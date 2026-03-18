@@ -10,13 +10,10 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   // If Google Sheets isn't configured, return demo data
-  const sheetId = process.env.GOOGLE_SHEET_ID;
-  const serviceKey = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
   const hasSheets =
-    sheetId &&
-    sheetId !== "placeholder" &&
-    serviceKey &&
-    serviceKey !== "{}";
+    process.env.SHEET_CSV_WEEKLY_SCHEDULE ||
+    process.env.SHEET_CSV_CAMPS ||
+    process.env.SHEET_CSV_PRIVATE_SLOTS;
 
   if (!hasSheets) {
     return NextResponse.json({
