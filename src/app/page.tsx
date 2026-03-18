@@ -239,7 +239,7 @@ export default function Home() {
                 href="#schedule"
                 className="rounded-lg bg-mesa-accent px-6 py-3 font-semibold text-white transition hover:bg-amber-600"
               >
-                View Schedule
+                Group Schedule
               </a>
               <a
                 href="#camps"
