@@ -28,9 +28,11 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    let manageToken: string | undefined;
+
     // Save to Supabase (unless this is an email-only request)
     if (!emailOnly) {
-      await addRegistration({
+      const result = await addRegistration({
         parentName,
         email,
         phone,
@@ -43,6 +45,7 @@ export async function POST(req: NextRequest) {
         bookedEndTime,
         bookedLocation,
       });
+      manageToken = result.manageToken;
     }
 
     // Send emails (unless this registration should skip email)
@@ -55,6 +58,7 @@ export async function POST(req: NextRequest) {
         type,
         sessionDetails,
         totalParticipants: totalParticipants || 1,
+        manageToken,
       });
     }
 
