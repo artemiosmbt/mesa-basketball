@@ -499,6 +499,7 @@ export default function Home() {
             bookedEndTime: booking.endTime,
             bookedLocation: booking.location,
             skipEmail: booking !== datesToBook[0], // only send email for first booking
+            submittedReferralCode: referralCode.trim() || undefined,
           }),
         });
       }
@@ -774,6 +775,9 @@ export default function Home() {
           <p className="mt-2 text-center text-sm text-brown-500">
             Prorated for shorter sessions &bull; Payment in person — Cash, Venmo, or Zelle
           </p>
+          <p className="mt-3 text-center text-sm text-green-400/80">
+            Every 11th session is on us! Earn free sessions through our loyalty rewards program.
+          </p>
 
           {privateSlots.length === 0 && !loading && (
             <p className="mt-8 text-center text-brown-500">
@@ -1000,6 +1004,20 @@ export default function Home() {
                     </div>
                   ))}
                 </div>
+
+                {/* Referral Code */}
+                {(modal.type === "private" || modal.type === "group-private") && (
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-brown-300">Referral Code <span className="text-brown-500 font-normal">(optional)</span></label>
+                    <input
+                      type="text"
+                      value={referralCode}
+                      onChange={(e) => setReferralCode(e.target.value.toUpperCase())}
+                      placeholder="e.g. SMITH-MESA"
+                      className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
+                    />
+                  </div>
+                )}
 
                 {/* Upsell prompt */}
                 {upsellOptions.length > 0 && upsellExtra === 0 && (

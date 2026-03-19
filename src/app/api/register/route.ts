@@ -1,12 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sendRegistrationNotification } from "@/lib/email";
 import {
-  addRegistration,
   addRegistrationWithRewards,
   getConfirmedSessionCount,
   getReferralCredits,
   addReferralCredit,
-  isNewFamily,
   findReferrerByCode,
   generateReferralCode,
 } from "@/lib/supabase";
@@ -77,14 +75,10 @@ export async function POST(req: NextRequest) {
       manageToken = result.manageToken;
 
       // Handle referral: if a new family used a valid referral code
+      // After the insert above, a truly new family will have exactly 1 confirmed session
       if (submittedReferralCode && isPrivateType) {
-        const newFamily = await isNewFamily(email);
-        // isNewFamily checked BEFORE insert, but we just inserted — so check count = 1
-        // Actually we already inserted, so "new" means they had 0 before this one = count is now 1
-        // Re-check: the insert already happened, so count is at least 1. We need to check if they had 0 before.
-        // Since we can't undo, let's just check count <= 1 (this is their first)
-        const sessionCount = await getConfirmedSessionCount(email);
-        if (sessionCount <= 1) {
+        const currentCount = await getConfirmedSessionCount(email);
+        if (currentCount <= 1) {
           const referrerEmail = await findReferrerByCode(submittedReferralCode);
           if (referrerEmail && referrerEmail !== email) {
             // Credit both the referrer and the new family

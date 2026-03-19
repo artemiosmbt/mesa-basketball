@@ -54,12 +54,22 @@ export async function DELETE(
   // Check 24-hour policy
   let isLateCancel = false;
   if (reg.booked_date && reg.booked_start_time) {
-    const sessionDateTime = new Date(
-      `${reg.booked_date} ${reg.booked_start_time}`
-    );
-    const hoursUntil =
-      (sessionDateTime.getTime() - Date.now()) / (1000 * 60 * 60);
-    isLateCancel = hoursUntil < 24;
+    // Parse "March 20, 2026" + "3:00 PM" into a reliable Date
+    const dateStr = reg.booked_date!;
+    const timeStr = reg.booked_start_time!;
+    const timeMatch = timeStr.match(/(\d+):(\d+)\s*(AM|PM)/i);
+    if (timeMatch) {
+      let hours = parseInt(timeMatch[1]);
+      const mins = parseInt(timeMatch[2]);
+      const period = timeMatch[3].toUpperCase();
+      if (period === "PM" && hours !== 12) hours += 12;
+      if (period === "AM" && hours === 12) hours = 0;
+      const sessionDateTime = new Date(`${dateStr}`);
+      sessionDateTime.setHours(hours, mins, 0, 0);
+      const hoursUntil =
+        (sessionDateTime.getTime() - Date.now()) / (1000 * 60 * 60);
+      isLateCancel = hoursUntil >= 0 && hoursUntil < 24;
+    }
   }
 
   const success = await cancelRegistration(token);

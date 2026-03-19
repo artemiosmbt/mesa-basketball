@@ -121,12 +121,17 @@ export default function ManageBooking({
   // Check if within 24 hours
   const within24Hours = useMemo(() => {
     if (!booking?.bookedDate || !booking?.bookedStartTime) return false;
-    const sessionDateTime = new Date(
-      `${booking.bookedDate} ${booking.bookedStartTime}`
-    );
-    const hoursUntil =
-      (sessionDateTime.getTime() - Date.now()) / (1000 * 60 * 60);
-    return hoursUntil < 24;
+    const timeMatch = booking.bookedStartTime.match(/(\d+):(\d+)\s*(AM|PM)/i);
+    if (!timeMatch) return false;
+    let hours = parseInt(timeMatch[1]);
+    const mins = parseInt(timeMatch[2]);
+    const period = timeMatch[3].toUpperCase();
+    if (period === "PM" && hours !== 12) hours += 12;
+    if (period === "AM" && hours === 12) hours = 0;
+    const sessionDateTime = new Date(booking.bookedDate);
+    sessionDateTime.setHours(hours, mins, 0, 0);
+    const hoursUntil = (sessionDateTime.getTime() - Date.now()) / (1000 * 60 * 60);
+    return hoursUntil >= 0 && hoursUntil < 24;
   }, [booking]);
 
   // Build time windows for rescheduling
@@ -284,7 +289,7 @@ export default function ManageBooking({
           </p>
           {isLateCancel && (
             <p className="mt-3 rounded-lg bg-yellow-900/30 px-4 py-2 text-sm text-yellow-400">
-              This cancellation was made within 24 hours of the session. Per our policy, 50% of the session fee is still due.
+              This change was made within 24 hours of the session. Per our policy, 50% of the session fee is still due.
             </p>
           )}
           <a href="/" className="mt-6 inline-block rounded bg-mesa-accent px-6 py-2 font-semibold text-white hover:bg-amber-600">
@@ -337,7 +342,7 @@ export default function ManageBooking({
 
               {within24Hours && (
                 <p className="mt-4 rounded-lg bg-yellow-900/30 px-4 py-2 text-sm text-yellow-400">
-                  This session is within 24 hours. Cancellations will result in a 50% charge.
+                  This session is within 24 hours. Rescheduling or canceling will result in a 50% charge of the session fee.
                 </p>
               )}
 
@@ -368,7 +373,7 @@ export default function ManageBooking({
                   <p className="text-sm text-brown-300">
                     Are you sure you want to cancel this session?
                     {within24Hours &&
-                      " Since this is within 24 hours, 50% of the session fee will still be due."}
+                      " Since this is within 24 hours, 50% of the session fee will still be due per our rescheduling/cancellation policy."}
                   </p>
                   <div className="mt-3 flex gap-3">
                     <button
