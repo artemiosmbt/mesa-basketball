@@ -2,6 +2,21 @@
 
 import { useState, useEffect, useMemo, use } from "react";
 
+const LOCATION_LINKS: Record<string, { name: string; url: string }> = {
+  "St. Pauls": { name: "St. Paul's Cathedral", url: "https://share.google/kVGkfSgr6SaShDWF7" },
+  "St. Paul's": { name: "St. Paul's Cathedral", url: "https://share.google/kVGkfSgr6SaShDWF7" },
+  "Cherry Valley": { name: "Cherry Valley Sports", url: "https://share.google/YKRoCTFuLP33bpSUZ" },
+};
+
+function formatSessionDetails(details: string): string {
+  for (const [key, { name }] of Object.entries(LOCATION_LINKS)) {
+    if (details.includes(key)) {
+      return details.replace(key, name);
+    }
+  }
+  return details;
+}
+
 interface Booking {
   id: string;
   parentName: string;
@@ -297,7 +312,7 @@ export default function ManageBooking({
           ) : (
             <>
               <div className="mt-4 space-y-2">
-                <p><span className="text-brown-400">Session:</span> {booking.sessionDetails}</p>
+                <p><span className="text-brown-400">Session:</span> {formatSessionDetails(booking.sessionDetails)}</p>
                 <p><span className="text-brown-400">Kids:</span> {booking.kids}</p>
                 <p><span className="text-brown-400">Type:</span> {booking.type === "group-private" ? "Group Private" : "Private"}</p>
               </div>
