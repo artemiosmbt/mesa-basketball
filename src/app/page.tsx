@@ -159,7 +159,7 @@ function getStartOptions(window: TimeWindow, minDuration: number): number[] {
 function getDurationOptions(startMins: number, windowEnd: number): number[] {
   const options: number[] = [];
   const maxDuration = windowEnd - startMins;
-  for (let d = 30; d <= maxDuration; d += 15) {
+  for (let d = 60; d <= maxDuration; d += 15) {
     options.push(d);
   }
   return options;
@@ -229,8 +229,8 @@ export default function Home() {
           updated.duration = maxDur;
         }
         // Ensure minimum 30 min
-        if (updated.duration < 30) {
-          updated.duration = 30;
+        if (updated.duration < 60) {
+          updated.duration = 60;
         }
       }
       return { ...prev, [windowIdx]: updated };
@@ -556,13 +556,13 @@ export default function Home() {
           )}
 
           <div className="mt-8 space-y-4">
-            {timeWindows.map((window, wi) => {
+            {timeWindows.filter((w) => w.endMins - w.startMins >= 60).map((window, wi) => {
               const totalAvailable = window.endMins - window.startMins;
               const sel = windowSelections[wi] || {
                 start: window.startMins,
                 duration: Math.min(60, totalAvailable),
               };
-              const startOptions = getStartOptions(window, 30);
+              const startOptions = getStartOptions(window, 60);
               const durationOptions = getDurationOptions(sel.start, window.endMins);
               const endTime = formatTimeFromMins(sel.start + sel.duration);
               const price = getPrivatePrice(sel.duration, 1);
@@ -762,6 +762,12 @@ export default function Home() {
                     </div>
                   ))}
                 </div>
+
+                {(modal.type === "private" || modal.type === "group-private") && (
+                  <p className="text-xs text-brown-500">
+                    1-3 kids: Private rate ($150/hr) &bull; 4+ kids: Group rate ($250/hr)
+                  </p>
+                )}
 
                 {priceLabel && (
                   <p className="rounded-lg bg-brown-800 px-3 py-2 text-sm text-mesa-accent">{priceLabel}</p>
