@@ -239,6 +239,7 @@ export default function Home() {
   // Group session selection state: key = "group|date|startTime"
   const [selectedGroupKeys, setSelectedGroupKeys] = useState<Set<string>>(new Set());
   const [activeGroup, setActiveGroup] = useState<string>("");
+  const [groupDayFilter, setGroupDayFilter] = useState<Set<number>>(new Set());
 
   // Per-window booking state: windowIndex → { start, duration }
   const [windowSelections, setWindowSelections] = useState<
@@ -924,8 +925,8 @@ export default function Home() {
                   onClick={() => {
                     setActiveGroup(isActive ? "" : group);
                     if (!isActive) {
-                      // Clear selections from other groups
                       setSelectedGroupKeys(new Set());
+                      setGroupDayFilter(new Set());
                     }
                   }}
                 >
@@ -941,9 +942,75 @@ export default function Home() {
                     {futureSessions.length} upcoming session{futureSessions.length !== 1 ? "s" : ""} &bull; {futureSessions[0].maxSpots} spots max
                   </p>
 
-                  {isActive && (
+                  {isActive && (() => {
+                    // Compute available days for this group
+                    const availDays = Array.from(
+                      new Set(futureSessions.map((s) => new Date(s.date).getUTCDay()))
+                    ).sort();
+                    const filteredSessions = groupDayFilter.size > 0
+                      ? futureSessions.filter((s) => groupDayFilter.has(new Date(s.date).getUTCDay()))
+                      : futureSessions;
+
+                    return (
                     <div className="mt-4 space-y-2" onClick={(e) => e.stopPropagation()}>
-                      {futureSessions.map((s) => {
+                      {/* Day filter + Select all */}
+                      {availDays.length > 1 && (
+                        <div className="flex flex-wrap items-center gap-2 mb-3">
+                          {availDays.map((day) => (
+                            <button
+                              key={day}
+                              onClick={() => setGroupDayFilter((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(day)) next.delete(day);
+                                else next.add(day);
+                                return next;
+                              })}
+                              className={`rounded-full px-2.5 py-0.5 text-xs font-medium transition ${
+                                groupDayFilter.has(day)
+                                  ? "bg-mesa-accent text-white"
+                                  : "bg-brown-800 text-brown-400 hover:bg-brown-700"
+                              }`}
+                            >
+                              {DAY_LABELS[day]}
+                            </button>
+                          ))}
+                          {groupDayFilter.size === 1 && (() => {
+                            const dayNum = Array.from(groupDayFilter)[0];
+                            const dayName = DAY_LABELS[dayNum];
+                            const daySessions = futureSessions.filter(
+                              (s) => new Date(s.date).getUTCDay() === dayNum && !isSessionFull(s)
+                            );
+                            const allSelected = daySessions.every((s) => selectedGroupKeys.has(getGroupSessionKey(s)));
+                            return (
+                              <button
+                                onClick={() => {
+                                  setSelectedGroupKeys((prev) => {
+                                    const next = new Set(prev);
+                                    if (allSelected) {
+                                      daySessions.forEach((s) => next.delete(getGroupSessionKey(s)));
+                                    } else {
+                                      daySessions.forEach((s) => next.add(getGroupSessionKey(s)));
+                                    }
+                                    return next;
+                                  });
+                                }}
+                                className="text-xs text-mesa-accent hover:text-amber-400 ml-1"
+                              >
+                                {allSelected ? `Deselect all ${dayName}s` : `Select all ${dayName}s`}
+                              </button>
+                            );
+                          })()}
+                          {groupDayFilter.size > 0 && (
+                            <button
+                              onClick={() => setGroupDayFilter(new Set())}
+                              className="text-xs text-brown-500 hover:text-brown-400"
+                            >
+                              Clear
+                            </button>
+                          )}
+                        </div>
+                      )}
+                      {filteredSessions.map((s) => {
                         const key = getGroupSessionKey(s);
                         const enrolled = getEnrollmentCount(s);
                         const spotsLeft = s.maxSpots - enrolled;
@@ -1031,7 +1098,8 @@ export default function Home() {
                         </div>
                       )}
                     </div>
-                  )}
+                    );
+                  })()}
                 </div>
               );
             })}
