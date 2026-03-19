@@ -31,9 +31,23 @@ export interface PrivateSlot {
 
 function parseCSV(text: string): string[][] {
   const lines = text.trim().split("\n");
-  return lines.map((line) =>
-    line.split(",").map((cell) => cell.replace(/^"|"$/g, "").trim())
-  );
+  return lines.map((line) => {
+    const cells: string[] = [];
+    let current = "";
+    let inQuotes = false;
+    for (const char of line) {
+      if (char === '"') {
+        inQuotes = !inQuotes;
+      } else if (char === "," && !inQuotes) {
+        cells.push(current.trim());
+        current = "";
+      } else {
+        current += char;
+      }
+    }
+    cells.push(current.trim());
+    return cells;
+  });
 }
 
 export async function getWeeklySchedule(): Promise<WeeklySession[]> {
