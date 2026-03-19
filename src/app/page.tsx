@@ -96,6 +96,9 @@ interface BookingModal {
   bookedStartTime?: string;
   bookedEndTime?: string;
   bookedLocation?: string;
+  selectedDuration?: number;
+  windowTotalMins?: number;
+  remainingAfterSelection?: number;
 }
 
 // Group weekly sessions by group name
@@ -189,6 +192,24 @@ function getDurationOptions(startMins: number, windowEnd: number): number[] {
   return options;
 }
 
+// Upsell: extra time at 50% off when window has ≤120 min and user picks 60 min
+function getUpsellOptions(
+  selectedDuration: number,
+  windowTotalMins: number,
+  remainingAfterSelection: number
+): { extraMins: number; savings: number }[] {
+  if (selectedDuration > 60) return []; // only upsell on base 60 min
+  if (windowTotalMins > 120) return []; // only on tight windows
+  const options: { extraMins: number; savings: number }[] = [];
+  for (const extra of [15, 30]) {
+    if (extra <= remainingAfterSelection) {
+      const fullPrice = getPrivatePrice(extra, 1);
+      options.push({ extraMins: extra, savings: fullPrice / 2 });
+    }
+  }
+  return options;
+}
+
 export default function Home() {
   const [schedule, setSchedule] = useState<WeeklySession[]>([]);
   const [camps, setCamps] = useState<Camp[]>([]);
@@ -217,6 +238,16 @@ export default function Home() {
   const [phone, setPhone] = useState("");
   const [kids, setKids] = useState([{ name: "", dob: "", grade: "" }]);
   const [isGroupRate, setIsGroupRate] = useState(false);
+  const [hideUpsell, setHideUpsell] = useState(false);
+  const [upsellExtra, setUpsellExtra] = useState(0); // extra minutes accepted
+
+  // Load hideUpsell from localStorage
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setHideUpsell(localStorage.getItem("mesa_hide_upsell") === "true");
+    }
+  }, []);
+
   const [recurringWeeks, setRecurringWeeks] = useState<
     { date: string; startTime: string; endTime: string; location: string; selected: boolean }[]
   >([]);
@@ -360,6 +391,9 @@ export default function Home() {
       bookedStartTime: startLabel,
       bookedEndTime: endLabel,
       bookedLocation: window.location,
+      selectedDuration: sel.duration,
+      windowTotalMins: window.endMins - window.startMins,
+      remainingAfterSelection: window.endMins - endMins,
     });
     setSubmitResult(null);
     setParentName("");
@@ -367,6 +401,7 @@ export default function Home() {
     setPhone("");
     setKids([{ name: "", dob: "", grade: "" }]);
     setIsGroupRate(false);
+    setUpsellExtra(0);
   }
 
   function openModal(type: BookingType, sessionIndex: number, details: string) {
@@ -377,6 +412,7 @@ export default function Home() {
     setPhone("");
     setKids([{ name: "", dob: "", grade: "" }]);
     setIsGroupRate(false);
+    setUpsellExtra(0);
   }
 
   function closeModal() {
@@ -410,18 +446,25 @@ export default function Home() {
     const kidsStr = kids.map((k) => `${k.name} (DOB: ${k.dob}, Grade: ${k.grade})`).join(", ");
 
     try {
+      // Adjust end time if upsell was accepted
+      let adjustedEndTime = modal.bookedEndTime;
+      if (upsellExtra > 0 && modal.bookedEndTime) {
+        const endMins = parseTime(modal.bookedEndTime) + upsellExtra;
+        adjustedEndTime = formatTimeFromMins(endMins);
+      }
+
       // Build list of all dates to book (primary + selected recurring)
       const datesToBook = [
         {
           date: modal.bookedDate,
           startTime: modal.bookedStartTime,
-          endTime: modal.bookedEndTime,
+          endTime: adjustedEndTime,
           location: modal.bookedLocation,
         },
         ...recurringWeeks.filter((w) => w.selected).map((w) => ({
           date: w.date,
           startTime: w.startTime,
-          endTime: w.endTime,
+          endTime: upsellExtra > 0 ? formatTimeFromMins(parseTime(w.endTime) + upsellExtra) : w.endTime,
           location: w.location,
         })),
       ];
@@ -498,17 +541,33 @@ export default function Home() {
   }
 
   // Compute price for the modal based on selected window duration
+  // Compute upsell options for the modal
+  const upsellOptions = useMemo(() => {
+    if (modal.type !== "private" && modal.type !== "group-private") return [];
+    if (hideUpsell) return [];
+    return getUpsellOptions(
+      modal.selectedDuration || 60,
+      modal.windowTotalMins || 999,
+      modal.remainingAfterSelection || 0
+    );
+  }, [modal, hideUpsell]);
+
   const priceLabel = (() => {
     if (modal.type !== "private" && modal.type !== "group-private") return null;
-    // Extract duration from session details
     const match = modal.sessionDetails.match(/\((\d+) min\)/);
     if (!match) return null;
-    const duration = parseInt(match[1]);
+    const baseDuration = parseInt(match[1]);
+    const totalDuration = baseDuration + upsellExtra;
     const effectiveGroup = isGroupRate || kids.length >= 4;
-    const price = getPrivatePrice(duration, effectiveGroup ? 4 : kids.length);
+    const kidCount = effectiveGroup ? 4 : kids.length;
+    // Base price + discounted extra
+    const basePrice = getPrivatePrice(baseDuration, kidCount);
+    const extraPrice = upsellExtra > 0 ? getPrivatePrice(upsellExtra, kidCount) * 0.5 : 0;
+    const totalPrice = basePrice + extraPrice;
     const tier = effectiveGroup ? "Group Private — 4+ participants" : "Private — up to 3 participants";
-    const timeNote = duration !== 60 ? ` (${duration} min session)` : "";
-    return `${formatPrice(price)} (${tier})${timeNote}`;
+    const timeNote = totalDuration !== 60 ? ` (${totalDuration} min session)` : "";
+    const savingsNote = upsellExtra > 0 ? ` — includes ${upsellExtra} min bonus at 50% off` : "";
+    return `${formatPrice(totalPrice)} (${tier})${timeNote}${savingsNote}`;
   })();
 
   const grouped = groupByGroup(schedule);
@@ -932,6 +991,58 @@ export default function Home() {
                     </div>
                   ))}
                 </div>
+
+                {/* Upsell prompt */}
+                {upsellOptions.length > 0 && upsellExtra === 0 && (
+                  <div className="rounded-lg border border-green-800/50 bg-green-900/20 p-4">
+                    <p className="text-sm font-semibold text-green-400">
+                      Extend your session?
+                    </p>
+                    <p className="mt-1 text-xs text-brown-300">
+                      Add extra time at half price. More reps, more progress — same session.
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {upsellOptions.map((opt) => {
+                        const extraCost = getPrivatePrice(opt.extraMins, isGroupRate || kids.length >= 4 ? 4 : 1) * 0.5;
+                        return (
+                          <button
+                            key={opt.extraMins}
+                            type="button"
+                            onClick={() => setUpsellExtra(opt.extraMins)}
+                            className="rounded bg-green-800/40 px-3 py-2 text-sm text-green-300 hover:bg-green-800/60"
+                          >
+                            +{opt.extraMins} min (+{formatPrice(extraCost)})
+                          </button>
+                        );
+                      })}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setHideUpsell(true);
+                          localStorage.setItem("mesa_hide_upsell", "true");
+                        }}
+                        className="text-xs text-brown-500 hover:text-brown-400 self-center ml-2"
+                      >
+                        Don&apos;t show this again
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {upsellExtra > 0 && (
+                  <div className="flex items-center justify-between rounded-lg bg-green-900/20 px-4 py-2">
+                    <p className="text-sm text-green-400">
+                      +{upsellExtra} min added at 50% off
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setUpsellExtra(0)}
+                      className="text-xs text-brown-500 hover:text-red-400"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                )}
 
                 {(modal.type === "private" || modal.type === "group-private") && recurringWeeks.length > 0 && (
                   <div>

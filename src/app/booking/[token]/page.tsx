@@ -8,6 +8,16 @@ const LOCATION_LINKS: Record<string, { name: string; url: string }> = {
   "Cherry Valley": { name: "Cherry Valley Sports", url: "https://share.google/YKRoCTFuLP33bpSUZ" },
 };
 
+function getPrivatePrice(durationMin: number, kidCount: number): number {
+  const ratio = durationMin / 60;
+  const basePrice = kidCount >= 4 ? 250 : 150;
+  return Math.round(basePrice * ratio * 100) / 100;
+}
+
+function formatPrice(amount: number): string {
+  return amount % 1 === 0 ? `$${amount}` : `$${amount.toFixed(2)}`;
+}
+
 function formatSessionDetails(details: string): string {
   for (const [key, { name }] of Object.entries(LOCATION_LINKS)) {
     if (details.includes(key)) {
@@ -88,6 +98,14 @@ export default function ManageBooking({
   const [selectedWindow, setSelectedWindow] = useState<number>(-1);
   const [selectedStart, setSelectedStart] = useState<number>(0);
   const [selectedDuration, setSelectedDuration] = useState<number>(60);
+  const [upsellExtra, setUpsellExtra] = useState(0);
+  const [hideUpsell, setHideUpsell] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setHideUpsell(localStorage.getItem("mesa_hide_upsell") === "true");
+    }
+  }, []);
 
   useEffect(() => {
     fetch(`/api/booking/${token}`)
@@ -210,7 +228,7 @@ export default function ManageBooking({
   async function handleReschedule() {
     if (selectedWindow < 0) return;
     const window = timeWindows[selectedWindow];
-    const endMins = selectedStart + selectedDuration;
+    const endMins = selectedStart + selectedDuration + upsellExtra;
 
     setRescheduling(true);
     const res = await fetch(`/api/booking/${token}`, {
@@ -410,6 +428,7 @@ export default function ManageBooking({
                             setSelectedWindow(wi);
                             setSelectedStart(w.startMins);
                             setSelectedDuration(Math.min(60, totalAvailable));
+                            setUpsellExtra(0);
                           }}
                           className={`block w-full rounded-lg border p-4 text-left transition ${
                             isSelected
@@ -467,6 +486,44 @@ export default function ManageBooking({
                       );
                     })}
                   </div>
+
+                  {/* Upsell prompt */}
+                  {selectedWindow >= 0 && !hideUpsell && (() => {
+                    const w = timeWindows[selectedWindow];
+                    if (!w) return null;
+                    const totalAvail = w.endMins - w.startMins;
+                    const remaining = w.endMins - (selectedStart + selectedDuration);
+                    if (selectedDuration > 60 || totalAvail > 120 || remaining <= 0) return null;
+                    const extras = [15, 30].filter((e) => e <= remaining);
+                    if (extras.length === 0) return null;
+                    if (upsellExtra > 0) {
+                      return (
+                        <div className="mt-4 flex items-center justify-between rounded-lg bg-green-900/20 px-4 py-2">
+                          <p className="text-sm text-green-400">+{upsellExtra} min added at 50% off</p>
+                          <button type="button" onClick={() => setUpsellExtra(0)} className="text-xs text-brown-500 hover:text-red-400">Remove</button>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="mt-4 rounded-lg border border-green-800/50 bg-green-900/20 p-4">
+                        <p className="text-sm font-semibold text-green-400">Extend your session?</p>
+                        <p className="mt-1 text-xs text-brown-300">Add extra time at half price. More reps, more progress — same session.</p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {extras.map((extra) => {
+                            const cost = getPrivatePrice(extra, 1) * 0.5;
+                            return (
+                              <button key={extra} type="button" onClick={() => setUpsellExtra(extra)} className="rounded bg-green-800/40 px-3 py-2 text-sm text-green-300 hover:bg-green-800/60">
+                                +{extra} min (+{formatPrice(cost)})
+                              </button>
+                            );
+                          })}
+                          <button type="button" onClick={() => { setHideUpsell(true); localStorage.setItem("mesa_hide_upsell", "true"); }} className="text-xs text-brown-500 hover:text-brown-400 self-center ml-2">
+                            Don&apos;t show this again
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {/* Bottom buttons (for short lists) */}
                   <div className="mt-4 flex gap-3">
