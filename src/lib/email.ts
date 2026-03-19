@@ -90,7 +90,7 @@ export async function sendRegistrationNotification(data: {
 
   const manageSection = manageLink
     ? `<p><a href="${manageLink}" style="color: #c4833e; font-weight: bold;">Manage Booking</a> — Cancel or reschedule your session</p>`
-    : "";
+    : `<p><a href="${BASE_URL}/my-bookings" style="color: #c4833e; font-weight: bold;">View My Bookings</a> — Manage, cancel, or reschedule your sessions</p>`;
 
   const referralSection = data.referralCode
     ? `<p style="background: #1e293b; padding: 12px; border-radius: 8px; margin-top: 12px;"><strong>Your referral code: ${data.referralCode}</strong><br/><span style="font-size: 13px; color: #94a3b8;">Share it with friends — when they book their first session, you both earn credit toward a free session.</span></p>`
