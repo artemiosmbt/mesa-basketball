@@ -240,6 +240,7 @@ export default function Home() {
   const [isGroupRate, setIsGroupRate] = useState(false);
   const [hideUpsell, setHideUpsell] = useState(false);
   const [upsellExtra, setUpsellExtra] = useState(0); // extra minutes accepted
+  const [referralCode, setReferralCode] = useState("");
 
   // Load hideUpsell from localStorage
   useEffect(() => {
@@ -402,6 +403,7 @@ export default function Home() {
     setKids([{ name: "", dob: "", grade: "" }]);
     setIsGroupRate(false);
     setUpsellExtra(0);
+    setReferralCode("");
   }
 
   function openModal(type: BookingType, sessionIndex: number, details: string) {
@@ -413,6 +415,7 @@ export default function Home() {
     setKids([{ name: "", dob: "", grade: "" }]);
     setIsGroupRate(false);
     setUpsellExtra(0);
+    setReferralCode("");
   }
 
   function closeModal() {
@@ -884,7 +887,13 @@ export default function Home() {
               </a>
             </p>
           </div>
-          <p className="mt-8 text-sm text-brown-600">
+          <a
+            href="/my-bookings"
+            className="mt-6 inline-block text-sm text-mesa-accent hover:text-amber-400"
+          >
+            My Bookings &mdash; Look Up Your Registrations
+          </a>
+          <p className="mt-4 text-sm text-brown-600">
             &copy; {new Date().getFullYear()} Mesa Basketball Training. All rights reserved.
           </p>
         </div>

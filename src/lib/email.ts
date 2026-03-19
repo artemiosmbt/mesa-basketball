@@ -38,6 +38,8 @@ export async function sendRegistrationNotification(data: {
   sessionDetails: string;
   totalParticipants: number;
   manageToken?: string;
+  isFree?: boolean;
+  referralCode?: string;
 }) {
   const resend = getResend();
 
@@ -56,7 +58,7 @@ export async function sendRegistrationNotification(data: {
   await resend.emails.send({
     from: FROM_EMAIL,
     to: ARTEMI_EMAIL,
-    subject: `New ${typeLabel}: ${data.parentName}`,
+    subject: `New ${typeLabel}: ${data.parentName}${data.isFree ? " [FREE - LOYALTY REWARD]" : ""}`,
     html: `
       <h2>New ${typeLabel}</h2>
       <p><strong>Parent:</strong> ${data.parentName}</p>
@@ -65,34 +67,52 @@ export async function sendRegistrationNotification(data: {
       <p><strong>Kids:</strong> ${data.kids}</p>
       <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails)}</p>
       <p><strong>Total Participants:</strong> ${data.totalParticipants}</p>
+      ${data.isFree ? '<p><strong style="color: green;">LOYALTY REWARD: This session is FREE</strong></p>' : ""}
     `,
   });
 
   // Confirmation email to parent
-  const priceNote =
-    data.type === "private"
+  const priceNote = data.isFree
+    ? ""
+    : data.type === "private"
       ? "<p><strong>Rate:</strong> $150 (up to 3 participants)</p>"
       : data.type === "group-private"
         ? "<p><strong>Rate:</strong> $250 (4+ participants)</p>"
         : "";
 
+  const paymentNote = data.isFree
+    ? ""
+    : "<p>Payments can be made via Zelle (<strong>artemios@mesabasketballtraining.com</strong>), Cash, or Venmo (<strong>@Artemios-Gavalas</strong>). Please provide at least 24 hours' notice if you need to cancel or reschedule a session. Cancellations made within 24 hours of the scheduled session will result in a 50% charge of the session fee.</p>";
+
+  const freeNote = data.isFree
+    ? '<p style="background: #166534; color: #4ade80; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">This session is FREE — thank you for your loyalty!</p>'
+    : "";
+
   const manageSection = manageLink
     ? `<p><a href="${manageLink}" style="color: #c4833e; font-weight: bold;">Manage Booking</a> — Cancel or reschedule your session</p>`
+    : "";
+
+  const referralSection = data.referralCode
+    ? `<p style="background: #1e293b; padding: 12px; border-radius: 8px; margin-top: 12px;"><strong>Your referral code: ${data.referralCode}</strong><br/><span style="font-size: 13px; color: #94a3b8;">Share it with friends — when they book their first session, you both earn credit toward a free session.</span></p>`
     : "";
 
   await resend.emails.send({
     from: FROM_EMAIL,
     to: data.email,
-    subject: `Booking Confirmed — Mesa Basketball Training`,
+    subject: data.isFree
+      ? `FREE Session Confirmed — Mesa Basketball Training`
+      : `Booking Confirmed — Mesa Basketball Training`,
     html: `
       <h2>You're booked!</h2>
       <p>Hi ${data.parentName},</p>
       <p>Your ${typeLabel.toLowerCase()} has been confirmed.</p>
       <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails)}</p>
       <p><strong>Kids:</strong> ${data.kids}</p>
+      ${freeNote}
       ${priceNote}
-      <p>Payments can be made via Zelle (<strong>artemios@mesabasketballtraining.com</strong>), Cash, or Venmo (<strong>@Artemios-Gavalas</strong>). Please provide at least 24 hours' notice if you need to cancel or reschedule a session. Cancellations made within 24 hours of the scheduled session will result in a 50% charge of the session fee.</p>
+      ${paymentNote}
       ${manageSection}
+      ${referralSection}
       <br/>
       <p>Questions? Contact Artemios at (631) 599-1280 or email <a href="mailto:artemios@mesabasketballtraining.com">artemios@mesabasketballtraining.com</a>.</p>
       <p>— Mesa Basketball Training</p>
