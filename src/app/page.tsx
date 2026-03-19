@@ -892,11 +892,10 @@ export default function Home() {
         <div className="mx-auto max-w-5xl px-6">
           <h2 className="text-center text-3xl font-bold">Group Sessions</h2>
           <p className="mt-2 text-center text-brown-400">
-            Select 2+ sessions to register — volume discounts available
+            Skill work in groups of up to six kids. Select 2+ sessions to register — volume discounts available.
           </p>
           <p className="mt-2 text-center text-xs text-brown-500">
-            Groups are organized by grade as a guideline. If your child plays up or you&apos;re unsure which group fits best,{" "}
-            <a href="mailto:artemios@mesabasketballtraining.com" className="text-mesa-accent hover:text-amber-400">reach out to Artemios</a> — we&apos;ll find the right fit.
+            Groups are organized by grade as a guideline. If your child plays up or you&apos;re unsure which group fits best, contact Artemios at (631) 599-1280 or artemios@mesabasketballtraining.com — we&apos;ll find the right fit.
           </p>
           <div className="mt-2 flex flex-wrap justify-center gap-4 text-xs text-brown-500">
             <span>1-3 sessions: $50 each</span>
@@ -943,7 +942,7 @@ export default function Home() {
                     )}
                   </div>
                   <p className="mt-1 text-sm text-brown-500">
-                    {futureSessions.length} upcoming session{futureSessions.length !== 1 ? "s" : ""} &bull; {futureSessions[0].maxSpots} spots max
+                    {futureSessions.length} upcoming session{futureSessions.length !== 1 ? "s" : ""}
                   </p>
 
                   {isActive && (() => {
@@ -1050,11 +1049,11 @@ export default function Home() {
                               </p>
                             </div>
                             <div className="text-right shrink-0">
-                              <span className={`text-xs font-medium ${
-                                full ? "text-red-400" : spotsLeft <= 2 ? "text-yellow-400" : "text-green-400"
-                              }`}>
-                                {full ? "FULL" : `${spotsLeft} spot${spotsLeft !== 1 ? "s" : ""}`}
-                              </span>
+                              {full ? (
+                                <span className="text-xs font-medium text-red-400">FULL</span>
+                              ) : spotsLeft <= 2 ? (
+                                <span className="text-xs font-medium text-yellow-400">Almost full!</span>
+                              ) : null}
                             </div>
                           </label>
                         );
