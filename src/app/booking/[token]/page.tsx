@@ -468,6 +468,7 @@ export default function ManageBooking({
                     })}
                   </div>
 
+                  {/* Bottom buttons (for short lists) */}
                   <div className="mt-4 flex gap-3">
                     <button
                       onClick={handleReschedule}
@@ -481,6 +482,30 @@ export default function ManageBooking({
                       className="rounded bg-brown-700 px-4 py-2 text-sm text-brown-300 hover:bg-brown-600"
                     >
                       Go Back
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Sticky bottom bar when rescheduling with a slot selected */}
+              {showReschedule && selectedWindow >= 0 && (
+                <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-brown-700 bg-brown-900 px-6 py-3 shadow-2xl">
+                  <div className="mx-auto flex max-w-lg items-center justify-between">
+                    <div className="text-sm text-brown-300">
+                      {(() => {
+                        const w = timeWindows[selectedWindow];
+                        if (!w) return null;
+                        const d = new Date(w.date);
+                        const day = d.toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" });
+                        return `${day}, ${w.date} ${formatTimeFromMins(selectedStart)}-${formatTimeFromMins(selectedStart + selectedDuration)}`;
+                      })()}
+                    </div>
+                    <button
+                      onClick={handleReschedule}
+                      disabled={rescheduling}
+                      className="rounded bg-mesa-accent px-5 py-2 text-sm font-semibold text-white hover:bg-amber-600 disabled:opacity-50"
+                    >
+                      {rescheduling ? "Rescheduling..." : "Confirm Reschedule"}
                     </button>
                   </div>
                 </div>
