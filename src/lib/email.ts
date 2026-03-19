@@ -82,7 +82,7 @@ export async function sendRegistrationNotification(data: {
 
   const paymentNote = data.isFree
     ? ""
-    : "<p>Payments can be made via Zelle (<strong>artemios@mesabasketballtraining.com</strong>), Cash, or Venmo (<strong>@Artemios-Gavalas</strong>). Please provide at least 24 hours' notice if you need to cancel or reschedule a session. Rescheduling or canceling within 24 hours of the scheduled session will result in a 50% charge of the session fee.</p>";
+    : "<p>Payments can be made via Zelle (<strong>artemios@mesabasketballtraining.com</strong>), Cash, or Venmo (<strong>@Artemios-Gavalas</strong>). Please provide at least 48 hours' notice if you need to cancel or reschedule a session. Rescheduling or canceling within 48 hours of the scheduled session will result in a 50% charge of the session fee.</p>";
 
   const freeNote = data.isFree
     ? '<p style="background: #166534; color: #4ade80; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">This session is FREE — thank you for your loyalty!</p>'
@@ -129,7 +129,7 @@ export async function sendCancellationNotification(data: {
   const resend = getResend();
 
   const lateNote = data.isLateCancel
-    ? "<p><strong>Note:</strong> This cancellation was made within 24 hours of the session. Per our policy, 50% of the session fee is still due.</p>"
+    ? "<p><strong>Note:</strong> This cancellation was made within 48 hours of the session. Per our policy, 50% of the session fee is still due.</p>"
     : "";
 
   // Email to Artemi

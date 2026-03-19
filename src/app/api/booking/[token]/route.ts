@@ -68,7 +68,7 @@ export async function DELETE(
       sessionDateTime.setHours(hours, mins, 0, 0);
       const hoursUntil =
         (sessionDateTime.getTime() - Date.now()) / (1000 * 60 * 60);
-      isLateCancel = hoursUntil >= 0 && hoursUntil < 24;
+      isLateCancel = hoursUntil >= 0 && hoursUntil < 48;
     }
   }
 
