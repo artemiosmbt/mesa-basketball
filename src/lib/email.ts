@@ -154,6 +154,7 @@ export async function sendCancellationNotification(data: {
       <p>Your session has been cancelled:</p>
       <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails)}</p>
       ${lateNote}
+      <p><a href="${BASE_URL}/my-bookings" style="color: #c4833e; font-weight: bold;">View My Bookings</a></p>
       <br/>
       <p>Questions? Contact Artemios at (631) 599-1280 or email <a href="mailto:artemios@mesabasketballtraining.com">artemios@mesabasketballtraining.com</a>.</p>
       <p>— Mesa Basketball Training</p>
@@ -195,7 +196,7 @@ export async function sendRescheduleNotification(data: {
       <p>Your session has been rescheduled.</p>
       <p><strong>Old Session:</strong> ${formatSessionDetailsForEmail(data.oldSessionDetails)}</p>
       <p><strong>New Session:</strong> ${formatSessionDetailsForEmail(data.newSessionDetails)}</p>
-      <p><a href="${manageLink}" style="color: #c4833e; font-weight: bold;">Manage Booking</a></p>
+      <p><a href="${BASE_URL}/my-bookings" style="color: #c4833e; font-weight: bold;">View My Bookings</a> — Manage all your sessions</p>
       <br/>
       <p>Questions? Contact Artemios at (631) 599-1280 or email <a href="mailto:artemios@mesabasketballtraining.com">artemios@mesabasketballtraining.com</a>.</p>
       <p>— Mesa Basketball Training</p>
