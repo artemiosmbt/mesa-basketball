@@ -273,6 +273,9 @@ export async function enrollInPackage(data: {
       phone: data.phone,
       package_type: data.packageType,
       month_year: data.monthYear,
+      sessions_used: 0,
+      reminder_sent: false,
+      status: "active",
     })
     .select("id")
     .single();
@@ -365,87 +368,3 @@ export async function checkGroupSessionCapacity(
   return { available: enrolled < maxSpots, enrolled };
 }
 
-// --- Monthly Packages ---
-
-export interface MonthlyPackage {
-  id: string;
-  created_at: string;
-  email: string;
-  parent_name: string;
-  phone: string;
-  package_type: number;
-  month_year: string;
-  sessions_used: number;
-  reminder_sent: boolean;
-  status: string;
-}
-
-export async function enrollInPackage(data: {
-  email: string;
-  parentName: string;
-  phone: string;
-  packageType: number;
-  monthYear: string;
-}): Promise<{ id: string }> {
-  const supabase = getSupabase();
-  const { data: row, error } = await supabase
-    .from("monthly_packages")
-    .insert({
-      email: data.email.toLowerCase().trim(),
-      parent_name: data.parentName,
-      phone: data.phone,
-      package_type: data.packageType,
-      month_year: data.monthYear,
-      sessions_used: 0,
-      reminder_sent: false,
-      status: "active",
-    })
-    .select("id")
-    .single();
-  if (error) throw error;
-  return { id: row.id };
-}
-
-export async function getActivePackage(
-  email: string,
-  monthYear: string
-): Promise<MonthlyPackage | null> {
-  const supabase = getSupabase();
-  const { data, error } = await supabase
-    .from("monthly_packages")
-    .select("*")
-    .eq("email", email.toLowerCase().trim())
-    .eq("month_year", monthYear)
-    .eq("status", "active")
-    .single();
-  if (error || !data) return null;
-  return data as MonthlyPackage;
-}
-
-export async function incrementPackageSessions(id: string, currentUsed: number): Promise<void> {
-  const supabase = getSupabase();
-  await supabase
-    .from("monthly_packages")
-    .update({ sessions_used: currentUsed + 1 })
-    .eq("id", id);
-}
-
-export async function getPackagesNeedingReminder(monthYear: string): Promise<MonthlyPackage[]> {
-  const supabase = getSupabase();
-  const { data, error } = await supabase
-    .from("monthly_packages")
-    .select("*")
-    .eq("month_year", monthYear)
-    .eq("status", "active")
-    .eq("reminder_sent", false);
-  if (error || !data) return [];
-  return (data as MonthlyPackage[]).filter((p) => p.sessions_used < p.package_type);
-}
-
-export async function markReminderSent(id: string): Promise<void> {
-  const supabase = getSupabase();
-  await supabase
-    .from("monthly_packages")
-    .update({ reminder_sent: true })
-    .eq("id", id);
-}
