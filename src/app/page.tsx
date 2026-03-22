@@ -1526,18 +1526,19 @@ export default function Home() {
                           </button>
                         )}
                       </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
+                      <div className="grid grid-cols-2 gap-2 overflow-hidden">
+                        <div className="min-w-0 overflow-hidden">
                           <label className="mb-1 block text-xs text-brown-500">Date of Birth</label>
                           <input
                             type="date"
                             required
                             value={kid.dob}
                             onChange={(e) => updateKid(i, "dob", e.target.value)}
-                            className="w-full rounded-lg border border-brown-700 bg-brown-800 px-2 py-2 text-white text-sm focus:border-mesa-accent focus:outline-none"
+                            style={{maxWidth: "100%", boxSizing: "border-box"}}
+                            className="w-full min-w-0 rounded-lg border border-brown-700 bg-brown-800 px-2 py-2 text-white text-sm focus:border-mesa-accent focus:outline-none"
                           />
                         </div>
-                        <div>
+                        <div className="min-w-0">
                           <label className="mb-1 block text-xs text-brown-500">Grade</label>
                           <input
                             type="text"
