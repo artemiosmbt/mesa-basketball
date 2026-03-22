@@ -272,6 +272,8 @@ export default function Home() {
     }
   }, []);
 
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
   const [recurringWeeks, setRecurringWeeks] = useState<
     { date: string; startTime: string; endTime: string; location: string; selected: boolean }[]
   >([]);
@@ -788,15 +790,41 @@ export default function Home() {
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3">
           <a href="#" className="flex items-center gap-2 text-lg font-bold text-white">
             <img src="/logo.jpeg" alt="Mesa Basketball Logo" className="h-10 w-10 rounded-full object-cover" />
-            MESA BASKETBALL
+            <span className="hidden sm:inline">MESA BASKETBALL</span>
           </a>
-          <div className="flex items-center gap-4 text-sm">
+          {/* Desktop nav */}
+          <div className="hidden md:flex items-center gap-4 text-sm">
             <a href="#schedule" className="text-brown-300 hover:text-white">Schedule</a>
             <a href="#camps" className="text-brown-300 hover:text-white">Camps</a>
             <a href="#private" className="text-brown-300 hover:text-white">Private Sessions</a>
             <a href="/my-bookings" className="rounded bg-mesa-accent/20 px-3 py-1 text-mesa-accent hover:bg-mesa-accent/30">My Bookings</a>
           </div>
+          {/* Mobile hamburger */}
+          <button
+            className="md:hidden text-brown-300 hover:text-white p-1"
+            onClick={() => setMobileMenuOpen((o) => !o)}
+            aria-label="Toggle menu"
+          >
+            {mobileMenuOpen ? (
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            )}
+          </button>
         </div>
+        {/* Mobile dropdown menu */}
+        {mobileMenuOpen && (
+          <div className="md:hidden border-t border-brown-800 bg-mesa-dark/98 px-6 py-4 space-y-4 text-sm">
+            <a href="#schedule" onClick={() => setMobileMenuOpen(false)} className="block text-brown-300 hover:text-white py-1">Schedule</a>
+            <a href="#camps" onClick={() => setMobileMenuOpen(false)} className="block text-brown-300 hover:text-white py-1">Camps</a>
+            <a href="#private" onClick={() => setMobileMenuOpen(false)} className="block text-brown-300 hover:text-white py-1">Private Sessions</a>
+            <a href="/my-bookings" onClick={() => setMobileMenuOpen(false)} className="block rounded bg-mesa-accent/20 px-3 py-2 text-mesa-accent hover:bg-mesa-accent/30 text-center font-medium">My Bookings</a>
+          </div>
+        )}
       </nav>
 
       {/* Hero */}
@@ -1482,36 +1510,45 @@ export default function Home() {
                     </button>
                   </div>
                   {kids.map((kid, i) => (
-                    <div key={i} className="mb-2 flex gap-2">
-                      <input
-                        type="text"
-                        placeholder="Name"
-                        required
-                        value={kid.name}
-                        onChange={(e) => updateKid(i, "name", e.target.value)}
-                        className="flex-1 rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
-                      />
-                      <input
-                        type="date"
-                        required
-                        value={kid.dob}
-                        onChange={(e) => updateKid(i, "dob", e.target.value)}
-                        className="w-36 rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
-                        title="Date of Birth"
-                      />
-                      <input
-                        type="text"
-                        placeholder="Grade"
-                        required
-                        value={kid.grade}
-                        onChange={(e) => updateKid(i, "grade", e.target.value)}
-                        className="w-20 rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
-                      />
-                      {kids.length > 1 && (
-                        <button type="button" onClick={() => removeKid(i)} className="text-brown-500 hover:text-red-400">
-                          &times;
-                        </button>
-                      )}
+                    <div key={i} className="mb-3 flex flex-col gap-2">
+                      <div className="flex gap-2 items-center">
+                        <input
+                          type="text"
+                          placeholder="Kid's Name"
+                          required
+                          value={kid.name}
+                          onChange={(e) => updateKid(i, "name", e.target.value)}
+                          className="flex-1 rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
+                        />
+                        {kids.length > 1 && (
+                          <button type="button" onClick={() => removeKid(i)} className="text-brown-500 hover:text-red-400 text-xl leading-none">
+                            &times;
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex gap-2">
+                        <div className="flex-1 flex flex-col">
+                          <label className="mb-1 text-xs text-brown-500">Date of Birth</label>
+                          <input
+                            type="date"
+                            required
+                            value={kid.dob}
+                            onChange={(e) => updateKid(i, "dob", e.target.value)}
+                            className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white focus:border-mesa-accent focus:outline-none"
+                          />
+                        </div>
+                        <div className="flex flex-col">
+                          <label className="mb-1 text-xs text-brown-500">Grade</label>
+                          <input
+                            type="text"
+                            placeholder="Grade"
+                            required
+                            value={kid.grade}
+                            onChange={(e) => updateKid(i, "grade", e.target.value)}
+                            className="w-20 rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
+                          />
+                        </div>
+                      </div>
                     </div>
                   ))}
                 </div>
