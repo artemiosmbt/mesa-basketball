@@ -1205,7 +1205,7 @@ export default function Home() {
             </div>
           </div>
           <p className="mt-2 text-center text-sm text-brown-500">
-            Prorated for shorter sessions &bull; Payment in person — Cash, Venmo, or Zelle
+            Payment in person — Cash, Venmo, or Zelle
           </p>
           <p className="mt-3 text-center text-sm text-green-400/80">
             Every 11th session is on us! Earn free sessions through our loyalty rewards program.
