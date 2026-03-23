@@ -4,7 +4,7 @@ import Link from "next/link";
 export const metadata: Metadata = {
   title: "About | Mesa Basketball Training",
   description:
-    "Learn about Artemios Gavalas — former Division I point guard, professional player, and founder of Mesa Basketball Training.",
+    "Learn about Artemios Gavalas, former Division I point guard, professional player, and founder of Mesa Basketball Training.",
 };
 
 export default function AboutPage() {
@@ -38,13 +38,13 @@ export default function AboutPage() {
               ARTEMIOS GAVALAS
             </h1>
             <p className="mt-5 max-w-xl text-brown-300 text-lg leading-relaxed">
-              Former Division I Point Guard. Professional Athlete. Coach. Community Builder.
+              Former Division I Point Guard. Professional Athlete. Trainer. Community Builder.
             </p>
             <div className="mt-6 flex flex-wrap justify-center gap-3 text-sm text-brown-300">
               <span className="rounded-full border border-brown-700 px-4 py-1">St. John&apos;s University</span>
               <span className="rounded-full border border-brown-700 px-4 py-1">Butler University</span>
-              <span className="rounded-full border border-brown-700 px-4 py-1">Professional — Greece</span>
-              <span className="rounded-full border border-brown-700 px-4 py-1">5+ Years Coaching</span>
+              <span className="rounded-full border border-brown-700 px-4 py-1">Professional in Greece</span>
+              <span className="rounded-full border border-brown-700 px-4 py-1">5+ Years Training</span>
             </div>
           </div>
         </div>
@@ -60,20 +60,20 @@ export default function AboutPage() {
           </h2>
           <div className="space-y-5 text-brown-200 leading-relaxed text-[17px]">
             <p>
-              Mesa Basketball Training was born out of a genuine love for the game and an even greater passion for
-              helping others grow through it. After competing at the Division I level at two of the most prestigious
-              programs in the country and playing professionally in Europe, Artemios Gavalas came home with one
-              clear mission: give back everything the game gave him.
+              Mesa Basketball Training was built out of a genuine love for the game and a deep commitment to
+              helping others grow through it. For Artemios Gavalas, training has always been a passion, something
+              he has poured himself into throughout his playing career and beyond. Long before Mesa had a name,
+              he was in the gym during offseasons, working with players, refining his craft as a trainer, and
+              developing an approach that was intentional, creative, and results-driven.
             </p>
             <p>
-              What started as a commitment to getting in the gym with players who truly wanted to improve has grown
-              into something much bigger. Mesa is rooted in the same community Artemios grew up in — and that
-              connection matters deeply. This isn&apos;t a program built from a distance. It&apos;s built from the
-              same courts, the same neighborhoods, and the same hunger to be great.
+              What started as a passion grew into a program. Mesa is rooted in the same community Artemios grew
+              up in, and that connection matters deeply. This is not a program built from a distance. It is built
+              from the same courts, the same neighborhoods, and the same hunger to be great.
             </p>
             <p>
-              Over five years and hundreds of athletes later — from 4-year-olds picking up a ball for the first
-              time to adult professionals sharpening their edge — Mesa has become a place where real development
+              Over five years and hundreds of athletes later, from 4-year-olds picking up a ball for the first
+              time to adult professionals sharpening their edge, Mesa has become a place where real development
               happens. Not shortcuts. Not gimmicks. Just consistent, intentional work that produces results on and
               off the court.
             </p>
@@ -88,41 +88,37 @@ export default function AboutPage() {
           <div className="space-y-5 text-brown-200 leading-relaxed text-[17px] mb-8">
             <p>
               Artemios competed as a point guard at the Division I level, suiting up for two of college
-              basketball&apos;s most storied programs — St. John&apos;s University and Butler University, both
+              basketball&apos;s most storied programs: St. John&apos;s University and Butler University, both
               members of the prestigious Big East Conference. Competing in one of the most demanding conferences
               in the country, he trained alongside and against elite talent day in and day out, developing a
               deep understanding of the game at its highest collegiate level.
             </p>
             <p>
               He went on to continue his career professionally in Greece, gaining firsthand experience in
-              European professional basketball — a system known for its emphasis on skill, IQ, and
-              fundamentals. That combination of American Division I intensity and European technical discipline
-              is the foundation every Mesa session is built on.
+              European professional basketball, a system known for its emphasis on skill, IQ, and fundamentals.
+              That combination of American Division I intensity and European technical discipline is the
+              foundation every Mesa session is built on.
             </p>
           </div>
           <div className="grid gap-4 sm:grid-cols-3">
             {[
               {
                 school: "St. John's University",
-                detail: "Division I • Big East Conference",
-                icon: "🏀",
+                detail: "Division I  •  Big East Conference",
               },
               {
                 school: "Butler University",
-                detail: "Division I • Big East Conference",
-                icon: "🏀",
+                detail: "Division I  •  Big East Conference",
               },
               {
                 school: "Professional",
-                detail: "European Pro League • Greece",
-                icon: "🌍",
+                detail: "European Pro League  •  Greece",
               },
             ].map((stop) => (
               <div
                 key={stop.school}
                 className="rounded-lg border border-brown-700 bg-brown-900/40 px-6 py-5"
               >
-                <p className="text-2xl mb-2">{stop.icon}</p>
                 <p className="font-semibold text-white">{stop.school}</p>
                 <p className="mt-1 text-sm text-brown-400">{stop.detail}</p>
               </div>
@@ -137,23 +133,22 @@ export default function AboutPage() {
           </h2>
           <div className="space-y-5 text-brown-200 leading-relaxed text-[17px]">
             <p>
-              Great trainers don&apos;t just run drills — they teach the game. At Mesa, every session is
-              thoughtfully designed with creativity and purpose. The goal isn&apos;t to go through the
-              motions; it&apos;s to understand <em>why</em> each skill matters and how it translates to live
-              game situations. That kind of intentional training is what separates players who look good in
-              drills from players who perform when it counts.
+              Great trainers do not just run drills. They teach the game. At Mesa, every session is
+              thoughtfully designed with creativity and purpose. The goal is not to go through the motions.
+              It is to understand <em>why</em> each skill matters and how it translates to live game situations.
+              That kind of intentional training is what separates players who look good in drills from players
+              who perform when it counts.
             </p>
             <p>
-              Artemios brings a point guard&apos;s mind to every session — reading situations, making
-              adjustments, and finding the right way to connect with each athlete individually. Whether
-              working with a beginner or a seasoned player, the energy in the gym stays high, the
-              expectations stay real, and the creativity keeps players engaged and progressing.
+              Artemios brings a point guard&apos;s mind to every session, reading situations, making adjustments,
+              and finding the right way to connect with each athlete individually. Whether working with a beginner
+              or a seasoned player, the energy in the gym stays high, the expectations stay real, and the
+              creativity keeps players engaged and progressing.
             </p>
             <p>
-              But the lessons go beyond basketball. Dedication, consistency, showing up when it&apos;s hard,
-              and chasing your goals with discipline — these are values that carry athletes far beyond the
-              court and into every area of their lives. Mesa is committed to developing people, not just
-              players.
+              The lessons go beyond basketball. Dedication, consistency, showing up when it is hard, and chasing
+              your goals with discipline are values that carry athletes far beyond the court and into every area
+              of their lives. Mesa is committed to developing people, not just players.
             </p>
           </div>
         </section>
@@ -163,7 +158,7 @@ export default function AboutPage() {
           <div className="grid gap-6 sm:grid-cols-3 text-center">
             {[
               { stat: "5+", label: "Years Training Athletes" },
-              { stat: "4–Pro", label: "Ages Trained" },
+              { stat: "4 to Pro", label: "Ages Trained" },
               { stat: "D1 + Pro", label: "Playing Pedigree" },
             ].map((item) => (
               <div
@@ -212,16 +207,15 @@ export default function AboutPage() {
           </div>
         </section>
 
-        {/* Quote / closing statement */}
+        {/* Quote */}
         <section className="border-l-4 border-mesa-accent pl-6">
           <blockquote className="text-brown-200 text-xl leading-relaxed italic">
             &ldquo;I started Mesa because I wanted to give players access to the kind of training and mentorship
             that shaped me. If I can take everything I&apos;ve learned from some of the best programs and coaches
-            in the world and pass that on to kids in my own community — that&apos;s everything. That&apos;s the
-            whole point.&rdquo;
+            in the world and pass that on to kids in my own community, that is everything. That is the whole point.&rdquo;
           </blockquote>
           <p className="mt-4 text-mesa-accent font-semibold text-sm uppercase tracking-widest">
-            — Artemios Gavalas, Founder
+            Artemios Gavalas, Founder
           </p>
         </section>
 
