@@ -1003,22 +1003,22 @@ export default function Home() {
           </div>
         </div>
         {/* Photo row */}
-        <div className="mx-auto flex max-w-5xl justify-center gap-4 px-6 pb-12">
-          <div className="relative h-48 w-1/3 overflow-hidden rounded-xl md:h-64">
+        <div className="mx-auto flex max-w-2xl justify-center gap-4 px-6 pb-12">
+          <div className="relative w-1/2 overflow-hidden rounded-xl" style={{aspectRatio: "3/4"}}>
             <Image
               src="/photo1.jpg"
-              alt="Artemios Gavalas training"
+              alt="Artemios Gavalas at St. John's"
               fill
-              className="object-cover"
+              className="object-cover object-top"
               priority
             />
           </div>
-          <div className="relative h-48 w-1/3 overflow-hidden rounded-xl md:h-64">
+          <div className="relative w-1/2 overflow-hidden rounded-xl" style={{aspectRatio: "3/4"}}>
             <Image
               src="/photo2.jpg"
-              alt="Artemios Gavalas playing"
+              alt="Artemios Gavalas at Butler"
               fill
-              className="object-cover"
+              className="object-cover object-top"
               priority
             />
           </div>
