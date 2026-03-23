@@ -1674,7 +1674,7 @@ export default function Home() {
             My Bookings &mdash; Look Up Your Registrations
           </a>
           <p className="mt-4 text-sm text-brown-600">
-            &copy; {new Date().getFullYear()} Mesa Basketball Training. All rights reserved.
+            &copy; 2025&ndash;{new Date().getFullYear()} Mesa Basketball Training. All rights reserved.
           </p>
         </div>
       </footer>
