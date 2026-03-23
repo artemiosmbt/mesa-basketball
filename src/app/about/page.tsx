@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import Image from "next/image";
 
 export const metadata: Metadata = {
   title: "About | Mesa Basketball Training",
@@ -43,7 +44,7 @@ export default function AboutPage() {
             <div className="mt-6 flex flex-wrap justify-center gap-3 text-sm text-brown-300">
               <span className="rounded-full border border-brown-700 px-4 py-1">St. John&apos;s University</span>
               <span className="rounded-full border border-brown-700 px-4 py-1">Butler University</span>
-              <span className="rounded-full border border-brown-700 px-4 py-1">Professional in Greece</span>
+              <span className="rounded-full border border-brown-700 px-4 py-1">Professional Player in Greece</span>
               <span className="rounded-full border border-brown-700 px-4 py-1">5+ Years Training</span>
             </div>
           </div>
@@ -100,27 +101,40 @@ export default function AboutPage() {
               foundation every Mesa session is built on.
             </p>
           </div>
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2">
             {[
               {
                 school: "St. John's University",
                 detail: "Division I  •  Big East Conference",
+                photo: "/photo1.jpg",
+                alt: "Artemios Gavalas at St. John's",
+                position: "center 35%",
               },
               {
                 school: "Butler University",
                 detail: "Division I  •  Big East Conference",
-              },
-              {
-                school: "Professional",
-                detail: "European Pro League  •  Greece",
+                photo: "/photo2.jpg",
+                alt: "Artemios Gavalas at Butler",
+                position: "center top",
               },
             ].map((stop) => (
               <div
                 key={stop.school}
-                className="rounded-lg border border-brown-700 bg-brown-900/40 px-6 py-5"
+                className="rounded-lg border border-brown-700 bg-brown-900/40 overflow-hidden"
               >
-                <p className="font-semibold text-white">{stop.school}</p>
-                <p className="mt-1 text-sm text-brown-400">{stop.detail}</p>
+                <div className="relative w-full overflow-hidden" style={{ aspectRatio: "3/4" }}>
+                  <Image
+                    src={stop.photo}
+                    alt={stop.alt}
+                    fill
+                    className="object-cover"
+                    style={{ objectPosition: stop.position }}
+                  />
+                </div>
+                <div className="px-6 py-4">
+                  <p className="font-semibold text-white">{stop.school}</p>
+                  <p className="mt-1 text-sm text-brown-400">{stop.detail}</p>
+                </div>
               </div>
             ))}
           </div>
