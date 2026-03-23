@@ -973,7 +973,7 @@ export default function Home() {
       <header className="relative overflow-hidden bg-gradient-to-br from-mesa-dark via-brown-900 to-brown-800">
         <div className="mx-auto max-w-6xl px-6 py-16 md:py-24">
           <div className="flex flex-col items-center text-center">
-            <h1 className="text-4xl font-bold tracking-tight md:text-6xl">
+            <h1 className="font-[family-name:var(--font-oswald)] text-5xl font-bold tracking-wide md:text-7xl">
               ΜΕΣΑ BASKETBALL TRAINING
             </h1>
             <p className="mt-4 text-lg text-brown-300 md:text-xl">
@@ -1034,7 +1034,7 @@ export default function Home() {
       {/* What to Expect */}
       <section className="bg-brown-900/50 py-16">
         <div className="mx-auto max-w-4xl px-6 text-center">
-          <h2 className="text-3xl font-bold">What to Expect</h2>
+          <h2 className="font-[family-name:var(--font-oswald)] text-3xl font-bold tracking-wide">What to Expect</h2>
           <div className="mt-8 grid gap-6 md:grid-cols-3">
             <div className="rounded-xl bg-brown-800/60 p-6">
               <div className="mb-4 flex justify-center">
@@ -1077,7 +1077,7 @@ export default function Home() {
       {/* Weekly Schedule */}
       <section id="schedule" className="py-16">
         <div className="mx-auto max-w-5xl px-6">
-          <h2 className="text-center text-3xl font-bold">Group Sessions</h2>
+          <h2 className="font-[family-name:var(--font-oswald)] text-center text-3xl font-bold tracking-wide">Group Sessions</h2>
           <p className="mt-2 text-center text-brown-400">
             Skill work in groups of up to 6 players. Select 2+ sessions to register — volume discounts available.
           </p>
@@ -1324,7 +1324,7 @@ export default function Home() {
       {/* Mini Camps */}
       <section id="camps" className="bg-brown-900/30 py-16">
         <div className="mx-auto max-w-5xl px-6">
-          <h2 className="text-center text-3xl font-bold">Mini Camps</h2>
+          <h2 className="font-[family-name:var(--font-oswald)] text-center text-3xl font-bold tracking-wide">Mini Camps</h2>
           <p className="mt-2 text-center text-brown-400">
             Summer &amp; break camps — register early, spots fill fast (max 20 per camp)
           </p>
@@ -1380,7 +1380,7 @@ export default function Home() {
       {/* Private Sessions */}
       <section id="private" className="py-16">
         <div className="mx-auto max-w-5xl px-6">
-          <h2 className="text-center text-3xl font-bold">Private Sessions</h2>
+          <h2 className="font-[family-name:var(--font-oswald)] text-center text-3xl font-bold tracking-wide">Private Sessions</h2>
           <div className="mt-4 flex flex-wrap justify-center gap-6">
             <div className="rounded-lg bg-brown-800/60 px-4 py-2 text-center">
               <p className="text-lg font-bold text-mesa-accent">$150 / 60 min</p>
@@ -1654,7 +1654,7 @@ export default function Home() {
       {/* Contact Footer */}
       <footer className="border-t border-brown-800 bg-mesa-dark py-12">
         <div className="mx-auto max-w-4xl px-6 text-center">
-          <h2 className="text-2xl font-bold">Get in Touch</h2>
+          <h2 className="font-[family-name:var(--font-oswald)] text-2xl font-bold tracking-wide">Get in Touch</h2>
           <div className="mt-4 space-y-1 text-brown-300">
             <p>
               <span className="font-semibold text-white">Call / Text:</span>{" "}
