@@ -329,6 +329,15 @@ export async function incrementPackageSessions(id: string, currentUsed: number):
     .eq("id", id);
 }
 
+export async function decrementPackageSessions(id: string, currentUsed: number): Promise<void> {
+  const supabase = getSupabase();
+  if (currentUsed <= 0) return;
+  await supabase
+    .from("monthly_packages")
+    .update({ sessions_used: currentUsed - 1 })
+    .eq("id", id);
+}
+
 export async function getPackagesNeedingReminder(monthYear: string): Promise<MonthlyPackage[]> {
   const supabase = getSupabase();
   const { data, error } = await supabase

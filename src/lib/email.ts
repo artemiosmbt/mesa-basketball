@@ -123,6 +123,7 @@ export async function sendRegistrationNotification(data: {
       <p>Your ${typeLabel.toLowerCase()} has been confirmed.</p>
       <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails)}</p>
       <p><strong>Players:</strong> ${data.kids}</p>
+      ${packageNote}
       ${freeNote}
       ${priceNote}
       ${paymentNote}

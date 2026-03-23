@@ -3,6 +3,8 @@ import {
   getRegistrationByToken,
   cancelRegistration,
   addRegistration,
+  getActivePackage,
+  decrementPackageSessions,
 } from "@/lib/supabase";
 import {
   sendCancellationNotification,
@@ -78,6 +80,20 @@ export async function DELETE(
       { error: "Failed to cancel" },
       { status: 500 }
     );
+  }
+
+  // If this was a private session tied to a monthly package, free up the slot
+  if (reg.booked_date && (reg.type === "private" || reg.type === "group-private")) {
+    try {
+      const d = new Date(reg.booked_date + "T12:00:00");
+      const bookingMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      const activePkg = await getActivePackage(reg.email, bookingMonth);
+      if (activePkg && activePkg.sessions_used > 0) {
+        await decrementPackageSessions(activePkg.id, activePkg.sessions_used);
+      }
+    } catch {
+      // non-critical — don't fail the cancellation
+    }
   }
 
   await sendCancellationNotification({
