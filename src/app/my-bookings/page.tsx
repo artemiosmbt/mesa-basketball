@@ -93,7 +93,7 @@ export default function MyBookings() {
   return (
     <div className="min-h-screen bg-mesa-dark text-white">
       <div className="mx-auto max-w-lg px-6 py-16">
-        <a href="/" className="text-sm text-mesa-accent hover:text-blue-300">
+        <a href="/" className="text-sm text-mesa-accent hover:text-yellow-300">
           &larr; Back to Home
         </a>
 
@@ -115,7 +115,7 @@ export default function MyBookings() {
             <button
               type="submit"
               disabled={loading}
-              className="rounded-lg bg-mesa-accent px-6 py-3 font-semibold text-white hover:bg-blue-600 disabled:opacity-50"
+              className="rounded-lg bg-mesa-accent px-6 py-3 font-semibold text-white hover:bg-yellow-600 disabled:opacity-50"
             >
               {loading ? "Looking up..." : "Look Up"}
             </button>
@@ -294,7 +294,7 @@ export default function MyBookings() {
                     <div className="mt-3 border-t border-brown-800 pt-3">
                       <a
                         href={`/booking/${b.manageToken}`}
-                        className="inline-flex items-center gap-1 text-sm font-medium text-mesa-accent hover:text-blue-300"
+                        className="inline-flex items-center gap-1 text-sm font-medium text-mesa-accent hover:text-yellow-300"
                       >
                         Manage Booking &rarr;
                       </a>

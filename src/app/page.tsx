@@ -896,7 +896,7 @@ export default function Home() {
             <div className="mt-8 flex flex-wrap justify-center gap-4">
               <a
                 href="#schedule"
-                className="rounded-lg bg-mesa-accent px-6 py-3 font-semibold text-white transition hover:bg-blue-600"
+                className="rounded-lg bg-mesa-accent px-6 py-3 font-semibold text-white transition hover:bg-yellow-600"
               >
                 Group Schedule
               </a>
@@ -1078,7 +1078,7 @@ export default function Home() {
                                     return next;
                                   });
                                 }}
-                                className="text-xs text-mesa-accent hover:text-blue-300 ml-1"
+                                className="text-xs text-mesa-accent hover:text-yellow-300 ml-1"
                               >
                                 {allSelected ? `Deselect all ${dayName}s` : `Select all ${dayName}s`}
                               </button>
@@ -1174,7 +1174,7 @@ export default function Home() {
                             <button
                               onClick={openGroupRegistration}
                               disabled={groupPricing.count < 2}
-                              className="rounded bg-mesa-accent px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed"
+                              className="rounded bg-mesa-accent px-4 py-2 text-sm font-semibold text-white transition hover:bg-yellow-600 disabled:opacity-40 disabled:cursor-not-allowed"
                             >
                               Register
                             </button>
@@ -1227,7 +1227,7 @@ export default function Home() {
                     {!full && (
                       <button
                         onClick={() => openModal("camp", i, `${camp.name} (${camp.startDate} — ${camp.endDate}) at ${camp.location}`)}
-                        className="rounded bg-mesa-accent px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-600"
+                        className="rounded bg-mesa-accent px-4 py-2 text-sm font-semibold text-white transition hover:bg-yellow-600"
                       >
                         Register
                       </button>
@@ -1279,7 +1279,7 @@ export default function Home() {
                 </div>
                 <button
                   onClick={() => { setPkgModal({ open: true, packageType: 4 }); setPkgName(""); setPkgEmail(""); setPkgPhone(""); setPkgMonth(pkgMonthOptions[0]?.value || ""); setPkgResult(null); }}
-                  className="mt-4 w-full rounded-lg bg-mesa-accent px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-600"
+                  className="mt-4 w-full rounded-lg bg-mesa-accent px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-yellow-600"
                 >
                   Enroll — 4 Sessions
                 </button>
@@ -1296,7 +1296,7 @@ export default function Home() {
                 </div>
                 <button
                   onClick={() => { setPkgModal({ open: true, packageType: 8 }); setPkgName(""); setPkgEmail(""); setPkgPhone(""); setPkgMonth(pkgMonthOptions[0]?.value || ""); setPkgResult(null); }}
-                  className="mt-4 w-full rounded-lg bg-mesa-accent px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-600"
+                  className="mt-4 w-full rounded-lg bg-mesa-accent px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-yellow-600"
                 >
                   Enroll — 8 Sessions
                 </button>
@@ -1448,7 +1448,7 @@ export default function Home() {
 
                     <button
                       onClick={() => openPrivateBooking(wi, window)}
-                      className="rounded bg-mesa-accent px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-600"
+                      className="rounded bg-mesa-accent px-4 py-2 text-sm font-semibold text-white transition hover:bg-yellow-600"
                     >
                       Book
                     </button>
@@ -1474,7 +1474,7 @@ export default function Home() {
             </div>
             <button
               onClick={openGroupRegistration}
-              className="rounded bg-mesa-accent px-5 py-2 text-sm font-semibold text-white hover:bg-blue-600"
+              className="rounded bg-mesa-accent px-5 py-2 text-sm font-semibold text-white hover:bg-yellow-600"
             >
               Register
             </button>
@@ -1500,7 +1500,7 @@ export default function Home() {
           </div>
           <a
             href="/my-bookings"
-            className="mt-6 inline-block text-sm text-mesa-accent hover:text-blue-300"
+            className="mt-6 inline-block text-sm text-mesa-accent hover:text-yellow-300"
           >
             My Bookings &mdash; Look Up Your Registrations
           </a>
@@ -1602,7 +1602,7 @@ export default function Home() {
                 <div>
                   <div className="mb-2 flex items-center justify-between">
                     <label className="text-sm font-medium text-brown-300">Kid(s)</label>
-                    <button type="button" onClick={addKid} className="text-sm text-mesa-accent hover:text-blue-300">
+                    <button type="button" onClick={addKid} className="text-sm text-mesa-accent hover:text-yellow-300">
                       + Add another kid
                     </button>
                   </div>
@@ -1803,7 +1803,7 @@ export default function Home() {
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="w-full rounded-lg bg-mesa-accent py-3 font-semibold text-white transition hover:bg-blue-600 disabled:opacity-50"
+                  className="w-full rounded-lg bg-mesa-accent py-3 font-semibold text-white transition hover:bg-yellow-600 disabled:opacity-50"
                 >
                   {submitting ? "Submitting..." : "Confirm Registration"}
                 </button>
@@ -1857,7 +1857,7 @@ export default function Home() {
                 {pkgResult && !pkgResult.success && (
                   <p className="text-sm text-red-400">{pkgResult.message}</p>
                 )}
-                <button type="submit" disabled={pkgSubmitting} className="w-full rounded-lg bg-mesa-accent py-3 font-semibold text-white transition hover:bg-blue-600 disabled:opacity-50">
+                <button type="submit" disabled={pkgSubmitting} className="w-full rounded-lg bg-mesa-accent py-3 font-semibold text-white transition hover:bg-yellow-600 disabled:opacity-50">
                   {pkgSubmitting ? "Enrolling..." : "Confirm Enrollment"}
                 </button>
               </form>

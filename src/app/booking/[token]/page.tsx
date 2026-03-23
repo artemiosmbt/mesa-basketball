@@ -269,7 +269,7 @@ export default function ManageBooking({
         <div className="text-center">
           <h1 className="text-2xl font-bold">Booking Not Found</h1>
           <p className="mt-2 text-brown-400">{error}</p>
-          <a href="/" className="mt-4 inline-block text-mesa-accent hover:text-blue-300">
+          <a href="/" className="mt-4 inline-block text-mesa-accent hover:text-yellow-300">
             Back to Home
           </a>
         </div>
@@ -292,7 +292,7 @@ export default function ManageBooking({
               This change was made within 48 hours of the session. Per our policy, 50% of the session fee is still due.
             </p>
           )}
-          <a href="/" className="mt-6 inline-block rounded bg-mesa-accent px-6 py-2 font-semibold text-white hover:bg-blue-600">
+          <a href="/" className="mt-6 inline-block rounded bg-mesa-accent px-6 py-2 font-semibold text-white hover:bg-yellow-600">
             Back to Home
           </a>
         </div>
@@ -308,7 +308,7 @@ export default function ManageBooking({
           <p className="mt-4 text-brown-300">
             Your session has been rescheduled. Check your email for the updated details and a new manage booking link.
           </p>
-          <a href="/" className="mt-6 inline-block rounded bg-mesa-accent px-6 py-2 font-semibold text-white hover:bg-blue-600">
+          <a href="/" className="mt-6 inline-block rounded bg-mesa-accent px-6 py-2 font-semibold text-white hover:bg-yellow-600">
             Back to Home
           </a>
         </div>
@@ -321,7 +321,7 @@ export default function ManageBooking({
   return (
     <div className="min-h-screen bg-mesa-dark text-white">
       <div className="mx-auto max-w-lg px-6 py-16">
-        <a href="/" className="text-sm text-mesa-accent hover:text-blue-300">
+        <a href="/" className="text-sm text-mesa-accent hover:text-yellow-300">
           &larr; Back to Home
         </a>
 
@@ -360,7 +360,7 @@ export default function ManageBooking({
                       setShowReschedule(true);
                       loadSchedule();
                     }}
-                    className="rounded bg-mesa-accent px-4 py-2 text-sm font-semibold text-white hover:bg-blue-600"
+                    className="rounded bg-mesa-accent px-4 py-2 text-sm font-semibold text-white hover:bg-yellow-600"
                   >
                     Reschedule
                   </button>
@@ -535,7 +535,7 @@ export default function ManageBooking({
                     <button
                       onClick={handleReschedule}
                       disabled={rescheduling || selectedWindow < 0}
-                      className="rounded bg-mesa-accent px-4 py-2 text-sm font-semibold text-white hover:bg-blue-600 disabled:opacity-50"
+                      className="rounded bg-mesa-accent px-4 py-2 text-sm font-semibold text-white hover:bg-yellow-600 disabled:opacity-50"
                     >
                       {rescheduling ? "Rescheduling..." : "Confirm Reschedule"}
                     </button>
@@ -565,7 +565,7 @@ export default function ManageBooking({
                     <button
                       onClick={handleReschedule}
                       disabled={rescheduling}
-                      className="rounded bg-mesa-accent px-5 py-2 text-sm font-semibold text-white hover:bg-blue-600 disabled:opacity-50"
+                      className="rounded bg-mesa-accent px-5 py-2 text-sm font-semibold text-white hover:bg-yellow-600 disabled:opacity-50"
                     >
                       {rescheduling ? "Rescheduling..." : "Confirm Reschedule"}
                     </button>
