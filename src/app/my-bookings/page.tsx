@@ -156,12 +156,9 @@ export default function MyBookings() {
         {/* Monthly Package Status Card */}
         {activePackage && (() => {
           const remaining = activePackage.packageType - activePackage.sessionsUsed;
-          const expiry = new Date(
-            new Date(activePackage.monthYear + "-01").getFullYear(),
-            new Date(activePackage.monthYear + "-01").getMonth() + 1,
-            0
-          ).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
-          const monthLabel = new Date(activePackage.monthYear + "-01").toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+          const [pkgYear, pkgMonth] = activePackage.monthYear.split("-").map(Number);
+          const expiry = new Date(pkgYear, pkgMonth, 0).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+          const monthLabel = new Date(pkgYear, pkgMonth - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
           return (
             <div className="mt-6 rounded-2xl bg-brown-900 p-6">
               <div className="flex items-start justify-between gap-4">
