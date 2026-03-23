@@ -214,7 +214,7 @@ function getUpsellOptions(
   remainingAfterSelection: number
 ): { extraMins: number; savings: number }[] {
   if (selectedDuration > 60) return []; // only upsell on base 60 min
-  if (windowTotalMins > 120) return []; // only on tight windows
+  if (remainingAfterSelection < 15 || remainingAfterSelection > 30) return []; // only show when 15-30 min left in window
   const options: { extraMins: number; savings: number }[] = [];
   for (const extra of [15, 30]) {
     if (extra <= remainingAfterSelection) {
@@ -337,6 +337,7 @@ export default function Home() {
   });
   const [calendarSelectedDate, setCalendarSelectedDate] = useState<string | null>(null);
   const [showAllPrivate, setShowAllPrivate] = useState(false);
+  const [showCalendar, setShowCalendar] = useState(false);
   const [showAllGroups, setShowAllGroups] = useState<Set<string>>(new Set());
   const [upsellExtra, setUpsellExtra] = useState(0); // extra minutes accepted
   const [referralCode, setReferralCode] = useState("");
@@ -1419,7 +1420,7 @@ export default function Home() {
 
           {/* Filters */}
           {timeWindows.length > 0 && (
-            <div className="mt-6 flex flex-wrap gap-6">
+            <div className="relative mt-6 flex flex-wrap gap-6 items-start">
               {/* Left: day + month filters */}
               <div className="flex-1 min-w-48 space-y-3">
                 {/* Day of week pills */}
@@ -1467,14 +1468,36 @@ export default function Home() {
                   </select>
                 </div>
               </div>
-              {/* Right: mini calendar */}
-              <MiniCalendar
-                month={calendarMonth}
-                onMonthChange={setCalendarMonth}
-                highlightedDates={calendarHighlightedDates}
-                selectedDate={calendarSelectedDate}
-                onSelectDate={(d) => { setCalendarSelectedDate(d); setFilterDays(new Set()); setFilterMonth(""); }}
-              />
+              {/* Right: calendar toggle */}
+              <div className="shrink-0">
+                <button
+                  onClick={() => setShowCalendar((v) => !v)}
+                  className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
+                    showCalendar || calendarSelectedDate
+                      ? "border-mesa-accent text-mesa-accent"
+                      : "border-brown-700 text-brown-400 hover:border-brown-500 hover:text-white"
+                  }`}
+                >
+                  📅 {calendarSelectedDate ? calendarSelectedDate : "Pick a date"}
+                  {calendarSelectedDate && (
+                    <span
+                      onClick={(e) => { e.stopPropagation(); setCalendarSelectedDate(null); setShowCalendar(false); }}
+                      className="ml-1 text-brown-500 hover:text-white"
+                    >✕</span>
+                  )}
+                </button>
+                {showCalendar && (
+                  <div className="absolute z-10 mt-1">
+                    <MiniCalendar
+                      month={calendarMonth}
+                      onMonthChange={setCalendarMonth}
+                      highlightedDates={calendarHighlightedDates}
+                      selectedDate={calendarSelectedDate}
+                      onSelectDate={(d) => { setCalendarSelectedDate(d); setFilterDays(new Set()); setFilterMonth(""); setShowCalendar(false); }}
+                    />
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
@@ -1741,7 +1764,7 @@ export default function Home() {
                       <div className="flex gap-2 items-center">
                         <input
                           type="text"
-                          placeholder="Kid's Name"
+                          placeholder="Player's Name"
                           required
                           value={kid.name}
                           onChange={(e) => updateKid(i, "name", e.target.value)}
