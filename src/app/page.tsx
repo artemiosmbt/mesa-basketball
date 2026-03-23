@@ -1015,7 +1015,7 @@ export default function Home() {
               alt="Artemios Gavalas at St. John's"
               fill
               className="object-cover"
-              style={{ objectPosition: "center 15%" }}
+              style={{ objectPosition: "center 25%" }}
               priority
             />
           </div>
