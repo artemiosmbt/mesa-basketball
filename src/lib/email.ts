@@ -115,6 +115,7 @@ export async function sendRegistrationNotification(data: {
   const clientResult = await resend.emails.send({
     from: FROM_EMAIL,
     to: data.email,
+    replyTo: ARTEMI_EMAIL,
     subject: data.isFree
       ? `FREE Session Confirmed — Mesa Basketball Training`
       : `Booking Confirmed — Mesa Basketball Training`,
@@ -167,6 +168,7 @@ export async function sendCancellationNotification(data: {
   await resend.emails.send({
     from: FROM_EMAIL,
     to: data.email,
+    replyTo: ARTEMI_EMAIL,
     subject: `Session Cancelled — Mesa Basketball Training`,
     html: `
       <h2>Session Cancelled</h2>
@@ -322,6 +324,7 @@ export async function sendRescheduleNotification(data: {
   await resend.emails.send({
     from: FROM_EMAIL,
     to: data.email,
+    replyTo: ARTEMI_EMAIL,
     subject: `Session Rescheduled — Mesa Basketball Training`,
     html: `
       <h2>Session Rescheduled</h2>

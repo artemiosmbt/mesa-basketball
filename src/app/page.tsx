@@ -598,7 +598,7 @@ export default function Home() {
         }
         setSubmitResult({
           success: true,
-          message: `${modal.selectedGroupSessions.length} sessions booked! Check your email for details.`,
+          message: `${modal.selectedGroupSessions.length} sessions booked! A confirmation email has been sent to ${email}.`,
         });
         // Clear selections
         setSelectedGroupKeys(new Set());
@@ -686,8 +686,8 @@ export default function Home() {
       setSubmitResult({
         success: true,
         message: datesToBook.length > 1
-          ? `${datesToBook.length} sessions booked! Check your email for details.`
-          : "Registration confirmed! Check your email for details.",
+          ? `${datesToBook.length} sessions booked! A confirmation email has been sent to ${email}.`
+          : `Booking confirmed! A confirmation email has been sent to ${email}.`,
       });
       const fresh = await fetch("/api/schedule").then((r) => r.json());
       setSchedule(fresh.weeklySchedule || []);
