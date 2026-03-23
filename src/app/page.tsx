@@ -1037,21 +1037,27 @@ export default function Home() {
           <h2 className="text-3xl font-bold">What to Expect</h2>
           <div className="mt-8 grid gap-6 md:grid-cols-3">
             <div className="rounded-xl bg-brown-800/60 p-6">
-              <div className="mb-3 text-3xl">🏀</div>
+              <div className="mb-4 flex justify-center">
+                <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#d4af37" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+              </div>
               <h3 className="font-semibold text-mesa-accent">Skill Development</h3>
               <p className="mt-2 text-sm text-brown-300">
                 Expert guidance on shooting, dribbling, ball handling & more
               </p>
             </div>
             <div className="rounded-xl bg-brown-800/60 p-6">
-              <div className="mb-3 text-3xl">💪</div>
+              <div className="mb-4 flex justify-center">
+                <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#d4af37" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+              </div>
               <h3 className="font-semibold text-mesa-accent">High Energy Drills</h3>
               <p className="mt-2 text-sm text-brown-300">
                 Build confidence, skill, and game IQ through competitive drills
               </p>
             </div>
             <div className="rounded-xl bg-brown-800/60 p-6">
-              <div className="mb-3 text-3xl">🎓</div>
+              <div className="mb-4 flex justify-center">
+                <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#d4af37" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>
+              </div>
               <h3 className="font-semibold text-mesa-accent">D1 Experience</h3>
               <p className="mt-2 text-sm text-brown-300">
                 Knowledge from playing at St. John&apos;s, Butler, and professionally in Greece
@@ -1060,6 +1066,13 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+      {/* Divider */}
+      <div className="flex items-center justify-center gap-3 py-2">
+        <div className="h-px w-16 bg-mesa-accent/25" />
+        <div className="h-1.5 w-1.5 rotate-45 bg-mesa-accent/50" />
+        <div className="h-px w-16 bg-mesa-accent/25" />
+      </div>
 
       {/* Weekly Schedule */}
       <section id="schedule" className="py-16">
@@ -1301,6 +1314,13 @@ export default function Home() {
         </div>
       </section>
 
+      {/* Divider */}
+      <div className="flex items-center justify-center gap-3 py-2">
+        <div className="h-px w-16 bg-mesa-accent/25" />
+        <div className="h-1.5 w-1.5 rotate-45 bg-mesa-accent/50" />
+        <div className="h-px w-16 bg-mesa-accent/25" />
+      </div>
+
       {/* Mini Camps */}
       <section id="camps" className="bg-brown-900/30 py-16">
         <div className="mx-auto max-w-5xl px-6">
@@ -1349,6 +1369,13 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+      {/* Divider */}
+      <div className="flex items-center justify-center gap-3 py-2">
+        <div className="h-px w-16 bg-mesa-accent/25" />
+        <div className="h-1.5 w-1.5 rotate-45 bg-mesa-accent/50" />
+        <div className="h-px w-16 bg-mesa-accent/25" />
+      </div>
 
       {/* Private Sessions */}
       <section id="private" className="py-16">
