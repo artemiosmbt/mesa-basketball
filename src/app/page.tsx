@@ -932,7 +932,7 @@ export default function Home() {
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3">
           <a href="#" className="flex items-center gap-2 text-lg font-bold text-white">
             <img src="/logo.jpeg" alt="Mesa Basketball Logo" className="h-10 w-10 rounded-full object-cover" />
-            <span className="hidden sm:inline">MESA BASKETBALL</span>
+            <span className="hidden sm:inline">ΜΕΣΑ BASKETBALL</span>
           </a>
           {/* Desktop nav */}
           <div className="hidden md:flex items-center gap-4 text-sm">
@@ -974,7 +974,7 @@ export default function Home() {
         <div className="mx-auto max-w-6xl px-6 py-16 md:py-24">
           <div className="flex flex-col items-center text-center">
             <h1 className="text-4xl font-bold tracking-tight md:text-6xl">
-              MESA BASKETBALL TRAINING
+              ΜΕΣΑ BASKETBALL TRAINING
             </h1>
             <p className="mt-4 text-lg text-brown-300 md:text-xl">
               With Former Division I Player{" "}
