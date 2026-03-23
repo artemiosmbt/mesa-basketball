@@ -1366,8 +1366,8 @@ export default function Home() {
           <p className="mt-2 text-center text-sm text-brown-500">
             Payment in person — Cash, Venmo, or Zelle
           </p>
-          <p className="mt-2 text-center text-sm font-semibold text-mesa-accent">
-            New clients: first session 50% off
+          <p className="mt-2 text-center text-sm text-green-400/80">
+            New Clients: First Session 50% Off
           </p>
 
           {/* Monthly Packages */}
