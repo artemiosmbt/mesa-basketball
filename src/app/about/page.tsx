@@ -260,22 +260,43 @@ export default function AboutPage() {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-brown-800 py-8 text-center text-sm text-brown-500">
-        <a
-          href="https://www.instagram.com/mesabasketballtraining"
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label="Instagram"
-          className="inline-flex items-center gap-2 text-brown-400 hover:text-white transition mb-4"
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <rect x="2" y="2" width="20" height="20" rx="5" ry="5" />
-            <circle cx="12" cy="12" r="4" />
-            <circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none" />
-          </svg>
-          @mesabasketballtraining
-        </a>
-        <p>&copy; {new Date().getFullYear()} Mesa Basketball Training. All rights reserved.</p>
+      <footer className="border-t border-brown-800 bg-mesa-dark py-12">
+        <div className="mx-auto max-w-4xl px-6 text-center">
+          <h2 className="font-[family-name:var(--font-oswald)] text-2xl font-bold tracking-wide">Get in Touch</h2>
+          <div className="mt-4 space-y-1 text-brown-300">
+            <p>
+              <span className="font-semibold text-white">Call / Text:</span>{" "}
+              <a href="tel:6315991280" className="hover:text-mesa-accent">(631) 599-1280</a>
+            </p>
+            <p>
+              <span className="font-semibold text-white">Email:</span>{" "}
+              <a href="mailto:artemios@mesabasketballtraining.com" className="hover:text-mesa-accent">
+                artemios@mesabasketballtraining.com
+              </a>
+            </p>
+          </div>
+          <div className="mt-6 flex items-center justify-center gap-4">
+            <a href="/my-bookings" className="text-sm text-mesa-accent hover:text-yellow-300">
+              My Bookings &mdash; Look Up Your Registrations
+            </a>
+            <a
+              href="https://www.instagram.com/mesabasketballtraining"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Instagram"
+              className="text-brown-400 hover:text-white transition"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <rect x="2" y="2" width="20" height="20" rx="5" ry="5" />
+                <circle cx="12" cy="12" r="4" />
+                <circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none" />
+              </svg>
+            </a>
+          </div>
+          <p className="mt-4 text-sm text-brown-600">
+            &copy; 2025&ndash;{new Date().getFullYear()} Mesa Basketball Training LLC. All rights reserved.
+          </p>
+        </div>
       </footer>
     </div>
   );
