@@ -974,7 +974,7 @@ export default function Home() {
         <div className="mx-auto max-w-6xl px-6 py-16 md:py-24">
           <div className="flex flex-col items-center text-center">
             <h1 className="font-[family-name:var(--font-oswald)] text-5xl font-bold tracking-wide md:text-7xl">
-              ΜΕΣΑ BASKETBALL TRAINING
+              <span className="font-[family-name:var(--font-exo2)] font-black">ΜΕΣΑ</span> BASKETBALL TRAINING
             </h1>
             <p className="mt-4 text-lg text-brown-300 md:text-xl">
               With Former Division I Player{" "}

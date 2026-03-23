@@ -1,11 +1,17 @@
 import type { Metadata } from "next";
-import { Oswald } from "next/font/google";
+import { Oswald, Exo_2 } from "next/font/google";
 import "./globals.css";
 
 const oswald = Oswald({
   subsets: ["latin"],
   weight: ["400", "500", "600", "700"],
   variable: "--font-oswald",
+});
+
+const exo2 = Exo_2({
+  subsets: ["latin", "greek"],
+  weight: ["700", "800", "900"],
+  variable: "--font-exo2",
 });
 
 export const metadata: Metadata = {
@@ -21,7 +27,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${oswald.variable} antialiased`}>{children}</body>
+      <body className={`${oswald.variable} ${exo2.variable} antialiased`}>{children}</body>
     </html>
   );
 }
