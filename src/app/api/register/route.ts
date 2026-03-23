@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { sendRegistrationNotification } from "@/lib/email";
 import {
   addRegistrationWithRewards,
-  getConfirmedSessionCount,
+  isNewClient,
   getReferralCredits,
+  decrementReferralCredit,
   addReferralCredit,
   findReferrerByCode,
   generateReferralCode,
@@ -110,17 +111,23 @@ export async function POST(req: NextRequest) {
     const isPrivateType = type === "private" || type === "group-private";
     let manageToken: string | undefined;
     let isFree = false;
+    let isFirstTime = false;
     const referralCode = generateReferralCode(parentName);
 
     // Save to Supabase (unless this is an email-only request)
     if (!emailOnly) {
-      // Check rewards eligibility for private/group-private sessions
+      // Check first-time discount and referral credit
       if (isPrivateType) {
-        const sessionCount = await getConfirmedSessionCount(email);
-        const credits = await getReferralCredits(email);
-        const effectiveCount = sessionCount + credits;
-        if ((effectiveCount + 1) % 11 === 0 && effectiveCount + 1 >= 11) {
-          isFree = true;
+        const newClient = await isNewClient(email, phone);
+        if (newClient) {
+          isFree = true; // repurposed: means "discount applied" (50% off)
+          isFirstTime = true;
+        } else {
+          const credits = await getReferralCredits(email);
+          if (credits > 0) {
+            isFree = true; // referral half-off credit
+            await decrementReferralCredit(email);
+          }
         }
       }
 
@@ -150,14 +157,13 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Handle referral: if a new family used a valid referral code
+      // Handle referral: if a verified new client used a referral code, reward the referrer
       if (submittedReferralCode && isPrivateType) {
-        const currentCount = await getConfirmedSessionCount(email);
-        if (currentCount <= 1) {
+        const newClient = await isNewClient(email, phone);
+        if (newClient) {
           const referrerEmail = await findReferrerByCode(submittedReferralCode);
           if (referrerEmail && referrerEmail !== email) {
-            await addReferralCredit(referrerEmail);
-            await addReferralCredit(email);
+            await addReferralCredit(referrerEmail); // referrer gets 1 half-off credit
           }
         }
       }
@@ -175,6 +181,7 @@ export async function POST(req: NextRequest) {
         totalParticipants: totalParticipants || 1,
         manageToken,
         isFree,
+        isFirstTime,
         referralCode: isPrivateType ? referralCode : undefined,
       });
     }

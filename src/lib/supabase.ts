@@ -125,19 +125,6 @@ export async function cancelRegistration(token: string): Promise<boolean> {
 
 // --- Rewards & Referral Helpers ---
 
-/** Count confirmed private/group-private sessions for a given email */
-export async function getConfirmedSessionCount(email: string): Promise<number> {
-  const supabase = getSupabase();
-  const { count, error } = await supabase
-    .from("registrations")
-    .select("*", { count: "exact", head: true })
-    .eq("email", email)
-    .eq("status", "confirmed")
-    .in("type", ["private", "group-private"]);
-  if (error) return 0;
-  return count || 0;
-}
-
 /** Get referral credits for an email */
 export async function getReferralCredits(email: string): Promise<number> {
   const supabase = getSupabase();
@@ -171,15 +158,50 @@ export async function addReferralCredit(email: string): Promise<void> {
   }
 }
 
-/** Check if an email has any previous registrations */
-export async function isNewFamily(email: string): Promise<boolean> {
+/** Use 1 referral credit (half-off session) */
+export async function decrementReferralCredit(email: string): Promise<void> {
   const supabase = getSupabase();
-  const { count, error } = await supabase
+  const { data } = await supabase
+    .from("referral_credits")
+    .select("credits")
+    .eq("email", email)
+    .single();
+  if (data && (data.credits || 0) > 0) {
+    await supabase
+      .from("referral_credits")
+      .update({ credits: data.credits - 1, updated_at: new Date().toISOString() })
+      .eq("email", email);
+  }
+}
+
+/** Check if email OR phone has any previous registrations (fraud-resistant new client check) */
+export async function isNewClient(email: string, phone: string): Promise<boolean> {
+  const supabase = getSupabase();
+  const normalizedPhone = phone.replace(/\D/g, "").slice(-10); // last 10 digits
+  const normalizedEmail = email.toLowerCase().trim();
+
+  // Check by email
+  const { count: emailCount } = await supabase
     .from("registrations")
     .select("*", { count: "exact", head: true })
-    .eq("email", email);
-  if (error) return true;
-  return (count || 0) === 0;
+    .eq("email", normalizedEmail);
+
+  if ((emailCount || 0) > 0) return false;
+
+  // Also fetch recent registrations to check phone (stored in various formats)
+  const { data: phoneRows } = await supabase
+    .from("registrations")
+    .select("phone")
+    .limit(500);
+
+  if (phoneRows) {
+    for (const row of phoneRows) {
+      const stored = (row.phone || "").replace(/\D/g, "").slice(-10);
+      if (stored && stored === normalizedPhone) return false;
+    }
+  }
+
+  return true;
 }
 
 /** Look up the email of the family that owns a referral code */

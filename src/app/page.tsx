@@ -1366,8 +1366,8 @@ export default function Home() {
           <p className="mt-2 text-center text-sm text-brown-500">
             Payment in person — Cash, Venmo, or Zelle
           </p>
-          <p className="mt-3 text-center text-sm text-green-400/80">
-            Every 11th session is on us! Earn free sessions through our loyalty rewards program.
+          <p className="mt-2 text-center text-sm font-semibold text-mesa-accent">
+            New clients: first session 50% off
           </p>
 
           {/* Monthly Packages */}

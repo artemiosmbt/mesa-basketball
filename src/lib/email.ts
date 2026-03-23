@@ -39,6 +39,7 @@ export async function sendRegistrationNotification(data: {
   totalParticipants: number;
   manageToken?: string;
   isFree?: boolean;
+  isFirstTime?: boolean;
   referralCode?: string;
 }) {
   const resend = getResend();
@@ -86,8 +87,10 @@ export async function sendRegistrationNotification(data: {
     ? ""
     : "<p>Payments can be made via Zelle (<strong>artemios@mesabasketballtraining.com</strong>), Cash, or Venmo (<strong>@Artemios-Gavalas</strong>). Please provide at least 48 hours' notice if you need to cancel or reschedule a session. Rescheduling or canceling within 48 hours of the scheduled session will result in a 50% charge of the session fee.</p>";
 
-  const freeNote = data.isFree
-    ? '<p style="background: #166534; color: #4ade80; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">This session is FREE — thank you for your loyalty!</p>'
+  const freeNote = data.isFree && data.isFirstTime
+    ? '<p style="background: #162d5a; color: #d4af37; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">First session discount applied — 50% off! Pay $75 (private) or $125 (group private) in person.</p>'
+    : data.isFree
+    ? '<p style="background: #162d5a; color: #d4af37; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">Referral credit applied — 50% off this session! Pay $75 (private) or $125 (group private) in person.</p>'
     : "";
 
   const manageSection = `<p><a href="${BASE_URL}/my-bookings" style="color: #d4af37; font-weight: bold;">View My Bookings</a> — Manage, cancel, or reschedule your sessions</p>`;

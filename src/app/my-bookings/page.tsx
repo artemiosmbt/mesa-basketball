@@ -36,10 +36,7 @@ export default function MyBookings() {
   const [email, setEmail] = useState("");
   const [bookings, setBookings] = useState<BookingRecord[] | null>(null);
   const [rewards, setRewards] = useState<{
-    sessionCount: number;
     referralCredits: number;
-    effectiveCount: number;
-    sessionsUntilFree: number;
     referralCode: string | null;
   } | null>(null);
   const [activePackage, setActivePackage] = useState<{ packageType: number; sessionsUsed: number; monthYear: string } | null>(null);
@@ -137,40 +134,21 @@ export default function MyBookings() {
           </div>
         )}
 
-        {/* Rewards & Referral Section */}
+        {/* Referral Section */}
         {rewards && (
           <div className="mt-8 rounded-2xl bg-brown-900 p-6">
-            <h2 className="text-lg font-bold">Loyalty Rewards</h2>
-            <div className="mt-4 grid gap-4 sm:grid-cols-2">
-              <div className="rounded-lg bg-brown-800/60 p-4">
-                <p className="text-2xl font-bold text-mesa-accent">{rewards.effectiveCount}</p>
-                <p className="text-xs text-brown-400">Sessions completed</p>
-                <div className="mt-2">
-                  <div className="h-2 rounded-full bg-brown-700">
-                    <div
-                      className="h-2 rounded-full bg-mesa-accent transition-all"
-                      style={{ width: `${Math.min(100, ((11 - rewards.sessionsUntilFree) / 11) * 100)}%` }}
-                    />
-                  </div>
-                  <p className="mt-1 text-xs text-brown-500">
-                    {rewards.sessionsUntilFree === 0
-                      ? "Your next session is FREE!"
-                      : `${rewards.sessionsUntilFree} more until your free session`}
-                  </p>
-                </div>
-              </div>
-              <div className="rounded-lg bg-brown-800/60 p-4">
-                <p className="text-sm font-semibold text-brown-300">Your Referral Code</p>
-                <p className="mt-1 text-xl font-bold text-mesa-accent">{rewards.referralCode || "—"}</p>
-                <p className="mt-2 text-xs text-brown-500">
-                  Share with friends — when they book their first session, you both earn credit toward a free session.
+            <h2 className="text-lg font-bold">Referrals</h2>
+            <div className="mt-4 rounded-lg bg-brown-800/60 p-4">
+              <p className="text-sm font-semibold text-brown-300">Your Referral Code</p>
+              <p className="mt-1 text-xl font-bold text-mesa-accent">{rewards.referralCode || "—"}</p>
+              <p className="mt-2 text-xs text-brown-500">
+                Share your code with friends — when a new client books using your code, you earn a 50% off credit on your next private session.
+              </p>
+              {rewards.referralCredits > 0 && (
+                <p className="mt-2 text-sm font-semibold text-mesa-accent">
+                  {rewards.referralCredits} half-off credit{rewards.referralCredits !== 1 ? "s" : ""} available — will be applied automatically on your next booking.
                 </p>
-                {rewards.referralCredits > 0 && (
-                  <p className="mt-2 text-xs text-green-400">
-                    +{rewards.referralCredits} referral credit{rewards.referralCredits !== 1 ? "s" : ""} earned
-                  </p>
-                )}
-              </div>
+              )}
             </div>
           </div>
         )}

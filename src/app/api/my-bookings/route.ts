@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   getRegistrationsByEmail,
-  getConfirmedSessionCount,
   getReferralCredits,
   generateReferralCode,
   getActivePackage,
@@ -20,9 +19,8 @@ export async function POST(req: NextRequest) {
 
   try {
     const currentMonthYear = new Date().toISOString().substring(0, 7); // "2026-03"
-    const [registrations, sessionCount, referralCredits, activePackage] = await Promise.all([
+    const [registrations, referralCredits, activePackage] = await Promise.all([
       getRegistrationsByEmail(email),
-      getConfirmedSessionCount(email).catch(() => 0),
       getReferralCredits(email).catch(() => 0),
       getActivePackage(email, currentMonthYear).catch(() => null),
     ]);
@@ -33,9 +31,6 @@ export async function POST(req: NextRequest) {
       (registrations.length > 0
         ? generateReferralCode(registrations[0].parent_name)
         : null);
-
-    const effectiveCount = sessionCount + referralCredits;
-    const sessionsUntilFree = 11 - (effectiveCount % 11);
 
     return NextResponse.json({
       registrations: registrations.map((r) => ({
@@ -53,10 +48,7 @@ export async function POST(req: NextRequest) {
         manageToken: r.manage_token,
       })),
       rewards: {
-        sessionCount,
         referralCredits,
-        effectiveCount,
-        sessionsUntilFree: sessionsUntilFree === 11 ? 11 : sessionsUntilFree,
         referralCode,
       },
       activePackage: activePackage
