@@ -19,8 +19,8 @@ export const metadata: Metadata = {
   description:
     "Basketball training with former Division I player Artemios Gavalas. Group sessions, private training, and mini camps.",
   icons: {
-    icon: "/logo.png",
-    apple: "/logo.png",
+    icon: "/favicon.png",
+    apple: "/favicon.png",
   },
 };
 
