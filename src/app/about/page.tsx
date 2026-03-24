@@ -28,7 +28,7 @@ export default function AboutPage() {
                 style={{
                   backgroundImage: "url(/headshot.jpg)",
                   backgroundSize: "cover",
-                  backgroundPosition: "40% 10%",
+                  backgroundPosition: "50% 30%",
                 }}
               />
             </div>
