@@ -943,6 +943,7 @@ export default function Home() {
           </a>
           {/* Desktop nav */}
           <div className="hidden md:flex items-center gap-4 text-sm">
+            <a href="/" className="text-brown-600 hover:text-mesa-dark">Home</a>
             <div className="relative group">
               <a href="#schedule" className="flex items-center gap-1 text-brown-600 hover:text-mesa-dark">
                 Scheduling
@@ -988,6 +989,7 @@ export default function Home() {
         {/* Mobile dropdown menu */}
         {mobileMenuOpen && (
           <div className="md:hidden border-t border-gray-200 bg-white px-6 py-4 space-y-4 text-sm">
+            <a href="/" onClick={() => setMobileMenuOpen(false)} className="block text-brown-600 hover:text-mesa-dark py-1">Home</a>
             <div>
               <button onClick={() => setSchedulingOpen((o) => !o)} className="flex items-center justify-between w-full text-brown-600 hover:text-mesa-dark py-1">
                 Scheduling

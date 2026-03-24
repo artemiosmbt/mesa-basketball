@@ -23,6 +23,7 @@ export default function AboutNav() {
           <span className="hidden sm:inline">ΜΕΣΑ BASKETBALL</span>
         </Link>
         <div className="flex items-center gap-4 text-sm">
+          <Link href="/" className="hidden md:inline text-brown-600 hover:text-mesa-dark">Home</Link>
           {/* Desktop Scheduling dropdown */}
           <div className="relative group hidden md:block">
             <Link href="/schedule" className="flex items-center gap-1 text-brown-600 hover:text-mesa-dark">
@@ -64,6 +65,7 @@ export default function AboutNav() {
       </div>
       {mobileMenuOpen && (
         <div className="md:hidden border-t border-gray-200 bg-white px-6 py-4 space-y-4 text-sm">
+          <Link href="/" onClick={() => setMobileMenuOpen(false)} className="block text-brown-600 hover:text-mesa-dark py-1">Home</Link>
           <div>
             <button onClick={() => setSchedulingOpen((o) => !o)} className="flex items-center justify-between w-full text-brown-600 hover:text-mesa-dark py-1">
               Scheduling {chevron(schedulingOpen)}
