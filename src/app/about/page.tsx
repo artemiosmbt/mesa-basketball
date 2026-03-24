@@ -71,7 +71,7 @@ export default function AboutPage() {
             <p>
               Over five years and hundreds of athletes later, from 4-year-olds picking up a ball for the first time
               to adult professionals sharpening their edge, Mesa has become a place where real development happens.
-              Not shortcuts. Not gimmicks. Just consistent, intentional work that produces results on and off the court.
+              No shortcuts. No gimmicks. Just consistent, intentional work that produces results on and off the court.
             </p>
           </div>
         </section>
