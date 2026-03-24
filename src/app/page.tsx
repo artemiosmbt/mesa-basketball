@@ -1889,15 +1889,18 @@ export default function Home() {
                         </button>
                         {showReferralInfo && (
                           <div className="absolute left-6 top-0 z-10 w-64 rounded-lg border border-brown-700 bg-brown-900 p-3 text-xs text-brown-300 shadow-xl">
-                            <p className="font-semibold text-white mb-1">How referrals work</p>
-                            <p>New members already receive a half-off session when they sign up. On top of that, for every person you refer to Mesa, you earn a half-off private session. Enter your referrer&apos;s code here if someone sent you our way.</p>
-                            <button
-                              type="button"
-                              onClick={() => setShowReferralInfo(false)}
-                              className="mt-2 text-mesa-accent hover:text-yellow-300"
-                            >
-                              Ok
-                            </button>
+                            <div className="flex items-start justify-between gap-2 mb-1">
+                              <p className="font-semibold text-white">Referral Code</p>
+                              <button
+                                type="button"
+                                onClick={() => setShowReferralInfo(false)}
+                                className="text-brown-400 hover:text-white leading-none text-sm"
+                                aria-label="Close"
+                              >
+                                &times;
+                              </button>
+                            </div>
+                            <p>If a Mesa family sent you here, enter their code and they&apos;ll earn a half-off private session as a thank you. New members also get a half-off session just for joining — it&apos;s our way of saying welcome.</p>
                           </div>
                         )}
                       </div>
