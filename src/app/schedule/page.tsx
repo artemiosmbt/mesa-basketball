@@ -1821,7 +1821,7 @@ export default function Home() {
                           i
                         </button>
                         {showReferralInfo && (
-                          <div className="absolute left-6 top-0 z-10 w-64 rounded-lg border border-brown-700 bg-brown-900 p-3 text-xs text-brown-300 shadow-xl">
+                          <div className="absolute right-0 top-6 z-10 w-64 rounded-lg border border-brown-700 bg-brown-900 p-3 text-xs text-brown-300 shadow-xl">
                             <div className="flex items-start justify-between gap-2 mb-1">
                               <p className="font-semibold text-white">Referral Code</p>
                               <button
