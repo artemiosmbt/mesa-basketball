@@ -1964,7 +1964,7 @@ export default function Home() {
                         <button
                           type="button"
                           onClick={() => setShowAllRecurring(true)}
-                          className="mt-1 w-full text-center text-xs text-mesa-accent hover:text-yellow-300"
+                          className="mt-1 w-full border-t border-brown-600 pt-2 text-center text-xs text-mesa-accent hover:text-yellow-300"
                         >
                           View more weeks ↓
                         </button>
@@ -1973,7 +1973,7 @@ export default function Home() {
                         <button
                           type="button"
                           onClick={() => setShowAllRecurring(false)}
-                          className="mt-1 w-full text-center text-xs text-mesa-accent hover:text-yellow-300"
+                          className="mt-1 w-full border-t border-brown-600 pt-2 text-center text-xs text-mesa-accent hover:text-yellow-300"
                         >
                           Show less ↑
                         </button>
