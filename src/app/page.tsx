@@ -1890,13 +1890,13 @@ export default function Home() {
                         {showReferralInfo && (
                           <div className="absolute left-6 top-0 z-10 w-64 rounded-lg border border-brown-700 bg-brown-900 p-3 text-xs text-brown-300 shadow-xl">
                             <p className="font-semibold text-white mb-1">How referrals work</p>
-                            <p>If someone referred you to Mesa, enter their referral code here. Both you and the referrer get credit toward a free session after your first booking. Ask your referrer for their code if you don&apos;t have it.</p>
+                            <p>New members already receive a half-off session when they sign up. On top of that, for every person you refer to Mesa, you earn a half-off private session. Enter your referrer&apos;s code here if someone sent you our way.</p>
                             <button
                               type="button"
                               onClick={() => setShowReferralInfo(false)}
                               className="mt-2 text-mesa-accent hover:text-yellow-300"
                             >
-                              Got it
+                              Ok
                             </button>
                           </div>
                         )}
