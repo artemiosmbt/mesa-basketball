@@ -23,15 +23,14 @@ export default function AboutPage() {
               Founder &amp; Head Trainer
             </p>
             <div className="mb-5 rounded-full p-[4px] bg-white/90 shadow-lg shadow-black/40 ring-2 ring-mesa-accent/40">
-              <div className="relative h-28 w-28 overflow-hidden rounded-full">
-                <Image
-                  src="/headshot.jpg"
-                  alt="Artemios Gavalas"
-                  fill
-                  className="object-cover [object-position:40%_10%]"
-                  priority
-                />
-              </div>
+              <div
+                className="h-28 w-28 rounded-full"
+                style={{
+                  backgroundImage: "url(/headshot.jpg)",
+                  backgroundSize: "cover",
+                  backgroundPosition: "40% 10%",
+                }}
+              />
             </div>
             <h1 className="font-[family-name:var(--font-fira-cond)] text-3xl font-black tracking-wide md:text-4xl">
               ARTEMIOS GAVALAS
