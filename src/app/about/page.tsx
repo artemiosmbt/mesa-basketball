@@ -49,7 +49,7 @@ export default function AboutPage() {
           <div className="space-y-5 text-brown-200 leading-relaxed text-[17px]">
             <p>
               I built Mesa out of a genuine love for the game and a deep commitment to helping others grow through it.
-              Training has always been a passion of mine — something I poured myself into throughout my playing career
+              Training has always been a passion of mine, something I poured myself into throughout my playing career
               and beyond. Long before Mesa had a name, I was in the gym during offseasons, working with players,
               refining my craft as a trainer, and developing an approach that was intentional, creative, and results-driven.
             </p>
@@ -59,8 +59,8 @@ export default function AboutPage() {
               same courts, the same neighborhoods, and the same hunger to be great.
             </p>
             <p>
-              Over five years and hundreds of athletes later — from 4-year-olds picking up a ball for the first time
-              to adult professionals sharpening their edge — Mesa has become a place where real development happens.
+              Over five years and hundreds of athletes later, from 4-year-olds picking up a ball for the first time
+              to adult professionals sharpening their edge, Mesa has become a place where real development happens.
               Not shortcuts. Not gimmicks. Just consistent, intentional work that produces results on and off the court.
             </p>
           </div>
@@ -81,7 +81,7 @@ export default function AboutPage() {
             </p>
             <p>
               I went on to continue my career professionally in Greece, gaining firsthand experience in European
-              professional basketball — a system known for its emphasis on skill, IQ, and fundamentals. That
+              professional basketball, a system known for its emphasis on skill, IQ, and fundamentals. That
               combination of American Division I intensity and European technical discipline is the foundation
               every Mesa session is built on.
             </p>
@@ -132,13 +132,13 @@ export default function AboutPage() {
           </h2>
           <div className="space-y-5 text-brown-200 leading-relaxed text-[17px]">
             <p>
-              Great trainers don&apos;t just run drills — they teach the game. Every session I run is thoughtfully
+              Great trainers don&apos;t just run drills. They teach the game. Every session I run is thoughtfully
               designed with creativity and purpose. The goal is not to go through the motions. It is to understand{" "}
               <em>why</em> each skill matters and how it translates to live game situations. That kind of intentional
               training is what separates players who look good in drills from players who perform when it counts.
             </p>
             <p>
-              I bring a point guard&apos;s mind to every session — reading situations, making adjustments, and
+              I bring a point guard&apos;s mind to every session, reading situations, making adjustments, and
               finding the right way to connect with each athlete individually. Whether I&apos;m working with a
               beginner or a seasoned player, the energy in the gym stays high, the expectations stay real, and the
               creativity keeps players engaged and progressing.
@@ -156,7 +156,7 @@ export default function AboutPage() {
           <div className="grid gap-6 sm:grid-cols-3 text-center">
             {[
               { stat: "5+", label: "Years Training Athletes" },
-              { stat: "4 to Pro", label: "Ages Trained" },
+              { stat: "4 yrs to Pro", label: "Ages Trained" },
               { stat: "D1 + Pro", label: "Playing Pedigree" },
             ].map((item) => (
               <div

@@ -89,7 +89,7 @@ export default function LandingPage() {
               {
                 title: "Private Training",
                 tag: "1-on-1 & Small Group",
-                desc: "Sessions completely tailored to your individual goals. Maximum attention, maximum growth — on your schedule.",
+                desc: "Sessions completely tailored to your individual goals. Maximum attention, maximum growth, on your schedule.",
                 anchor: "/schedule#private",
               },
             ].map((item) => (
@@ -118,7 +118,7 @@ export default function LandingPage() {
           <div className="grid grid-cols-3 gap-6 text-center">
             {[
               { stat: "5+", label: "Years Training Athletes" },
-              { stat: "4 to Pro", label: "Ages Trained" },
+              { stat: "4 yrs to Pro", label: "Ages Trained" },
               { stat: "D1 + Pro", label: "Playing Pedigree" },
             ].map((item) => (
               <div key={item.label}>
