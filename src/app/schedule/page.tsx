@@ -1966,7 +1966,7 @@ export default function Home() {
                           onClick={() => setShowAllRecurring(true)}
                           className="mt-1 w-full text-center text-xs text-mesa-accent hover:text-yellow-300"
                         >
-                          View {recurringWeeks.length - 3} more weeks ↓
+                          View more weeks ↓
                         </button>
                       )}
                       {showAllRecurring && recurringWeeks.length > 3 && (
