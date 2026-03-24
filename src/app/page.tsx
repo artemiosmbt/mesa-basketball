@@ -172,7 +172,7 @@ export default function LandingPage() {
             READY TO GET TO WORK?
           </h2>
           <p className="text-white/80 text-lg mb-8 max-w-xl mx-auto">
-            Whether you&apos;re just starting out or looking to take your game to the next level, there&apos;s a spot for you at Mesa.
+            From first-time players to seasoned athletes, Mesa has a program built for every level. Browse available sessions and lock in your booking today.
           </p>
           <Link
             href="/schedule"

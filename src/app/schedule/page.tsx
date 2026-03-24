@@ -1804,7 +1804,7 @@ export default function Home() {
                           <option value="10">10th Grade</option>
                           <option value="11">11th Grade</option>
                           <option value="12">12th Grade</option>
-                          <option value="College">College</option>
+                          <option value="College +">College +</option>
                         </select>
                       </div>
                     </div>
@@ -2083,7 +2083,7 @@ export default function Home() {
                           <option value="10">10th Grade</option>
                           <option value="11">11th Grade</option>
                           <option value="12">12th Grade</option>
-                          <option value="College">College</option>
+                          <option value="College +">College +</option>
                         </select>
                       </div>
                     </div>
