@@ -5,7 +5,7 @@ import { sendPackageConfirmation } from "@/lib/email";
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { parentName, email, phone, packageType, monthYear } = body;
+    const { parentName, email, phone, packageType, monthYear, kids, referralCode } = body;
 
     if (!parentName || !email || !phone || !packageType || !monthYear) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
 
     const totalPrice = packageType === 4 ? 475 : 900;
 
-    await sendPackageConfirmation({ parentName, email, phone, packageType, monthYear, totalPrice });
+    await sendPackageConfirmation({ parentName, email, phone, packageType, monthYear, totalPrice, kids, referralCode });
 
     return NextResponse.json({ success: true, id });
   } catch (error) {

@@ -205,6 +205,8 @@ export async function sendPackageConfirmation(data: {
   packageType: number;
   monthYear: string;
   totalPrice: number;
+  kids?: string;
+  referralCode?: string;
 }) {
   const resend = getResend();
   const monthLabel = formatMonthYear(data.monthYear);
@@ -223,6 +225,8 @@ export async function sendPackageConfirmation(data: {
       <p><strong>Package:</strong> ${data.packageType} sessions / month</p>
       <p><strong>Month:</strong> ${monthLabel}</p>
       <p><strong>Total:</strong> $${data.totalPrice}</p>
+      ${data.kids ? `<p><strong>Player(s):</strong> ${data.kids}</p>` : ""}
+      ${data.referralCode ? `<p><strong>Referral Code:</strong> ${data.referralCode}</p>` : ""}
     `,
   });
 

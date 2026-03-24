@@ -588,6 +588,7 @@ export default function Home() {
             totalParticipants,
             weeklySessions: modal.selectedGroupSessions,
             weeklyTotalPrice: modal.weeklyTotalPrice,
+            submittedReferralCode: referralCode.trim() || undefined,
           }),
         });
         const result = await res.json();
@@ -709,6 +710,7 @@ export default function Home() {
     e.preventDefault();
     setPkgSubmitting(true);
     setPkgResult(null);
+    const kidsStr = kids.map((k) => `${k.name} (DOB: ${k.dob}, Grade: ${k.grade})`).join(", ");
     try {
       const res = await fetch("/api/packages", {
         method: "POST",
@@ -719,6 +721,8 @@ export default function Home() {
           phone: pkgPhone,
           packageType: pkgModal.packageType,
           monthYear: pkgMonth,
+          kids: kidsStr,
+          referralCode: referralCode.trim() || undefined,
         }),
       });
       const data = await res.json();
@@ -1434,7 +1438,7 @@ export default function Home() {
                   <p className="text-xs text-brown-400">$118.75 per session</p>
                 </div>
                 <button
-                  onClick={() => { setPkgModal({ open: true, packageType: 4 }); setPkgName(""); setPkgEmail(""); setPkgPhone(""); setPkgMonth(pkgMonthOptions[0]?.value || ""); setPkgResult(null); }}
+                  onClick={() => { setPkgModal({ open: true, packageType: 4 }); setPkgName(""); setPkgEmail(""); setPkgPhone(""); setPkgMonth(pkgMonthOptions[0]?.value || ""); setPkgResult(null); setKids([{ name: "", dob: "", grade: "" }]); setReferralCode(""); }}
                   className="mt-4 w-full rounded-lg bg-mesa-accent px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-yellow-600"
                 >
                   Enroll — 4 Sessions
@@ -1451,7 +1455,7 @@ export default function Home() {
                   <p className="text-xs text-brown-400">$112.50 per session</p>
                 </div>
                 <button
-                  onClick={() => { setPkgModal({ open: true, packageType: 8 }); setPkgName(""); setPkgEmail(""); setPkgPhone(""); setPkgMonth(pkgMonthOptions[0]?.value || ""); setPkgResult(null); }}
+                  onClick={() => { setPkgModal({ open: true, packageType: 8 }); setPkgName(""); setPkgEmail(""); setPkgPhone(""); setPkgMonth(pkgMonthOptions[0]?.value || ""); setPkgResult(null); setKids([{ name: "", dob: "", grade: "" }]); setReferralCode(""); }}
                   className="mt-4 w-full rounded-lg bg-mesa-accent px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-yellow-600"
                 >
                   Enroll — 8 Sessions
@@ -1868,7 +1872,7 @@ export default function Home() {
                 </div>
 
                 {/* Referral Code */}
-                {(modal.type === "private" || modal.type === "group-private") && (
+                {(modal.type === "private" || modal.type === "group-private" || modal.type === "weekly") && (
                   <div>
                     <label className="mb-1 block text-sm font-medium text-brown-300">Referral Code <span className="text-brown-500 font-normal">(optional)</span></label>
                     <input
@@ -2056,6 +2060,76 @@ export default function Home() {
                       <option key={opt.value} value={opt.value}>{opt.label}</option>
                     ))}
                   </select>
+                </div>
+                <div>
+                  <div className="mb-2 flex items-center justify-between">
+                    <label className="text-sm font-medium text-brown-300">Player(s)</label>
+                    <button type="button" onClick={addKid} className="text-sm text-mesa-accent hover:text-yellow-300">+ Add another player</button>
+                  </div>
+                  {kids.map((kid, i) => (
+                    <div key={i} className="mb-3 flex flex-col gap-2">
+                      <div className="flex gap-2 items-center">
+                        <input
+                          type="text"
+                          placeholder="Player's Name"
+                          required
+                          value={kid.name}
+                          onChange={(e) => updateKid(i, "name", e.target.value)}
+                          className="flex-1 rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
+                        />
+                        {kids.length > 1 && (
+                          <button type="button" onClick={() => removeKid(i)} className="text-brown-500 hover:text-red-400 text-xl leading-none">&times;</button>
+                        )}
+                      </div>
+                      <div className="overflow-hidden">
+                        <label className="mb-1 block text-xs text-brown-500">Date of Birth</label>
+                        <div className="overflow-hidden rounded-lg border border-brown-700 bg-brown-800">
+                          <input
+                            type="date"
+                            required
+                            value={kid.dob}
+                            onChange={(e) => updateKid(i, "dob", e.target.value)}
+                            className="w-full bg-transparent px-3 py-2 text-white text-sm focus:outline-none"
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs text-brown-500">Grade</label>
+                        <select
+                          required
+                          value={kid.grade}
+                          onChange={(e) => updateKid(i, "grade", e.target.value)}
+                          className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white text-sm focus:border-mesa-accent focus:outline-none"
+                        >
+                          <option value="">Select grade...</option>
+                          <option value="K">Kindergarten</option>
+                          <option value="1">1st Grade</option>
+                          <option value="2">2nd Grade</option>
+                          <option value="3">3rd Grade</option>
+                          <option value="4">4th Grade</option>
+                          <option value="5">5th Grade</option>
+                          <option value="6">6th Grade</option>
+                          <option value="7">7th Grade</option>
+                          <option value="8">8th Grade</option>
+                          <option value="9">9th Grade</option>
+                          <option value="10">10th Grade</option>
+                          <option value="11">11th Grade</option>
+                          <option value="12">12th Grade</option>
+                          <option value="College">College</option>
+                        </select>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-brown-300">Referral Code <span className="text-brown-500 font-normal">(optional)</span></label>
+                  <input
+                    type="text"
+                    value={referralCode}
+                    onChange={(e) => setReferralCode(e.target.value.toUpperCase())}
+                    placeholder="e.g. SMITH-MESA"
+                    className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
+                  />
                 </div>
                 {pkgResult && !pkgResult.success && (
                   <p className="text-sm text-red-400">{pkgResult.message}</p>
