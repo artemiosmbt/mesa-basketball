@@ -337,6 +337,7 @@ export default function Home() {
   });
   const [calendarSelectedDate, setCalendarSelectedDate] = useState<string | null>(null);
   const [showAllPrivate, setShowAllPrivate] = useState(false);
+  const [showAllRecurring, setShowAllRecurring] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
   const [showAllGroups, setShowAllGroups] = useState<Set<string>>(new Set());
   const [upsellExtra, setUpsellExtra] = useState(0); // extra minutes accepted
@@ -527,6 +528,7 @@ export default function Home() {
     setEmail("");
     setPhone("");
     setSmsConsent(true);
+    setShowAllRecurring(false);
     setKids([{ name: "", dob: "", grade: "" }]);
     setIsGroupRate(false);
     setUpsellExtra(0);
@@ -540,6 +542,7 @@ export default function Home() {
     setEmail("");
     setPhone("");
     setSmsConsent(true);
+    setShowAllRecurring(false);
     setKids([{ name: "", dob: "", grade: "" }]);
     setIsGroupRate(false);
     setUpsellExtra(0);
@@ -954,6 +957,7 @@ export default function Home() {
     setEmail("");
     setPhone("");
     setSmsConsent(true);
+    setShowAllRecurring(false);
     setKids([{ name: "", dob: "", grade: "" }]);
     setIsGroupRate(false);
     setUpsellExtra(0);
@@ -1519,7 +1523,7 @@ export default function Home() {
           )}
 
           <div className="mt-6 space-y-4">
-            {(showAllPrivate ? filteredWindows : filteredWindows.slice(0, 3)).map((window, wi) => {
+            {(showAllPrivate ? filteredWindows : filteredWindows.slice(0, 10)).map((window, wi) => {
               const totalAvailable = window.endMins - window.startMins;
               const sel = windowSelections[wi] || {
                 start: window.startMins,
@@ -1604,15 +1608,15 @@ export default function Home() {
                 </div>
               );
             })}
-            {!showAllPrivate && filteredWindows.length > 3 && (
+            {!showAllPrivate && filteredWindows.length > 10 && (
               <button
                 onClick={() => setShowAllPrivate(true)}
                 className="mt-2 w-full rounded-lg border border-brown-700 py-2 text-sm text-brown-400 hover:border-brown-500 hover:text-white transition"
               >
-                View {filteredWindows.length - 3} more days ↓
+                View {filteredWindows.length - 10} more days ↓
               </button>
             )}
-            {showAllPrivate && filteredWindows.length > 3 && (
+            {showAllPrivate && filteredWindows.length > 10 && (
               <button
                 onClick={() => setShowAllPrivate(false)}
                 className="mt-2 w-full rounded-lg border border-brown-700 py-2 text-sm text-brown-400 hover:border-brown-500 hover:text-white transition"
@@ -1933,7 +1937,7 @@ export default function Home() {
                       Repeat weekly? (same time &amp; location)
                     </label>
                     <div className="space-y-2 rounded-lg border border-brown-700 bg-brown-800/50 p-3">
-                      {recurringWeeks.map((week, wi) => {
+                      {(showAllRecurring ? recurringWeeks : recurringWeeks.slice(0, 3)).map((week, wi) => {
                         const d = new Date(week.date);
                         const dayName = d.toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" });
                         return (
@@ -1956,6 +1960,24 @@ export default function Home() {
                           </label>
                         );
                       })}
+                      {!showAllRecurring && recurringWeeks.length > 3 && (
+                        <button
+                          type="button"
+                          onClick={() => setShowAllRecurring(true)}
+                          className="mt-1 w-full text-center text-xs text-mesa-accent hover:text-yellow-300"
+                        >
+                          View {recurringWeeks.length - 3} more weeks ↓
+                        </button>
+                      )}
+                      {showAllRecurring && recurringWeeks.length > 3 && (
+                        <button
+                          type="button"
+                          onClick={() => setShowAllRecurring(false)}
+                          className="mt-1 w-full text-center text-xs text-mesa-accent hover:text-yellow-300"
+                        >
+                          Show less ↑
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}
