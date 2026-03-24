@@ -929,7 +929,7 @@ export default function Home() {
     <div className="min-h-screen bg-mesa-dark text-white">
       {/* Sticky Nav */}
       <nav className="sticky top-0 z-50 border-b border-gray-200 bg-white/95 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-2 md:px-6 py-3">
           <a href="#" className="flex items-center gap-2 text-lg font-bold text-mesa-dark">
             <div className="h-10 w-[120px] flex items-center overflow-visible">
               <img src="/logo.png" alt="Mesa Basketball Logo" className="h-[120px] w-[120px] object-contain" />
