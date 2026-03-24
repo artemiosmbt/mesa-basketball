@@ -15,12 +15,19 @@ const firaCond = Fira_Sans_Condensed({
 });
 
 export const metadata: Metadata = {
-  title: "Mesa Basketball Training | Artemios Gavalas",
+  title: "Mesa Basketball Training",
   description:
-    "Basketball training with former Division I player Artemios Gavalas. Group sessions, private training, and mini camps.",
+    "Elite basketball training on Long Island. Group sessions, private training, and mini camps.",
   icons: {
     icon: "/favicon.png",
     apple: "/favicon.png",
+  },
+  openGraph: {
+    title: "Mesa Basketball Training",
+    description: "Elite basketball training on Long Island. Group sessions, private training, and mini camps.",
+    url: "https://mesabasketballtraining.com",
+    siteName: "Mesa Basketball Training",
+    images: [{ url: "/logo.png" }],
   },
 };
 

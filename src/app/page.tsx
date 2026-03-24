@@ -3,9 +3,9 @@ import Link from "next/link";
 import LandingNav from "./LandingNav";
 
 export const metadata: Metadata = {
-  title: "Mesa Basketball Training | Artemios Gavalas",
+  title: "Mesa Basketball Training",
   description:
-    "Elite basketball training with former Division I player Artemios Gavalas. Group sessions, mini camps, and private training on Long Island.",
+    "Elite basketball training on Long Island. Group sessions, mini camps, and private training.",
 };
 
 export default function LandingPage() {

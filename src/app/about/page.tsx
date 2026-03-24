@@ -6,7 +6,7 @@ import AboutNav from "./AboutNav";
 export const metadata: Metadata = {
   title: "About | Mesa Basketball Training",
   description:
-    "Learn about Artemios Gavalas, former Division I point guard, professional player, and founder of Mesa Basketball Training.",
+    "Learn about Mesa Basketball Training — elite coaching on Long Island built on a foundation of Division I and professional experience.",
 };
 
 export default function AboutPage() {
