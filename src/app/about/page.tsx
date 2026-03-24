@@ -28,7 +28,7 @@ export default function AboutPage() {
                   src="/headshot.jpg"
                   alt="Artemios Gavalas"
                   fill
-                  className="object-cover" style={{ objectPosition: "35% top" }}
+                  className="object-cover" style={{ objectPosition: "center 10%" }}
                   priority
                 />
               </div>
