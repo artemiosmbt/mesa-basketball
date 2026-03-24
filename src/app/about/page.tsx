@@ -19,9 +19,20 @@ export default function AboutPage() {
       <section className="relative overflow-hidden bg-gradient-to-br from-mesa-dark via-brown-900 to-brown-800 py-20 md:py-28">
         <div className="mx-auto max-w-6xl px-6">
           <div className="flex flex-col items-center text-center">
-            <p className="mb-3 text-sm font-semibold uppercase tracking-widest text-mesa-accent">
+            <p className="mb-4 text-sm font-semibold uppercase tracking-widest text-mesa-accent">
               Founder &amp; Head Trainer
             </p>
+            <div className="mb-5 rounded-full p-[4px] bg-white/90 shadow-lg shadow-black/40 ring-2 ring-mesa-accent/40">
+              <div className="relative h-28 w-28 overflow-hidden rounded-full">
+                <Image
+                  src="/headshot.jpg"
+                  alt="Artemios Gavalas"
+                  fill
+                  className="object-cover object-top"
+                  priority
+                />
+              </div>
+            </div>
             <h1 className="font-[family-name:var(--font-fira-cond)] text-3xl font-black tracking-wide md:text-4xl">
               ARTEMIOS GAVALAS
             </h1>
