@@ -1811,33 +1811,31 @@ export default function Home() {
                   <div>
                     <div className="mb-1 flex items-center gap-2">
                       <label className="text-sm font-medium text-brown-300">Referral Code <span className="text-brown-500 font-normal">(optional)</span></label>
-                      <div className="relative">
-                        <button
-                          type="button"
-                          onClick={() => setShowReferralInfo((v) => !v)}
-                          className="flex h-4 w-4 items-center justify-center rounded-full border border-brown-500 text-brown-400 hover:border-mesa-accent hover:text-mesa-accent text-[10px] font-bold leading-none"
-                          aria-label="Referral code info"
-                        >
-                          i
-                        </button>
-                        {showReferralInfo && (
-                          <div className="absolute right-0 top-6 z-10 w-64 rounded-lg border border-brown-700 bg-brown-900 p-3 text-xs text-brown-300 shadow-xl">
-                            <div className="flex items-start justify-between gap-2 mb-1">
-                              <p className="font-semibold text-white">Referral Code</p>
-                              <button
-                                type="button"
-                                onClick={() => setShowReferralInfo(false)}
-                                className="text-brown-400 hover:text-white leading-none text-sm"
-                                aria-label="Close"
-                              >
-                                &times;
-                              </button>
-                            </div>
-                            <p>If a Mesa family sent you here, enter their code and they&apos;ll earn a half-off private session as a thank you. New members also get a half-off session just for joining — it&apos;s our way of saying welcome.</p>
-                          </div>
-                        )}
-                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowReferralInfo((v) => !v)}
+                        className="flex h-4 w-4 items-center justify-center rounded-full border border-brown-500 text-brown-400 hover:border-mesa-accent hover:text-mesa-accent text-[10px] font-bold leading-none"
+                        aria-label="Referral code info"
+                      >
+                        i
+                      </button>
                     </div>
+                    {showReferralInfo && (
+                      <div className="mb-2 rounded-lg border border-brown-700 bg-brown-900 p-3 text-xs text-brown-300">
+                        <div className="flex items-start justify-between gap-2 mb-1">
+                          <p className="font-semibold text-white">Referral Code</p>
+                          <button
+                            type="button"
+                            onClick={() => setShowReferralInfo(false)}
+                            className="text-brown-400 hover:text-white leading-none text-sm"
+                            aria-label="Close"
+                          >
+                            &times;
+                          </button>
+                        </div>
+                        <p>If a Mesa family sent you here, enter their code and they&apos;ll earn a half-off private session as a thank you. New members also get a half-off session just for joining — it&apos;s our way of saying welcome.</p>
+                      </div>
+                    )}
                     <input
                       type="text"
                       value={referralCode}
