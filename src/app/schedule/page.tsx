@@ -325,6 +325,7 @@ export default function Home() {
   const [parentName, setParentName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
+  const [smsConsent, setSmsConsent] = useState(false);
   const [kids, setKids] = useState([{ name: "", dob: "", grade: "" }]);
   const [isGroupRate, setIsGroupRate] = useState(false);
   const [hideUpsell, setHideUpsell] = useState(false);
@@ -525,6 +526,7 @@ export default function Home() {
     setParentName("");
     setEmail("");
     setPhone("");
+    setSmsConsent(false);
     setKids([{ name: "", dob: "", grade: "" }]);
     setIsGroupRate(false);
     setUpsellExtra(0);
@@ -537,6 +539,7 @@ export default function Home() {
     setParentName("");
     setEmail("");
     setPhone("");
+    setSmsConsent(false);
     setKids([{ name: "", dob: "", grade: "" }]);
     setIsGroupRate(false);
     setUpsellExtra(0);
@@ -583,6 +586,7 @@ export default function Home() {
             parentName,
             email,
             phone,
+            smsConsent,
             kids: kidsStr,
             type: "weekly",
             sessionDetails: modal.sessionDetails,
@@ -647,6 +651,7 @@ export default function Home() {
             parentName,
             email,
             phone,
+            smsConsent,
             kids: kidsStr,
             type: bookingType,
             sessionDetails: `Private Session — ${booking.date} ${booking.startTime}-${booking.endTime} at ${booking.location}`,
@@ -674,6 +679,7 @@ export default function Home() {
             parentName,
             email,
             phone,
+            smsConsent,
             kids: kidsStr,
             type: bookingType,
             sessionDetails: `Recurring Private Sessions:<br/>${allSessionsList}`,
@@ -947,6 +953,7 @@ export default function Home() {
     setParentName("");
     setEmail("");
     setPhone("");
+    setSmsConsent(false);
     setKids([{ name: "", dob: "", grade: "" }]);
     setIsGroupRate(false);
     setUpsellExtra(0);
@@ -1989,6 +1996,18 @@ export default function Home() {
                 {submitResult && !submitResult.success && (
                   <p className="text-sm text-red-400">{submitResult.message}</p>
                 )}
+
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={smsConsent}
+                    onChange={(e) => setSmsConsent(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-brown-600 accent-mesa-accent"
+                  />
+                  <span className="text-xs text-brown-400 leading-relaxed">
+                    I agree to receive text message reminders from Mesa Basketball Training about upcoming sessions. Reply STOP at any time to opt out.
+                  </span>
+                </label>
 
                 <button
                   type="submit"

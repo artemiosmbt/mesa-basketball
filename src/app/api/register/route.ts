@@ -32,6 +32,7 @@ export async function POST(req: NextRequest) {
       skipEmail,
       emailOnly,
       submittedReferralCode,
+      smsConsent,
       // Weekly multi-session fields
       weeklySessions,
       weeklyTotalPrice,
@@ -82,6 +83,7 @@ export async function POST(req: NextRequest) {
           bookedLocation: session.location,
           referralCode,
           isFree: false,
+          smsConsent: !!smsConsent,
         });
       }
 
@@ -148,6 +150,7 @@ export async function POST(req: NextRequest) {
         bookedLocation,
         referralCode,
         isFree,
+        smsConsent: !!smsConsent,
       });
       manageToken = result.manageToken;
 

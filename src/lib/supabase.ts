@@ -239,6 +239,7 @@ export async function addRegistrationWithRewards(data: {
   bookedLocation?: string;
   referralCode: string;
   isFree: boolean;
+  smsConsent?: boolean;
 }): Promise<{ manageToken: string }> {
   const supabase = getSupabase();
   const { data: row, error } = await supabase
@@ -257,6 +258,7 @@ export async function addRegistrationWithRewards(data: {
       booked_location: data.bookedLocation || null,
       referral_code: data.referralCode,
       is_free: data.isFree,
+      sms_consent: data.smsConsent ?? false,
     })
     .select("manage_token")
     .single();
