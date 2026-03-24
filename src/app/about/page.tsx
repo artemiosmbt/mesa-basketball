@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import Image from "next/image";
+import AboutNav from "./AboutNav";
 
 export const metadata: Metadata = {
   title: "About | Mesa Basketball Training",
@@ -12,28 +13,7 @@ export default function AboutPage() {
   return (
     <div className="min-h-screen bg-mesa-dark text-white">
       {/* Nav */}
-      <nav className="sticky top-0 z-50 border-b border-brown-800 bg-mesa-dark/95 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3">
-          <Link href="/" className="flex items-center gap-2 text-lg font-bold text-white">
-            <img src="/logo.jpeg" alt="Mesa Basketball Logo" className="h-10 w-10 rounded-full object-cover" />
-            <span className="hidden sm:inline">ΜΕΣΑ BASKETBALL</span>
-          </Link>
-          <div className="flex items-center gap-4 text-sm">
-            <Link href="/#schedule" className="hidden md:inline text-brown-300 hover:text-white">Schedule</Link>
-            <Link href="/#camps" className="hidden md:inline text-brown-300 hover:text-white">Camps</Link>
-            <Link href="/#private" className="hidden md:inline text-brown-300 hover:text-white">Private Sessions</Link>
-            <Link href="/about" className="hidden md:inline text-mesa-accent font-medium">About</Link>
-            <a href="https://www.instagram.com/mesabasketballtraining" target="_blank" rel="noopener noreferrer" aria-label="Instagram" className="hidden md:inline text-brown-300 hover:text-white">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <rect x="2" y="2" width="20" height="20" rx="5" ry="5" />
-                <circle cx="12" cy="12" r="4" />
-                <circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none" />
-              </svg>
-            </a>
-            <Link href="/my-bookings" className="rounded bg-mesa-accent/20 px-3 py-1 text-mesa-accent hover:bg-mesa-accent/30">My Bookings</Link>
-          </div>
-        </div>
-      </nav>
+      <AboutNav />
 
       {/* Hero */}
       <section className="relative overflow-hidden bg-gradient-to-br from-mesa-dark via-brown-900 to-brown-800 py-20 md:py-28">
@@ -233,7 +213,7 @@ export default function AboutPage() {
           <blockquote className="text-brown-200 text-xl leading-relaxed italic">
             &ldquo;I started Mesa because I wanted to give players access to the kind of training and mentorship
             that shaped me. If I can take everything I&apos;ve learned from some of the best programs and coaches
-            in the world and pass that on to kids in my own community, that is everything. That is the whole point.&rdquo;
+            in the world and pass that on to kids in my own community, that is everything. That&apos;s the whole point.&rdquo;
           </blockquote>
           <p className="mt-4 text-mesa-accent font-semibold text-sm uppercase tracking-widest">
             Artemios Gavalas, Founder
