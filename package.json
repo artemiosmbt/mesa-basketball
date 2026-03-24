@@ -13,7 +13,8 @@
     "next": "16.1.7",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "resend": "^6.9.4"
+    "resend": "^6.9.4",
+    "twilio": "^5.13.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
