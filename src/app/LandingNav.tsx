@@ -13,6 +13,7 @@ export default function LandingNav() {
           <div className="h-10 w-[120px] flex items-center overflow-visible">
             <img src="/logo.png" alt="Mesa Basketball Logo" className="h-[120px] w-[120px] object-contain" />
           </div>
+          <span className="hidden sm:inline">ΜΕΣΑ BASKETBALL</span>
         </Link>
         <div className="flex items-center gap-4 text-sm">
           <Link href="/schedule#schedule" className="hidden md:inline text-brown-600 hover:text-mesa-dark">Schedule</Link>
