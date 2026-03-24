@@ -24,6 +24,7 @@ export default function AboutNav() {
         </Link>
         <div className="flex items-center gap-4 text-sm">
           <Link href="/" className="hidden md:inline text-brown-600 hover:text-mesa-dark">Home</Link>
+          <span className="hidden md:inline text-brown-300">|</span>
           {/* Desktop Scheduling dropdown */}
           <div className="relative group hidden md:block">
             <Link href="/schedule" className="flex items-center gap-1 text-brown-600 hover:text-mesa-dark">
@@ -37,7 +38,9 @@ export default function AboutNav() {
               </div>
             </div>
           </div>
+          <span className="hidden md:inline text-brown-300">|</span>
           <Link href="/about" className="hidden md:inline text-brown-600 hover:text-mesa-dark">About</Link>
+          <span className="hidden md:inline text-brown-300">|</span>
           <Link href="/my-bookings" className="hidden md:inline rounded bg-mesa-accent/20 px-3 py-1 text-mesa-accent hover:bg-mesa-accent/30">My Bookings</Link>
           <a href="https://www.instagram.com/mesabasketballtraining" target="_blank" rel="noopener noreferrer" aria-label="Instagram" className="hidden md:inline text-brown-600 hover:text-mesa-dark">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>

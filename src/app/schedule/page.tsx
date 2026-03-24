@@ -944,6 +944,7 @@ export default function Home() {
           {/* Desktop nav */}
           <div className="hidden md:flex items-center gap-4 text-sm">
             <a href="/" className="text-brown-600 hover:text-mesa-dark">Home</a>
+            <span className="text-brown-300">|</span>
             <div className="relative group">
               <a href="#schedule" className="flex items-center gap-1 text-brown-600 hover:text-mesa-dark">
                 Scheduling
@@ -959,7 +960,9 @@ export default function Home() {
                 </div>
               </div>
             </div>
+            <span className="text-brown-300">|</span>
             <a href="/about" className="text-brown-600 hover:text-mesa-dark">About</a>
+            <span className="text-brown-300">|</span>
             <a href="/my-bookings" className="rounded bg-mesa-accent/20 px-3 py-1 text-mesa-accent hover:bg-mesa-accent/30">My Bookings</a>
             <a href="https://www.instagram.com/mesabasketballtraining" target="_blank" rel="noopener noreferrer" aria-label="Instagram" className="text-brown-600 hover:text-mesa-dark">
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
