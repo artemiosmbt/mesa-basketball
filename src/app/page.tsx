@@ -188,7 +188,7 @@ export default function LandingPage() {
       <section className="bg-mesa-accent py-16 md:py-20">
         <div className="mx-auto max-w-4xl px-6 text-center">
           <h2 className="font-[family-name:var(--font-fira-cond)] text-4xl md:text-5xl font-black tracking-wide text-white mb-4">
-            READY TO GET TO WORK?
+            SERIOUS ABOUT GETTING BETTER?
           </h2>
           <p className="text-white/80 text-lg mb-8 max-w-xl mx-auto">
             From first-time players to seasoned athletes, Mesa has a program built for every level. Browse available sessions and lock in your booking today.
@@ -197,7 +197,7 @@ export default function LandingPage() {
             href="/schedule"
             className="inline-block rounded-lg bg-white px-10 py-4 font-bold text-mesa-accent text-lg hover:bg-brown-100 transition"
           >
-            View Schedule &amp; Book Now
+            View Programs &mdash; Book Now
           </Link>
         </div>
       </section>
