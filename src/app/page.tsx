@@ -114,7 +114,7 @@ export default function LandingPage() {
       </section>
 
       {/* What We Offer */}
-      <section className="bg-gradient-to-b from-brown-950 to-mesa-dark py-16 md:py-24">
+      <section className="bg-gradient-to-b from-brown-950 to-mesa-dark border-t border-brown-800 py-16 md:py-24">
         <div className="mx-auto max-w-6xl px-6">
           <div className="text-center mb-12">
             <p className="text-sm font-semibold uppercase tracking-widest text-mesa-accent mb-2">Training Programs for Every Level</p>
