@@ -6,10 +6,10 @@ export const metadata: Metadata = {
   title: "Mesa Basketball Training | Long Island",
   description:
     "Elite basketball training on Long Island with former D1 and professional player Artemios Gavalas. Group sessions, mini camps, and private training for all ages.",
-  keywords: ["basketball training", "Long Island basketball", "basketball camps Long Island", "private basketball training", "youth basketball Long Island", "Mesa Basketball"],
+  keywords: ["basketball training Long Island", "youth basketball training Long Island", "elite basketball trainer Long Island", "private basketball training near me", "basketball camps Long Island", "AAU basketball training", "basketball training Nassau County", "basketball training Suffolk County", "basketball trainer Long Island", "Mesa Basketball", "Artemios Gavalas", "D1 basketball trainer", "professional basketball trainer Long Island"],
   openGraph: {
     title: "Mesa Basketball Training | Long Island",
-    description: "Elite basketball training on Long Island with former D1 and professional player Artemios Gavalas.",
+    description: "Elite basketball training on Long Island with former D1 and professional player Artemios Gavalas. Serving Nassau County, Suffolk County, and The Hamptons.",
     url: "https://www.mesabasketballtraining.com",
     siteName: "Mesa Basketball Training",
     images: [{ url: "https://www.mesabasketballtraining.com/og-image.jpg" }],
@@ -162,24 +162,75 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Stats */}
-      <section className="bg-brown-950 py-16 md:py-20 border-t border-brown-800">
-        <div className="mx-auto max-w-4xl px-6">
-          <div className="grid grid-cols-3 gap-6 text-center">
+      {/* Credentials & Detail */}
+      <section className="bg-brown-950 py-16 md:py-24 border-t border-brown-800">
+        <div className="mx-auto max-w-6xl px-6">
+
+          {/* Section heading */}
+          <div className="text-center mb-12">
+            <p className="text-sm font-semibold uppercase tracking-widest text-mesa-accent mb-2">Proven Experience. Trusted Development.</p>
+            <h2 className="font-[family-name:var(--font-fira-cond)] text-4xl font-black tracking-wide">WHY MESA</h2>
+          </div>
+
+          {/* Stats bar */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-center mb-14">
             {[
               { stat: "5+", label: "Years Training Athletes" },
-              { stat: "4 yrs to Pro", label: "Ages Trained" },
+              { stat: "5–Pro", label: "Ages Trained" },
               { stat: "D1 + Pro", label: "Playing Pedigree" },
+              { stat: "LI-Wide", label: "Athletes Served" },
             ].map((item) => (
               <div key={item.label}>
-                <p className="font-[family-name:var(--font-fira-cond)] text-4xl md:text-5xl font-black text-mesa-accent">
-                  {item.stat}
-                </p>
-                <p className="mt-2 text-xs md:text-sm text-brown-400 font-medium uppercase tracking-wide">
-                  {item.label}
-                </p>
+                <p className="font-[family-name:var(--font-fira-cond)] text-4xl md:text-5xl font-black text-mesa-accent">{item.stat}</p>
+                <p className="mt-2 text-xs text-brown-400 font-medium uppercase tracking-wide">{item.label}</p>
               </div>
             ))}
+          </div>
+
+          {/* Three columns */}
+          <div className="grid gap-8 md:grid-cols-3">
+
+            {/* Who We Train */}
+            <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-6 py-8">
+              <p className="font-[family-name:var(--font-fira-cond)] text-xl font-black tracking-wide text-mesa-accent mb-4">Who We Train</p>
+              <ul className="space-y-3 text-sm text-brown-300">
+                <li><span className="text-white font-semibold">Youth (Ages 5–10)</span><br /><span className="text-brown-400">Fundamentals &amp; love of the game</span></li>
+                <li><span className="text-white font-semibold">Middle School</span><br /><span className="text-brown-400">Skill foundation &amp; confidence</span></li>
+                <li><span className="text-white font-semibold">High School</span><br /><span className="text-brown-400">Advanced development &amp; game performance</span></li>
+                <li><span className="text-white font-semibold">College Athletes</span><br /><span className="text-brown-400">Position-specific training</span></li>
+                <li><span className="text-white font-semibold">Professional Players</span><br /><span className="text-brown-400">Off-season development</span></li>
+              </ul>
+            </div>
+
+            {/* What Players Gain */}
+            <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-6 py-8">
+              <p className="font-[family-name:var(--font-fira-cond)] text-xl font-black tracking-wide text-mesa-accent mb-4">What Players Gain</p>
+              <ul className="space-y-2 text-sm text-brown-300">
+                {[
+                  "Elite ball handling & scoring ability",
+                  "Improved shooting mechanics",
+                  "Game-speed decision making",
+                  "Confidence under pressure",
+                  "Stronger mindset & discipline",
+                  "Athletes trained have gone on to compete at the high school and college level across Long Island",
+                ].map((item) => (
+                  <li key={item} className="flex items-start gap-2">
+                    <span className="text-mesa-accent mt-0.5">◆</span>
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            {/* Where We Train */}
+            <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-6 py-8">
+              <p className="font-[family-name:var(--font-fira-cond)] text-xl font-black tracking-wide text-mesa-accent mb-4">Basketball Training on Long Island</p>
+              <p className="text-sm text-brown-400 mb-3">Mesa serves athletes across Nassau County, Suffolk County, and The Hamptons — including:</p>
+              <p className="text-sm text-brown-300 leading-relaxed">
+                Hempstead, Garden City, Mineola, Westbury, Uniondale, Hicksville, Levittown, Massapequa, Babylon, Bay Shore, Islip, Brentwood, Hauppauge, Smithtown, Huntington, Commack, East Hampton, Southampton, Bridgehampton, and surrounding areas.
+              </p>
+            </div>
+
           </div>
         </div>
       </section>
