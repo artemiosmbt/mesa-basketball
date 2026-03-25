@@ -223,9 +223,9 @@ export default function LandingPage() {
             {/* Where We Train */}
             <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-6 py-8">
               <p className="font-[family-name:var(--font-fira-cond)] text-xl font-black tracking-wide text-mesa-accent mb-4">Basketball Training on Long Island</p>
-              <p className="text-sm text-brown-400 mb-3">Mesa serves athletes across Nassau County, Suffolk County, and The Hamptons — including:</p>
+              <p className="text-sm text-brown-400 mb-3">Mesa serves athletes across Nassau County, Suffolk County, The Hamptons, and New York City — including:</p>
               <p className="text-sm text-brown-300 leading-relaxed">
-                Hempstead, Garden City, Mineola, Westbury, Uniondale, Hicksville, Levittown, Massapequa, Babylon, Bay Shore, Islip, Brentwood, Hauppauge, Smithtown, Huntington, Commack, East Hampton, Southampton, Bridgehampton, and surrounding areas.
+                NYC, Manhasset, Garden City, Hempstead, Long Beach, Huntington, Southampton, and surrounding areas.
               </p>
             </div>
 
