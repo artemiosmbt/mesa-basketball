@@ -1076,19 +1076,21 @@ export default function Home() {
       <section id="schedule" className="py-16">
         <div className="mx-auto max-w-5xl px-6">
           <h2 className="font-[family-name:var(--font-oswald)] text-center text-3xl font-bold tracking-wide">Group Sessions</h2>
-          <p className="mt-2 text-center text-brown-400">
-            Skill work in groups of up to 6 players. Select 2+ sessions to register — volume discounts available.
-          </p>
-          <p className="mt-2 text-center text-xs text-brown-500">
-            Groups are organized by grade as a guideline. If you play up or you&apos;re unsure which group fits best, contact Artemios at (631) 599-1280 or artemios@mesabasketballtraining.com — we&apos;ll find the right fit.
-          </p>
           <div className="mt-4 flex flex-wrap justify-center gap-6">
             <div className="rounded-lg bg-brown-800/60 px-4 py-2 text-center">
               <p className="text-lg font-bold text-mesa-accent">$50 / session</p>
               <p className="text-xs text-brown-400">Volume discounts available</p>
             </div>
           </div>
+          <p className="mt-3 text-center text-brown-400">
+            Skill work in groups of up to 6 players. Select 2+ sessions to register — volume discounts available.
+          </p>
+          <p className="mt-2 text-center text-xs text-brown-500">
+            Groups are organized by grade as a guideline. If you play up or you&apos;re unsure which group fits best, contact Artemios at (631) 599-1280 or artemios@mesabasketballtraining.com — we&apos;ll find the right fit.
+          </p>
           <div className="mt-2 flex flex-wrap justify-center gap-4 text-xs text-brown-500">
+            <span>1-3 sessions: $50 each</span>
+            <span className="text-brown-600">|</span>
             <span>4-7 sessions: <span className="text-green-400/80">10% off</span></span>
             <span className="text-brown-600">|</span>
             <span>8+ sessions: <span className="text-green-400/80">15% off</span></span>
