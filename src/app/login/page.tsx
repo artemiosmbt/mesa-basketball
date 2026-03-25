@@ -29,7 +29,7 @@ export default function LoginPage() {
     <div className="min-h-screen bg-brown-950 flex items-center justify-center px-6">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <div className="h-20 w-20 mx-auto mb-4 rounded-full bg-white overflow-hidden flex items-center justify-center">
+          <div className="h-28 w-28 mx-auto mb-4 rounded-full bg-white overflow-hidden flex items-center justify-center">
             <img src="/logo.png" alt="Mesa Basketball" className="h-28 w-28 object-contain scale-150" />
           </div>
           <h1 className="font-[family-name:var(--font-oswald)] text-3xl font-bold text-white tracking-wide">SIGN IN</h1>
