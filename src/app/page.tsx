@@ -148,7 +148,7 @@ export default function LandingPage() {
                 href={item.anchor}
                 className="group rounded-xl border border-brown-700 bg-brown-900/40 px-7 py-8 hover:border-mesa-accent/60 hover:bg-brown-900/70 transition"
               >
-                <p className="text-xs font-semibold uppercase tracking-widest text-mesa-accent mb-3">{item.tag}</p>
+                <p className="text-xs font-semibold text-mesa-accent mb-3 whitespace-nowrap">{item.tag}</p>
                 <p className="font-[family-name:var(--font-fira-cond)] text-2xl font-black tracking-wide text-white mb-3 group-hover:text-mesa-accent transition">
                   {item.title}
                 </p>
