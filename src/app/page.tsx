@@ -95,7 +95,7 @@ export default function LandingPage() {
               },
             ].map((item) => (
               <div key={item.heading} className="rounded-xl border border-brown-700 bg-brown-900/40 px-6 py-8">
-                <p className="font-[family-name:var(--font-fira-cond)] text-base font-black tracking-wide text-mesa-accent mb-3 leading-snug">{item.heading}</p>
+                <p className="font-[family-name:var(--font-fira-cond)] text-xl font-black tracking-wide text-mesa-accent mb-3 leading-snug">{item.heading}</p>
                 <p className="text-sm text-brown-400 leading-relaxed">{item.body}</p>
               </div>
             ))}
