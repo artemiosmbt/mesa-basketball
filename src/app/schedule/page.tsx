@@ -1756,6 +1756,10 @@ export default function Home() {
           <p className="mt-4 text-sm text-brown-600">
             &copy; 2025&ndash;{new Date().getFullYear()} Mesa Basketball Training LLC. All rights reserved.
           </p>
+          <div className="mt-3 flex justify-center gap-8 text-sm">
+            <a href="/privacy-policy" className="text-mesa-accent hover:text-yellow-300">Privacy Policy</a>
+            <a href="/terms" className="text-mesa-accent hover:text-yellow-300">Terms &amp; Conditions</a>
+          </div>
         </div>
       </footer>
 
@@ -2224,14 +2228,6 @@ export default function Home() {
           </div>
         </div>
       )}
-      {/* Footer */}
-      <footer className="border-t border-brown-800 bg-brown-950 py-6 text-center">
-        <p className="text-xs text-brown-700">&copy; 2025&ndash;{new Date().getFullYear()} Mesa Basketball Training LLC. All rights reserved.</p>
-        <div className="mt-3 flex justify-center gap-8 text-sm">
-          <a href="/privacy-policy" className="text-mesa-accent hover:text-yellow-300">Privacy Policy</a>
-          <a href="/terms" className="text-mesa-accent hover:text-yellow-300">Terms &amp; Conditions</a>
-        </div>
-      </footer>
     </div>
   );
 }
