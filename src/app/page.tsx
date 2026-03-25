@@ -173,12 +173,11 @@ export default function LandingPage() {
           </div>
 
           {/* Stats bar */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-center mb-14">
+          <div className="grid grid-cols-3 gap-6 text-center mb-14">
             {[
               { stat: "5+", label: "Years Training Athletes" },
               { stat: "Age 4–Pro", label: "Athletes Trained" },
               { stat: "D1 + Pro", label: "Playing Pedigree" },
-              { stat: "Nassau + Suffolk", label: "Counties Served" },
             ].map((item) => (
               <div key={item.label}>
                 <p className="font-[family-name:var(--font-fira-cond)] text-4xl md:text-5xl font-black text-mesa-accent">{item.stat}</p>
@@ -194,9 +193,9 @@ export default function LandingPage() {
             <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-6 py-8">
               <p className="font-[family-name:var(--font-fira-cond)] text-xl font-black tracking-wide text-mesa-accent mb-4">Who We Train</p>
               <ul className="space-y-3 text-sm text-brown-300">
-                <li><span className="text-white font-semibold">Beginner (Ages 4–10)</span><br /><span className="text-brown-400">Building fundamentals, coordination, and a love for the game</span></li>
-                <li><span className="text-white font-semibold">Intermediate (Middle School)</span><br /><span className="text-brown-400">Developing skills, basketball IQ, and competitive instincts</span></li>
-                <li><span className="text-white font-semibold">Advanced (High School)</span><br /><span className="text-brown-400">Elevating performance, game speed, and court vision</span></li>
+                <li><span className="text-white font-semibold">Beginner</span><br /><span className="text-brown-400">Building fundamentals, coordination, and a love for the game</span></li>
+                <li><span className="text-white font-semibold">Intermediate</span><br /><span className="text-brown-400">Developing skills, basketball IQ, and competitive instincts</span></li>
+                <li><span className="text-white font-semibold">Advanced</span><br /><span className="text-brown-400">Elevating performance, game speed, and court vision</span></li>
                 <li><span className="text-white font-semibold">College &amp; Pro</span><br /><span className="text-brown-400">Year-round development for competitive athletes at the highest levels</span></li>
               </ul>
             </div>
