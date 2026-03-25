@@ -213,7 +213,7 @@ export default function LandingPage() {
                   "Athletes trained have gone on to compete at the high school and college level across Long Island",
                 ].map((item) => (
                   <li key={item} className="flex items-start gap-2">
-                    <span className="text-mesa-accent mt-0.5">◆</span>
+                    <span className="text-white mt-0.5">◆</span>
                     <span>{item}</span>
                   </li>
                 ))}
