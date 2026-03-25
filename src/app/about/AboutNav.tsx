@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { authClient } from "@/lib/auth";
 
 const chevron = (open?: boolean) => (
@@ -13,13 +14,21 @@ const chevron = (open?: boolean) => (
 export default function AboutNav() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [schedulingOpen, setSchedulingOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const router = useRouter();
 
   useEffect(() => {
     authClient.auth.getSession().then(({ data: { session } }) => {
       setUserEmail(session?.user?.email ?? null);
     });
   }, []);
+
+  async function handleSignOut() {
+    await authClient.auth.signOut();
+    setUserEmail(null);
+    router.push("/");
+  }
 
   return (
     <nav className="sticky top-0 z-50 border-b border-gray-200 bg-white/95 backdrop-blur">
@@ -33,7 +42,6 @@ export default function AboutNav() {
         <div className="flex items-center gap-4 text-sm">
           <Link href="/" className="hidden md:inline text-brown-600 hover:text-mesa-dark">Home</Link>
           <span className="hidden md:inline text-brown-300">|</span>
-          {/* Desktop Scheduling dropdown */}
           <div className="relative group hidden md:block">
             <Link href="/schedule" className="flex items-center gap-1 text-brown-600 hover:text-mesa-dark">
               Scheduling {chevron()}
@@ -49,11 +57,20 @@ export default function AboutNav() {
           <span className="hidden md:inline text-brown-300">|</span>
           <Link href="/about" className="hidden md:inline text-brown-600 hover:text-mesa-dark">About</Link>
           <span className="hidden md:inline text-brown-300">|</span>
-          <Link href="/my-bookings" className="hidden md:inline rounded bg-brown-600/20 px-3 py-1 text-brown-600 hover:bg-brown-600/30">My Bookings</Link>
           {userEmail ? (
-            <Link href="/my-bookings" className="hidden md:inline rounded bg-mesa-accent/20 px-3 py-1 text-mesa-accent hover:bg-mesa-accent/30 text-xs font-medium">Account</Link>
+            <div className="relative group hidden md:block">
+              <button className="flex items-center gap-1 rounded bg-brown-600/20 px-3 py-1 text-brown-600 hover:bg-brown-600/30">
+                Account {chevron()}
+              </button>
+              <div className="absolute top-full right-0 w-44 z-50 hidden group-hover:block pt-2">
+                <div className="rounded-lg border border-gray-200 bg-white shadow-lg py-1">
+                  <Link href="/my-bookings" className="block px-4 py-2 text-brown-600 hover:text-mesa-dark hover:bg-gray-50">My Bookings</Link>
+                  <button onClick={handleSignOut} className="w-full text-left block px-4 py-2 text-brown-600 hover:text-mesa-dark hover:bg-gray-50">Sign Out</button>
+                </div>
+              </div>
+            </div>
           ) : (
-            <Link href="/login" className="hidden md:inline rounded bg-mesa-accent/20 px-3 py-1 text-mesa-accent hover:bg-mesa-accent/30 text-xs font-medium">Sign In</Link>
+            <Link href="/login" className="hidden md:inline rounded bg-brown-600/20 px-3 py-1 text-brown-600 hover:bg-brown-600/30">Login</Link>
           )}
           <a href="https://www.instagram.com/mesabasketballtraining" target="_blank" rel="noopener noreferrer" aria-label="Instagram" className="hidden md:inline text-brown-600 hover:text-mesa-dark">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -103,11 +120,20 @@ export default function AboutNav() {
               <circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none" />
             </svg>
           </a>
-          <Link href="/my-bookings" onClick={() => setMobileMenuOpen(false)} className="block rounded bg-brown-600/20 px-3 py-2 text-brown-600 hover:bg-brown-600/30 text-center font-medium">My Bookings</Link>
           {userEmail ? (
-            <Link href="/my-bookings" onClick={() => setMobileMenuOpen(false)} className="block rounded bg-mesa-accent/20 px-3 py-2 text-mesa-accent hover:bg-mesa-accent/30 text-center font-medium">Account</Link>
+            <div>
+              <button onClick={() => setAccountOpen((o) => !o)} className="flex items-center justify-between w-full rounded bg-brown-600/20 px-3 py-2 text-brown-600 hover:bg-brown-600/30 font-medium">
+                Account {chevron(accountOpen)}
+              </button>
+              {accountOpen && (
+                <div className="ml-4 mt-1 space-y-1">
+                  <Link href="/my-bookings" onClick={() => setMobileMenuOpen(false)} className="block text-brown-500 hover:text-mesa-dark py-1">My Bookings</Link>
+                  <button onClick={handleSignOut} className="block text-brown-500 hover:text-mesa-dark py-1">Sign Out</button>
+                </div>
+              )}
+            </div>
           ) : (
-            <Link href="/login" onClick={() => setMobileMenuOpen(false)} className="block rounded bg-mesa-accent/20 px-3 py-2 text-mesa-accent hover:bg-mesa-accent/30 text-center font-medium">Sign In</Link>
+            <Link href="/login" onClick={() => setMobileMenuOpen(false)} className="block rounded bg-brown-600/20 px-3 py-2 text-brown-600 hover:bg-brown-600/30 text-center font-medium">Login</Link>
           )}
         </div>
       )}
