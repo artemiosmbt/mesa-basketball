@@ -126,7 +126,7 @@ export default function LandingPage() {
             {[
               {
                 title: "Group Sessions",
-                tag: "Weekly · $50",
+                tag: "Weekly",
                 desc: "Structured skill development in a competitive small-group setting. Players push each other, learn together, and walk out better every single time.",
                 anchor: "/schedule#schedule",
               },
