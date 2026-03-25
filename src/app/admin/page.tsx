@@ -108,7 +108,9 @@ export default function AdminPage() {
       <div className="border-b border-brown-800 bg-brown-900/50 px-6 py-4">
         <div className="mx-auto max-w-7xl flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <img src="/logo.png" alt="Mesa" className="h-10 w-10 object-contain" />
+            <div className="h-10 w-10 rounded-full bg-white flex items-center justify-center">
+              <img src="/logo.png" alt="Mesa" className="h-8 w-8 object-contain" />
+            </div>
             <div>
               <p className="font-[family-name:var(--font-oswald)] text-xl font-bold tracking-wide">ADMIN DASHBOARD</p>
               <p className="text-xs text-brown-400">Mesa Basketball Training</p>
