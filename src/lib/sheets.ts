@@ -19,6 +19,7 @@ export interface Camp {
   currentEnrolled: number;
   price: string;
   description: string;
+  notify: boolean;
 }
 
 export interface PrivateSlot {
@@ -84,6 +85,7 @@ export async function getCamps(): Promise<Camp[]> {
     currentEnrolled: parseInt(row[6]) || 0,
     price: row[7] || "",
     description: row[8] || "",
+    notify: (row[9] || "").toUpperCase() === "TRUE",
   }));
 }
 

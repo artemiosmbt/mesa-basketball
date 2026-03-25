@@ -60,10 +60,10 @@ export async function GET(req: NextRequest) {
 
   const notifiedIds = new Set((alreadyNotified || []).map((r) => r.camp_id));
 
-  // Find new camps not yet notified
+  // Find new camps that are marked ready to notify and haven't been notified yet
   const newCamps = camps.filter((camp) => {
     const campId = `${camp.name}|${camp.startDate}`;
-    return camp.name && camp.startDate && !notifiedIds.has(campId);
+    return camp.name && camp.startDate && camp.notify && !notifiedIds.has(campId);
   });
 
   if (newCamps.length === 0) {
