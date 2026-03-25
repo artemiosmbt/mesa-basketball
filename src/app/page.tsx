@@ -190,21 +190,20 @@ export default function LandingPage() {
           <div className="grid gap-8 md:grid-cols-2">
 
             {/* Who We Train */}
-            <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-6 py-8 flex flex-col">
+            <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-6 py-8">
               <p className="font-[family-name:var(--font-fira-cond)] text-xl font-black tracking-wide text-mesa-accent mb-4">Who We Train</p>
-              <ul className="space-y-3 text-sm text-brown-300 flex-1">
+              <ul className="space-y-3 text-sm text-brown-300">
                 <li><span className="text-white font-semibold">Beginner</span><br /><span className="text-brown-400">Building fundamentals, coordination, and a love for the game</span></li>
                 <li><span className="text-white font-semibold">Intermediate</span><br /><span className="text-brown-400">Developing skills, basketball IQ, and competitive instincts</span></li>
                 <li><span className="text-white font-semibold">Advanced</span><br /><span className="text-brown-400">Elevating performance, game speed, and court vision</span></li>
                 <li><span className="text-white font-semibold">College &amp; Pro</span><br /><span className="text-brown-400">Year-round development for competitive athletes at the highest levels</span></li>
               </ul>
-              <p className="mt-6 pt-4 border-t border-brown-800 text-xs text-brown-600">Serving NYC, Manhasset, Garden City, Hempstead, Long Beach, Huntington, Southampton &amp; surrounding areas.</p>
             </div>
 
             {/* What Players Gain */}
-            <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-6 py-8 flex flex-col">
+            <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-6 py-8">
               <p className="font-[family-name:var(--font-fira-cond)] text-xl font-black tracking-wide text-mesa-accent mb-4">What Players Gain</p>
-              <ul className="space-y-2 text-sm text-brown-300 flex-1">
+              <ul className="space-y-2 text-sm text-brown-300">
                 {[
                   "Elite ball handling & scoring ability",
                   "Improved shooting mechanics",
@@ -219,10 +218,11 @@ export default function LandingPage() {
                   </li>
                 ))}
               </ul>
-              <p className="mt-6 pt-4 border-t border-brown-800 text-xs text-brown-600">Basketball training on Long Island — Nassau County, Suffolk County, The Hamptons &amp; NYC.</p>
             </div>
 
           </div>
+
+          <p className="mt-8 text-xs text-brown-600 text-center">Serving athletes across Long Island — NYC, Manhasset, Garden City, Hempstead, Long Beach, Huntington, Southampton &amp; surrounding areas.</p>
         </div>
       </section>
 
