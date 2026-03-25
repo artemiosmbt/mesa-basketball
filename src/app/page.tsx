@@ -27,21 +27,23 @@ export default function LandingPage() {
         <div className="mx-auto max-w-6xl px-6 py-24 md:py-36">
           <div className="flex flex-col items-center text-center">
             <p className="mb-4 text-sm font-semibold uppercase tracking-widest text-mesa-accent">
-              Long Island&apos;s Premier Basketball Training
+              Long Island&apos;s Elite Basketball Training Program
             </p>
-            <h1 className="font-[family-name:var(--font-fira-cond)] text-6xl font-black tracking-wide md:text-8xl leading-none">
-              TRAIN WITH<br />PURPOSE.
+            <h1 className="font-[family-name:var(--font-fira-cond)] text-5xl font-black tracking-wide md:text-7xl leading-tight">
+              Train With Purpose.<br />Play With Confidence.<br />Perform at Every Level.
             </h1>
             <p className="mt-6 max-w-2xl text-brown-300 text-lg md:text-xl leading-relaxed">
-              Elite basketball development with <span className="text-white font-semibold">Artemios Gavalas</span> —
-              former Division I point guard, professional athlete, and lifelong student of the game.
+              High-level basketball development for youth, middle school, high school, college, and professional athletes. Led by former Division I point guard and international athlete <span className="text-white font-semibold">Artemios Gavalas</span>.
+            </p>
+            <p className="mt-3 text-mesa-accent font-semibold text-base md:text-lg tracking-wide">
+              Build skill. Build IQ. Build discipline.
             </p>
             <div className="mt-10 flex flex-wrap justify-center gap-4">
               <Link
                 href="/schedule#schedule"
                 className="rounded-lg bg-mesa-accent px-8 py-3 font-semibold text-white hover:bg-yellow-600 transition"
               >
-                View Schedule &amp; Book
+                View Programs
               </Link>
               <Link
                 href="/about"
