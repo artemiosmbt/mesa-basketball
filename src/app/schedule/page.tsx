@@ -1390,11 +1390,11 @@ export default function Home() {
         <div className="mx-auto max-w-5xl px-6">
           <h2 className="font-[family-name:var(--font-oswald)] text-center text-3xl font-bold tracking-wide">Mini Camps</h2>
           <p className="mt-2 text-center text-brown-400">
-            Summer &amp; break camps — register early, spots fill fast (max 20 per camp)
+            Intensive multi-day programs — spots are limited, register early.
           </p>
 
           {camps.length === 0 && !loading && (
-            <p className="mt-8 text-center text-brown-500">No upcoming camps scheduled. Check back soon!</p>
+            <p className="mt-8 text-center text-brown-500">No camps are currently open for registration. Check back soon or reach out to be notified when the next one is announced.</p>
           )}
 
           <div className="mt-8 grid gap-6 md:grid-cols-2">
