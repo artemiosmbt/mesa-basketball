@@ -58,7 +58,7 @@ export default function LandingPage() {
       {/* Quote */}
       <section className="bg-mesa-dark py-16 md:py-20">
         <div className="mx-auto max-w-3xl px-6">
-          <p className="font-[family-name:var(--font-fira-cond)] text-3xl md:text-4xl font-black tracking-wide text-white mb-8">
+          <p className="font-[family-name:var(--font-fira-cond)] text-2xl md:text-3xl font-black tracking-wide text-white mb-8">
             Built From Experience<span className="text-mesa-accent"> — </span>Designed for Real Growth.
           </p>
           <div className="border-l-4 border-mesa-accent pl-6">
