@@ -40,7 +40,7 @@ export default function LoginPage() {
         }
       }
       const next = new URLSearchParams(window.location.search).get("next");
-      router.push(data.user?.email === ADMIN_EMAIL ? "/admin" : (next || "/my-bookings"));
+      router.push(next || "/my-bookings");
     }
   }
 

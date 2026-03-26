@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useRef } from "react";
-import { authClient } from "@/lib/auth";
+import { authClient, ADMIN_EMAIL } from "@/lib/auth";
 
 const LOCATION_LINKS: Record<string, { name: string; url: string }> = {
   "St. Pauls": { name: "St. Paul's Cathedral", url: "https://share.google/kgiqMxAj2iAFEAGI6" },
@@ -1138,6 +1138,9 @@ export default function Home() {
                     </div>
                     <a href="/my-bookings" className="block px-4 py-2 text-brown-600 hover:text-mesa-dark hover:bg-gray-50">My Bookings</a>
                     <a href="/settings" className="block px-4 py-2 text-brown-600 hover:text-mesa-dark hover:bg-gray-50">Settings</a>
+                    {userEmail === ADMIN_EMAIL && (
+                      <a href="/admin" className="block px-4 py-2 text-mesa-accent hover:text-yellow-600 hover:bg-gray-50 font-medium">Admin</a>
+                    )}
                     <div className="border-t border-gray-100 mt-1 pt-1">
                       <button onClick={async () => { await authClient.auth.signOut(); window.location.href = "/"; }} className="w-full text-left block px-4 py-2 text-brown-600 hover:text-mesa-dark hover:bg-gray-50">Sign Out</button>
                     </div>
@@ -1205,6 +1208,9 @@ export default function Home() {
                 <p className="text-xs text-brown-400 px-1">Signed in as <span className="font-medium text-brown-600">{userEmail}</span></p>
                 <a href="/my-bookings" onClick={() => setMobileMenuOpen(false)} className="block rounded bg-brown-600/20 px-3 py-2 text-brown-600 hover:bg-brown-600/30 text-center font-medium">My Bookings</a>
                 <a href="/settings" onClick={() => setMobileMenuOpen(false)} className="block rounded bg-brown-600/20 px-3 py-2 text-brown-600 hover:bg-brown-600/30 text-center font-medium">Settings</a>
+                {userEmail === ADMIN_EMAIL && (
+                  <a href="/admin" onClick={() => setMobileMenuOpen(false)} className="block rounded bg-mesa-accent/20 px-3 py-2 text-mesa-accent hover:bg-mesa-accent/30 text-center font-medium">Admin</a>
+                )}
                 <button onClick={async () => { await authClient.auth.signOut(); window.location.href = "/"; }} className="block w-full text-center rounded bg-brown-600/20 px-3 py-2 text-brown-600 hover:bg-brown-600/30 font-medium">Sign Out</button>
               </>
             ) : (
