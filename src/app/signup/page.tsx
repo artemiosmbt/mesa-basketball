@@ -26,6 +26,7 @@ export default function SignupPage() {
   const [kids, setKids] = useState([{ name: "", dob: "", grade: "" }]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [confirmed, setConfirmed] = useState(false);
   const router = useRouter();
 
   function addKid() {
@@ -79,9 +80,37 @@ export default function SignupPage() {
       });
       router.push("/my-bookings");
     } else {
-      // Email confirmation required
-      router.push("/login?confirmed=1");
+      // Email confirmation required — show message instead of redirecting
+      setConfirmed(true);
+      setLoading(false);
     }
+  }
+
+  if (confirmed) {
+    return (
+      <div className="min-h-screen bg-brown-950 flex items-center justify-center px-6 py-12">
+        <div className="w-full max-w-md text-center">
+          <div className="h-28 w-28 mx-auto mb-6 rounded-full bg-white overflow-hidden flex items-center justify-center">
+            <img src="/logo.png" alt="Mesa Basketball" className="h-28 w-28 object-contain scale-125" />
+          </div>
+          <h1 className="font-[family-name:var(--font-oswald)] text-3xl font-bold text-white tracking-wide mb-4">CHECK YOUR EMAIL</h1>
+          <div className="bg-brown-900/40 border border-brown-700 rounded-xl px-8 py-8 space-y-4">
+            <p className="text-brown-200 text-base leading-relaxed">
+              A confirmation email has been sent to <span className="text-white font-semibold">{email}</span>.
+            </p>
+            <p className="text-brown-400 text-sm leading-relaxed">
+              Click the link in the email to confirm your account before signing in. Check your spam folder if you don&apos;t see it within a minute.
+            </p>
+            <a
+              href="/login"
+              className="block w-full rounded-lg bg-mesa-accent py-3 font-bold text-white hover:bg-mesa-accent/90 transition text-center mt-2"
+            >
+              Go to Login
+            </a>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
