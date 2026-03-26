@@ -210,7 +210,7 @@ export default function LandingPage() {
                   "Game-speed decision making",
                   "Confidence under pressure",
                   "Stronger mindset & discipline",
-                  "Athletes trained have gone on to compete at the high school and college level",
+                  "Athletes trained have gone on to compete from high school to the pro level",
                 ].map((item) => (
                   <li key={item} className="flex items-start gap-2">
                     <span className="text-white mt-0.5">◆</span>
