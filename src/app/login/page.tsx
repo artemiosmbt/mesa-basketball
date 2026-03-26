@@ -21,6 +21,24 @@ export default function LoginPage() {
       setError(error.message);
       setLoading(false);
     } else {
+      // Save any pending profile data from signup (when email confirmation was required)
+      const pending = localStorage.getItem("mesa_pending_profile");
+      if (pending && data.session) {
+        try {
+          const profile = JSON.parse(pending);
+          await fetch("/api/profile", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${data.session.access_token}`,
+            },
+            body: JSON.stringify(profile),
+          });
+          localStorage.removeItem("mesa_pending_profile");
+        } catch {
+          // non-critical, ignore
+        }
+      }
       router.push(data.user?.email === ADMIN_EMAIL ? "/admin" : "/my-bookings");
     }
   }

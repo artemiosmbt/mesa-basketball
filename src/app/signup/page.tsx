@@ -80,7 +80,8 @@ export default function SignupPage() {
       });
       router.push("/my-bookings");
     } else {
-      // Email confirmation required — show message instead of redirecting
+      // Email confirmation required — stash profile data so login page can save it after confirm
+      localStorage.setItem("mesa_pending_profile", JSON.stringify({ parentName, phone, kids }));
       setConfirmed(true);
       setLoading(false);
     }
