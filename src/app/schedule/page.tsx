@@ -405,7 +405,9 @@ export default function Home() {
   const pendingBookingRef = useRef<{
     kind: "modal"; type: BookingType; sessionIndex: number; details: string;
   } | {
-    kind: "private"; windowIdx: number; savedSelections: Record<number, { start: number; duration: number }>;
+    kind: "private";
+    windowDate: string; windowLocation: string; windowStartMins: number;
+    savedStart: number; savedDuration: number;
   } | {
     kind: "group"; savedGroup: string; savedKeys: string[];
   } | null>(null);
@@ -547,7 +549,18 @@ export default function Home() {
   }
 
   function openPrivateBooking(windowIdx: number, window: TimeWindow) {
-    if (!userEmail) { showAuthPrompt({ kind: "private", windowIdx, savedSelections: windowSelections }); return; }
+    if (!userEmail) {
+      const sel = windowSelections[windowIdx] || { start: window.startMins, duration: 60 };
+      showAuthPrompt({
+        kind: "private",
+        windowDate: window.date,
+        windowLocation: window.location,
+        windowStartMins: window.startMins,
+        savedStart: sel.start,
+        savedDuration: sel.duration,
+      });
+      return;
+    }
     const sel = windowSelections[windowIdx] || {
       start: window.startMins,
       duration: Math.min(60, window.endMins - window.startMins),
@@ -1001,9 +1014,14 @@ export default function Home() {
     if (pending.kind === "modal") {
       openModal(pending.type, pending.sessionIndex, pending.details);
     } else if (pending.kind === "private") {
-      setWindowSelections(pending.savedSelections);
-      const win = timeWindows[pending.windowIdx];
-      if (win) openPrivateBooking(pending.windowIdx, win);
+      const winIdx = timeWindows.findIndex(
+        (w) => w.date === pending.windowDate && w.location === pending.windowLocation && w.startMins === pending.windowStartMins
+      );
+      if (winIdx !== -1) {
+        const win = timeWindows[winIdx];
+        setWindowSelections((prev) => ({ ...prev, [winIdx]: { start: pending.savedStart, duration: pending.savedDuration } }));
+        openPrivateBooking(winIdx, win);
+      }
     } else if (pending.kind === "group") {
       setActiveGroup(pending.savedGroup);
       setSelectedGroupKeys(new Set(pending.savedKeys));
