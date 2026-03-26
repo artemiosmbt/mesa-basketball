@@ -109,7 +109,7 @@ export default function MyBookings() {
         {!loading && bookings === null && !error && (
           <div className="mt-8 rounded-2xl bg-brown-900 p-8 text-center">
             <p className="text-brown-300 mb-4">Log in to view your bookings.</p>
-            <a href="/login" className="inline-block rounded-lg bg-mesa-accent px-6 py-3 font-semibold text-white hover:bg-yellow-600">
+            <a href="/login?next=/my-bookings" className="inline-block rounded-lg bg-mesa-accent px-6 py-3 font-semibold text-white hover:bg-yellow-600">
               Log In
             </a>
           </div>

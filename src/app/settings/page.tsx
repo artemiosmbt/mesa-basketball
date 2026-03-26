@@ -40,7 +40,7 @@ export default function SettingsPage() {
   useEffect(() => {
     authClient.auth.getSession().then(async ({ data: { session } }) => {
       if (!session) {
-        router.push("/login");
+        router.push("/login?next=/settings");
         return;
       }
       setUserEmail(session.user.email ?? "");
@@ -81,7 +81,7 @@ export default function SettingsPage() {
     setError("");
 
     const { data: { session } } = await authClient.auth.getSession();
-    if (!session) { router.push("/login"); return; }
+    if (!session) { router.push("/login?next=/settings"); return; }
 
     const res = await fetch("/api/profile", {
       method: "POST",

@@ -1167,7 +1167,7 @@ export default function Home() {
                 </div>
               </div>
             ) : (
-              <a href="/login" className="rounded bg-brown-600/20 px-3 py-1 text-brown-600 hover:bg-brown-600/30">Login</a>
+              <a href="/login?next=/schedule" className="rounded bg-brown-600/20 px-3 py-1 text-brown-600 hover:bg-brown-600/30">Login</a>
             )}
             <a href="https://www.instagram.com/mesabasketballtraining" target="_blank" rel="noopener noreferrer" aria-label="Instagram" className="text-brown-600 hover:text-mesa-dark">
               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -1233,7 +1233,7 @@ export default function Home() {
                 <button onClick={async () => { await authClient.auth.signOut(); window.location.href = "/"; }} className="block w-full text-center rounded bg-brown-600/20 px-3 py-2 text-brown-600 hover:bg-brown-600/30 font-medium">Sign Out</button>
               </>
             ) : (
-              <a href="/login" onClick={() => setMobileMenuOpen(false)} className="block rounded bg-brown-600/20 px-3 py-2 text-brown-600 hover:bg-brown-600/30 text-center font-medium">Login</a>
+              <a href="/login?next=/schedule" onClick={() => setMobileMenuOpen(false)} className="block rounded bg-brown-600/20 px-3 py-2 text-brown-600 hover:bg-brown-600/30 text-center font-medium">Login</a>
             )}
           </div>
         )}

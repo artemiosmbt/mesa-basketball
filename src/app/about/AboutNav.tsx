@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { authClient, ADMIN_EMAIL } from "@/lib/auth";
 
 const chevron = (open?: boolean) => (
@@ -17,6 +17,7 @@ export default function AboutNav() {
   const [accountOpen, setAccountOpen] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
     authClient.auth.getSession().then(({ data: { session } }) => {
@@ -80,7 +81,7 @@ export default function AboutNav() {
               </div>
             </div>
           ) : (
-            <Link href="/login" className="hidden md:inline rounded bg-brown-600/20 px-3 py-1 text-brown-600 hover:bg-brown-600/30">Login</Link>
+            <Link href={`/login?next=${pathname}`} className="hidden md:inline rounded bg-brown-600/20 px-3 py-1 text-brown-600 hover:bg-brown-600/30">Login</Link>
           )}
           <a href="https://www.instagram.com/mesabasketballtraining" target="_blank" rel="noopener noreferrer" aria-label="Instagram" className="hidden md:inline text-brown-600 hover:text-mesa-dark">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -148,7 +149,7 @@ export default function AboutNav() {
               )}
             </div>
           ) : (
-            <Link href="/login" onClick={() => setMobileMenuOpen(false)} className="block rounded bg-brown-600/20 px-3 py-2 text-brown-600 hover:bg-brown-600/30 text-center font-medium">Login</Link>
+            <Link href={`/login?next=${pathname}`} onClick={() => setMobileMenuOpen(false)} className="block rounded bg-brown-600/20 px-3 py-2 text-brown-600 hover:bg-brown-600/30 text-center font-medium">Login</Link>
           )}
         </div>
       )}
