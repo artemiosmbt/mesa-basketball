@@ -89,7 +89,7 @@ export default function AboutPage() {
               at its highest collegiate level.
             </p>
             <p>
-              I went on to continue my career professionally in Greece, gaining firsthand experience in European
+              I went on to continue my career internationally in Greece, gaining firsthand experience in European
               professional basketball, a system known for its emphasis on skill, IQ, and fundamentals. That
               combination of American Division I intensity and European technical discipline is the foundation
               every Mesa session is built on.
