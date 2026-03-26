@@ -52,7 +52,13 @@ export default function SignupPage() {
     }
     setLoading(true);
 
-    const { data, error: signUpError } = await authClient.auth.signUp({ email, password });
+    const { data, error: signUpError } = await authClient.auth.signUp({
+      email,
+      password,
+      options: {
+        emailRedirectTo: "https://www.mesabasketballtraining.com/login?confirmed=1",
+      },
+    });
     if (signUpError) {
       setError(signUpError.message);
       setLoading(false);
