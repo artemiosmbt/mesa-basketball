@@ -548,7 +548,7 @@ export default function Home() {
     });
   }
 
-  function openPrivateBooking(windowIdx: number, window: TimeWindow) {
+  function openPrivateBooking(windowIdx: number, window: TimeWindow, overrideSel?: { start: number; duration: number }) {
     if (!userEmail) {
       const sel = windowSelections[windowIdx] || { start: window.startMins, duration: 60 };
       showAuthPrompt({
@@ -561,7 +561,7 @@ export default function Home() {
       });
       return;
     }
-    const sel = windowSelections[windowIdx] || {
+    const sel = overrideSel || windowSelections[windowIdx] || {
       start: window.startMins,
       duration: Math.min(60, window.endMins - window.startMins),
     };
@@ -1019,8 +1019,9 @@ export default function Home() {
       );
       if (winIdx !== -1) {
         const win = timeWindows[winIdx];
-        setWindowSelections((prev) => ({ ...prev, [winIdx]: { start: pending.savedStart, duration: pending.savedDuration } }));
-        openPrivateBooking(winIdx, win);
+        const savedSel = { start: pending.savedStart, duration: pending.savedDuration };
+        setWindowSelections((prev) => ({ ...prev, [winIdx]: savedSel }));
+        openPrivateBooking(winIdx, win, savedSel);
       }
     } else if (pending.kind === "group") {
       setActiveGroup(pending.savedGroup);
