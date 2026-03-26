@@ -39,7 +39,8 @@ export default function LoginPage() {
           // non-critical, ignore
         }
       }
-      router.push(data.user?.email === ADMIN_EMAIL ? "/admin" : "/my-bookings");
+      const next = new URLSearchParams(window.location.search).get("next");
+      router.push(data.user?.email === ADMIN_EMAIL ? "/admin" : (next || "/my-bookings"));
     }
   }
 

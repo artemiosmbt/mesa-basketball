@@ -400,7 +400,29 @@ export default function Home() {
 
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [authPrompt, setAuthPrompt] = useState(false);
+  const [pendingGroupOpen, setPendingGroupOpen] = useState(false);
   const profileRef = useRef<{ parentName: string; phone: string; kids: { name: string; dob: string; grade: string }[] } | null>(null);
+  const pendingBookingRef = useRef<{
+    kind: "modal"; type: BookingType; sessionIndex: number; details: string;
+  } | {
+    kind: "private"; windowIdx: number; savedSelections: Record<number, { start: number; duration: number }>;
+  } | {
+    kind: "group"; savedGroup: string; savedKeys: string[];
+  } | null>(null);
+
+  // Read any pending booking from sessionStorage on mount
+  useEffect(() => {
+    const raw = typeof window !== "undefined" ? sessionStorage.getItem("mesa_pending_booking") : null;
+    if (raw) {
+      pendingBookingRef.current = JSON.parse(raw);
+      sessionStorage.removeItem("mesa_pending_booking");
+    }
+  }, []);
+
+  function showAuthPrompt(data: typeof pendingBookingRef.current) {
+    if (data) sessionStorage.setItem("mesa_pending_booking", JSON.stringify(data));
+    setAuthPrompt(true);
+  }
 
   async function saveProfile() {
     const { data: { session } } = await authClient.auth.getSession();
@@ -525,7 +547,7 @@ export default function Home() {
   }
 
   function openPrivateBooking(windowIdx: number, window: TimeWindow) {
-    if (!userEmail) { setAuthPrompt(true); return; }
+    if (!userEmail) { showAuthPrompt({ kind: "private", windowIdx, savedSelections: windowSelections }); return; }
     const sel = windowSelections[windowIdx] || {
       start: window.startMins,
       duration: Math.min(60, window.endMins - window.startMins),
@@ -584,7 +606,7 @@ export default function Home() {
   }
 
   function openModal(type: BookingType, sessionIndex: number, details: string) {
-    if (!userEmail) { setAuthPrompt(true); return; }
+    if (!userEmail) { showAuthPrompt({ kind: "modal", type, sessionIndex, details }); return; }
     setModal({ open: true, type, sessionIndex, sessionDetails: details });
     setSubmitResult(null);
     setParentName(profileRef.current?.parentName ?? "");
@@ -971,6 +993,33 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [schedule, activeGroup, selectedGroupKeys]);
 
+  // Auto-restore pending booking once schedule + user are both ready
+  useEffect(() => {
+    if (loading || !userEmail || !pendingBookingRef.current) return;
+    const pending = pendingBookingRef.current;
+    pendingBookingRef.current = null;
+    if (pending.kind === "modal") {
+      openModal(pending.type, pending.sessionIndex, pending.details);
+    } else if (pending.kind === "private") {
+      setWindowSelections(pending.savedSelections);
+      const win = timeWindows[pending.windowIdx];
+      if (win) openPrivateBooking(pending.windowIdx, win);
+    } else if (pending.kind === "group") {
+      setActiveGroup(pending.savedGroup);
+      setSelectedGroupKeys(new Set(pending.savedKeys));
+      setPendingGroupOpen(true);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, userEmail]);
+
+  // Auto-open group registration once sessions are restored and ready
+  useEffect(() => {
+    if (!pendingGroupOpen || selectedSessionsForActiveGroup.length < 2) return;
+    setPendingGroupOpen(false);
+    openGroupRegistration();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingGroupOpen, selectedSessionsForActiveGroup]);
+
   // Compute group session pricing
   const groupPricing = useMemo(() => {
     const sessions = selectedSessionsForActiveGroup;
@@ -998,7 +1047,7 @@ export default function Home() {
   }, [selectedSessionsForActiveGroup]);
 
   function openGroupRegistration() {
-    if (!userEmail) { setAuthPrompt(true); return; }
+    if (!userEmail) { showAuthPrompt({ kind: "group", savedGroup: activeGroup, savedKeys: Array.from(selectedGroupKeys) }); return; }
     const sessions = selectedSessionsForActiveGroup;
     if (sessions.length < 2) return;
 
@@ -1830,13 +1879,13 @@ export default function Home() {
             </p>
             <div className="space-y-3">
               <a
-                href="/signup"
+                href="/signup?next=/schedule"
                 className="block w-full rounded-lg bg-mesa-accent py-3 font-bold text-white hover:bg-mesa-accent/90 transition"
               >
                 Create Account
               </a>
               <a
-                href="/login"
+                href="/login?next=/schedule"
                 className="block w-full rounded-lg border border-brown-600 py-3 font-semibold text-brown-300 hover:border-brown-400 hover:text-white transition"
               >
                 Sign In
