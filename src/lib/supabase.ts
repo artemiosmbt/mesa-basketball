@@ -224,6 +224,44 @@ export function generateReferralCode(parentName: string): string {
   return `${lastName}-MESA`;
 }
 
+/**
+ * Generate a unique referral code for a family at registration time.
+ * If SMITH-MESA is already taken by another email, tries SMITH-MESA2, SMITH-MESA3, etc.
+ * If this email already has a stored code, returns it unchanged.
+ */
+export async function generateUniqueReferralCode(parentName: string, email: string): Promise<string> {
+  const supabase = getSupabase();
+
+  // If this email already has a code, reuse it
+  const { data: existing } = await supabase
+    .from("registrations")
+    .select("referral_code")
+    .eq("email", email)
+    .not("referral_code", "is", null)
+    .limit(1)
+    .maybeSingle();
+
+  if (existing?.referral_code) return existing.referral_code;
+
+  const base = generateReferralCode(parentName);
+  let code = base;
+  let suffix = 2;
+
+  while (true) {
+    const { data: taken } = await supabase
+      .from("registrations")
+      .select("email")
+      .eq("referral_code", code)
+      .neq("email", email)
+      .limit(1)
+      .maybeSingle();
+
+    if (!taken) return code;
+    code = `${base}${suffix}`;
+    suffix++;
+  }
+}
+
 /** Insert a registration with referral_code and is_free columns */
 export async function addRegistrationWithRewards(data: {
   parentName: string;

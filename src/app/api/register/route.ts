@@ -7,7 +7,7 @@ import {
   decrementReferralCredit,
   addReferralCredit,
   findReferrerByCode,
-  generateReferralCode,
+  generateUniqueReferralCode,
   checkGroupSessionCapacity,
   getActivePackage,
   setPackageSessions,
@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
 
     // Handle weekly multi-session registration
     if (type === "weekly" && weeklySessions && weeklySessions.length > 0) {
-      const referralCode = generateReferralCode(parentName);
+      const referralCode = await generateUniqueReferralCode(parentName, email);
 
       // Check capacity for all selected sessions
       const capacityChecks = await Promise.all(
@@ -117,7 +117,7 @@ export async function POST(req: NextRequest) {
     let isFirstTime = false;
     let packageSessionsRemaining: number | undefined;
     let packageType: number | undefined;
-    const referralCode = generateReferralCode(parentName);
+    const referralCode = await generateUniqueReferralCode(parentName, email);
 
     // Save to Supabase (unless this is an email-only request)
     if (!emailOnly) {
