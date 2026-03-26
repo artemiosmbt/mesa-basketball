@@ -43,6 +43,7 @@ export default function MyBookings() {
   const [activePackage, setActivePackage] = useState<{ packageType: number; sessionsUsed: number; monthYear: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [activeTab, setActiveTab] = useState<"upcoming" | "past">("upcoming");
 
   // Load saved email and auto-lookup — prefer logged-in session
   useEffect(() => {
@@ -304,17 +305,42 @@ export default function MyBookings() {
           }
 
           return (
-            <div className="mt-6 space-y-8">
-              {upcoming.length > 0 && (
-                <div>
-                  <h2 className="text-xs font-semibold uppercase tracking-widest text-mesa-accent mb-3">Upcoming</h2>
-                  <div className="space-y-4">{upcoming.map(renderCard)}</div>
+            <div className="mt-6">
+              <div className="flex gap-2 mb-6">
+                <button
+                  onClick={() => setActiveTab("upcoming")}
+                  className={`px-5 py-2 rounded-lg text-sm font-semibold transition ${
+                    activeTab === "upcoming"
+                      ? "bg-mesa-accent text-white"
+                      : "bg-brown-900 text-brown-400 hover:text-white"
+                  }`}
+                >
+                  Upcoming {upcoming.length > 0 && `(${upcoming.length})`}
+                </button>
+                <button
+                  onClick={() => setActiveTab("past")}
+                  className={`px-5 py-2 rounded-lg text-sm font-semibold transition ${
+                    activeTab === "past"
+                      ? "bg-brown-700 text-white"
+                      : "bg-brown-900 text-brown-400 hover:text-white"
+                  }`}
+                >
+                  Past {past.length > 0 && `(${past.length})`}
+                </button>
+              </div>
+
+              {activeTab === "upcoming" && (
+                <div className="space-y-4">
+                  {upcoming.length > 0 ? upcoming.map(renderCard) : (
+                    <p className="text-brown-500 text-sm">No upcoming sessions.</p>
+                  )}
                 </div>
               )}
-              {past.length > 0 && (
-                <div>
-                  <h2 className="text-xs font-semibold uppercase tracking-widest text-brown-500 mb-3">Past</h2>
-                  <div className="space-y-4">{past.map(renderCard)}</div>
+              {activeTab === "past" && (
+                <div className="space-y-4">
+                  {past.length > 0 ? past.map(renderCard) : (
+                    <p className="text-brown-500 text-sm">No past sessions.</p>
+                  )}
                 </div>
               )}
             </div>
