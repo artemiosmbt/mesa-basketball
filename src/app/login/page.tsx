@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { authClient, ADMIN_EMAIL } from "@/lib/auth";
+import { authClient } from "@/lib/auth";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -77,6 +77,11 @@ export default function LoginPage() {
               className="w-full rounded-lg border border-brown-700 bg-brown-800/60 px-4 py-2.5 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
               placeholder="••••••••"
             />
+          </div>
+          <div className="flex justify-end -mt-2">
+            <Link href="/forgot-password" className="text-xs text-brown-400 hover:text-mesa-accent">
+              Forgot password?
+            </Link>
           </div>
           <button
             type="submit"
