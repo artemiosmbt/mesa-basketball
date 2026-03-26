@@ -17,9 +17,47 @@ export const metadata: Metadata = {
   },
 };
 
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@type": "LocalBusiness",
+  "@id": "https://www.mesabasketballtraining.com",
+  "name": "Mesa Basketball Training",
+  "description": "Elite basketball training on Long Island for youth and adults. Group sessions, private lessons, and mini camps led by former D1 and international professional player Artemios Gavalas.",
+  "url": "https://www.mesabasketballtraining.com",
+  "telephone": "",
+  "email": "mesabasketballtraining@gmail.com",
+  "founder": {
+    "@type": "Person",
+    "name": "Artemios Gavalas",
+    "jobTitle": "Head Trainer & Founder",
+    "description": "Former Division I point guard and international professional basketball player"
+  },
+  "areaServed": [
+    { "@type": "City", "name": "Long Island, New York" },
+    { "@type": "AdministrativeArea", "name": "Nassau County, New York" },
+    { "@type": "AdministrativeArea", "name": "Suffolk County, New York" }
+  ],
+  "hasOfferCatalog": {
+    "@type": "OfferCatalog",
+    "name": "Basketball Training Programs",
+    "itemListElement": [
+      { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Group Basketball Training Sessions" } },
+      { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Private Basketball Lessons" } },
+      { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Basketball Mini Camps" } }
+    ]
+  },
+  "sameAs": [
+    "https://www.instagram.com/mesabasketballtraining"
+  ]
+};
+
 export default function LandingPage() {
   return (
     <div className="min-h-screen bg-mesa-dark text-white">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
       <LandingNav />
 
       {/* Hero */}

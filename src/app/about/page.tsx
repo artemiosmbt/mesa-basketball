@@ -4,9 +4,23 @@ import Image from "next/image";
 import AboutNav from "./AboutNav";
 
 export const metadata: Metadata = {
-  title: "About | Mesa Basketball Training",
+  title: "About Artemios Gavalas | Mesa Basketball Training",
   description:
-    "Learn about Mesa Basketball Training — elite coaching on Long Island built on a foundation of Division I and professional experience.",
+    "Meet Artemios Gavalas — former Division I point guard and international professional basketball player, now bringing elite coaching to Long Island youth and adults.",
+  keywords: [
+    "Artemios Gavalas",
+    "basketball coach Long Island",
+    "D1 basketball trainer",
+    "professional basketball trainer Long Island",
+    "elite basketball coaching Long Island",
+    "Mesa Basketball Training about",
+  ],
+  openGraph: {
+    title: "About Artemios Gavalas | Mesa Basketball Training",
+    description: "Former D1 point guard and international professional player. Now training the next generation on Long Island.",
+    url: "https://www.mesabasketballtraining.com/about",
+    images: [{ url: "/og-image.jpg", width: 1200, height: 630 }],
+  },
 };
 
 export default function AboutPage() {

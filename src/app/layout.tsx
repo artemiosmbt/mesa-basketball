@@ -15,15 +15,38 @@ const firaCond = Fira_Sans_Condensed({
 });
 
 export const metadata: Metadata = {
-  title: "Mesa Basketball Training",
+  title: {
+    default: "Mesa Basketball Training | Long Island",
+    template: "%s | Mesa Basketball Training",
+  },
   description:
-    "Elite basketball training on Long Island. Group sessions, private training, and mini camps.",
+    "Elite basketball training on Long Island with former D1 and international professional player Artemios Gavalas. Group sessions, private lessons, and mini camps for all ages.",
+  keywords: [
+    "basketball training Long Island",
+    "youth basketball training Long Island",
+    "private basketball lessons Long Island",
+    "basketball camps Long Island",
+    "basketball trainer Nassau County",
+    "basketball trainer Suffolk County",
+    "elite basketball training Long Island",
+    "AAU basketball training Long Island",
+    "Artemios Gavalas",
+    "Mesa Basketball Training",
+  ],
+  metadataBase: new URL("https://www.mesabasketballtraining.com"),
   openGraph: {
-    title: "Mesa Basketball Training",
-    description: "Elite basketball training on Long Island. Group sessions, private training, and mini camps.",
-    url: "https://mesabasketballtraining.com",
+    title: "Mesa Basketball Training | Long Island",
+    description: "Elite basketball training on Long Island with former D1 and international professional player Artemios Gavalas.",
+    url: "https://www.mesabasketballtraining.com",
     siteName: "Mesa Basketball Training",
     images: [{ url: "/og-image.jpg", width: 1200, height: 630 }],
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Mesa Basketball Training | Long Island",
+    description: "Elite basketball training on Long Island. Group sessions, private lessons, and mini camps.",
+    images: ["/og-image.jpg"],
   },
 };
 
