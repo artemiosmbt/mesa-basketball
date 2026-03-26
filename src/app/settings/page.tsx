@@ -112,10 +112,16 @@ export default function SettingsPage() {
   return (
     <div className="min-h-screen bg-brown-950 px-6 py-12">
       <div className="mx-auto max-w-lg">
-        {/* Back link */}
-        <Link href="/my-bookings" className="text-sm text-mesa-accent hover:text-yellow-300">
-          &larr; Back to My Bookings
-        </Link>
+        {/* Back links */}
+        <div className="flex items-center gap-4">
+          <Link href="/" className="text-sm text-mesa-accent hover:text-yellow-300">
+            &larr; Back to Home
+          </Link>
+          <span className="text-brown-700">|</span>
+          <Link href="/my-bookings" className="text-sm text-mesa-accent hover:text-yellow-300">
+            My Bookings
+          </Link>
+        </div>
 
         <div className="mt-6 mb-8">
           <h1 className="font-[family-name:var(--font-oswald)] text-3xl font-bold text-white tracking-wide">
