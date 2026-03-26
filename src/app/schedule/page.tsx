@@ -399,6 +399,7 @@ export default function Home() {
   }, []);
 
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [authPrompt, setAuthPrompt] = useState(false);
   const profileRef = useRef<{ parentName: string; phone: string; kids: { name: string; dob: string; grade: string }[] } | null>(null);
 
   async function saveProfile() {
@@ -524,6 +525,7 @@ export default function Home() {
   }
 
   function openPrivateBooking(windowIdx: number, window: TimeWindow) {
+    if (!userEmail) { setAuthPrompt(true); return; }
     const sel = windowSelections[windowIdx] || {
       start: window.startMins,
       duration: Math.min(60, window.endMins - window.startMins),
@@ -582,6 +584,7 @@ export default function Home() {
   }
 
   function openModal(type: BookingType, sessionIndex: number, details: string) {
+    if (!userEmail) { setAuthPrompt(true); return; }
     setModal({ open: true, type, sessionIndex, sessionDetails: details });
     setSubmitResult(null);
     setParentName(profileRef.current?.parentName ?? "");
@@ -995,6 +998,7 @@ export default function Home() {
   }, [selectedSessionsForActiveGroup]);
 
   function openGroupRegistration() {
+    if (!userEmail) { setAuthPrompt(true); return; }
     const sessions = selectedSessionsForActiveGroup;
     if (sessions.length < 2) return;
 
@@ -1523,7 +1527,7 @@ export default function Home() {
                   <p className="text-xs text-brown-400">$118.75 per session</p>
                 </div>
                 <button
-                  onClick={() => { setPkgModal({ open: true, packageType: 4 }); setPkgName(""); setPkgEmail(""); setPkgPhone(""); setPkgMonth(pkgMonthOptions[0]?.value || ""); setPkgResult(null); setKids([{ name: "", dob: "", grade: "" }]); setReferralCode(""); }}
+                  onClick={() => { if (!userEmail) { setAuthPrompt(true); return; } setPkgModal({ open: true, packageType: 4 }); setPkgName(""); setPkgEmail(""); setPkgPhone(""); setPkgMonth(pkgMonthOptions[0]?.value || ""); setPkgResult(null); setKids([{ name: "", dob: "", grade: "" }]); setReferralCode(""); }}
                   className="mt-4 w-full rounded-lg bg-mesa-accent px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-yellow-600"
                 >
                   Enroll — 4 Sessions
@@ -1540,7 +1544,7 @@ export default function Home() {
                   <p className="text-xs text-brown-400">$112.50 per session</p>
                 </div>
                 <button
-                  onClick={() => { setPkgModal({ open: true, packageType: 8 }); setPkgName(""); setPkgEmail(""); setPkgPhone(""); setPkgMonth(pkgMonthOptions[0]?.value || ""); setPkgResult(null); setKids([{ name: "", dob: "", grade: "" }]); setReferralCode(""); }}
+                  onClick={() => { if (!userEmail) { setAuthPrompt(true); return; } setPkgModal({ open: true, packageType: 8 }); setPkgName(""); setPkgEmail(""); setPkgPhone(""); setPkgMonth(pkgMonthOptions[0]?.value || ""); setPkgResult(null); setKids([{ name: "", dob: "", grade: "" }]); setReferralCode(""); }}
                   className="mt-4 w-full rounded-lg bg-mesa-accent px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-yellow-600"
                 >
                   Enroll — 8 Sessions
@@ -1810,6 +1814,43 @@ export default function Home() {
           </div>
         </div>
       </footer>
+
+      {/* Auth Prompt */}
+      {authPrompt && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-brown-900 p-8 shadow-2xl text-center">
+            <div className="h-16 w-16 mx-auto mb-4 rounded-full bg-white overflow-hidden flex items-center justify-center">
+              <img src="/logo.png" alt="Mesa Basketball" className="h-16 w-16 object-contain scale-125" />
+            </div>
+            <h2 className="font-[family-name:var(--font-oswald)] text-2xl font-bold text-white tracking-wide mb-2">
+              ACCOUNT REQUIRED
+            </h2>
+            <p className="text-brown-300 text-sm mb-6 leading-relaxed">
+              Create a free account to book a session. Your info saves automatically so booking is faster every time.
+            </p>
+            <div className="space-y-3">
+              <a
+                href="/signup"
+                className="block w-full rounded-lg bg-mesa-accent py-3 font-bold text-white hover:bg-mesa-accent/90 transition"
+              >
+                Create Account
+              </a>
+              <a
+                href="/login"
+                className="block w-full rounded-lg border border-brown-600 py-3 font-semibold text-brown-300 hover:border-brown-400 hover:text-white transition"
+              >
+                Sign In
+              </a>
+              <button
+                onClick={() => setAuthPrompt(false)}
+                className="block w-full text-sm text-brown-500 hover:text-brown-300 pt-1"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Registration Modal */}
       {modal.open && (
