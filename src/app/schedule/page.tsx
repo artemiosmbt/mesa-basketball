@@ -1308,7 +1308,6 @@ export default function Home() {
                   <div className="flex items-center justify-between">
                     <h3 className="text-lg font-bold text-mesa-accent">{group.replace("Grade 5 & Below", "Grades K-5")}</h3>
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-bold text-white">$50</span>
                       {selectedCount > 0 && (
                         <span className="rounded-full bg-mesa-accent/20 px-2 py-0.5 text-xs font-semibold text-mesa-accent">
                           {selectedCount} selected
@@ -1333,6 +1332,7 @@ export default function Home() {
 
                     return (
                     <div className="mt-4 space-y-2" onClick={(e) => e.stopPropagation()}>
+                      <p className="text-sm font-bold text-mesa-accent mb-3">$50 / session</p>
                       {/* Day filter + Select all */}
                       {availDays.length > 1 && (
                         <div className="flex flex-wrap items-center gap-2 mb-3">
