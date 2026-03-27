@@ -142,11 +142,11 @@ export default function LandingPage() {
       </section>
 
       {/* The Name */}
-      <section className="bg-mesa-accent py-14 md:py-20">
+      <section className="bg-brown-950 border-t border-brown-800 py-14 md:py-20">
         <div className="mx-auto max-w-2xl px-6 text-center">
-          <p className="text-sm font-semibold uppercase tracking-widest text-blue-900 mb-4">The Name</p>
-          <p className="text-blue-900 text-lg md:text-xl leading-relaxed">
-            <span className="text-blue-900 font-semibold">ΜΕΣΑ</span> is the Greek word for &ldquo;in.&rdquo; In basketball, it is the call you hear the moment a shot finds the net. It represents precision. Confidence. Execution. A word that has followed Artemios his entire life and now defines how players train.
+          <p className="text-sm font-semibold uppercase tracking-widest text-mesa-accent mb-4">The Name</p>
+          <p className="text-brown-300 text-lg md:text-xl leading-relaxed">
+            <span className="text-white font-semibold">ΜΕΣΑ</span> is the Greek word for &ldquo;in.&rdquo; In basketball, it is the call you hear the moment a shot finds the net. It represents precision. Confidence. Execution. A word that has followed Artemios his entire life and now defines how players train.
           </p>
         </div>
       </section>
