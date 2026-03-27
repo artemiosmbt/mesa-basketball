@@ -1258,7 +1258,7 @@ export default function Home() {
         <div className="mx-auto max-w-5xl px-6">
           <h2 className="font-[family-name:var(--font-oswald)] text-center text-3xl font-bold tracking-wide">Group Sessions</h2>
           <div className="mt-4 flex flex-wrap justify-center gap-6">
-            <div className="rounded-lg bg-brown-800/60 px-4 py-2 text-center">
+            <div className="rounded-lg border border-mesa-accent bg-brown-800/60 px-4 py-2 text-center">
               <p className="text-lg font-bold text-mesa-accent">$50 / session</p>
               <p className="text-xs text-brown-400">Volume discounts available</p>
             </div>
@@ -1570,11 +1570,11 @@ export default function Home() {
         <div className="mx-auto max-w-5xl px-6">
           <h2 className="font-[family-name:var(--font-oswald)] text-center text-3xl font-bold tracking-wide">Private Sessions</h2>
           <div className="mt-4 flex flex-wrap justify-center gap-6">
-            <div className="rounded-lg bg-brown-800/60 px-4 py-2 text-center">
+            <div className="rounded-lg border border-mesa-accent bg-brown-800/60 px-4 py-2 text-center">
               <p className="text-lg font-bold text-mesa-accent">$150 / 60 min</p>
               <p className="text-xs text-brown-400">Up to 3 participants</p>
             </div>
-            <div className="rounded-lg bg-brown-800/60 px-4 py-2 text-center">
+            <div className="rounded-lg border border-mesa-accent bg-brown-800/60 px-4 py-2 text-center">
               <p className="text-lg font-bold text-mesa-accent">$250 / 60 min</p>
               <p className="text-xs text-brown-400">Group Private (4+ players)</p>
             </div>
