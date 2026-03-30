@@ -91,7 +91,7 @@ export default function LandingPage() {
               </p>
               <div className="mt-6 flex flex-wrap justify-center gap-3">
                 <Link href="/schedule#schedule" className="rounded-lg bg-mesa-accent px-7 py-2.5 font-semibold text-white hover:bg-yellow-600 transition text-sm">View Programs</Link>
-                <Link href="/about" className="rounded-lg border border-brown-500 px-7 py-2.5 font-semibold text-brown-300 hover:border-brown-400 hover:text-white transition text-sm">Meet the Trainer</Link>
+                <Link href="/about" className="rounded-lg bg-[#1e3a5f] px-7 py-2.5 font-semibold text-white hover:bg-[#264a7a] transition text-sm">Meet the Trainer</Link>
               </div>
             </div>
           </div>
