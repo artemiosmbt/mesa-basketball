@@ -66,7 +66,7 @@ export default function LandingPage() {
 
         {/* Mobile: everything overlaid on photo, fades into dark */}
         <div className="md:hidden">
-          <div className="relative w-full h-[105vw] overflow-hidden">
+          <div className="relative w-full h-[115vw] overflow-hidden">
             <Image
               src="/photos/grid2.jpg"
               alt="Mesa Basketball Training session"
@@ -76,8 +76,8 @@ export default function LandingPage() {
             />
             {/* Top darkening */}
             <div className="absolute inset-0 bg-gradient-to-b from-mesa-dark/50 via-transparent to-transparent" />
-            {/* Bottom fade */}
-            <div className="absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-mesa-dark via-mesa-dark/70 to-transparent" />
+            {/* Bottom fade — long and silky so dark space feels cinematic */}
+            <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-mesa-dark from-20% via-mesa-dark/50 via-60% to-transparent" />
             {/* All content overlaid */}
             <div className="absolute inset-0 flex flex-col items-center justify-center px-6 text-center gap-0">
               <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-mesa-accent drop-shadow">
@@ -133,7 +133,7 @@ export default function LandingPage() {
       </section>
 
       {/* Quote — split layout with photo */}
-      <section className="bg-mesa-dark pt-12 pb-16 md:py-24">
+      <section className="bg-mesa-dark pt-20 pb-16 md:py-24">
         <div className="mx-auto max-w-6xl px-6">
           <div className="flex flex-col md:flex-row gap-10 md:gap-16 items-center">
 
