@@ -61,17 +61,6 @@ export default function AboutPage() {
         </div>
       </section>
 
-      {/* Full-width training photo strip */}
-      <div className="relative h-48 md:h-96 overflow-hidden">
-        <Image
-          src="/photos/grid3.jpg"
-          alt="Artemios coaching group ball handling drill"
-          fill
-          className="object-cover object-top"
-        />
-        <div className="absolute inset-0 bg-gradient-to-r from-mesa-dark/80 via-mesa-dark/40 to-mesa-dark/80" />
-      </div>
-
       {/* Main content */}
       <main className="mx-auto max-w-4xl px-6 py-16 md:py-20 space-y-16">
 

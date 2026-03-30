@@ -1737,6 +1737,22 @@ export default function Home() {
         <div className="h-px w-16 bg-mesa-accent/25" />
       </div>
 
+      {/* Photo divider before private */}
+      <div className="relative h-64 md:h-80 overflow-hidden">
+        <Image
+          src="/photos/grid3.jpg"
+          alt="Private basketball training session"
+          fill
+          className="object-cover object-top md:object-center"
+        />
+        <div className="absolute inset-0 bg-gradient-to-r from-mesa-dark/85 via-mesa-dark/50 to-mesa-dark/85" />
+        <div className="absolute inset-0 flex items-center justify-center">
+          <p className="font-[family-name:var(--font-fira-cond)] text-xl md:text-4xl font-black tracking-wide md:tracking-widest text-white text-center px-6 drop-shadow-lg">
+            PRIVATE &amp; <span className="text-mesa-accent">1-ON-1 TRAINING</span>
+          </p>
+        </div>
+      </div>
+
       {/* Private Sessions */}
       <section id="private" className="py-16">
         <div className="mx-auto max-w-5xl px-6">
