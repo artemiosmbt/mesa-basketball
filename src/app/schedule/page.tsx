@@ -420,6 +420,14 @@ export default function Home() {
       .finally(() => setLoading(false));
   }, []);
 
+  // Scroll to hash anchor after data loads (fixes mobile layout-shift issue)
+  useEffect(() => {
+    if (!loading && typeof window !== "undefined" && window.location.hash) {
+      const el = document.querySelector(window.location.hash);
+      if (el) el.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [loading]);
+
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [authPrompt, setAuthPrompt] = useState(false);
   const [pendingGroupOpen, setPendingGroupOpen] = useState(false);
@@ -1345,7 +1353,7 @@ export default function Home() {
       </header>
 
       {/* Weekly Schedule */}
-      <section id="schedule" className="py-16">
+      <section id="schedule" className="py-16 scroll-mt-20">
         <div className="mx-auto max-w-5xl px-6">
           <h2 className="font-[family-name:var(--font-oswald)] text-center text-3xl font-bold tracking-wide">Group Sessions</h2>
           <div className="mt-4 flex flex-wrap justify-center gap-6">
@@ -1605,7 +1613,7 @@ export default function Home() {
       </div>
 
       {/* Mini Camps */}
-      <section id="camps" className="bg-brown-900/30 py-16">
+      <section id="camps" className="bg-brown-900/30 py-16 scroll-mt-20">
         <div className="mx-auto max-w-5xl px-6">
           <h2 className="font-[family-name:var(--font-oswald)] text-center text-3xl font-bold tracking-wide">Mini Camps</h2>
           <p className="mt-2 text-center text-brown-400">
@@ -1737,7 +1745,7 @@ export default function Home() {
       </div>
 
       {/* Private Sessions */}
-      <section id="private" className="py-16">
+      <section id="private" className="py-16 scroll-mt-20">
         <div className="mx-auto max-w-5xl px-6">
           <h2 className="font-[family-name:var(--font-oswald)] text-center text-3xl font-bold tracking-wide">Private Sessions</h2>
           <div className="mt-4 flex flex-wrap justify-center gap-6">
