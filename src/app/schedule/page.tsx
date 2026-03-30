@@ -1357,10 +1357,10 @@ export default function Home() {
         <div className="mx-auto max-w-5xl px-6">
           <h2 className="font-[family-name:var(--font-oswald)] text-center text-3xl font-bold tracking-wide">Group Sessions</h2>
           <div className="mt-4 flex flex-wrap justify-center gap-6">
-            <div className="rounded-lg border border-mesa-accent bg-brown-800/60 px-4 py-2 text-center">
+            <a href="#group-schedule" className="rounded-lg border border-mesa-accent bg-brown-800/60 px-4 py-2 text-center hover:bg-brown-700/60 hover:border-yellow-400 transition cursor-pointer">
               <p className="text-lg font-bold text-mesa-accent">$50 / session</p>
               <p className="text-xs text-brown-400">Volume discounts available</p>
-            </div>
+            </a>
           </div>
           <p className="mt-3 text-center text-brown-400">
             Skill work in groups of up to 6 players. Volume discounts available when booking multiple sessions.
@@ -1379,7 +1379,7 @@ export default function Home() {
           {loading && <p className="mt-8 text-center text-brown-400">Loading schedule...</p>}
           {error && <p className="mt-8 text-center text-red-400">{error}</p>}
 
-          <div className="mt-8 grid gap-6 md:grid-cols-2">
+          <div id="group-schedule" className="mt-8 grid gap-6 md:grid-cols-2">
             {Object.entries(grouped).map(([group, sessions]) => {
               const futureSessions = sessions.filter(isFutureSession);
               if (futureSessions.length === 0) return null;
