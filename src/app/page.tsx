@@ -138,19 +138,9 @@ export default function LandingPage() {
         <div className="mx-auto max-w-6xl px-6">
           <div className="flex flex-col md:flex-row gap-10 md:gap-16 items-center">
 
-            {/* Photo — landscape on mobile, portrait on desktop */}
-            <div className="relative w-full h-56 md:h-auto md:w-2/5 md:aspect-[4/5] rounded-2xl overflow-hidden flex-shrink-0 shadow-2xl">
-              <Image
-                src="/photos/grid4.jpg"
-                alt="Artemios Gavalas coaching a player"
-                fill
-                className="object-cover object-center"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-mesa-dark/60 via-transparent to-transparent" />
-            </div>
+            {/* Quote content — first on mobile, first on desktop */}
+            <div className="flex-1 order-first">
 
-            {/* Quote content */}
-            <div className="flex-1">
               <p className="font-[family-name:var(--font-fira-cond)] text-2xl md:text-3xl font-black tracking-wide text-white mb-8">
                 Built From Experience<span className="text-mesa-accent"> — </span>Designed for Real Growth.
               </p>
@@ -162,6 +152,17 @@ export default function LandingPage() {
                   Artemios Gavalas &mdash; Founder, Mesa Basketball Training
                 </p>
               </div>
+            </div>
+
+            {/* Photo — below quote on mobile, left side on desktop */}
+            <div className="relative w-full h-56 md:h-auto md:w-2/5 md:aspect-[4/5] rounded-2xl overflow-hidden flex-shrink-0 shadow-2xl order-last md:order-first">
+              <Image
+                src="/photos/grid4.jpg"
+                alt="Artemios Gavalas coaching a player"
+                fill
+                className="object-cover object-center"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-mesa-dark/60 via-transparent to-transparent" />
             </div>
 
           </div>
