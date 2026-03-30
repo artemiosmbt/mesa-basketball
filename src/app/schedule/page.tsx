@@ -1995,12 +1995,12 @@ export default function Home() {
       </section>
 
       {/* Sticky group session registration bar */}
-      {groupPricing.count >= 2 && (
+      {groupPricing.count >= 1 && (
         <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-brown-700 bg-brown-900 px-6 py-3 shadow-2xl">
           <div className="mx-auto flex max-w-5xl items-center justify-between">
             <div>
               <p className="text-sm font-semibold text-white">
-                {groupPricing.count} sessions &times; ${groupPricing.unitPrice} = <span className="text-mesa-accent">${groupPricing.totalPrice}</span>
+                {groupPricing.count} session{groupPricing.count !== 1 ? "s" : ""} &times; ${groupPricing.unitPrice} = <span className="text-mesa-accent">${groupPricing.totalPrice}</span>
               </p>
               {groupPricing.savings > 0 && (
                 <p className="text-xs text-green-400">{groupPricing.discountLabel} — You save ${groupPricing.savings}!</p>
