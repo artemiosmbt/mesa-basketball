@@ -117,7 +117,7 @@ export async function sendRegistrationNotification(data: {
     to: data.email,
     replyTo: ARTEMI_EMAIL,
     subject: data.isFree
-      ? `FREE Session Confirmed — Mesa Basketball Training`
+      ? `Booking Confirmed — Mesa Basketball Training`
       : `Booking Confirmed — Mesa Basketball Training`,
     html: `
       <h2>You're booked!</h2>
