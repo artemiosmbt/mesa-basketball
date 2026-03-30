@@ -1113,7 +1113,7 @@ export default function Home() {
 
   // Auto-open group registration once sessions are restored and ready
   useEffect(() => {
-    if (!pendingGroupOpen || selectedSessionsForActiveGroup.length < 2) return;
+    if (!pendingGroupOpen || selectedSessionsForActiveGroup.length < 1) return;
     setPendingGroupOpen(false);
     openGroupRegistration();
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1355,7 +1355,7 @@ export default function Home() {
             </div>
           </div>
           <p className="mt-3 text-center text-brown-400">
-            Skill work in groups of up to 6 players. Select 2+ sessions to register — volume discounts available.
+            Skill work in groups of up to 6 players. Volume discounts available when booking multiple sessions.
           </p>
           <p className="mt-2 text-center text-xs text-brown-500">
             Groups are organized by grade as a guideline. If you play up or you&apos;re unsure which group fits best, contact Artemios at (631) 599-1280 or artemios@mesabasketballtraining.com — we&apos;ll find the right fit.
@@ -1557,12 +1557,7 @@ export default function Home() {
                                   {groupPricing.discountLabel} — You save ${groupPricing.savings}!
                                 </p>
                               )}
-                              {groupPricing.count < 2 && (
-                                <p className="text-xs text-yellow-400/80 mt-0.5">
-                                  Select at least 2 sessions to register
-                                </p>
-                              )}
-                              {groupPricing.count >= 2 && groupPricing.count < 4 && (
+                              {groupPricing.count >= 1 && groupPricing.count < 4 && (
                                 <p className="text-xs text-brown-500 mt-0.5">
                                   Add {4 - groupPricing.count} more for 10% off
                                 </p>
@@ -1575,7 +1570,7 @@ export default function Home() {
                             </div>
                             <button
                               onClick={openGroupRegistration}
-                              disabled={groupPricing.count < 2}
+                              disabled={groupPricing.count < 1}
                               className="rounded bg-mesa-accent px-4 py-2 text-sm font-semibold text-white transition hover:bg-yellow-600 disabled:opacity-40 disabled:cursor-not-allowed"
                             >
                               Register
