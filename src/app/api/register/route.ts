@@ -36,6 +36,9 @@ export async function POST(req: NextRequest) {
       // Weekly multi-session fields
       weeklySessions,
       weeklyTotalPrice,
+      // Camp multi-day fields
+      campSessions,
+      campTotalPrice,
     } = body;
 
     if (!parentName || !email || !phone || !kids || !type || !sessionDetails) {
@@ -109,6 +112,48 @@ export async function POST(req: NextRequest) {
       });
 
       return NextResponse.json({ success: true, count: weeklySessions.length });
+    }
+
+    // Handle camp multi-day registration
+    if (type === "camp" && campSessions && campSessions.length > 0) {
+      const referralCode = await generateUniqueReferralCode(parentName, email);
+
+      for (const session of campSessions) {
+        await addRegistrationWithRewards({
+          parentName,
+          email,
+          phone,
+          kids,
+          type: "camp",
+          sessionDetails: `${session.campName}${session.gradeGroup ? ` — ${session.gradeGroup}` : ""} — ${session.date} ${session.startTime}${session.endTime ? `-${session.endTime}` : ""} at ${session.location}`,
+          totalParticipants: totalParticipants || 1,
+          bookedDate: session.date,
+          bookedStartTime: session.startTime,
+          bookedEndTime: session.endTime || "",
+          bookedLocation: session.location,
+          referralCode,
+          isFree: false,
+          smsConsent: !!smsConsent,
+        });
+      }
+
+      const daysList = campSessions
+        .map((s: { date: string; startTime: string; endTime: string }) => `${s.date} ${s.startTime}${s.endTime ? `-${s.endTime}` : ""}`)
+        .join("<br/>");
+      const priceNote = campTotalPrice ? `<br/><strong>Total:</strong> ${campTotalPrice}` : "";
+      const firstSession = campSessions[0];
+
+      await sendRegistrationNotification({
+        parentName,
+        email,
+        phone,
+        kids,
+        type: "camp",
+        sessionDetails: `${firstSession.campName}${firstSession.gradeGroup ? ` — ${firstSession.gradeGroup}` : ""}<br/>Days registered (${campSessions.length}):<br/>${daysList}${priceNote}`,
+        totalParticipants: totalParticipants || 1,
+      });
+
+      return NextResponse.json({ success: true, count: campSessions.length });
     }
 
     const isPrivateType = type === "private" || type === "group-private";

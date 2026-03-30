@@ -20,6 +20,11 @@ export interface Camp {
   price: string;
   description: string;
   notify: boolean;
+  // multi-group camp fields (optional — col K-N)
+  gradeGroup: string;
+  earlyBirdPrice: string;
+  dropInPrice: string;
+  campDays: string[];
 }
 
 export interface PrivateSlot {
@@ -86,6 +91,10 @@ export async function getCamps(): Promise<Camp[]> {
     price: row[7] || "",
     description: row[8] || "",
     notify: (row[9] || "").toUpperCase() === "TRUE",
+    gradeGroup: row[10] || "",
+    earlyBirdPrice: row[11] || "",
+    dropInPrice: row[12] || "",
+    campDays: row[13] ? row[13].split(",").map((d) => d.trim()).filter(Boolean) : [],
   }));
 }
 

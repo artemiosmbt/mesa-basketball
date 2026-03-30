@@ -44,6 +44,24 @@ interface Camp {
   currentEnrolled: number;
   price: string;
   description: string;
+  gradeGroup: string;
+  earlyBirdPrice: string;
+  dropInPrice: string;
+  campDays: string[];
+}
+
+// Early bird ends March 31, 2026 end of day Eastern (April 1 04:00 UTC)
+function isEarlyBirdActive(): boolean {
+  return new Date() < new Date("2026-04-01T04:00:00Z");
+}
+
+function calcCampPrice(daysSelected: number, totalDays: number, camp: Camp): string {
+  if (daysSelected === 0) return "";
+  if (daysSelected === totalDays) {
+    return isEarlyBirdActive() && camp.earlyBirdPrice ? camp.earlyBirdPrice : camp.price;
+  }
+  const perDay = parseInt(camp.dropInPrice.replace(/\D/g, "")) || 100;
+  return `$${perDay * daysSelected}`;
 }
 
 interface PrivateSlot {
@@ -311,6 +329,9 @@ export default function Home() {
   const [groupEnrollment, setGroupEnrollment] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  // Camp day selection state
+  const [campSelectedDays, setCampSelectedDays] = useState<Set<string>>(new Set());
 
   // Group session selection state: key = "group|date|startTime"
   const [selectedGroupKeys, setSelectedGroupKeys] = useState<Set<string>>(new Set());
@@ -630,6 +651,15 @@ export default function Home() {
     setIsGroupRate(false);
     setUpsellExtra(0);
     setReferralCode("");
+    // Pre-select all days for camps with day selection
+    if (type === "camp") {
+      const camp = camps[sessionIndex];
+      if (camp?.campDays?.length > 0) {
+        setCampSelectedDays(new Set(camp.campDays));
+      } else {
+        setCampSelectedDays(new Set());
+      }
+    }
   }
 
   function closeModal() {
@@ -703,6 +733,55 @@ export default function Home() {
         setGroupEnrollment(fresh.groupEnrollment || {});
         setSubmitting(false);
         return;
+      }
+
+      // Camp multi-day registration
+      if (bookingType === "camp" && campSelectedDays.size > 0) {
+        const camp = camps[modal.sessionIndex];
+        if (camp?.campDays?.length > 0) {
+          const selectedDaysArr = camp.campDays.filter((d) => campSelectedDays.has(d));
+          const totalPrice = calcCampPrice(selectedDaysArr.length, camp.campDays.length, camp);
+          const campSessions = selectedDaysArr.map((day) => ({
+            date: day,
+            startTime: camp.time.split("-")[0]?.trim() || camp.time,
+            endTime: camp.time.split("-")[1]?.trim() || "",
+            location: camp.location,
+            campName: camp.name,
+            gradeGroup: camp.gradeGroup,
+          }));
+          const res = await fetch("/api/register", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              parentName,
+              email,
+              phone,
+              smsConsent,
+              kids: kidsStr,
+              type: "camp",
+              sessionDetails: modal.sessionDetails,
+              totalParticipants,
+              campSessions,
+              campTotalPrice: totalPrice,
+            }),
+          });
+          const result = await res.json();
+          if (!res.ok) {
+            setSubmitResult({ success: false, message: result.error || "Registration failed." });
+            setSubmitting(false);
+            return;
+          }
+          setSubmitResult({
+            success: true,
+            message: `Camp registration confirmed for ${selectedDaysArr.length} day${selectedDaysArr.length !== 1 ? "s" : ""}! A confirmation email has been sent to ${email}.`,
+          });
+          saveProfile();
+          setCampSelectedDays(new Set());
+          const fresh = await fetch("/api/schedule").then((r) => r.json());
+          setCamps(fresh.camps || []);
+          setSubmitting(false);
+          return;
+        }
       }
 
       // Adjust end time if upsell was accepted
@@ -1521,16 +1600,92 @@ export default function Home() {
             <p className="mt-8 text-center text-brown-500">No camps are currently open for registration. Check back soon or reach out to be notified when the next one is announced.</p>
           )}
 
-          <div className="mt-8 grid gap-6 md:grid-cols-2">
-            {camps.map((camp, i) => {
+          {(() => {
+            // Group camps by name
+            const campGroups: { name: string; camps: { camp: Camp; index: number }[] }[] = [];
+            const seen = new Map<string, number>();
+            camps.forEach((camp, i) => {
+              if (!seen.has(camp.name)) {
+                seen.set(camp.name, campGroups.length);
+                campGroups.push({ name: camp.name, camps: [] });
+              }
+              campGroups[seen.get(camp.name)!].camps.push({ camp, index: i });
+            });
+
+            return campGroups.map((group) => {
+              const isMultiGroup = group.camps.length > 1 || !!group.camps[0]?.camp.gradeGroup;
+              const firstCamp = group.camps[0].camp;
+              const earlyBird = isEarlyBirdActive();
+
+              if (isMultiGroup) {
+                return (
+                  <div key={group.name} className="mt-8 rounded-xl border border-brown-700 bg-brown-900/40 p-6">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <h3 className="text-xl font-bold text-mesa-accent">{group.name}</h3>
+                        <p className="text-sm text-brown-300 mt-0.5">
+                          {firstCamp.startDate}{firstCamp.endDate ? ` — ${firstCamp.endDate}` : ""} &bull; <LocationLink location={firstCamp.location} />
+                        </p>
+                      </div>
+                      <div className="flex flex-col items-end gap-1">
+                        {earlyBird && firstCamp.earlyBirdPrice ? (
+                          <>
+                            <span className="rounded-full bg-green-900/60 border border-green-700 px-3 py-1 text-sm font-bold text-green-400">
+                              Early Bird: {firstCamp.earlyBirdPrice}
+                            </span>
+                            <span className="text-xs text-brown-500 line-through">{firstCamp.price} after Mar 31</span>
+                          </>
+                        ) : (
+                          <span className="rounded-full bg-brown-800 px-3 py-1 text-sm font-semibold text-mesa-accent">{firstCamp.price}</span>
+                        )}
+                        {firstCamp.dropInPrice && (
+                          <span className="text-xs text-brown-400">{firstCamp.dropInPrice}/day drop-in</span>
+                        )}
+                      </div>
+                    </div>
+                    {firstCamp.description && <p className="mt-2 text-sm text-brown-400">{firstCamp.description}</p>}
+                    <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                      {group.camps.map(({ camp, index }) => {
+                        const spotsLeft = camp.maxSpots - camp.currentEnrolled;
+                        const full = spotsLeft <= 0;
+                        return (
+                          <div key={camp.id} className="rounded-lg border border-brown-600 bg-brown-800/50 p-4 flex flex-col gap-2">
+                            <p className="font-semibold text-white text-sm">{camp.gradeGroup}</p>
+                            <p className="text-xs text-brown-400">{camp.time}</p>
+                            <span className={`text-xs font-medium ${full ? "text-red-400" : spotsLeft <= 3 ? "text-yellow-400" : "text-green-400"}`}>
+                              {full ? "FULL" : `${spotsLeft} spot${spotsLeft !== 1 ? "s" : ""} left`}
+                            </span>
+                            {!full && (
+                              <button
+                                onClick={() => openModal("camp", index, `${camp.name} — ${camp.gradeGroup} at ${camp.location}`)}
+                                className="mt-auto rounded bg-mesa-accent px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-yellow-600"
+                              >
+                                Register
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {firstCamp.campDays.length > 0 && (
+                      <p className="mt-3 text-xs text-brown-500">
+                        Select any combination of days — {firstCamp.dropInPrice}/day drop-in, or {earlyBird && firstCamp.earlyBirdPrice ? `${firstCamp.earlyBirdPrice} early bird` : firstCamp.price} for all {firstCamp.campDays.length} days.
+                      </p>
+                    )}
+                  </div>
+                );
+              }
+
+              // Original single-card layout
+              const { camp, index } = group.camps[0];
               const spotsLeft = camp.maxSpots - camp.currentEnrolled;
               const full = spotsLeft <= 0;
               return (
-                <div key={camp.id} className="rounded-xl border border-brown-700 bg-brown-900/40 p-6">
+                <div key={camp.id} className="mt-8 rounded-xl border border-brown-700 bg-brown-900/40 p-6">
                   <div className="flex items-start justify-between">
                     <div>
                       <h3 className="text-lg font-bold text-mesa-accent">{camp.name}</h3>
-                      <p className="text-sm text-brown-300">{camp.startDate} — {camp.endDate}</p>
+                      <p className="text-sm text-brown-300">{camp.startDate}{camp.endDate ? ` — ${camp.endDate}` : ""}</p>
                     </div>
                     <span className="rounded-full bg-brown-800 px-3 py-1 text-sm font-semibold text-mesa-accent">
                       {camp.price}
@@ -1544,7 +1699,7 @@ export default function Home() {
                     </span>
                     {!full && (
                       <button
-                        onClick={() => openModal("camp", i, `${camp.name} (${camp.startDate} — ${camp.endDate}) at ${camp.location}`)}
+                        onClick={() => openModal("camp", index, `${camp.name} (${camp.startDate}${camp.endDate ? ` — ${camp.endDate}` : ""}) at ${camp.location}`)}
                         className="rounded bg-mesa-accent px-4 py-2 text-sm font-semibold text-white transition hover:bg-yellow-600"
                       >
                         Register
@@ -1553,8 +1708,8 @@ export default function Home() {
                   </div>
                 </div>
               );
-            })}
-          </div>
+            });
+          })()}
         </div>
       </section>
 
@@ -1947,6 +2102,59 @@ export default function Home() {
             </div>
             <p className="mt-1 text-sm text-brown-400">{modal.sessionDetails}</p>
 
+            {/* Camp day selector */}
+            {modal.type === "camp" && !submitResult?.success && (() => {
+              const camp = camps[modal.sessionIndex];
+              if (!camp?.campDays?.length) return null;
+              const earlyBird = isEarlyBirdActive();
+              const selectedCount = campSelectedDays.size;
+              const totalDays = camp.campDays.length;
+              const price = calcCampPrice(selectedCount, totalDays, camp);
+              return (
+                <div className="mt-3 rounded-lg border border-brown-700 bg-brown-800/50 p-4">
+                  <p className="text-xs font-semibold text-brown-300 mb-2">Select the days you&apos;d like to attend:</p>
+                  <div className="space-y-2">
+                    {camp.campDays.map((day) => (
+                      <label key={day} className="flex items-center gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={campSelectedDays.has(day)}
+                          onChange={(e) => {
+                            setCampSelectedDays((prev) => {
+                              const next = new Set(prev);
+                              if (e.target.checked) next.add(day); else next.delete(day);
+                              return next;
+                            });
+                          }}
+                          className="h-4 w-4 rounded accent-mesa-accent"
+                        />
+                        <span className="text-sm text-white">{day}</span>
+                      </label>
+                    ))}
+                  </div>
+                  {selectedCount > 0 && (
+                    <div className="mt-3 border-t border-brown-700 pt-3">
+                      <p className="text-sm font-semibold text-mesa-accent">
+                        {selectedCount === totalDays ? "All 4 days" : `${selectedCount} day${selectedCount !== 1 ? "s" : ""}`}: {price}
+                        {selectedCount === totalDays && earlyBird && camp.earlyBirdPrice && (
+                          <span className="ml-2 text-xs text-green-400">(Early Bird — ends Mar 31)</span>
+                        )}
+                      </p>
+                      {selectedCount < totalDays && camp.dropInPrice && (
+                        <p className="text-xs text-brown-400 mt-0.5">
+                          Drop-in rate: {camp.dropInPrice}/day &bull; All {totalDays} days: {earlyBird && camp.earlyBirdPrice ? `${camp.earlyBirdPrice} (EB) / ${camp.price}` : camp.price}
+                        </p>
+                      )}
+                      <p className="text-xs text-brown-500 mt-1">Payment in person — Cash, Venmo, or Zelle</p>
+                    </div>
+                  )}
+                  {selectedCount === 0 && (
+                    <p className="mt-2 text-xs text-yellow-500">Select at least one day to continue.</p>
+                  )}
+                </div>
+              );
+            })()}
+
             {/* Weekly sessions list */}
             {modal.type === "weekly" && modal.selectedGroupSessions && modal.selectedGroupSessions.length > 0 && !submitResult?.success && (
               <div className="mt-3 rounded-lg border border-brown-700 bg-brown-800/50 p-3">
@@ -2269,7 +2477,7 @@ export default function Home() {
 
                 <button
                   type="submit"
-                  disabled={submitting}
+                  disabled={submitting || (modal.type === "camp" && camps[modal.sessionIndex]?.campDays?.length > 0 && campSelectedDays.size === 0)}
                   className="w-full rounded-lg bg-mesa-accent py-3 font-semibold text-white transition hover:bg-yellow-600 disabled:opacity-50"
                 >
                   {submitting ? "Submitting..." : "Confirm Registration"}
