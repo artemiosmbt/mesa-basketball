@@ -148,24 +148,30 @@ export default function LandingPage() {
             <p className="text-sm font-semibold uppercase tracking-widest text-mesa-accent mb-2">The Approach</p>
             <h2 className="font-[family-name:var(--font-fira-cond)] text-4xl font-black tracking-wide">A DIFFERENT STANDARD OF TRAINING</h2>
           </div>
-          <div className="grid gap-8 md:grid-cols-3 text-center">
+          <div className="divide-y divide-brown-800">
             {[
               {
+                num: "01",
                 heading: "We Teach the Game — Not Just Drills",
                 body: "Players develop basketball IQ, decision-making, and real game awareness so skills translate under pressure.",
               },
               {
+                num: "02",
                 heading: "Real Development. Real Results.",
                 body: "No gimmicks. No wasted reps. Every session is designed for measurable improvement in skill, confidence, and performance.",
               },
               {
+                num: "03",
                 heading: "Built Beyond Basketball",
                 body: "We train discipline, focus, and resilience, because great players are built mentally as much as physically.",
               },
             ].map((item) => (
-              <div key={item.heading} className="rounded-xl border border-brown-700 bg-brown-900/40 px-6 py-8">
-                <p className="font-[family-name:var(--font-fira-cond)] text-xl font-black tracking-wide text-mesa-accent mb-3 leading-snug">{item.heading}</p>
-                <p className="text-sm text-brown-400 leading-relaxed">{item.body}</p>
+              <div key={item.heading} className="flex items-start gap-6 md:gap-10 py-8">
+                <span className="font-[family-name:var(--font-fira-cond)] text-4xl md:text-5xl font-black text-brown-700 leading-none flex-shrink-0 w-14 text-right">{item.num}</span>
+                <div>
+                  <p className="font-[family-name:var(--font-fira-cond)] text-xl md:text-2xl font-black tracking-wide text-white mb-2 leading-snug">{item.heading}</p>
+                  <p className="text-sm text-brown-400 leading-relaxed">{item.body}</p>
+                </div>
               </div>
             ))}
           </div>
