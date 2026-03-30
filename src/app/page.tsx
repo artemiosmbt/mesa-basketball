@@ -69,7 +69,7 @@ export default function LandingPage() {
             src="/photos/grid2.jpg"
             alt="Mesa Basketball Training session"
             fill
-            className="object-cover object-[center_35%]"
+            className="object-cover object-left md:object-center"
             priority
           />
           {/* Gradient overlays for readability */}
@@ -245,7 +245,7 @@ export default function LandingPage() {
                     src={item.photo}
                     alt={item.photoAlt}
                     fill
-                    className={`object-cover group-hover:scale-105 transition-transform duration-500 ${item.title === "Group Training Sessions" ? "object-top" : "object-center"}`}
+                    className={`object-cover group-hover:scale-105 transition-transform duration-500 ${item.title === "Group Training Sessions" ? "object-[center_30%]" : "object-center"}`}
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-brown-900/90 via-brown-900/20 to-transparent" />
                 </div>
