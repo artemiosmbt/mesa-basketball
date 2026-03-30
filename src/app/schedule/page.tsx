@@ -1593,13 +1593,6 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Divider */}
-      <div className="flex items-center justify-center gap-3 py-2">
-        <div className="h-px w-16 bg-mesa-accent/25" />
-        <div className="h-1.5 w-1.5 rotate-45 bg-mesa-accent/50" />
-        <div className="h-px w-16 bg-mesa-accent/25" />
-      </div>
-
       {/* Photo divider before camps */}
       <div className="relative h-64 md:h-[26rem] overflow-hidden">
         <Image
@@ -1731,13 +1724,6 @@ export default function Home() {
           })()}
         </div>
       </section>
-
-      {/* Divider */}
-      <div className="flex items-center justify-center gap-3 py-2">
-        <div className="h-px w-16 bg-mesa-accent/25" />
-        <div className="h-1.5 w-1.5 rotate-45 bg-mesa-accent/50" />
-        <div className="h-px w-16 bg-mesa-accent/25" />
-      </div>
 
       {/* Photo divider before private */}
       <div className="relative h-64 md:h-[26rem] overflow-hidden">
