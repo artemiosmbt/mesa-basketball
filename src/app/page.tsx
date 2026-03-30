@@ -277,13 +277,13 @@ export default function LandingPage() {
           </div>
 
           {/* Stats bar */}
-          <div className="rounded-2xl border border-brown-700 bg-brown-900/30 grid grid-cols-3 divide-x divide-brown-700 text-center py-10 mb-6">
+          <div className="rounded-2xl border border-brown-700 bg-brown-900/30 grid grid-cols-1 divide-y divide-brown-700 md:grid-cols-3 md:divide-y-0 md:divide-x text-center py-4 md:py-10 mb-6">
             {[
               { stat: "5+", label: "Years Training Athletes" },
               { stat: "Age 4–Pro", label: "Athletes Trained" },
               { stat: "D1 + Pro", label: "Playing Pedigree" },
             ].map((item) => (
-              <div key={item.label}>
+              <div key={item.label} className="py-6 md:py-0">
                 <p className="font-[family-name:var(--font-fira-cond)] text-4xl md:text-5xl font-black text-mesa-accent">{item.stat}</p>
                 <p className="mt-2 text-xs text-brown-400 font-medium uppercase tracking-wide">{item.label}</p>
               </div>
