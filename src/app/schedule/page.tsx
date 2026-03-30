@@ -1645,27 +1645,18 @@ export default function Home() {
                     </div>
                     {firstCamp.description && <p className="mt-2 text-sm text-brown-400">{firstCamp.description}</p>}
                     <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                      {group.camps.map(({ camp, index }) => {
-                        const spotsLeft = camp.maxSpots - camp.currentEnrolled;
-                        const full = spotsLeft <= 0;
-                        return (
-                          <div key={camp.id} className="rounded-lg border border-brown-600 bg-brown-800/50 p-4 flex flex-col gap-2">
-                            <p className="font-semibold text-white text-sm">{camp.gradeGroup}</p>
-                            <p className="text-xs text-brown-400">{camp.time}</p>
-                            <span className={`text-xs font-medium ${full ? "text-red-400" : spotsLeft <= 3 ? "text-yellow-400" : "text-green-400"}`}>
-                              {full ? "FULL" : `${spotsLeft} spot${spotsLeft !== 1 ? "s" : ""} left`}
-                            </span>
-                            {!full && (
-                              <button
-                                onClick={() => openModal("camp", index, `${camp.name} — ${camp.gradeGroup} at ${camp.location}`)}
-                                className="mt-auto rounded bg-mesa-accent px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-yellow-600"
-                              >
-                                Register
-                              </button>
-                            )}
-                          </div>
-                        );
-                      })}
+                      {group.camps.map(({ camp, index }) => (
+                        <div key={camp.id} className="rounded-lg border border-brown-600 bg-brown-800/50 p-4 flex flex-col gap-2">
+                          <p className="font-semibold text-white text-sm">{camp.gradeGroup}</p>
+                          <p className="text-xs text-brown-400">{camp.time}</p>
+                          <button
+                            onClick={() => openModal("camp", index, `${camp.name} — ${camp.gradeGroup} at ${camp.location}`)}
+                            className="mt-auto rounded bg-mesa-accent px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-yellow-600"
+                          >
+                            Register
+                          </button>
+                        </div>
+                      ))}
                     </div>
                     {firstCamp.campDays.length > 0 && (
                       <p className="mt-3 text-xs text-brown-500">
@@ -2114,23 +2105,34 @@ export default function Home() {
                 <div className="mt-3 rounded-lg border border-brown-700 bg-brown-800/50 p-4">
                   <p className="text-xs font-semibold text-brown-300 mb-2">Select the days you&apos;d like to attend:</p>
                   <div className="space-y-2">
-                    {camp.campDays.map((day) => (
-                      <label key={day} className="flex items-center gap-3 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={campSelectedDays.has(day)}
-                          onChange={(e) => {
-                            setCampSelectedDays((prev) => {
-                              const next = new Set(prev);
-                              if (e.target.checked) next.add(day); else next.delete(day);
-                              return next;
-                            });
-                          }}
-                          className="h-4 w-4 rounded accent-mesa-accent"
-                        />
-                        <span className="text-sm text-white">{day}</span>
-                      </label>
-                    ))}
+                    {camp.campDays.map((day) => {
+                      const dayStartTime = camp.time.split("-")[0]?.trim() || camp.time;
+                      const enrolled = groupEnrollment[`${day}|${dayStartTime}`] || 0;
+                      const spotsLeft = camp.maxSpots - enrolled;
+                      const dayFull = spotsLeft <= 0;
+                      return (
+                        <label key={day} className={`flex items-center gap-3 ${dayFull ? "cursor-not-allowed opacity-50" : "cursor-pointer"}`}>
+                          <input
+                            type="checkbox"
+                            checked={campSelectedDays.has(day)}
+                            disabled={dayFull}
+                            onChange={(e) => {
+                              if (dayFull) return;
+                              setCampSelectedDays((prev) => {
+                                const next = new Set(prev);
+                                if (e.target.checked) next.add(day); else next.delete(day);
+                                return next;
+                              });
+                            }}
+                            className="h-4 w-4 rounded accent-mesa-accent"
+                          />
+                          <span className="text-sm text-white flex-1">{day}</span>
+                          <span className={`text-xs font-medium ${dayFull ? "text-red-400" : spotsLeft <= 2 ? "text-yellow-400" : "text-green-400"}`}>
+                            {dayFull ? "Full" : `${spotsLeft} spot${spotsLeft !== 1 ? "s" : ""} left`}
+                          </span>
+                        </label>
+                      );
+                    })}
                   </div>
                   {selectedCount > 0 && (
                     <div className="mt-3 border-t border-brown-700 pt-3">

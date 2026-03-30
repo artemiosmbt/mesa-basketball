@@ -439,7 +439,7 @@ export async function getGroupSessionEnrollment(): Promise<
   const { data, error } = await supabase
     .from("registrations")
     .select("booked_date, booked_start_time")
-    .eq("type", "weekly")
+    .in("type", ["weekly", "camp"])
     .eq("status", "confirmed")
     .not("booked_date", "is", null);
 
