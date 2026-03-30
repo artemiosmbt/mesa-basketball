@@ -69,7 +69,7 @@ export default function LandingPage() {
             src="/photos/grid2.jpg"
             alt="Mesa Basketball Training session"
             fill
-            className="object-cover object-left md:object-center"
+            className="object-cover object-right md:object-center"
             priority
           />
           {/* Gradient overlays for readability */}
