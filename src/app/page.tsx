@@ -148,30 +148,24 @@ export default function LandingPage() {
             <p className="text-sm font-semibold uppercase tracking-widest text-mesa-accent mb-2">The Approach</p>
             <h2 className="font-[family-name:var(--font-fira-cond)] text-4xl font-black tracking-wide">A DIFFERENT STANDARD OF TRAINING</h2>
           </div>
-          <div className="divide-y divide-brown-800">
+          <div className="grid gap-10 md:grid-cols-3">
             {[
               {
-                num: "01",
                 heading: "We Teach the Game — Not Just Drills",
                 body: "Players develop basketball IQ, decision-making, and real game awareness so skills translate under pressure.",
               },
               {
-                num: "02",
                 heading: "Real Development. Real Results.",
                 body: "No gimmicks. No wasted reps. Every session is designed for measurable improvement in skill, confidence, and performance.",
               },
               {
-                num: "03",
                 heading: "Built Beyond Basketball",
                 body: "We train discipline, focus, and resilience, because great players are built mentally as much as physically.",
               },
             ].map((item) => (
-              <div key={item.heading} className="flex items-start gap-6 md:gap-10 py-8">
-                <span className="font-[family-name:var(--font-fira-cond)] text-4xl md:text-5xl font-black text-brown-700 leading-none flex-shrink-0 w-14 text-right">{item.num}</span>
-                <div>
-                  <p className="font-[family-name:var(--font-fira-cond)] text-xl md:text-2xl font-black tracking-wide text-white mb-2 leading-snug">{item.heading}</p>
-                  <p className="text-sm text-brown-400 leading-relaxed">{item.body}</p>
-                </div>
+              <div key={item.heading} className="border-l-2 border-mesa-accent pl-5">
+                <p className="font-[family-name:var(--font-fira-cond)] text-xl font-black tracking-wide text-white mb-2 leading-snug">{item.heading}</p>
+                <p className="text-sm text-brown-400 leading-relaxed">{item.body}</p>
               </div>
             ))}
           </div>
@@ -283,7 +277,7 @@ export default function LandingPage() {
           </div>
 
           {/* Stats bar */}
-          <div className="grid grid-cols-3 gap-6 text-center mb-14">
+          <div className="rounded-2xl border border-brown-700 bg-brown-900/30 grid grid-cols-3 gap-6 text-center px-6 py-10 mb-6">
             {[
               { stat: "5+", label: "Years Training Athletes" },
               { stat: "Age 4–Pro", label: "Athletes Trained" },
@@ -294,6 +288,12 @@ export default function LandingPage() {
                 <p className="mt-2 text-xs text-brown-400 font-medium uppercase tracking-wide">{item.label}</p>
               </div>
             ))}
+          </div>
+
+          <div className="flex items-center gap-4 mb-10">
+            <div className="flex-1 h-px bg-brown-800" />
+            <p className="text-xs font-semibold uppercase tracking-widest text-brown-600">Who We Work With</p>
+            <div className="flex-1 h-px bg-brown-800" />
           </div>
 
           {/* Two columns */}
