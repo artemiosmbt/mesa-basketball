@@ -64,7 +64,7 @@ export default function LandingPage() {
       {/* Hero */}
       <section className="bg-gradient-to-br from-mesa-dark via-brown-900 to-brown-800">
 
-        {/* Mobile: photo with all text overlaid, fades into dark, buttons below */}
+        {/* Mobile: everything overlaid on photo, fades into dark */}
         <div className="md:hidden">
           <div className="relative w-full h-[105vw] overflow-hidden">
             <Image
@@ -76,11 +76,11 @@ export default function LandingPage() {
             />
             {/* Top darkening */}
             <div className="absolute inset-0 bg-gradient-to-b from-mesa-dark/50 via-transparent to-transparent" />
-            {/* Bottom fade — starts higher and uses two layers for a smoother dissolve */}
+            {/* Bottom fade */}
             <div className="absolute inset-x-0 bottom-0 h-3/5 bg-gradient-to-t from-mesa-dark via-mesa-dark/60 to-transparent" />
             <div className="absolute inset-x-0 bottom-0 h-1/4 bg-gradient-to-t from-mesa-dark to-transparent" />
-            {/* All text overlaid on photo */}
-            <div className="absolute inset-0 flex flex-col items-center justify-center px-6 text-center">
+            {/* All content overlaid */}
+            <div className="absolute inset-0 flex flex-col items-center justify-center px-6 text-center gap-0">
               <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-mesa-accent drop-shadow">
                 Long Island&apos;s Elite Basketball Training
               </p>
@@ -90,13 +90,10 @@ export default function LandingPage() {
               <p className="mt-4 max-w-xs text-brown-200 text-sm leading-relaxed drop-shadow">
                 Elite development for all levels — led by former D1 point guard and international athlete <span className="text-white font-semibold">Artemios Gavalas</span>.
               </p>
-            </div>
-          </div>
-          {/* Buttons below — same bg so the fade is seamless */}
-          <div className="px-6 pb-8 pt-2 text-center">
-            <div className="flex flex-wrap justify-center gap-4">
-              <Link href="/schedule#schedule" className="rounded-lg bg-mesa-accent px-8 py-3 font-semibold text-white hover:bg-yellow-600 transition">View Programs</Link>
-              <Link href="/about" className="rounded-lg border border-brown-600 px-8 py-3 font-semibold text-brown-300 hover:border-brown-400 hover:text-white transition">Meet the Trainer</Link>
+              <div className="mt-6 flex flex-wrap justify-center gap-3">
+                <Link href="/schedule#schedule" className="rounded-lg bg-mesa-accent px-7 py-2.5 font-semibold text-white hover:bg-yellow-600 transition text-sm">View Programs</Link>
+                <Link href="/about" className="rounded-lg border border-brown-500 px-7 py-2.5 font-semibold text-brown-300 hover:border-brown-400 hover:text-white transition text-sm">Meet the Trainer</Link>
+              </div>
             </div>
           </div>
         </div>
