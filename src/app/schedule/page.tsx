@@ -2275,6 +2275,8 @@ export default function Home() {
                           <option value="">Select grade...</option>
                           {(modal.type === "weekly"
                             ? getGradesForGroup(modal.sessionDetails.replace(/ — \d+ sessions?$/, ""))
+                            : modal.type === "camp" && camps[modal.sessionIndex]?.gradeGroup
+                            ? getGradesForGroup(camps[modal.sessionIndex].gradeGroup)
                             : ALL_GRADES
                           ).map((g) => (
                             <option key={g.value} value={g.value}>{g.label}</option>
