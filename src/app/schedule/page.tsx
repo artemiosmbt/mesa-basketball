@@ -1749,14 +1749,14 @@ export default function Home() {
         <div className="mx-auto max-w-5xl px-6">
           <h2 className="font-[family-name:var(--font-oswald)] text-center text-3xl font-bold tracking-wide">Private Sessions</h2>
           <div className="mt-4 flex flex-wrap justify-center gap-6">
-            <div className="rounded-lg border border-mesa-accent bg-brown-800/60 px-4 py-2 text-center">
+            <a href="#private-schedule" className="rounded-lg border border-mesa-accent bg-brown-800/60 px-4 py-2 text-center hover:bg-brown-700/60 hover:border-yellow-400 transition cursor-pointer">
               <p className="text-lg font-bold text-mesa-accent">$150 / 60 min</p>
               <p className="text-xs text-brown-400">Up to 3 participants</p>
-            </div>
-            <div className="rounded-lg border border-mesa-accent bg-brown-800/60 px-4 py-2 text-center">
+            </a>
+            <a href="#private-schedule" className="rounded-lg border border-mesa-accent bg-brown-800/60 px-4 py-2 text-center hover:bg-brown-700/60 hover:border-yellow-400 transition cursor-pointer">
               <p className="text-lg font-bold text-mesa-accent">$250 / 60 min</p>
               <p className="text-xs text-brown-400">Group Private (4+ players)</p>
-            </div>
+            </a>
           </div>
           <p className="mt-2 text-center text-sm text-brown-500">
             Payment in person — Cash, Venmo, or Zelle
@@ -1821,7 +1821,7 @@ export default function Home() {
 
           {/* Filters */}
           {timeWindows.length > 0 && (
-            <div className="relative mt-6">
+            <div id="private-schedule" className="relative mt-6">
               <div className="flex flex-wrap gap-4 items-center">
                 {/* Day dropdown */}
                 <div className="flex items-center gap-2">
