@@ -1599,12 +1599,12 @@ export default function Home() {
       </div>
 
       {/* Photo divider before camps */}
-      <div className="relative h-40 md:h-72 overflow-hidden">
+      <div className="relative h-64 md:h-80 overflow-hidden">
         <Image
           src="/photos/grid5.jpg"
           alt="Basketball camp training"
           fill
-          className="object-cover object-top md:object-center"
+          className="object-cover object-center"
         />
         <div className="absolute inset-0 bg-gradient-to-r from-mesa-dark/85 via-mesa-dark/50 to-mesa-dark/85" />
         <div className="absolute inset-0 flex items-center justify-center">
