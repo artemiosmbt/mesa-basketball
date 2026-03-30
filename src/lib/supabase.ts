@@ -180,7 +180,19 @@ export async function isNewClient(email: string, phone: string): Promise<boolean
   const normalizedPhone = phone.replace(/\D/g, "").slice(-10); // last 10 digits
   const normalizedEmail = email.toLowerCase().trim();
 
-  // Check by email
+  // Check existing_clients table (pre-launch clients added manually)
+  const { data: existingRows } = await supabase
+    .from("existing_clients")
+    .select("phone");
+
+  if (existingRows) {
+    for (const row of existingRows) {
+      const stored = (row.phone || "").replace(/\D/g, "").slice(-10);
+      if (stored && stored === normalizedPhone) return false;
+    }
+  }
+
+  // Check by email in registrations
   const { count: emailCount } = await supabase
     .from("registrations")
     .select("*", { count: "exact", head: true })
