@@ -73,7 +73,7 @@ export async function GET(req: NextRequest) {
   for (const phone of phonesToText) {
     try {
       await client.messages.create({
-        body: "Mesa Basketball: Don't forget to book your session this week! Reserve your spot at mesabasketballtraining.com. Reply STOP to opt out.",
+        body: "Mesa Basketball: Don't forget to book your group or individual session this week! Reserve your spot at mesabasketballtraining.com. Reply STOP to opt out.",
         from: process.env.TWILIO_PHONE_NUMBER,
         to: phone,
       });
