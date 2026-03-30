@@ -277,7 +277,7 @@ export default function LandingPage() {
           </div>
 
           {/* Stats bar */}
-          <div className="rounded-2xl border border-brown-700 bg-brown-900/30 grid grid-cols-3 gap-6 text-center px-6 py-10 mb-6">
+          <div className="rounded-2xl border border-brown-700 bg-brown-900/30 grid grid-cols-3 divide-x divide-brown-700 text-center py-10 mb-6">
             {[
               { stat: "5+", label: "Years Training Athletes" },
               { stat: "Age 4–Pro", label: "Athletes Trained" },
