@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import Image from "next/image";
 import LandingNav from "./LandingNav";
 
 export const metadata: Metadata = {
@@ -91,6 +92,32 @@ export default function LandingPage() {
         </div>
         {/* Subtle bottom fade */}
         <div className="absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t from-mesa-dark to-transparent" />
+      </section>
+
+      {/* Photo Grid */}
+      <section className="bg-mesa-dark py-10">
+        <div className="mx-auto max-w-6xl px-4">
+          <div className="grid grid-cols-3 gap-2 md:gap-3">
+            {[
+              { src: "/photos/grid1.jpg", alt: "One-on-one dribbling drill with young player" },
+              { src: "/photos/grid2.jpg", alt: "Trainer coaching athlete on shooting form" },
+              { src: "/photos/grid3.jpg", alt: "Group session with two players and trainer" },
+              { src: "/photos/grid4.jpg", alt: "Player working on ball handling" },
+              { src: "/photos/grid5.jpg", alt: "Group training session with boys" },
+              { src: "/photos/grid6.jpg", alt: "Trainer demonstrating dribbling to young girls" },
+            ].map((photo) => (
+              <div key={photo.src} className="relative aspect-[4/3] overflow-hidden rounded-lg">
+                <Image
+                  src={photo.src}
+                  alt={photo.alt}
+                  fill
+                  className="object-cover"
+                  sizes="(max-width: 768px) 33vw, 400px"
+                />
+              </div>
+            ))}
+          </div>
+        </div>
       </section>
 
       {/* Quote */}
