@@ -64,10 +64,10 @@ export default function AboutPage() {
       {/* Full-width training photo strip */}
       <div className="relative h-48 md:h-96 overflow-hidden">
         <Image
-          src="/photos/grid7.jpg"
-          alt="Artemios coaching shooting form"
+          src="/photos/grid3.jpg"
+          alt="Artemios coaching group ball handling drill"
           fill
-          className="object-cover object-center"
+          className="object-cover object-top"
         />
         <div className="absolute inset-0 bg-gradient-to-r from-mesa-dark/80 via-mesa-dark/40 to-mesa-dark/80" />
       </div>
@@ -102,10 +102,10 @@ export default function AboutPage() {
             {/* Photo alongside text — hidden on mobile, visible on desktop */}
             <div className="hidden md:block relative md:w-72 md:aspect-[3/4] rounded-xl overflow-hidden flex-shrink-0 shadow-xl">
               <Image
-                src="/photos/grid3.jpg"
-                alt="Artemios coaching group ball handling drill"
+                src="/photos/grid7.jpg"
+                alt="Artemios coaching shooting form"
                 fill
-                className="object-cover object-top"
+                className="object-cover object-center"
               />
               <div className="absolute inset-0 bg-gradient-to-t from-mesa-dark/50 via-transparent to-transparent" />
             </div>

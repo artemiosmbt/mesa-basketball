@@ -1320,7 +1320,7 @@ export default function Home() {
       </nav>
 
       {/* Page Header */}
-      <header className="relative border-b border-brown-800 overflow-hidden min-h-[180px] md:min-h-[260px]">
+      <header className="relative border-b border-brown-800 overflow-hidden min-h-[55vh] md:min-h-[65vh] flex items-end">
         <Image
           src="/photos/grid2.jpg"
           alt="Basketball training session"
@@ -1328,13 +1328,14 @@ export default function Home() {
           className="object-cover object-right md:object-center"
           priority
         />
-        <div className="absolute inset-0 bg-gradient-to-r from-mesa-dark/95 via-mesa-dark/85 to-mesa-dark/50 md:to-mesa-dark/60" />
-        <div className="relative mx-auto max-w-6xl px-6 py-12 md:py-20">
-          <p className="text-sm font-semibold uppercase tracking-widest text-mesa-accent mb-1">Mesa Basketball Training</p>
-          <h1 className="font-[family-name:var(--font-fira-cond)] text-3xl font-black tracking-wide md:text-5xl">
+        <div className="absolute inset-0 bg-gradient-to-t from-mesa-dark via-mesa-dark/60 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-r from-mesa-dark/60 via-transparent to-transparent" />
+        <div className="relative mx-auto max-w-6xl w-full px-6 py-10 md:py-16">
+          <p className="text-sm font-semibold uppercase tracking-widest text-mesa-accent mb-2">Mesa Basketball Training</p>
+          <h1 className="font-[family-name:var(--font-fira-cond)] text-4xl font-black tracking-wide md:text-6xl">
             SCHEDULE &amp; BOOK
           </h1>
-          <p className="mt-2 text-brown-400 text-sm">
+          <p className="mt-3 text-brown-300 text-sm max-w-md">
             Browse available sessions below and register online. Questions? Call or text{" "}
             <a href="tel:6315991280" className="text-mesa-accent hover:text-yellow-400">(631) 599-1280</a>.
           </p>
