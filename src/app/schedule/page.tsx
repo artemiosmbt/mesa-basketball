@@ -1280,12 +1280,14 @@ export default function Home() {
             <a href="/" onClick={() => setMobileMenuOpen(false)} className="block text-brown-600 hover:text-mesa-dark py-1">Home</a>
             <a href="/about" onClick={() => setMobileMenuOpen(false)} className="block text-brown-600 hover:text-mesa-dark py-1">About</a>
             <div>
-              <button onClick={() => setSchedulingOpen((o) => !o)} className="flex items-center justify-between w-full text-brown-600 hover:text-mesa-dark py-1">
-                Programs
-                <svg xmlns="http://www.w3.org/2000/svg" className={`h-3 w-3 transition-transform ${schedulingOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
+              <div className="flex items-center justify-between py-1">
+                <a href="#schedule" onClick={() => setMobileMenuOpen(false)} className="text-brown-600 hover:text-mesa-dark">Programs</a>
+                <button onClick={() => setSchedulingOpen((o) => !o)} className="p-1 text-brown-600 hover:text-mesa-dark">
+                  <svg xmlns="http://www.w3.org/2000/svg" className={`h-3 w-3 transition-transform ${schedulingOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+              </div>
               {schedulingOpen && (
                 <div className="ml-4 mt-1 space-y-1">
                   <a href="#schedule" onClick={() => setMobileMenuOpen(false)} className="block text-brown-500 hover:text-mesa-dark py-1">Group Sessions</a>
@@ -1320,12 +1322,12 @@ export default function Home() {
       </nav>
 
       {/* Page Header */}
-      <header className="relative border-b border-brown-800 overflow-hidden min-h-[55vh] md:min-h-[65vh] flex items-end">
+      <header className="relative border-b border-brown-800 overflow-hidden min-h-[38vh] md:min-h-[65vh] flex items-end">
         <Image
           src="/photos/grid5.jpg"
           alt="Basketball training session"
           fill
-          className="object-cover object-top md:object-center"
+          className="object-cover object-center"
           priority
         />
         <div className="absolute inset-0 bg-gradient-to-t from-mesa-dark via-mesa-dark/60 to-transparent" />
@@ -1599,7 +1601,7 @@ export default function Home() {
       </div>
 
       {/* Photo divider before camps */}
-      <div className="relative h-64 md:h-80 overflow-hidden">
+      <div className="relative h-64 md:h-[26rem] overflow-hidden">
         <Image
           src="/photos/grid10.jpg"
           alt="Basketball camp training"
@@ -1738,12 +1740,12 @@ export default function Home() {
       </div>
 
       {/* Photo divider before private */}
-      <div className="relative h-64 md:h-80 overflow-hidden">
+      <div className="relative h-64 md:h-[26rem] overflow-hidden">
         <Image
           src="/photos/grid3.jpg"
           alt="Private basketball training session"
           fill
-          className="object-cover object-top md:object-center"
+          className="object-cover object-top md:object-top"
         />
         <div className="absolute inset-0 bg-gradient-to-r from-mesa-dark/85 via-mesa-dark/50 to-mesa-dark/85" />
         <div className="absolute inset-0 flex items-center justify-center">

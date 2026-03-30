@@ -88,8 +88,8 @@ export default function AboutPage() {
                 No shortcuts. No gimmicks. Just consistent, intentional work that produces results on and off the court.
               </p>
             </div>
-            {/* Photo alongside text — hidden on mobile, visible on desktop */}
-            <div className="hidden md:block relative md:w-72 md:aspect-[3/4] rounded-xl overflow-hidden flex-shrink-0 shadow-xl">
+            {/* Photo alongside text */}
+            <div className="relative w-full h-56 md:h-auto md:w-72 md:aspect-[3/4] rounded-xl overflow-hidden flex-shrink-0 shadow-xl">
               <Image
                 src="/photos/grid7.jpg"
                 alt="Artemios coaching shooting form"
