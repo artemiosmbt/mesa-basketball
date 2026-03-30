@@ -74,8 +74,8 @@ export default function LandingPage() {
               className="object-cover object-center"
               priority
             />
-            {/* Top darkening */}
-            <div className="absolute inset-0 bg-gradient-to-b from-mesa-dark/50 via-transparent to-transparent" />
+            {/* Dark blue tint over whole photo — same feel as desktop */}
+            <div className="absolute inset-0 bg-mesa-dark/55" />
             {/* Bottom fade — starts below shoes, just smooths the edge */}
             <div className="absolute inset-x-0 bottom-0 h-1/5 bg-gradient-to-t from-mesa-dark to-transparent" />
             {/* All content overlaid */}
@@ -91,7 +91,7 @@ export default function LandingPage() {
               </p>
               <div className="mt-6 flex flex-wrap justify-center gap-3">
                 <Link href="/schedule#schedule" className="rounded-lg bg-mesa-accent px-7 py-2.5 font-semibold text-white hover:bg-yellow-600 transition text-sm">View Programs</Link>
-                <Link href="/about" className="rounded-lg bg-[#1e3a5f] px-7 py-2.5 font-semibold text-white hover:bg-[#264a7a] transition text-sm">Meet the Trainer</Link>
+                <Link href="/about" className="rounded-lg border border-brown-500 px-7 py-2.5 font-semibold text-brown-300 hover:border-brown-400 hover:text-white transition text-sm">Meet the Trainer</Link>
               </div>
             </div>
           </div>
