@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useRef } from "react";
+import Image from "next/image";
 import { authClient, ADMIN_EMAIL } from "@/lib/auth";
 
 const LOCATION_LINKS: Record<string, { name: string; url: string }> = {
@@ -1319,10 +1320,18 @@ export default function Home() {
       </nav>
 
       {/* Page Header */}
-      <header className="border-b border-brown-800 bg-mesa-dark px-6 py-8">
-        <div className="mx-auto max-w-6xl">
+      <header className="relative border-b border-brown-800 overflow-hidden">
+        <Image
+          src="/photos/grid2.jpg"
+          alt="Basketball training session"
+          fill
+          className="object-cover object-center"
+          priority
+        />
+        <div className="absolute inset-0 bg-gradient-to-r from-mesa-dark/95 via-mesa-dark/80 to-mesa-dark/60" />
+        <div className="relative mx-auto max-w-6xl px-6 py-14 md:py-20">
           <p className="text-sm font-semibold uppercase tracking-widest text-mesa-accent mb-1">Mesa Basketball Training</p>
-          <h1 className="font-[family-name:var(--font-fira-cond)] text-3xl font-black tracking-wide md:text-4xl">
+          <h1 className="font-[family-name:var(--font-fira-cond)] text-3xl font-black tracking-wide md:text-5xl">
             SCHEDULE &amp; BOOK
           </h1>
           <p className="mt-2 text-brown-400 text-sm">
@@ -1586,6 +1595,22 @@ export default function Home() {
         <div className="h-px w-16 bg-mesa-accent/25" />
         <div className="h-1.5 w-1.5 rotate-45 bg-mesa-accent/50" />
         <div className="h-px w-16 bg-mesa-accent/25" />
+      </div>
+
+      {/* Photo divider before camps */}
+      <div className="relative h-52 md:h-72 overflow-hidden">
+        <Image
+          src="/photos/grid5.jpg"
+          alt="Basketball camp training"
+          fill
+          className="object-cover object-center"
+        />
+        <div className="absolute inset-0 bg-gradient-to-r from-mesa-dark/85 via-mesa-dark/50 to-mesa-dark/85" />
+        <div className="absolute inset-0 flex items-center justify-center">
+          <p className="font-[family-name:var(--font-fira-cond)] text-2xl md:text-4xl font-black tracking-widest text-white text-center px-6 drop-shadow-lg">
+            MINI CAMPS &amp; <span className="text-mesa-accent">INTENSIVE TRAINING</span>
+          </p>
+        </div>
       </div>
 
       {/* Mini Camps */}

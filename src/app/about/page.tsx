@@ -61,6 +61,17 @@ export default function AboutPage() {
         </div>
       </section>
 
+      {/* Full-width training photo strip */}
+      <div className="relative h-72 md:h-96 overflow-hidden">
+        <Image
+          src="/photos/grid7.jpg"
+          alt="Artemios coaching shooting form"
+          fill
+          className="object-cover object-center"
+        />
+        <div className="absolute inset-0 bg-gradient-to-r from-mesa-dark/80 via-mesa-dark/40 to-mesa-dark/80" />
+      </div>
+
       {/* Main content */}
       <main className="mx-auto max-w-4xl px-6 py-16 md:py-20 space-y-16">
 
@@ -69,23 +80,35 @@ export default function AboutPage() {
           <h2 className="font-[family-name:var(--font-fira-cond)] text-3xl font-black tracking-wide text-mesa-accent mb-6">
             WHY MESA EXISTS
           </h2>
-          <div className="space-y-5 text-brown-200 leading-relaxed text-[17px]">
-            <p>
-              I built Mesa out of a genuine love for the game and a deep commitment to helping others grow through it.
-              Training has always been a passion of mine, something I poured myself into throughout my playing career
-              and beyond. Long before Mesa had a name, I was in the gym during offseasons, working with players,
-              refining my craft as a trainer, and developing an approach that was intentional, creative, and results-driven.
-            </p>
-            <p>
-              What started as a passion grew into a program. Mesa is rooted in the same community I grew up in, and
-              that connection matters deeply to me. This is not a program built from a distance. It is built from the
-              same courts, the same neighborhoods, and the same hunger to be great.
-            </p>
-            <p>
-              Over five years and hundreds of athletes later, from 4-year-olds picking up a ball for the first time
-              to adult professionals sharpening their edge, Mesa has become a place where real development happens.
-              No shortcuts. No gimmicks. Just consistent, intentional work that produces results on and off the court.
-            </p>
+          <div className="flex flex-col md:flex-row gap-10 items-start">
+            <div className="space-y-5 text-brown-200 leading-relaxed text-[17px] flex-1">
+              <p>
+                I built Mesa out of a genuine love for the game and a deep commitment to helping others grow through it.
+                Training has always been a passion of mine, something I poured myself into throughout my playing career
+                and beyond. Long before Mesa had a name, I was in the gym during offseasons, working with players,
+                refining my craft as a trainer, and developing an approach that was intentional, creative, and results-driven.
+              </p>
+              <p>
+                What started as a passion grew into a program. Mesa is rooted in the same community I grew up in, and
+                that connection matters deeply to me. This is not a program built from a distance. It is built from the
+                same courts, the same neighborhoods, and the same hunger to be great.
+              </p>
+              <p>
+                Over five years and hundreds of athletes later, from 4-year-olds picking up a ball for the first time
+                to adult professionals sharpening their edge, Mesa has become a place where real development happens.
+                No shortcuts. No gimmicks. Just consistent, intentional work that produces results on and off the court.
+              </p>
+            </div>
+            {/* Photo alongside text */}
+            <div className="relative w-full md:w-72 aspect-[3/4] rounded-xl overflow-hidden flex-shrink-0 shadow-xl">
+              <Image
+                src="/photos/grid3.jpg"
+                alt="Artemios coaching group ball handling drill"
+                fill
+                className="object-cover object-top"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-mesa-dark/50 via-transparent to-transparent" />
+            </div>
           </div>
         </section>
 

@@ -114,12 +114,12 @@ export default function LandingPage() {
             {/* Photo */}
             <div className="relative w-full md:w-2/5 aspect-[4/5] rounded-2xl overflow-hidden flex-shrink-0 shadow-2xl">
               <Image
-                src="/photos/grid9.jpg"
-                alt="Artemios Gavalas coaching a group session"
+                src="/photos/grid4.jpg"
+                alt="Artemios Gavalas coaching a player"
                 fill
-                className="object-cover object-top"
+                className="object-cover object-center"
               />
-              <div className="absolute inset-0 bg-gradient-to-t from-mesa-dark/70 via-transparent to-transparent" />
+              <div className="absolute inset-0 bg-gradient-to-t from-mesa-dark/60 via-transparent to-transparent" />
             </div>
 
             {/* Quote content */}
@@ -173,7 +173,7 @@ export default function LandingPage() {
       </section>
 
       {/* Full-width action photo strip */}
-      <div className="relative h-72 md:h-96 overflow-hidden">
+      <div className="relative h-[28rem] md:h-[44rem] overflow-hidden">
         <Image
           src="/photos/grid8.jpg"
           alt="Basketball training in action"
@@ -222,8 +222,8 @@ export default function LandingPage() {
                 tag: "Intense. Immersive. High-Volume.",
                 desc: "Multi-day intensive camps built for rapid skill growth, competitive games, and confidence-building in a high-energy environment.",
                 anchor: "/schedule#camps",
-                photo: "/photos/grid5.jpg",
-                photoAlt: "Mini camp training session with young athletes",
+                photo: "/photos/grid9.jpg",
+                photoAlt: "Mini camp group training session",
               },
               {
                 title: "Private Training",
@@ -276,27 +276,18 @@ export default function LandingPage() {
             <h2 className="font-[family-name:var(--font-fira-cond)] text-4xl font-black tracking-wide">WHY MESA</h2>
           </div>
 
-          {/* Stats bar with photo background */}
-          <div className="relative rounded-2xl overflow-hidden mb-14">
-            <Image
-              src="/photos/grid4.jpg"
-              alt="Training session"
-              fill
-              className="object-cover object-center"
-            />
-            <div className="absolute inset-0 bg-mesa-dark/85" />
-            <div className="relative grid grid-cols-3 gap-6 text-center py-12 px-6">
-              {[
-                { stat: "5+", label: "Years Training Athletes" },
-                { stat: "Age 4–Pro", label: "Athletes Trained" },
-                { stat: "D1 + Pro", label: "Playing Pedigree" },
-              ].map((item) => (
-                <div key={item.label}>
-                  <p className="font-[family-name:var(--font-fira-cond)] text-4xl md:text-5xl font-black text-mesa-accent">{item.stat}</p>
-                  <p className="mt-2 text-xs text-brown-400 font-medium uppercase tracking-wide">{item.label}</p>
-                </div>
-              ))}
-            </div>
+          {/* Stats bar */}
+          <div className="grid grid-cols-3 gap-6 text-center mb-14">
+            {[
+              { stat: "5+", label: "Years Training Athletes" },
+              { stat: "Age 4–Pro", label: "Athletes Trained" },
+              { stat: "D1 + Pro", label: "Playing Pedigree" },
+            ].map((item) => (
+              <div key={item.label}>
+                <p className="font-[family-name:var(--font-fira-cond)] text-4xl md:text-5xl font-black text-mesa-accent">{item.stat}</p>
+                <p className="mt-2 text-xs text-brown-400 font-medium uppercase tracking-wide">{item.label}</p>
+              </div>
+            ))}
           </div>
 
           {/* Two columns */}
