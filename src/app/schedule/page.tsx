@@ -1280,9 +1280,9 @@ export default function Home() {
             <a href="/" onClick={() => setMobileMenuOpen(false)} className="block text-brown-600 hover:text-mesa-dark py-1">Home</a>
             <a href="/about" onClick={() => setMobileMenuOpen(false)} className="block text-brown-600 hover:text-mesa-dark py-1">About</a>
             <div>
-              <div className="flex items-center justify-between py-1">
-                <a href="#schedule" onClick={() => setMobileMenuOpen(false)} className="text-brown-600 hover:text-mesa-dark">Programs</a>
-                <button onClick={() => setSchedulingOpen((o) => !o)} className="p-1 text-brown-600 hover:text-mesa-dark">
+              <div className="flex items-center justify-between">
+                <a href="/schedule" onClick={() => setMobileMenuOpen(false)} className="flex-1 py-2 text-brown-600 hover:text-mesa-dark">Programs</a>
+                <button onClick={() => setSchedulingOpen((o) => !o)} className="px-3 py-2 text-brown-600 hover:text-mesa-dark" aria-label="Toggle programs submenu">
                   <svg xmlns="http://www.w3.org/2000/svg" className={`h-3 w-3 transition-transform ${schedulingOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
                   </svg>

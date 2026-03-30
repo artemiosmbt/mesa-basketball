@@ -114,9 +114,9 @@ export default function LandingNav() {
           <Link href="/" onClick={() => setMobileMenuOpen(false)} className="block text-brown-600 hover:text-mesa-dark py-1">Home</Link>
           <Link href="/about" onClick={() => setMobileMenuOpen(false)} className="block text-brown-600 hover:text-mesa-dark py-1">About</Link>
           <div>
-            <div className="flex items-center justify-between py-1">
-              <Link href="/schedule" onClick={() => setMobileMenuOpen(false)} className="flex-1 text-brown-600 hover:text-mesa-dark">Programs</Link>
-              <button onClick={() => setSchedulingOpen((o) => !o)} className="p-1 text-brown-600 hover:text-mesa-dark">
+            <div className="flex items-center justify-between">
+              <Link href="/schedule" onClick={() => setMobileMenuOpen(false)} className="flex-1 py-2 text-brown-600 hover:text-mesa-dark">Programs</Link>
+              <button onClick={() => setSchedulingOpen((o) => !o)} className="px-3 py-2 text-brown-600 hover:text-mesa-dark" aria-label="Toggle programs submenu">
                 {chevron(schedulingOpen)}
               </button>
             </div>
