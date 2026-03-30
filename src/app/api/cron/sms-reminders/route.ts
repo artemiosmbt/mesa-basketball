@@ -8,11 +8,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Only run on Sundays (0 = Sunday)
   const now = new Date();
-  if (now.getUTCDay() !== 0) {
-    return NextResponse.json({ sent: 0, message: "Not Sunday, skipping" });
-  }
 
   // Upcoming week = tomorrow (Monday) through the following Sunday
   const monday = new Date(now);
