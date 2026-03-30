@@ -134,7 +134,7 @@ export default function LandingPage() {
       </section>
 
       {/* Quote — split layout with photo */}
-      <section className="bg-mesa-dark py-16 md:py-24">
+      <section className="bg-mesa-dark pt-28 pb-16 md:py-24">
         <div className="mx-auto max-w-6xl px-6">
           <div className="flex flex-col md:flex-row gap-10 md:gap-16 items-center">
 
