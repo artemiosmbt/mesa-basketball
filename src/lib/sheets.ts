@@ -94,7 +94,7 @@ export async function getCamps(): Promise<Camp[]> {
     gradeGroup: row[10] || "",
     earlyBirdPrice: row[11] || "",
     dropInPrice: row[12] || "",
-    campDays: row[13] ? row[13].split(",").map((d) => d.trim()).filter(Boolean) : [],
+    campDays: row[13] ? row[13].split("|").map((d) => d.trim()).filter(Boolean) : [],
   }));
 }
 
