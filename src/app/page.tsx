@@ -87,7 +87,7 @@ export default function LandingPage() {
               <h1 className="font-[family-name:var(--font-fira-cond)] text-5xl font-black tracking-wide leading-none drop-shadow-lg">
                 TRAIN WITH<br />PURPOSE.
               </h1>
-              <p className="mt-4 max-w-xs text-brown-200 text-sm leading-relaxed drop-shadow">
+              <p className="mt-10 max-w-xs text-brown-200 text-sm leading-relaxed drop-shadow">
                 Elite development for all levels — led by former D1 point guard and international athlete <span className="text-white font-semibold">Artemios Gavalas</span>.
               </p>
               <div className="mt-6 flex flex-wrap justify-center gap-3">
