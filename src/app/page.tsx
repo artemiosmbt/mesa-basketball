@@ -64,9 +64,9 @@ export default function LandingPage() {
       {/* Hero */}
       <section className="bg-gradient-to-br from-mesa-dark via-brown-900 to-brown-800">
 
-        {/* Mobile: photo with all text overlaid, buttons below */}
+        {/* Mobile: photo with all text overlaid, fades into dark, buttons below */}
         <div className="md:hidden">
-          <div className="relative w-full aspect-[4/3] overflow-hidden">
+          <div className="relative w-full h-[85vw] overflow-hidden">
             <Image
               src="/photos/grid2.jpg"
               alt="Mesa Basketball Training session"
@@ -74,7 +74,10 @@ export default function LandingPage() {
               className="object-cover object-center"
               priority
             />
-            <div className="absolute inset-0 bg-gradient-to-b from-mesa-dark/50 via-mesa-dark/20 to-mesa-dark/70" />
+            {/* Top + side darkening */}
+            <div className="absolute inset-0 bg-gradient-to-b from-mesa-dark/50 via-transparent to-transparent" />
+            {/* Bottom fade to mesa-dark — matches the section below */}
+            <div className="absolute inset-x-0 bottom-0 h-2/5 bg-gradient-to-t from-mesa-dark to-transparent" />
             {/* All text overlaid on photo */}
             <div className="absolute inset-0 flex flex-col items-center justify-center px-6 text-center">
               <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-mesa-accent drop-shadow">
@@ -88,8 +91,8 @@ export default function LandingPage() {
               </p>
             </div>
           </div>
-          {/* Buttons below photo */}
-          <div className="px-6 py-7 text-center">
+          {/* Buttons below — same bg so the fade is seamless */}
+          <div className="px-6 pb-8 pt-2 text-center">
             <div className="flex flex-wrap justify-center gap-4">
               <Link href="/schedule#schedule" className="rounded-lg bg-mesa-accent px-8 py-3 font-semibold text-white hover:bg-yellow-600 transition">View Programs</Link>
               <Link href="/about" className="rounded-lg border border-brown-600 px-8 py-3 font-semibold text-brown-300 hover:border-brown-400 hover:text-white transition">Meet the Trainer</Link>
