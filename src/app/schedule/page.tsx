@@ -1320,16 +1320,16 @@ export default function Home() {
       </nav>
 
       {/* Page Header */}
-      <header className="relative border-b border-brown-800 overflow-hidden">
+      <header className="relative border-b border-brown-800 overflow-hidden min-h-[180px] md:min-h-[260px]">
         <Image
           src="/photos/grid2.jpg"
           alt="Basketball training session"
           fill
-          className="object-cover object-center"
+          className="object-cover object-right md:object-center"
           priority
         />
-        <div className="absolute inset-0 bg-gradient-to-r from-mesa-dark/95 via-mesa-dark/80 to-mesa-dark/60" />
-        <div className="relative mx-auto max-w-6xl px-6 py-14 md:py-20">
+        <div className="absolute inset-0 bg-gradient-to-r from-mesa-dark/95 via-mesa-dark/85 to-mesa-dark/50 md:to-mesa-dark/60" />
+        <div className="relative mx-auto max-w-6xl px-6 py-12 md:py-20">
           <p className="text-sm font-semibold uppercase tracking-widest text-mesa-accent mb-1">Mesa Basketball Training</p>
           <h1 className="font-[family-name:var(--font-fira-cond)] text-3xl font-black tracking-wide md:text-5xl">
             SCHEDULE &amp; BOOK
@@ -1598,16 +1598,16 @@ export default function Home() {
       </div>
 
       {/* Photo divider before camps */}
-      <div className="relative h-52 md:h-72 overflow-hidden">
+      <div className="relative h-40 md:h-72 overflow-hidden">
         <Image
           src="/photos/grid5.jpg"
           alt="Basketball camp training"
           fill
-          className="object-cover object-center"
+          className="object-cover object-top md:object-center"
         />
         <div className="absolute inset-0 bg-gradient-to-r from-mesa-dark/85 via-mesa-dark/50 to-mesa-dark/85" />
         <div className="absolute inset-0 flex items-center justify-center">
-          <p className="font-[family-name:var(--font-fira-cond)] text-2xl md:text-4xl font-black tracking-widest text-white text-center px-6 drop-shadow-lg">
+          <p className="font-[family-name:var(--font-fira-cond)] text-xl md:text-4xl font-black tracking-wide md:tracking-widest text-white text-center px-6 drop-shadow-lg">
             MINI CAMPS &amp; <span className="text-mesa-accent">INTENSIVE TRAINING</span>
           </p>
         </div>

@@ -62,7 +62,7 @@ export default function LandingPage() {
       <LandingNav />
 
       {/* Hero — cinematic background photo */}
-      <section className="relative overflow-hidden min-h-[85vh] flex items-center">
+      <section className="relative overflow-hidden min-h-[70vh] md:min-h-[85vh] flex items-center">
         {/* Background photo */}
         <div className="absolute inset-0">
           <Image
@@ -111,8 +111,8 @@ export default function LandingPage() {
         <div className="mx-auto max-w-6xl px-6">
           <div className="flex flex-col md:flex-row gap-10 md:gap-16 items-center">
 
-            {/* Photo */}
-            <div className="relative w-full md:w-2/5 aspect-[4/5] rounded-2xl overflow-hidden flex-shrink-0 shadow-2xl">
+            {/* Photo — landscape on mobile, portrait on desktop */}
+            <div className="relative w-full h-56 md:h-auto md:w-2/5 md:aspect-[4/5] rounded-2xl overflow-hidden flex-shrink-0 shadow-2xl">
               <Image
                 src="/photos/grid4.jpg"
                 alt="Artemios Gavalas coaching a player"
@@ -173,17 +173,17 @@ export default function LandingPage() {
       </section>
 
       {/* Full-width action photo strip */}
-      <div className="relative h-[28rem] md:h-[44rem] overflow-hidden">
+      <div className="relative h-56 md:h-[44rem] overflow-hidden">
         <Image
           src="/photos/grid8.jpg"
           alt="Basketball training in action"
           fill
-          className="object-cover object-center"
+          className="object-cover object-top md:object-center"
         />
         <div className="absolute inset-0 bg-gradient-to-r from-mesa-dark/90 via-mesa-dark/50 to-mesa-dark/90" />
         <div className="absolute inset-0 flex items-center justify-center">
-          <p className="font-[family-name:var(--font-fira-cond)] text-3xl md:text-5xl font-black tracking-widest text-white text-center px-6 drop-shadow-lg">
-            EVERY REP.<span className="text-mesa-accent"> EVERY SESSION.</span><br />EVERY PLAYER.
+          <p className="font-[family-name:var(--font-fira-cond)] text-2xl md:text-5xl font-black tracking-wide md:tracking-widest text-white text-center px-6 drop-shadow-lg">
+            EVERY REP.<span className="text-mesa-accent"> EVERY SESSION.</span><br className="hidden md:block" /> EVERY PLAYER.
           </p>
         </div>
       </div>

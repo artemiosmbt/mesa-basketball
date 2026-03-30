@@ -62,7 +62,7 @@ export default function AboutPage() {
       </section>
 
       {/* Full-width training photo strip */}
-      <div className="relative h-72 md:h-96 overflow-hidden">
+      <div className="relative h-48 md:h-96 overflow-hidden">
         <Image
           src="/photos/grid7.jpg"
           alt="Artemios coaching shooting form"
@@ -99,8 +99,8 @@ export default function AboutPage() {
                 No shortcuts. No gimmicks. Just consistent, intentional work that produces results on and off the court.
               </p>
             </div>
-            {/* Photo alongside text */}
-            <div className="relative w-full md:w-72 aspect-[3/4] rounded-xl overflow-hidden flex-shrink-0 shadow-xl">
+            {/* Photo alongside text — hidden on mobile, visible on desktop */}
+            <div className="hidden md:block relative md:w-72 md:aspect-[3/4] rounded-xl overflow-hidden flex-shrink-0 shadow-xl">
               <Image
                 src="/photos/grid3.jpg"
                 alt="Artemios coaching group ball handling drill"
