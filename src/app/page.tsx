@@ -66,7 +66,7 @@ export default function LandingPage() {
         {/* Background photo */}
         <div className="absolute inset-0">
           <Image
-            src="/photos/grid10.jpg"
+            src="/photos/grid2.jpg"
             alt="Mesa Basketball Training session"
             fill
             className="object-cover object-center"

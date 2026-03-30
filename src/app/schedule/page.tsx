@@ -1322,10 +1322,10 @@ export default function Home() {
       {/* Page Header */}
       <header className="relative border-b border-brown-800 overflow-hidden min-h-[55vh] md:min-h-[65vh] flex items-end">
         <Image
-          src="/photos/grid2.jpg"
+          src="/photos/grid5.jpg"
           alt="Basketball training session"
           fill
-          className="object-cover object-right md:object-center"
+          className="object-cover object-top md:object-center"
           priority
         />
         <div className="absolute inset-0 bg-gradient-to-t from-mesa-dark via-mesa-dark/60 to-transparent" />
@@ -1601,7 +1601,7 @@ export default function Home() {
       {/* Photo divider before camps */}
       <div className="relative h-64 md:h-80 overflow-hidden">
         <Image
-          src="/photos/grid5.jpg"
+          src="/photos/grid10.jpg"
           alt="Basketball camp training"
           fill
           className="object-cover object-center"
