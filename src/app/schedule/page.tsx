@@ -1379,7 +1379,7 @@ export default function Home() {
           {loading && <p className="mt-8 text-center text-brown-400">Loading schedule...</p>}
           {error && <p className="mt-8 text-center text-red-400">{error}</p>}
 
-          <div id="group-schedule" className="mt-8 grid gap-6 md:grid-cols-2">
+          <div id="group-schedule" className="mt-8 grid gap-6 md:grid-cols-2 scroll-mt-24">
             {Object.entries(grouped).map(([group, sessions]) => {
               const futureSessions = sessions.filter(isFutureSession);
               if (futureSessions.length === 0) return null;
