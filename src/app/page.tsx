@@ -61,9 +61,23 @@ export default function LandingPage() {
       />
       <LandingNav />
 
-      {/* Hero */}
-      <section className="relative overflow-hidden bg-gradient-to-br from-mesa-dark via-brown-900 to-brown-800">
-        <div className="mx-auto max-w-6xl px-6 py-24 md:py-36">
+      {/* Hero — cinematic background photo */}
+      <section className="relative overflow-hidden min-h-[85vh] flex items-center">
+        {/* Background photo */}
+        <div className="absolute inset-0">
+          <Image
+            src="/photos/grid10.jpg"
+            alt="Mesa Basketball Training session"
+            fill
+            className="object-cover object-center"
+            priority
+          />
+          {/* Gradient overlays for readability */}
+          <div className="absolute inset-0 bg-gradient-to-br from-mesa-dark/95 via-mesa-dark/75 to-brown-900/60" />
+          <div className="absolute inset-0 bg-gradient-to-t from-mesa-dark via-transparent to-transparent" />
+        </div>
+
+        <div className="relative mx-auto max-w-6xl px-6 py-24 md:py-36 w-full">
           <div className="flex flex-col items-center text-center">
             <p className="mb-4 text-sm font-semibold uppercase tracking-widest text-mesa-accent">
               Long Island&apos;s Elite Basketball Training
@@ -90,49 +104,39 @@ export default function LandingPage() {
             </div>
           </div>
         </div>
-        {/* Subtle bottom fade */}
-        <div className="absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t from-mesa-dark to-transparent" />
       </section>
 
-      {/* Photo Grid */}
-      <section className="bg-mesa-dark py-10">
-        <div className="mx-auto max-w-6xl px-4">
-          <div className="grid grid-cols-3 gap-2 md:gap-3">
-            {[
-              { src: "/photos/grid1.jpg", alt: "One-on-one dribbling drill with young player" },
-              { src: "/photos/grid2.jpg", alt: "Trainer coaching athlete on shooting form" },
-              { src: "/photos/grid3.jpg", alt: "Group session with two players and trainer" },
-              { src: "/photos/grid4.jpg", alt: "Player working on ball handling" },
-              { src: "/photos/grid5.jpg", alt: "Group training session with boys" },
-              { src: "/photos/grid6.jpg", alt: "Trainer demonstrating dribbling to young girls" },
-            ].map((photo) => (
-              <div key={photo.src} className="relative aspect-[4/3] overflow-hidden rounded-lg">
-                <Image
-                  src={photo.src}
-                  alt={photo.alt}
-                  fill
-                  className="object-cover"
-                  sizes="(max-width: 768px) 33vw, 400px"
-                />
+      {/* Quote — split layout with photo */}
+      <section className="bg-mesa-dark py-16 md:py-24">
+        <div className="mx-auto max-w-6xl px-6">
+          <div className="flex flex-col md:flex-row gap-10 md:gap-16 items-center">
+
+            {/* Photo */}
+            <div className="relative w-full md:w-2/5 aspect-[4/5] rounded-2xl overflow-hidden flex-shrink-0 shadow-2xl">
+              <Image
+                src="/photos/grid9.jpg"
+                alt="Artemios Gavalas coaching a group session"
+                fill
+                className="object-cover object-top"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-mesa-dark/70 via-transparent to-transparent" />
+            </div>
+
+            {/* Quote content */}
+            <div className="flex-1">
+              <p className="font-[family-name:var(--font-fira-cond)] text-2xl md:text-3xl font-black tracking-wide text-white mb-8">
+                Built From Experience<span className="text-mesa-accent"> — </span>Designed for Real Growth.
+              </p>
+              <div className="border-l-4 border-mesa-accent pl-6">
+                <blockquote className="text-brown-200 text-xl md:text-2xl leading-relaxed italic">
+                  &ldquo;Mesa was built to give players access to the level of training, mindset, and mentorship that shaped my career. Everything I learned from some of the best programs and coaches in the world, I now bring directly to every athlete I work with. My goal is simple, pass that on to the next generation.&rdquo;
+                </blockquote>
+                <p className="mt-4 text-mesa-accent font-semibold text-sm uppercase tracking-widest">
+                  Artemios Gavalas &mdash; Founder, Mesa Basketball Training
+                </p>
               </div>
-            ))}
-          </div>
-        </div>
-      </section>
+            </div>
 
-      {/* Quote */}
-      <section className="bg-mesa-dark py-16 md:py-20">
-        <div className="mx-auto max-w-3xl px-6">
-          <p className="font-[family-name:var(--font-fira-cond)] text-2xl md:text-3xl font-black tracking-wide text-white mb-8">
-            Built From Experience<span className="text-mesa-accent"> — </span>Designed for Real Growth.
-          </p>
-          <div className="border-l-4 border-mesa-accent pl-6">
-            <blockquote className="text-brown-200 text-xl md:text-2xl leading-relaxed italic">
-              &ldquo;Mesa was built to give players access to the level of training, mindset, and mentorship that shaped my career. Everything I learned from some of the best programs and coaches in the world, I now bring directly to every athlete I work with. My goal is simple, pass that on to the next generation.&rdquo;
-            </blockquote>
-            <p className="mt-4 text-mesa-accent font-semibold text-sm uppercase tracking-widest">
-              Artemios Gavalas &mdash; Founder, Mesa Basketball Training
-            </p>
           </div>
         </div>
       </section>
@@ -168,6 +172,22 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* Full-width action photo strip */}
+      <div className="relative h-72 md:h-96 overflow-hidden">
+        <Image
+          src="/photos/grid8.jpg"
+          alt="Basketball training in action"
+          fill
+          className="object-cover object-center"
+        />
+        <div className="absolute inset-0 bg-gradient-to-r from-mesa-dark/90 via-mesa-dark/50 to-mesa-dark/90" />
+        <div className="absolute inset-0 flex items-center justify-center">
+          <p className="font-[family-name:var(--font-fira-cond)] text-3xl md:text-5xl font-black tracking-widest text-white text-center px-6 drop-shadow-lg">
+            EVERY REP.<span className="text-mesa-accent"> EVERY SESSION.</span><br />EVERY PLAYER.
+          </p>
+        </div>
+      </div>
+
       {/* The Name */}
       <section className="bg-brown-950 border-t border-brown-800 py-14 md:py-20">
         <div className="mx-auto max-w-2xl px-6 text-center">
@@ -178,7 +198,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* What We Offer */}
+      {/* What We Offer — cards with photos */}
       <section className="bg-gradient-to-b from-brown-950 to-mesa-dark border-t border-brown-800 py-16 md:py-24">
         <div className="mx-auto max-w-6xl px-6">
           <div className="text-center mb-12">
@@ -194,33 +214,52 @@ export default function LandingPage() {
                 tag: "Competitive. Collaborative. Consistent.",
                 desc: "Small group basketball training focused on skill development, game situations, and live competition. Perfect for players who want to improve while being pushed by others.",
                 anchor: "/schedule#schedule",
+                photo: "/photos/grid6.jpg",
+                photoAlt: "Group training session with young players",
               },
               {
                 title: "Mini Camps",
                 tag: "Intense. Immersive. High-Volume.",
                 desc: "Multi-day intensive camps built for rapid skill growth, competitive games, and confidence-building in a high-energy environment.",
                 anchor: "/schedule#camps",
+                photo: "/photos/grid5.jpg",
+                photoAlt: "Mini camp training session with young athletes",
               },
               {
                 title: "Private Training",
                 tag: "Personalized. 1-on-1. Targeted.",
                 desc: "Customized training programs built around your position, goals, and development needs.",
                 anchor: "/schedule#private",
+                photo: "/photos/grid1.jpg",
+                photoAlt: "One-on-one private basketball training session",
               },
             ].map((item) => (
               <Link
                 key={item.title}
                 href={item.anchor}
-                className="group rounded-xl border border-brown-700 bg-brown-900/40 px-7 py-8 hover:border-mesa-accent/60 hover:bg-brown-900/70 transition"
+                className="group rounded-xl border border-brown-700 bg-brown-900/40 overflow-hidden hover:border-mesa-accent/60 hover:bg-brown-900/70 transition"
               >
-                <p className="text-xs font-semibold text-mesa-accent mb-3 whitespace-nowrap">{item.tag}</p>
-                <p className="font-[family-name:var(--font-fira-cond)] text-2xl font-black tracking-wide text-white mb-3 group-hover:text-mesa-accent transition">
-                  {item.title}
-                </p>
-                <p className="text-sm text-brown-400 leading-relaxed">{item.desc}</p>
-                <p className="mt-5 text-sm font-semibold text-mesa-accent group-hover:text-yellow-400 transition">
-                  View &amp; Book &rarr;
-                </p>
+                {/* Photo header */}
+                <div className="relative h-48 overflow-hidden">
+                  <Image
+                    src={item.photo}
+                    alt={item.photoAlt}
+                    fill
+                    className="object-cover group-hover:scale-105 transition-transform duration-500"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-brown-900/90 via-brown-900/20 to-transparent" />
+                </div>
+                {/* Text */}
+                <div className="px-7 py-6">
+                  <p className="text-xs font-semibold text-mesa-accent mb-2 whitespace-nowrap">{item.tag}</p>
+                  <p className="font-[family-name:var(--font-fira-cond)] text-2xl font-black tracking-wide text-white mb-3 group-hover:text-mesa-accent transition">
+                    {item.title}
+                  </p>
+                  <p className="text-sm text-brown-400 leading-relaxed">{item.desc}</p>
+                  <p className="mt-5 text-sm font-semibold text-mesa-accent group-hover:text-yellow-400 transition">
+                    View &amp; Book &rarr;
+                  </p>
+                </div>
               </Link>
             ))}
           </div>
@@ -237,21 +276,30 @@ export default function LandingPage() {
             <h2 className="font-[family-name:var(--font-fira-cond)] text-4xl font-black tracking-wide">WHY MESA</h2>
           </div>
 
-          {/* Stats bar */}
-          <div className="grid grid-cols-3 gap-6 text-center mb-14">
-            {[
-              { stat: "5+", label: "Years Training Athletes" },
-              { stat: "Age 4–Pro", label: "Athletes Trained" },
-              { stat: "D1 + Pro", label: "Playing Pedigree" },
-            ].map((item) => (
-              <div key={item.label}>
-                <p className="font-[family-name:var(--font-fira-cond)] text-4xl md:text-5xl font-black text-mesa-accent">{item.stat}</p>
-                <p className="mt-2 text-xs text-brown-400 font-medium uppercase tracking-wide">{item.label}</p>
-              </div>
-            ))}
+          {/* Stats bar with photo background */}
+          <div className="relative rounded-2xl overflow-hidden mb-14">
+            <Image
+              src="/photos/grid4.jpg"
+              alt="Training session"
+              fill
+              className="object-cover object-center"
+            />
+            <div className="absolute inset-0 bg-mesa-dark/85" />
+            <div className="relative grid grid-cols-3 gap-6 text-center py-12 px-6">
+              {[
+                { stat: "5+", label: "Years Training Athletes" },
+                { stat: "Age 4–Pro", label: "Athletes Trained" },
+                { stat: "D1 + Pro", label: "Playing Pedigree" },
+              ].map((item) => (
+                <div key={item.label}>
+                  <p className="font-[family-name:var(--font-fira-cond)] text-4xl md:text-5xl font-black text-mesa-accent">{item.stat}</p>
+                  <p className="mt-2 text-xs text-brown-400 font-medium uppercase tracking-wide">{item.label}</p>
+                </div>
+              ))}
+            </div>
           </div>
 
-          {/* Three columns */}
+          {/* Two columns */}
           <div className="grid gap-8 md:grid-cols-2">
 
             {/* Who We Train */}
