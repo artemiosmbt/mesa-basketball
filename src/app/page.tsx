@@ -63,18 +63,18 @@ export default function LandingPage() {
 
       {/* Hero — cinematic background photo */}
       <section className="relative overflow-hidden min-h-[70vh] md:min-h-[85vh] flex items-center">
-        {/* Background photo — desktop only */}
-        <div className="absolute inset-0 hidden md:block">
+        {/* Background photo */}
+        <div className="absolute inset-0">
           <Image
             src="/photos/grid2.jpg"
             alt="Mesa Basketball Training session"
             fill
-            className="object-cover object-center"
+            className="object-contain md:object-cover object-center"
             priority
           />
         </div>
-        {/* Gradient overlays */}
-        <div className="absolute inset-0 bg-gradient-to-br from-mesa-dark/95 via-mesa-dark/75 to-brown-900/60" />
+        {/* Gradient overlays — lighter on mobile so contained image stays visible */}
+        <div className="absolute inset-0 bg-gradient-to-br from-mesa-dark/60 via-mesa-dark/30 to-transparent md:from-mesa-dark/95 md:via-mesa-dark/75 md:to-brown-900/60" />
         <div className="absolute inset-0 bg-gradient-to-t from-mesa-dark via-transparent to-transparent" />
 
         <div className="relative mx-auto max-w-6xl px-6 py-24 md:py-36 w-full">
