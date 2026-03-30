@@ -290,14 +290,8 @@ export default function LandingPage() {
             ))}
           </div>
 
-          <div className="flex items-center gap-4 mb-10">
-            <div className="flex-1 h-px bg-brown-800" />
-            <p className="text-xs font-semibold uppercase tracking-widest text-brown-600">Who We Work With</p>
-            <div className="flex-1 h-px bg-brown-800" />
-          </div>
-
           {/* Two columns */}
-          <div className="grid gap-8 md:grid-cols-2">
+          <div className="grid gap-8 md:grid-cols-2 mt-10">
 
             {/* Who We Train */}
             <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-6 py-8">
