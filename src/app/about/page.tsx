@@ -89,12 +89,12 @@ export default function AboutPage() {
               </p>
             </div>
             {/* Photo alongside text */}
-            <div className="relative w-full h-56 md:h-auto md:w-72 md:aspect-[3/4] rounded-xl overflow-hidden flex-shrink-0 shadow-xl">
+            <div className="relative w-full h-56 md:h-auto md:w-72 md:aspect-[3/4] rounded-xl overflow-hidden flex-shrink-0 shadow-xl bg-mesa-dark">
               <Image
                 src="/photos/grid7.jpg"
                 alt="Artemios coaching shooting form"
                 fill
-                className="object-cover object-center"
+                className="object-contain md:object-cover object-center"
               />
               <div className="absolute inset-0 bg-gradient-to-t from-mesa-dark/50 via-transparent to-transparent" />
             </div>

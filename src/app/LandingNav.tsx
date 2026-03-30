@@ -114,9 +114,12 @@ export default function LandingNav() {
           <Link href="/" onClick={() => setMobileMenuOpen(false)} className="block text-brown-600 hover:text-mesa-dark py-1">Home</Link>
           <Link href="/about" onClick={() => setMobileMenuOpen(false)} className="block text-brown-600 hover:text-mesa-dark py-1">About</Link>
           <div>
-            <button onClick={() => setSchedulingOpen((o) => !o)} className="flex items-center justify-between w-full text-brown-600 hover:text-mesa-dark py-1">
-              Programs {chevron(schedulingOpen)}
-            </button>
+            <div className="flex items-center justify-between py-1">
+              <Link href="/schedule" onClick={() => setMobileMenuOpen(false)} className="text-brown-600 hover:text-mesa-dark">Programs</Link>
+              <button onClick={() => setSchedulingOpen((o) => !o)} className="p-1 text-brown-600 hover:text-mesa-dark">
+                {chevron(schedulingOpen)}
+              </button>
+            </div>
             {schedulingOpen && (
               <div className="ml-4 mt-1 space-y-1">
                 <Link href="/schedule#schedule" onClick={() => setMobileMenuOpen(false)} className="block text-brown-500 hover:text-mesa-dark py-1">Group Sessions</Link>
