@@ -64,16 +64,37 @@ export default function LandingPage() {
       {/* Hero */}
       <section className="bg-gradient-to-br from-mesa-dark via-brown-900 to-brown-800">
 
-        {/* Mobile: landscape photo showing both people at natural ratio */}
-        <div className="relative md:hidden w-full aspect-[3/2] overflow-hidden">
-          <Image
-            src="/photos/grid2.jpg"
-            alt="Mesa Basketball Training session"
-            fill
-            className="object-cover object-center"
-            priority
-          />
-          <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-mesa-dark" />
+        {/* Mobile: photo with title overlaid, buttons below */}
+        <div className="md:hidden">
+          <div className="relative w-full aspect-[3/2] overflow-hidden">
+            <Image
+              src="/photos/grid2.jpg"
+              alt="Mesa Basketball Training session"
+              fill
+              className="object-cover object-center"
+              priority
+            />
+            <div className="absolute inset-0 bg-gradient-to-b from-mesa-dark/40 via-transparent to-mesa-dark/60" />
+            {/* Title overlaid on photo */}
+            <div className="absolute inset-0 flex flex-col items-center justify-center px-6 text-center">
+              <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-mesa-accent">
+                Long Island&apos;s Elite Basketball Training
+              </p>
+              <h1 className="font-[family-name:var(--font-fira-cond)] text-5xl font-black tracking-wide leading-none drop-shadow-lg">
+                TRAIN WITH<br />PURPOSE.
+              </h1>
+            </div>
+          </div>
+          {/* Buttons + subtitle below photo */}
+          <div className="px-6 py-8 text-center">
+            <p className="max-w-xs mx-auto text-brown-300 text-base leading-relaxed mb-6">
+              Elite development for all levels — led by former D1 point guard and international athlete <span className="text-white font-semibold">Artemios Gavalas</span>.
+            </p>
+            <div className="flex flex-wrap justify-center gap-4">
+              <Link href="/schedule#schedule" className="rounded-lg bg-mesa-accent px-8 py-3 font-semibold text-white hover:bg-yellow-600 transition">View Programs</Link>
+              <Link href="/about" className="rounded-lg border border-brown-600 px-8 py-3 font-semibold text-brown-300 hover:border-brown-400 hover:text-white transition">Meet the Trainer</Link>
+            </div>
+          </div>
         </div>
 
         {/* Desktop: cinematic full-bleed */}
@@ -108,22 +129,6 @@ export default function LandingPage() {
           </div>
         </div>
 
-        {/* Mobile: text below the photo */}
-        <div className="md:hidden px-6 py-10 text-center">
-          <p className="mb-4 text-sm font-semibold uppercase tracking-widest text-mesa-accent">
-            Long Island&apos;s Elite Basketball Training
-          </p>
-          <h1 className="font-[family-name:var(--font-fira-cond)] text-6xl font-black tracking-wide leading-none">
-            TRAIN WITH<br />PURPOSE.
-          </h1>
-          <p className="mt-6 max-w-xl mx-auto text-brown-300 text-lg leading-relaxed">
-            Elite development for all levels — led by former D1 point guard and international athlete <span className="text-white font-semibold">Artemios Gavalas</span>.
-          </p>
-          <div className="mt-8 flex flex-wrap justify-center gap-4">
-            <Link href="/schedule#schedule" className="rounded-lg bg-mesa-accent px-8 py-3 font-semibold text-white hover:bg-yellow-600 transition">View Programs</Link>
-            <Link href="/about" className="rounded-lg border border-brown-600 px-8 py-3 font-semibold text-brown-300 hover:border-brown-400 hover:text-white transition">Meet the Trainer</Link>
-          </div>
-        </div>
 
       </section>
 
