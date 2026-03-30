@@ -66,7 +66,7 @@ export default function LandingPage() {
 
         {/* Mobile: photo with all text overlaid, fades into dark, buttons below */}
         <div className="md:hidden">
-          <div className="relative w-full h-[85vw] overflow-hidden">
+          <div className="relative w-full h-[105vw] overflow-hidden">
             <Image
               src="/photos/grid2.jpg"
               alt="Mesa Basketball Training session"
@@ -74,10 +74,11 @@ export default function LandingPage() {
               className="object-cover object-center"
               priority
             />
-            {/* Top + side darkening */}
+            {/* Top darkening */}
             <div className="absolute inset-0 bg-gradient-to-b from-mesa-dark/50 via-transparent to-transparent" />
-            {/* Bottom fade to mesa-dark — matches the section below */}
-            <div className="absolute inset-x-0 bottom-0 h-2/5 bg-gradient-to-t from-mesa-dark to-transparent" />
+            {/* Bottom fade — starts higher and uses two layers for a smoother dissolve */}
+            <div className="absolute inset-x-0 bottom-0 h-3/5 bg-gradient-to-t from-mesa-dark via-mesa-dark/60 to-transparent" />
+            <div className="absolute inset-x-0 bottom-0 h-1/4 bg-gradient-to-t from-mesa-dark to-transparent" />
             {/* All text overlaid on photo */}
             <div className="absolute inset-0 flex flex-col items-center justify-center px-6 text-center">
               <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-mesa-accent drop-shadow">
