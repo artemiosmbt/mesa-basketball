@@ -1,5 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sendRegistrationNotification } from "@/lib/email";
+import twilio from "twilio";
+
+function formatPhone(phone: string): string {
+  const digits = phone.replace(/\D/g, "");
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
+  return `+${digits}`;
+}
+
+async function sendConfirmationSMS(phone: string, message: string) {
+  try {
+    const accountSid = process.env.TWILIO_ACCOUNT_SID;
+    const authToken = process.env.TWILIO_AUTH_TOKEN;
+    const from = process.env.TWILIO_PHONE_NUMBER;
+    if (!accountSid || !authToken || !from) return;
+    const client = twilio(accountSid, authToken);
+    await client.messages.create({ body: message, from, to: formatPhone(phone) });
+  } catch (err) {
+    console.error("SMS confirmation failed:", err);
+  }
+}
 import {
   addRegistrationWithRewards,
   isNewClient,
@@ -111,6 +132,10 @@ export async function POST(req: NextRequest) {
         totalParticipants: totalParticipants || 1,
       });
 
+      if (smsConsent) {
+        await sendConfirmationSMS(phone, `Mesa Basketball: You're registered for ${weeklySessions.length} group session${weeklySessions.length !== 1 ? "s" : ""}! Check your email for details. Reply STOP to opt out.`);
+      }
+
       return NextResponse.json({ success: true, count: weeklySessions.length });
     }
 
@@ -152,6 +177,11 @@ export async function POST(req: NextRequest) {
         sessionDetails: `${firstSession.campName}${firstSession.gradeGroup ? ` — ${firstSession.gradeGroup}` : ""}<br/>Days registered (${campSessions.length}):<br/>${daysList}${priceNote}`,
         totalParticipants: totalParticipants || 1,
       });
+
+      if (smsConsent) {
+        const priceText = campTotalPrice ? ` Total: ${campTotalPrice}.` : "";
+        await sendConfirmationSMS(phone, `Mesa Basketball: Camp registration confirmed for ${campSessions.length} day${campSessions.length !== 1 ? "s" : ""}!${priceText} Check your email for details. Reply STOP to opt out.`);
+      }
 
       return NextResponse.json({ success: true, count: campSessions.length });
     }
@@ -247,6 +277,11 @@ export async function POST(req: NextRequest) {
         packageType,
         referralCode: isPrivateType ? referralCode : undefined,
       });
+
+      if (smsConsent && !emailOnly) {
+        const typeLabel = isPrivateType ? "private session" : "session";
+        await sendConfirmationSMS(phone, `Mesa Basketball: Your ${typeLabel} is confirmed! Check your email for details. Reply STOP to opt out.`);
+      }
     }
 
     return NextResponse.json({ success: true, isFree });

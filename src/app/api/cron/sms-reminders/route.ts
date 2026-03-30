@@ -2,13 +2,24 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import twilio from "twilio";
 
+function formatPhone(phone: string): string {
+  const digits = phone.replace(/\D/g, "");
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
+  return `+${digits}`;
+}
+
 export async function GET(req: NextRequest) {
   const authHeader = req.headers.get("authorization");
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // Only run on Sundays (0 = Sunday)
   const now = new Date();
+  if (now.getUTCDay() !== 0) {
+    return NextResponse.json({ sent: 0, message: "Not Sunday, skipping" });
+  }
 
   // Upcoming week = tomorrow (Monday) through the following Sunday
   const monday = new Date(now);
@@ -71,7 +82,7 @@ export async function GET(req: NextRequest) {
       await client.messages.create({
         body: "Mesa Basketball: Don't forget to book your group or individual session this week! Reserve your spot at mesabasketballtraining.com. Reply STOP to opt out.",
         from: process.env.TWILIO_PHONE_NUMBER,
-        to: phone,
+        to: formatPhone(phone),
       });
       sent++;
     } catch (err) {
