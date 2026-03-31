@@ -1157,7 +1157,7 @@ export default function Home() {
   function openGroupRegistration() {
     if (!userEmail) { showAuthPrompt({ kind: "group", savedGroup: activeGroup, savedKeys: Array.from(selectedGroupKeys) }); return; }
     const sessions = selectedSessionsForActiveGroup;
-    if (sessions.length < 2) return;
+    if (sessions.length < 1) return;
 
     const sessionList = sessions
       .map((s) => {
