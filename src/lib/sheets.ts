@@ -69,7 +69,7 @@ export async function getWeeklySchedule(): Promise<WeeklySession[]> {
     startTime: row[2] || "",
     endTime: row[3] || "",
     location: row[4] || "",
-    maxSpots: parseInt(row[5]) || 6,
+    maxSpots: parseInt(row[5]) || 8,
     price: parseInt(row[6]) || 50,
   }));
 }
