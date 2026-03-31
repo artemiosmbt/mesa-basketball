@@ -499,7 +499,7 @@ export async function getGroupSessionEnrollment(): Promise<
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from("registrations")
-    .select("booked_date, booked_start_time")
+    .select("booked_date, booked_start_time, total_participants")
     .in("type", ["weekly", "camp"])
     .eq("status", "confirmed")
     .not("booked_date", "is", null);
@@ -509,7 +509,7 @@ export async function getGroupSessionEnrollment(): Promise<
   const counts: Record<string, number> = {};
   for (const row of data) {
     const key = `${row.booked_date}|${row.booked_start_time}`;
-    counts[key] = (counts[key] || 0) + 1;
+    counts[key] = (counts[key] || 0) + (row.total_participants || 1);
   }
   return counts;
 }
