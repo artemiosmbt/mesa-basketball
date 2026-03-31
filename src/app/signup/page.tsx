@@ -24,6 +24,8 @@ export default function SignupPage() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [kids, setKids] = useState([{ name: "", dob: "", grade: "" }]);
+  const [smsConsent, setSmsConsent] = useState(true);
+  const [marketingEmails, setMarketingEmails] = useState(true);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
@@ -77,13 +79,13 @@ export default function SignupPage() {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ parentName, phone, kids }),
+        body: JSON.stringify({ parentName, phone, kids, smsConsent, marketingEmails }),
       });
       const next = new URLSearchParams(window.location.search).get("next");
       router.push(next || "/");
     } else {
       // Email confirmation required — stash profile data so login page can save it after confirm
-      localStorage.setItem("mesa_pending_profile", JSON.stringify({ parentName, phone, kids }));
+      localStorage.setItem("mesa_pending_profile", JSON.stringify({ parentName, phone, kids, smsConsent, marketingEmails }));
       setConfirmed(true);
       setLoading(false);
     }
@@ -250,6 +252,31 @@ export default function SignupPage() {
             >
               + Add another athlete
             </button>
+          </div>
+
+          <div className="space-y-3">
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={smsConsent}
+                onChange={(e) => setSmsConsent(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-brown-600 accent-mesa-accent"
+              />
+              <span className="text-xs text-brown-400 leading-relaxed">
+                I agree to receive text message reminders from Mesa Basketball Training about upcoming sessions. Reply STOP at any time to opt out.
+              </span>
+            </label>
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={marketingEmails}
+                onChange={(e) => setMarketingEmails(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-brown-600 accent-mesa-accent"
+              />
+              <span className="text-xs text-brown-400 leading-relaxed">
+                I agree to receive emails about new sessions, camps, promotions, and updates from Mesa Basketball Training.
+              </span>
+            </label>
           </div>
 
           <button

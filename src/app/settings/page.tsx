@@ -34,6 +34,7 @@ export default function SettingsPage() {
   const [phone, setPhone] = useState("");
   const [kids, setKids] = useState<Kid[]>([{ name: "", dob: "", grade: "" }]);
   const [marketingEmails, setMarketingEmails] = useState(true);
+  const [smsConsent, setSmsConsent] = useState(true);
 
   const router = useRouter();
 
@@ -56,6 +57,9 @@ export default function SettingsPage() {
         }
         if (typeof data.marketing_emails === "boolean") {
           setMarketingEmails(data.marketing_emails);
+        }
+        if (typeof data.sms_consent === "boolean") {
+          setSmsConsent(data.sms_consent);
         }
       }
       setLoading(false);
@@ -89,7 +93,7 @@ export default function SettingsPage() {
         "Content-Type": "application/json",
         Authorization: `Bearer ${session.access_token}`,
       },
-      body: JSON.stringify({ parentName, phone, kids, marketingEmails }),
+      body: JSON.stringify({ parentName, phone, kids, marketingEmails, smsConsent }),
     });
 
     setSaving(false);
@@ -221,6 +225,23 @@ export default function SettingsPage() {
           {/* Preferences */}
           <div className="bg-brown-900/40 border border-brown-700 rounded-xl px-6 py-6 space-y-4">
             <h2 className="text-xs font-semibold uppercase tracking-widest text-mesa-accent">Preferences</h2>
+
+            <label className="flex items-start gap-3 cursor-pointer">
+              <div className="mt-0.5 shrink-0">
+                <input
+                  type="checkbox"
+                  checked={smsConsent}
+                  onChange={(e) => setSmsConsent(e.target.checked)}
+                  className="h-4 w-4 rounded border-brown-600 bg-brown-800 accent-mesa-accent cursor-pointer"
+                />
+              </div>
+              <div>
+                <p className="text-sm text-white font-medium">Text message reminders</p>
+                <p className="text-xs text-brown-400 mt-0.5 leading-relaxed">
+                  Receive text message reminders about upcoming sessions. Reply STOP at any time to opt out.
+                </p>
+              </div>
+            </label>
 
             <label className="flex items-start gap-3 cursor-pointer">
               <div className="mt-0.5 shrink-0">

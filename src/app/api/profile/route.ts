@@ -42,6 +42,7 @@ export async function POST(req: NextRequest) {
     phone: body.phone || null,
     kids: body.kids || [],
     marketing_emails: body.marketingEmails ?? true,
+    sms_consent: body.smsConsent ?? true,
     updated_at: new Date().toISOString(),
   });
 
