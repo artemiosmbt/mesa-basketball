@@ -2273,23 +2273,16 @@ export default function Home() {
 
                 <div>
                   {(() => {
-                    const campForLimit = camps[modal.sessionIndex];
-                    const dayStart = campForLimit?.time.split("-")[0]?.trim() || campForLimit?.time || "";
-                    const campMaxKids = campForLimit && campSelectedDays.size > 0
-                      ? Math.min(...Array.from(campSelectedDays).map((day) => {
-                          const enrolled = groupEnrollment[`${day}|${dayStart}`] || 0;
-                          return Math.max(0, campForLimit.maxSpots - enrolled);
-                        }))
-                      : (campForLimit?.maxSpots ?? 10);
+                    const campMaxSpots = camps[modal.sessionIndex]?.maxSpots ?? 8;
                     return (
                       <div className="mb-2 flex items-center justify-between">
                         <label className="text-sm font-medium text-brown-300">Player(s)</label>
-                        {kids.length < campMaxKids ? (
+                        {kids.length < campMaxSpots ? (
                           <button type="button" onClick={addKid} className="text-sm text-mesa-accent hover:text-yellow-300">
                             + Add another player
                           </button>
                         ) : (
-                          <span className="text-xs text-yellow-500">Max {campMaxKids} athlete{campMaxKids !== 1 ? "s" : ""} (spots available)</span>
+                          <span className="text-xs text-yellow-500">Max {campMaxSpots} athletes per session</span>
                         )}
                       </div>
                     );
@@ -2594,20 +2587,14 @@ export default function Home() {
                 </div>
                 <div>
                   {(() => {
-                    const groupSessions = modal.selectedGroupSessions || [];
-                    const groupMaxKids = groupSessions.length > 0
-                      ? Math.min(...groupSessions.map((s) => {
-                          const enrolled = groupEnrollment[`${s.date}|${s.startTime}`] || 0;
-                          return Math.max(0, s.maxSpots - enrolled);
-                        }))
-                      : 10;
+                    const groupMaxSpots = modal.selectedGroupSessions?.[0]?.maxSpots ?? 8;
                     return (
                       <div className="mb-2 flex items-center justify-between">
                         <label className="text-sm font-medium text-brown-300">Player(s)</label>
-                        {kids.length < groupMaxKids ? (
+                        {kids.length < groupMaxSpots ? (
                           <button type="button" onClick={addKid} className="text-sm text-mesa-accent hover:text-yellow-300">+ Add another player</button>
                         ) : (
-                          <span className="text-xs text-yellow-500">Max {groupMaxKids} athlete{groupMaxKids !== 1 ? "s" : ""} (spots available)</span>
+                          <span className="text-xs text-yellow-500">Max {groupMaxSpots} athletes per session</span>
                         )}
                       </div>
                     );
