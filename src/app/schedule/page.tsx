@@ -1760,7 +1760,7 @@ export default function Home() {
             </a>
           </div>
           <p className="mt-2 text-center text-sm text-brown-500">
-            Payment in person — Cash, Venmo, or Zelle
+            Payment due upon registration — Cash, Venmo, or Zelle
           </p>
           <p className="mt-2 text-center text-sm text-green-400/80">
             New Clients: First Session 50% Off
@@ -2181,7 +2181,7 @@ export default function Home() {
                           Drop-in rate: {camp.dropInPrice}/day &bull; All {totalDays} days: {earlyBird && camp.earlyBirdPrice ? `${camp.earlyBirdPrice} (EB) / ${camp.price}` : camp.price}
                         </p>
                       )}
-                      <p className="text-xs text-brown-500 mt-1">Payment in person — Cash, Venmo, or Zelle</p>
+                      <p className="text-xs text-brown-500 mt-1">Payment due upon registration — Cash, Venmo, or Zelle</p>
                     </div>
                   )}
                   {selectedCount === 0 && (
@@ -2215,7 +2215,7 @@ export default function Home() {
                       </span>
                     ) : null}
                   </p>
-                  <p className="text-xs text-brown-500 mt-0.5">Payment in person — Cash, Venmo, or Zelle</p>
+                  <p className="text-xs text-brown-500 mt-0.5">Payment due upon registration — Cash, Venmo, or Zelle</p>
                 </div>
               </div>
             )}
@@ -2537,7 +2537,7 @@ export default function Home() {
               <button onClick={() => setPkgModal({ open: false, packageType: null })} className="text-2xl text-brown-400 hover:text-white">&times;</button>
             </div>
             <p className="mt-1 text-sm text-brown-400">
-              {pkgModal.packageType === 4 ? "$475" : "$900"} — payment in person (Cash, Venmo, or Zelle)
+              {pkgModal.packageType === 4 ? "$475" : "$900"} — payment due upon registration (Cash, Venmo, or Zelle)
             </p>
 
             {pkgResult?.success ? (
