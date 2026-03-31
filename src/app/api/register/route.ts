@@ -107,7 +107,7 @@ export async function POST(req: NextRequest) {
 
       // Create one registration row per selected session
       for (const session of weeklySessions) {
-        const perSessionPrice = session.price ? session.price * (totalParticipants || 1) : null;
+        const perSessionPrice = session.price ? session.price * (totalParticipants || 1) : undefined;
         await addRegistrationWithRewards({
           parentName,
           email,
