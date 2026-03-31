@@ -253,12 +253,12 @@ export async function POST(req: NextRequest) {
     let packageSessionsRemaining: number | undefined;
     let packageType: number | undefined;
     const referralCode = await generateUniqueReferralCode(parentName, email);
+    let privateReferrer: { email: string; name: string } | null = null;
 
     // Save to Supabase (unless this is an email-only request)
     if (!emailOnly) {
       // Check new-client status and referral BEFORE saving
       const newClient = await isNewClient(email, phone);
-      let privateReferrer: { email: string; name: string } | null = null;
       if (submittedReferralCode && newClient) {
         const info = await findReferrerInfoByCode(submittedReferralCode);
         if (info && info.email !== email) {
