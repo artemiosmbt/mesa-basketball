@@ -3,6 +3,7 @@ import {
   getRegistrationByToken,
   cancelRegistration,
   cancelFullCampByReferralCode,
+  getEarliestCampDay,
   addRegistration,
   getActivePackage,
   setPackageSessions,
@@ -56,22 +57,30 @@ export async function DELETE(
     );
   }
 
-  // Block camp cancellations once the camp has started
-  if (reg.type === "camp" && reg.booked_date && reg.booked_start_time) {
-    const timeMatch = reg.booked_start_time.match(/(\d+):(\d+)\s*(AM|PM)/i);
-    if (timeMatch) {
-      let hours = parseInt(timeMatch[1]);
-      const mins = parseInt(timeMatch[2]);
-      const period = timeMatch[3].toUpperCase();
-      if (period === "PM" && hours !== 12) hours += 12;
-      if (period === "AM" && hours === 12) hours = 0;
-      const sessionDateTime = new Date(reg.booked_date);
-      sessionDateTime.setHours(hours, mins, 0, 0);
-      if (Date.now() >= sessionDateTime.getTime()) {
-        return NextResponse.json(
-          { error: "Cancellations are not accepted once the camp has started. The full amount is due." },
-          { status: 400 }
-        );
+  // Block camp cancellations once the camp has started.
+  // For full camp, check the earliest day of the group so no day's token can be used
+  // after the camp has already begun. For drop-in, check that specific day.
+  if (reg.type === "camp") {
+    const checkDay = reg.is_full_camp && reg.referral_code
+      ? await getEarliestCampDay(reg.referral_code)
+      : { booked_date: reg.booked_date!, booked_start_time: reg.booked_start_time! };
+
+    if (checkDay?.booked_date && checkDay?.booked_start_time) {
+      const timeMatch = checkDay.booked_start_time.match(/(\d+):(\d+)\s*(AM|PM)/i);
+      if (timeMatch) {
+        let hours = parseInt(timeMatch[1]);
+        const mins = parseInt(timeMatch[2]);
+        const period = timeMatch[3].toUpperCase();
+        if (period === "PM" && hours !== 12) hours += 12;
+        if (period === "AM" && hours === 12) hours = 0;
+        const sessionDateTime = new Date(checkDay.booked_date);
+        sessionDateTime.setHours(hours, mins, 0, 0);
+        if (Date.now() >= sessionDateTime.getTime()) {
+          return NextResponse.json(
+            { error: "Cancellations are not accepted once the camp has started. The full amount is due." },
+            { status: 400 }
+          );
+        }
       }
     }
   }

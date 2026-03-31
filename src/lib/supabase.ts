@@ -125,6 +125,23 @@ export async function cancelRegistration(token: string): Promise<boolean> {
   return !error;
 }
 
+/** Get the earliest booked_date + booked_start_time across all days of a full camp group. */
+export async function getEarliestCampDay(referralCode: string): Promise<{ booked_date: string; booked_start_time: string } | null> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("registrations")
+    .select("booked_date, booked_start_time")
+    .eq("referral_code", referralCode)
+    .eq("type", "camp")
+    .eq("is_full_camp", true)
+    .not("booked_date", "is", null)
+    .order("booked_date", { ascending: true })
+    .limit(1)
+    .single();
+  if (error || !data) return null;
+  return data;
+}
+
 /** Cancel all confirmed camp days sharing the same referral_code (full camp cancellation). */
 export async function cancelFullCampByReferralCode(referralCode: string): Promise<boolean> {
   const supabase = getSupabase();
