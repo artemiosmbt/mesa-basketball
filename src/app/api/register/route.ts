@@ -145,6 +145,7 @@ export async function POST(req: NextRequest) {
         sessionDetails: `Group Session${weeklySessions.length !== 1 ? "s" : ""} (${weeklySessions.length} ${weeklySessions.length !== 1 ? "dates" : "date"}):<br/>${allSessionsList}${priceNote ? "<br/>" + priceNote : ""}`,
         totalParticipants: totalParticipants || 1,
         referralCode,
+        referredBy: weeklyReferrer?.name,
       });
 
       if (weeklyReferrer) {
@@ -229,6 +230,7 @@ export async function POST(req: NextRequest) {
         sessionDetails: `${firstSession.campName}${firstSession.gradeGroup ? ` — ${firstSession.gradeGroup}` : ""}<br/>Days registered (${campSessions.length}):<br/>${daysList}${priceNote}`,
         totalParticipants: totalParticipants || 1,
         referralCode,
+        referredBy: campReferrer?.name,
       });
 
       if (campReferrer) {
@@ -337,6 +339,7 @@ export async function POST(req: NextRequest) {
         packageSessionsRemaining,
         packageType,
         referralCode,
+        referredBy: privateReferrer?.name,
       });
 
       if (smsConsent && !emailOnly) {
