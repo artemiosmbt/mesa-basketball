@@ -122,16 +122,29 @@ export default function MyBookings() {
             {(rewards || activePackage) && (
               <div className="md:col-span-1 space-y-5 mb-8 md:mb-0">
                 {rewards && (
-                  <div className="rounded-2xl bg-brown-900 p-5">
-                    <h2 className="text-sm font-bold uppercase tracking-widest text-mesa-accent mb-3">Referrals</h2>
-                    <p className="text-xs text-brown-500 mb-1">Your Referral Code</p>
-                    <p className="text-2xl font-bold text-mesa-accent">{rewards.referralCode || "—"}</p>
-                    <p className="mt-2 text-xs text-brown-500 leading-relaxed">
-                      Share your code — when a new client books with it, you earn a 50% off credit on your next private session.
-                    </p>
-                    <p className={`mt-3 text-sm font-semibold ${rewards.referralCredits > 0 ? "text-mesa-accent" : "text-brown-500"}`}>
-                      {rewards.referralCredits} half-off credit{rewards.referralCredits !== 1 ? "s" : ""} available
-                    </p>
+                  <div className="rounded-2xl bg-brown-900 p-5 space-y-4">
+                    <div>
+                      <h2 className="text-sm font-bold uppercase tracking-widest text-mesa-accent mb-3">Referrals</h2>
+                      <p className="text-xs text-brown-500 mb-1">Your Referral Code</p>
+                      <p className="text-2xl font-bold text-mesa-accent">{rewards.referralCode || "—"}</p>
+                      <p className="mt-2 text-xs text-brown-500 leading-relaxed">
+                        Share your code — when a new client books with it, you earn 50% off your next private session.
+                      </p>
+                    </div>
+
+                    <div className={`rounded-xl border px-4 py-3 ${rewards.referralCredits > 0 ? "border-mesa-accent/50 bg-mesa-accent/10" : "border-brown-700 bg-brown-800/40"}`}>
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-semibold uppercase tracking-widest text-brown-400">Credits Earned</p>
+                        <span className={`text-2xl font-bold ${rewards.referralCredits > 0 ? "text-mesa-accent" : "text-brown-600"}`}>
+                          {rewards.referralCredits}
+                        </span>
+                      </div>
+                      <p className={`mt-1 text-xs leading-relaxed ${rewards.referralCredits > 0 ? "text-mesa-accent/80" : "text-brown-600"}`}>
+                        {rewards.referralCredits > 0
+                          ? `${rewards.referralCredits} half-off session${rewards.referralCredits !== 1 ? "s" : ""} ready to use — applied automatically at checkout.`
+                          : "No credits yet. Start sharing your code!"}
+                      </p>
+                    </div>
                   </div>
                 )}
 
