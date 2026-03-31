@@ -146,8 +146,8 @@ export default function SignupPage() {
         <form onSubmit={handleSubmit} className="bg-brown-900/40 border border-brown-700 rounded-xl px-8 py-8 space-y-5">
           {error && <p className="text-red-400 text-sm text-center">{error}</p>}
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="col-span-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="sm:col-span-2">
               <label className="block text-xs font-semibold uppercase tracking-widest text-brown-400 mb-1.5">Parent / Guardian Name</label>
               <input
                 type="text"
@@ -215,7 +215,7 @@ export default function SignupPage() {
                       <button type="button" onClick={() => removeKid(i)} className="text-xs text-red-400 hover:text-red-300">Remove</button>
                     )}
                   </div>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                     <input
                       type="text"
                       value={kid.name}
