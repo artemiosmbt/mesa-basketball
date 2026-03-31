@@ -49,7 +49,7 @@ export default function LoginPage() {
         }
       }
       const next = new URLSearchParams(window.location.search).get("next");
-      router.push(next || "/my-bookings");
+      router.push(next || "/");
     }
   }
 

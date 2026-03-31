@@ -80,7 +80,7 @@ export default function SignupPage() {
         body: JSON.stringify({ parentName, phone, kids }),
       });
       const next = new URLSearchParams(window.location.search).get("next");
-      router.push(next || "/my-bookings");
+      router.push(next || "/");
     } else {
       // Email confirmation required — stash profile data so login page can save it after confirm
       localStorage.setItem("mesa_pending_profile", JSON.stringify({ parentName, phone, kids }));
