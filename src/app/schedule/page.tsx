@@ -56,13 +56,17 @@ function isEarlyBirdActive(): boolean {
   return new Date() < new Date("2026-04-01T04:00:00Z");
 }
 
-function calcCampPrice(daysSelected: number, totalDays: number, camp: Camp): string {
+function calcCampPrice(daysSelected: number, totalDays: number, camp: Camp, kidCount: number = 1): string {
   if (daysSelected === 0) return "";
+  const count = Math.max(1, kidCount);
   if (daysSelected === totalDays) {
-    return isEarlyBirdActive() && camp.earlyBirdPrice ? camp.earlyBirdPrice : camp.price;
+    const baseStr = isEarlyBirdActive() && camp.earlyBirdPrice ? camp.earlyBirdPrice : camp.price;
+    if (count === 1) return baseStr;
+    const base = parseInt(baseStr.replace(/\D/g, "")) || 0;
+    return `$${base * count}`;
   }
   const perDay = parseInt(camp.dropInPrice.replace(/\D/g, "")) || 100;
-  return `$${perDay * daysSelected}`;
+  return `$${perDay * daysSelected * count}`;
 }
 
 interface PrivateSlot {
@@ -749,7 +753,7 @@ export default function Home() {
         const camp = camps[modal.sessionIndex];
         if (camp?.campDays?.length > 0) {
           const selectedDaysArr = camp.campDays.filter((d) => campSelectedDays.has(d));
-          const totalPrice = calcCampPrice(selectedDaysArr.length, camp.campDays.length, camp);
+          const totalPrice = calcCampPrice(selectedDaysArr.length, camp.campDays.length, camp, kids.length);
           const campSessions = selectedDaysArr.map((day) => ({
             date: day,
             startTime: camp.time.split("-")[0]?.trim() || camp.time,
@@ -2134,7 +2138,7 @@ export default function Home() {
               const earlyBird = isEarlyBirdActive();
               const selectedCount = campSelectedDays.size;
               const totalDays = camp.campDays.length;
-              const price = calcCampPrice(selectedCount, totalDays, camp);
+              const price = calcCampPrice(selectedCount, totalDays, camp, kids.length);
               return (
                 <div className="mt-3 rounded-lg border border-brown-700 bg-brown-800/50 p-4">
                   <p className="text-xs font-semibold text-brown-300 mb-2">Select the days you&apos;d like to attend:</p>
