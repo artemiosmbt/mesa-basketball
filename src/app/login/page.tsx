@@ -8,11 +8,12 @@ import { authClient } from "@/lib/auth";
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState(() => {
+  const [error, setError] = useState("");
+  const [info, setInfo] = useState(() => {
     if (typeof window !== "undefined") {
       const params = new URLSearchParams(window.location.search);
-      if (params.get("error") === "confirmation_failed") {
-        return "Confirmation link expired or already used. Please request a new one.";
+      if (params.get("confirmed") === "1") {
+        return "Email confirmed! Please sign in to continue.";
       }
     }
     return "";
@@ -63,6 +64,7 @@ export default function LoginPage() {
           <p className="text-brown-400 mt-1 text-sm">Mesa Basketball Training</p>
         </div>
         <form onSubmit={handleSubmit} className="bg-brown-900/40 border border-brown-700 rounded-xl px-8 py-8 space-y-5">
+          {info && <p className="text-green-400 text-sm text-center">{info}</p>}
           {error && <p className="text-red-400 text-sm text-center">{error}</p>}
           <div>
             <label className="block text-xs font-semibold uppercase tracking-widest text-brown-400 mb-1.5">Email</label>

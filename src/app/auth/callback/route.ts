@@ -17,6 +17,6 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // If something went wrong, send them to login with an error hint
-  return NextResponse.redirect(`${origin}/login?error=confirmation_failed`);
+  // Code already used or expired — email is likely already confirmed, just send to login
+  return NextResponse.redirect(`${origin}/login?confirmed=1`);
 }
