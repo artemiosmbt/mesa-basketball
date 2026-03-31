@@ -1709,8 +1709,8 @@ export default function Home() {
                   <p className="mt-2 text-sm text-brown-400">{camp.time} &bull; <LocationLink location={camp.location} /></p>
                   {camp.description && <p className="mt-2 text-sm text-brown-300">{camp.description}</p>}
                   <div className="mt-4 flex items-center justify-between">
-                    <span className={`text-sm font-medium ${full ? "text-red-400" : spotsLeft <= 5 ? "text-yellow-400" : "text-green-400"}`}>
-                      {full ? "FULL" : `${spotsLeft} spot${spotsLeft !== 1 ? "s" : ""} left`}
+                    <span className={`text-sm font-medium ${full ? "text-red-400" : "text-yellow-400"}`}>
+                      {full ? "FULL" : spotsLeft <= 3 ? `${spotsLeft} spot${spotsLeft !== 1 ? "s" : ""} left` : ""}
                     </span>
                     {!full && (
                       <button
@@ -2160,8 +2160,8 @@ export default function Home() {
                             className="h-4 w-4 rounded accent-mesa-accent"
                           />
                           <span className="text-sm text-white flex-1">{day}</span>
-                          <span className={`text-xs font-medium ${dayFull ? "text-red-400" : spotsLeft <= 2 ? "text-yellow-400" : "text-green-400"}`}>
-                            {dayFull ? "Full" : `${spotsLeft} spot${spotsLeft !== 1 ? "s" : ""} left`}
+                          <span className={`text-xs font-medium ${dayFull ? "text-red-400" : "text-yellow-400"}`}>
+                            {dayFull ? "Full" : spotsLeft <= 3 ? `${spotsLeft} spot${spotsLeft !== 1 ? "s" : ""} left` : ""}
                           </span>
                         </label>
                       );
