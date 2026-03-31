@@ -39,6 +39,7 @@ interface Booking {
   bookedEndTime: string | null;
   bookedLocation: string | null;
   status: string;
+  isFullCamp: boolean;
 }
 
 interface TimeWindow {
@@ -132,6 +133,22 @@ export default function ManageBooking({
     sessionDateTime.setHours(hours, mins, 0, 0);
     const hoursUntil = (sessionDateTime.getTime() - Date.now()) / (1000 * 60 * 60);
     return hoursUntil >= 0 && hoursUntil < 48;
+  }, [booking]);
+
+  // Camp has already started — no cancellation allowed, full amount due
+  const campStarted = useMemo(() => {
+    if (booking?.type !== "camp") return false;
+    if (!booking?.bookedDate || !booking?.bookedStartTime) return false;
+    const timeMatch = booking.bookedStartTime.match(/(\d+):(\d+)\s*(AM|PM)/i);
+    if (!timeMatch) return false;
+    let hours = parseInt(timeMatch[1]);
+    const mins = parseInt(timeMatch[2]);
+    const period = timeMatch[3].toUpperCase();
+    if (period === "PM" && hours !== 12) hours += 12;
+    if (period === "AM" && hours === 12) hours = 0;
+    const sessionDateTime = new Date(booking.bookedDate);
+    sessionDateTime.setHours(hours, mins, 0, 0);
+    return Date.now() >= sessionDateTime.getTime();
   }, [booking]);
 
   // Build time windows for rescheduling
@@ -280,16 +297,21 @@ export default function ManageBooking({
   if (!booking) return null;
 
   if (cancelled) {
+    const isFullCampCancel = booking?.type === "camp" && booking?.isFullCamp;
     return (
       <div className="flex min-h-screen items-center justify-center bg-mesa-dark text-white">
         <div className="mx-auto max-w-md rounded-2xl bg-brown-900 p-8 text-center">
-          <h1 className="text-2xl font-bold">Session Cancelled</h1>
+          <h1 className="text-2xl font-bold">{isFullCampCancel ? "Camp Cancelled" : "Session Cancelled"}</h1>
           <p className="mt-4 text-brown-300">
-            Your session has been cancelled. You&apos;ll receive a confirmation email.
+            {isFullCampCancel
+              ? "Your entire camp registration has been cancelled. You'll receive a confirmation email."
+              : "Your session has been cancelled. You'll receive a confirmation email."}
           </p>
           {isLateCancel && (
             <p className="mt-3 rounded-lg bg-yellow-900/30 px-4 py-2 text-sm text-yellow-400">
-              This change was made within 48 hours of the session. Per our policy, 50% of the session fee is still due.
+              {isFullCampCancel
+                ? "This cancellation was made within 48 hours of the camp. Per our policy, 50% of the total camp fee is still due."
+                : "This change was made within 48 hours of the session. Per our policy, 50% of the session fee is still due."}
             </p>
           )}
           <a href="/" className="mt-6 inline-block rounded bg-mesa-accent px-6 py-2 font-semibold text-white hover:bg-yellow-600">
@@ -342,56 +364,114 @@ export default function ManageBooking({
 
               {within24Hours && (
                 <p className="mt-4 rounded-lg bg-yellow-900/30 px-4 py-2 text-sm text-yellow-400">
-                  This session is within 48 hours. Rescheduling or canceling will result in a 50% charge of the session fee.
+                  {booking.isFullCamp
+                    ? "This camp is within 48 hours. Canceling the entire camp will result in a 50% charge of the total camp fee."
+                    : "This session is within 48 hours. Rescheduling or canceling will result in a 50% charge of the session fee."}
                 </p>
               )}
 
-              {/* Cancel Section */}
-              {!showCancelConfirm && !showReschedule && (
-                <div className="mt-6 flex gap-3">
-                  <button
-                    onClick={() => setShowCancelConfirm(true)}
-                    className="rounded border border-red-700 px-4 py-2 text-sm text-red-400 hover:bg-red-900/30"
-                  >
-                    Cancel Session
-                  </button>
-                  <button
-                    onClick={() => {
-                      setShowReschedule(true);
-                      loadSchedule();
-                    }}
-                    className="rounded bg-mesa-accent px-4 py-2 text-sm font-semibold text-white hover:bg-yellow-600"
-                  >
-                    Reschedule
-                  </button>
-                </div>
+              {/* Camp has started — no cancellation allowed */}
+              {campStarted && (
+                <p className="mt-4 rounded-lg bg-red-900/30 px-4 py-2 text-sm text-red-400">
+                  This camp has already started. Cancellations are no longer accepted and the full amount is due.
+                </p>
               )}
 
-              {/* Cancel Confirmation */}
-              {showCancelConfirm && (
-                <div className="mt-6 rounded-lg border border-red-800 bg-red-900/20 p-4">
-                  <p className="text-sm text-brown-300">
-                    Are you sure you want to cancel this session?
-                    {within24Hours &&
-                      " Since this is within 48 hours, 50% of the session fee will still be due per our rescheduling/cancellation policy."}
+              {/* Full camp — can only cancel entire camp, no individual day cancel or reschedule */}
+              {!campStarted && booking.type === "camp" && booking.isFullCamp ? (
+                <>
+                  <p className="mt-4 rounded-lg bg-brown-800/60 px-4 py-2 text-sm text-brown-300">
+                    You registered for the full camp package. Individual days cannot be cancelled or rescheduled — you may only cancel the entire camp.
                   </p>
-                  <div className="mt-3 flex gap-3">
-                    <button
-                      onClick={handleCancel}
-                      disabled={cancelling}
-                      className="rounded bg-red-700 px-4 py-2 text-sm font-semibold text-white hover:bg-red-600 disabled:opacity-50"
-                    >
-                      {cancelling ? "Cancelling..." : "Yes, Cancel"}
-                    </button>
-                    <button
-                      onClick={() => setShowCancelConfirm(false)}
-                      className="rounded bg-brown-700 px-4 py-2 text-sm text-brown-300 hover:bg-brown-600"
-                    >
-                      Go Back
-                    </button>
-                  </div>
-                </div>
-              )}
+
+                  {!showCancelConfirm && (
+                    <div className="mt-6">
+                      <button
+                        onClick={() => setShowCancelConfirm(true)}
+                        className="rounded border border-red-700 px-4 py-2 text-sm text-red-400 hover:bg-red-900/30"
+                      >
+                        Cancel Entire Camp
+                      </button>
+                    </div>
+                  )}
+
+                  {showCancelConfirm && (
+                    <div className="mt-6 rounded-lg border border-red-800 bg-red-900/20 p-4">
+                      <p className="text-sm text-brown-300">
+                        Are you sure you want to cancel the entire camp? All registered days will be cancelled.
+                        {within24Hours &&
+                          " Since the camp is within 48 hours, 50% of the total camp fee will still be due per our cancellation policy."}
+                      </p>
+                      <div className="mt-3 flex gap-3">
+                        <button
+                          onClick={handleCancel}
+                          disabled={cancelling}
+                          className="rounded bg-red-700 px-4 py-2 text-sm font-semibold text-white hover:bg-red-600 disabled:opacity-50"
+                        >
+                          {cancelling ? "Cancelling..." : "Yes, Cancel Entire Camp"}
+                        </button>
+                        <button
+                          onClick={() => setShowCancelConfirm(false)}
+                          className="rounded bg-brown-700 px-4 py-2 text-sm text-brown-300 hover:bg-brown-600"
+                        >
+                          Go Back
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : !campStarted ? (
+                <>
+                  {/* Drop-in or non-camp — normal cancel/reschedule */}
+                  {!showCancelConfirm && !showReschedule && (
+                    <div className="mt-6 flex gap-3">
+                      <button
+                        onClick={() => setShowCancelConfirm(true)}
+                        className="rounded border border-red-700 px-4 py-2 text-sm text-red-400 hover:bg-red-900/30"
+                      >
+                        Cancel Session
+                      </button>
+                      {booking.type !== "camp" && (
+                        <button
+                          onClick={() => {
+                            setShowReschedule(true);
+                            loadSchedule();
+                          }}
+                          className="rounded bg-mesa-accent px-4 py-2 text-sm font-semibold text-white hover:bg-yellow-600"
+                        >
+                          Reschedule
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Cancel Confirmation */}
+                  {showCancelConfirm && (
+                    <div className="mt-6 rounded-lg border border-red-800 bg-red-900/20 p-4">
+                      <p className="text-sm text-brown-300">
+                        Are you sure you want to cancel this session?
+                        {within24Hours &&
+                          " Since this is within 48 hours, 50% of the session fee will still be due per our rescheduling/cancellation policy."}
+                      </p>
+                      <div className="mt-3 flex gap-3">
+                        <button
+                          onClick={handleCancel}
+                          disabled={cancelling}
+                          className="rounded bg-red-700 px-4 py-2 text-sm font-semibold text-white hover:bg-red-600 disabled:opacity-50"
+                        >
+                          {cancelling ? "Cancelling..." : "Yes, Cancel"}
+                        </button>
+                        <button
+                          onClick={() => setShowCancelConfirm(false)}
+                          className="rounded bg-brown-700 px-4 py-2 text-sm text-brown-300 hover:bg-brown-600"
+                        >
+                          Go Back
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : null}
 
               {/* Reschedule Section */}
               {showReschedule && (

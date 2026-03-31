@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   getRegistrationByToken,
   cancelRegistration,
+  cancelFullCampByReferralCode,
   addRegistration,
   getActivePackage,
   setPackageSessions,
@@ -34,6 +35,7 @@ export async function GET(
     bookedEndTime: reg.booked_end_time,
     bookedLocation: reg.booked_location,
     status: reg.status,
+    isFullCamp: reg.is_full_camp ?? false,
   });
 }
 
@@ -52,6 +54,26 @@ export async function DELETE(
       { error: "Booking is already cancelled" },
       { status: 400 }
     );
+  }
+
+  // Block camp cancellations once the camp has started
+  if (reg.type === "camp" && reg.booked_date && reg.booked_start_time) {
+    const timeMatch = reg.booked_start_time.match(/(\d+):(\d+)\s*(AM|PM)/i);
+    if (timeMatch) {
+      let hours = parseInt(timeMatch[1]);
+      const mins = parseInt(timeMatch[2]);
+      const period = timeMatch[3].toUpperCase();
+      if (period === "PM" && hours !== 12) hours += 12;
+      if (period === "AM" && hours === 12) hours = 0;
+      const sessionDateTime = new Date(reg.booked_date);
+      sessionDateTime.setHours(hours, mins, 0, 0);
+      if (Date.now() >= sessionDateTime.getTime()) {
+        return NextResponse.json(
+          { error: "Cancellations are not accepted once the camp has started. The full amount is due." },
+          { status: 400 }
+        );
+      }
+    }
   }
 
   // Check 24-hour policy
@@ -75,6 +97,29 @@ export async function DELETE(
     }
   }
 
+  // Full camp: block individual-day cancellation — must cancel all days together
+  if (reg.type === "camp" && reg.is_full_camp) {
+    if (!reg.referral_code) {
+      return NextResponse.json({ error: "Cannot cancel — missing camp group reference." }, { status: 500 });
+    }
+    const success = await cancelFullCampByReferralCode(reg.referral_code);
+    if (!success) {
+      return NextResponse.json({ error: "Failed to cancel camp" }, { status: 500 });
+    }
+    const lateFeeAmount = reg.session_price && isLateCancel ? Math.round(reg.session_price * 0.5) : undefined;
+    // Extract camp name (everything before the first " — " in session_details)
+    const campName = reg.session_details.split(" — ")[0] || reg.session_details;
+    await sendCancellationNotification({
+      parentName: reg.parent_name,
+      email: reg.email,
+      sessionDetails: campName,
+      sessionType: reg.type,
+      isLateCancel,
+      lateFeeAmount,
+    });
+    return NextResponse.json({ success: true, isLateCancel });
+  }
+
   const success = await cancelRegistration(token);
   if (!success) {
     return NextResponse.json(
@@ -94,7 +139,6 @@ export async function DELETE(
         const bookingMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
         const activePkg = await getActivePackage(reg.email, bookingMonth);
         if (activePkg) {
-          // Count remaining confirmed sessions after this cancellation
           const confirmedCount = await countConfirmedPrivateSessions(reg.email, bookingMonth);
           const newUsed = Math.min(activePkg.package_type, confirmedCount);
           if (newUsed !== activePkg.sessions_used) {
@@ -107,12 +151,15 @@ export async function DELETE(
     }
   }
 
+  const lateFeeAmount = reg.session_price && isLateCancel ? Math.round(reg.session_price * 0.5) : undefined;
+
   await sendCancellationNotification({
     parentName: reg.parent_name,
     email: reg.email,
     sessionDetails: reg.session_details,
     sessionType: reg.type,
     isLateCancel,
+    lateFeeAmount,
   });
 
   return NextResponse.json({ success: true, isLateCancel });

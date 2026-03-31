@@ -772,6 +772,7 @@ export default function Home() {
               totalParticipants,
               campSessions,
               campTotalPrice: totalPrice,
+              campTotalDays: camp.campDays.length,
             }),
           });
           const result = await res.json();

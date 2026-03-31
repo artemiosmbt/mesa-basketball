@@ -30,6 +30,8 @@ export interface Registration {
   manage_token: string;
   referral_code: string | null;
   is_free: boolean;
+  session_price: number | null;
+  is_full_camp: boolean;
 }
 
 export async function addRegistration(data: {
@@ -119,6 +121,19 @@ export async function cancelRegistration(token: string): Promise<boolean> {
     .from("registrations")
     .update({ status: "cancelled" })
     .eq("manage_token", token)
+    .eq("status", "confirmed");
+  return !error;
+}
+
+/** Cancel all confirmed camp days sharing the same referral_code (full camp cancellation). */
+export async function cancelFullCampByReferralCode(referralCode: string): Promise<boolean> {
+  const supabase = getSupabase();
+  const { error } = await supabase
+    .from("registrations")
+    .update({ status: "cancelled" })
+    .eq("referral_code", referralCode)
+    .eq("type", "camp")
+    .eq("is_full_camp", true)
     .eq("status", "confirmed");
   return !error;
 }
@@ -290,6 +305,8 @@ export async function addRegistrationWithRewards(data: {
   referralCode: string;
   isFree: boolean;
   smsConsent?: boolean;
+  sessionPrice?: number;
+  isFullCamp?: boolean;
 }): Promise<{ manageToken: string }> {
   const supabase = getSupabase();
   const { data: row, error } = await supabase
@@ -309,6 +326,8 @@ export async function addRegistrationWithRewards(data: {
       referral_code: data.referralCode,
       is_free: data.isFree,
       sms_consent: data.smsConsent ?? false,
+      session_price: data.sessionPrice ?? null,
+      is_full_camp: data.isFullCamp ?? false,
     })
     .select("manage_token")
     .single();

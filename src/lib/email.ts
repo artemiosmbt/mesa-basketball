@@ -145,10 +145,13 @@ export async function sendCancellationNotification(data: {
   sessionDetails: string;
   sessionType?: string;
   isLateCancel: boolean;
+  lateFeeAmount?: number;
 }) {
   const resend = getResend();
 
-  const lateFee = data.sessionType === "group-private" ? 125 : data.sessionType === "weekly" ? 25 : 75;
+  const lateFee = data.lateFeeAmount !== undefined
+    ? data.lateFeeAmount
+    : data.sessionType === "group-private" ? 125 : data.sessionType === "weekly" ? 25 : 75;
   const lateNote = data.isLateCancel
     ? `<p><strong>Note:</strong> This cancellation was made within 48 hours of the session. Per our policy, a 50% cancellation fee ($${lateFee}) is still due. Please pay via Zelle (<strong>artemios@mesabasketballtraining.com</strong>), Cash, or Venmo (<strong>@Artemios-Gavalas</strong>).</p>`
     : "";

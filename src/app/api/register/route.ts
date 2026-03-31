@@ -60,6 +60,7 @@ export async function POST(req: NextRequest) {
       // Camp multi-day fields
       campSessions,
       campTotalPrice,
+      campTotalDays,
     } = body;
 
     if (!parentName || !email || !phone || !kids || !type || !sessionDetails) {
@@ -143,6 +144,24 @@ export async function POST(req: NextRequest) {
     if (type === "camp" && campSessions && campSessions.length > 0) {
       const referralCode = await generateUniqueReferralCode(parentName, email);
 
+      // Parse total price string (e.g. "$290" or "$290 (Early Bird)") to a number
+      const campTotalNum = campTotalPrice ? parseInt(String(campTotalPrice).replace(/\D/g, "")) || 0 : 0;
+
+      // Determine if this is a full camp purchase or drop-in days
+      // campSessions comes from the selected days; we need the total available days to compare.
+      // The frontend passes campTotalDays alongside campSessions for this check.
+      const isFullCamp = campTotalDays != null
+        ? campSessions.length === campTotalDays
+        : false;
+
+      // Full camp: store total price paid (for 50% fee on full cancel).
+      // Drop-in: store per-day price (for 50% fee on individual day cancel).
+      const sessionPrice = campTotalNum > 0
+        ? isFullCamp
+          ? campTotalNum
+          : Math.round(campTotalNum / campSessions.length)
+        : undefined;
+
       for (const session of campSessions) {
         await addRegistrationWithRewards({
           parentName,
@@ -159,6 +178,8 @@ export async function POST(req: NextRequest) {
           referralCode,
           isFree: false,
           smsConsent: !!smsConsent,
+          sessionPrice,
+          isFullCamp,
         });
       }
 
