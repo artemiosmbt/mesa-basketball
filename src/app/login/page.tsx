@@ -8,7 +8,15 @@ import { authClient } from "@/lib/auth";
 export default function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
+  const [error, setError] = useState(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("error") === "confirmation_failed") {
+        return "Confirmation link expired or already used. Please request a new one.";
+      }
+    }
+    return "";
+  });
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 

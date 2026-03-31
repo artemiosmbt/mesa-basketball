@@ -58,7 +58,7 @@ export default function SignupPage() {
       email,
       password,
       options: {
-        emailRedirectTo: "https://www.mesabasketballtraining.com/login?confirmed=1",
+        emailRedirectTo: "https://www.mesabasketballtraining.com/auth/callback",
       },
     });
     if (signUpError) {
