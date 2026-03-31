@@ -1368,7 +1368,7 @@ export default function Home() {
             </a>
           </div>
           <p className="mt-3 text-center text-brown-400">
-            Skill work in groups of up to 6 players. Volume discounts available when booking multiple sessions.
+            Skill work in groups of up to 8 players. Volume discounts available when booking multiple sessions.
           </p>
           <p className="mt-2 text-center text-xs text-brown-500">
             Groups are organized by grade as a guideline. If you play up or you&apos;re unsure which group fits best, contact Artemios at (631) 599-1280 or artemios@mesabasketballtraining.com — we&apos;ll find the right fit.
