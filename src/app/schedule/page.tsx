@@ -1532,8 +1532,8 @@ export default function Home() {
                             <div className="text-right shrink-0">
                               {full ? (
                                 <span className="text-xs font-medium text-red-400">FULL</span>
-                              ) : spotsLeft <= 2 ? (
-                                <span className="text-xs font-medium text-yellow-400">Almost full!</span>
+                              ) : spotsLeft <= 3 ? (
+                                <span className="text-xs font-medium text-yellow-400">{spotsLeft} spot{spotsLeft !== 1 ? "s" : ""} remaining</span>
                               ) : null}
                             </div>
                           </label>
