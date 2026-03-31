@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sendRegistrationNotification, sendReferralCreditNotification } from "@/lib/email";
+import { addPrivateSessionToCalendar, upsertGroupSessionCalendarEvent } from "@/lib/calendar";
 import twilio from "twilio";
 
 function formatPhone(phone: string): string {
@@ -159,6 +160,21 @@ export async function POST(req: NextRequest) {
         await sendConfirmationSMS(phone, `Mesa Basketball: You're registered for ${weeklySessions.length} group session${weeklySessions.length !== 1 ? "s" : ""}! Check your email for details. Reply STOP to opt out.`);
       }
 
+      // Fire-and-forget: update Google Calendar for each weekly session
+      for (const session of weeklySessions) {
+        upsertGroupSessionCalendarEvent({
+          sessionType: "weekly",
+          sessionLabel: session.group || "Group Session",
+          bookedDate: session.date,
+          bookedStartTime: session.startTime,
+          bookedEndTime: session.endTime,
+          bookedLocation: session.location,
+          maxSpots: session.maxSpots,
+          kidsJustRegistered: kids,
+          participantsJustRegistered: totalParticipants || 1,
+        }).catch((err) => console.error("Calendar sync error (weekly):", err));
+      }
+
       return NextResponse.json({ success: true, count: weeklySessions.length });
     }
 
@@ -243,6 +259,20 @@ export async function POST(req: NextRequest) {
       if (smsConsent) {
         const priceText = campTotalPrice ? ` Total: ${campTotalPrice}.` : "";
         await sendConfirmationSMS(phone, `Mesa Basketball: Camp registration confirmed for ${campSessions.length} day${campSessions.length !== 1 ? "s" : ""}!${priceText} Check your email for details. Reply STOP to opt out.`);
+      }
+
+      // Fire-and-forget: update Google Calendar for each camp day
+      for (const session of campSessions) {
+        upsertGroupSessionCalendarEvent({
+          sessionType: "camp",
+          sessionLabel: session.campName || "Camp",
+          bookedDate: session.date,
+          bookedStartTime: session.startTime,
+          bookedEndTime: session.endTime || session.startTime,
+          bookedLocation: session.location,
+          kidsJustRegistered: kids,
+          participantsJustRegistered: totalParticipants || 1,
+        }).catch((err) => console.error("Calendar sync error (camp):", err));
       }
 
       return NextResponse.json({ success: true, count: campSessions.length });
@@ -347,6 +377,22 @@ export async function POST(req: NextRequest) {
       if (smsConsent && !emailOnly) {
         const typeLabel = isPrivateType ? "private session" : "session";
         await sendConfirmationSMS(phone, `Mesa Basketball: Your ${typeLabel} is confirmed! Check your email for details. Reply STOP to opt out.`);
+      }
+    }
+
+    // Fire-and-forget: add to Google Calendar (private sessions only; group/camp handled above)
+    if (!emailOnly && bookedDate && bookedStartTime && bookedEndTime) {
+      if (isPrivateType) {
+        addPrivateSessionToCalendar({
+          parentName,
+          email,
+          phone,
+          kids,
+          bookedDate,
+          bookedStartTime,
+          bookedEndTime,
+          bookedLocation: bookedLocation || "",
+        }).catch((err) => console.error("Calendar sync error (private):", err));
       }
     }
 
