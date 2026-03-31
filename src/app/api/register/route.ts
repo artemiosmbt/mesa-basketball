@@ -296,7 +296,7 @@ export async function POST(req: NextRequest) {
         isFirstTime,
         packageSessionsRemaining,
         packageType,
-        referralCode: isPrivateType ? referralCode : undefined,
+        referralCode,
       });
 
       if (smsConsent && !emailOnly) {
