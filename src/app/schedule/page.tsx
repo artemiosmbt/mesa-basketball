@@ -2272,12 +2272,28 @@ export default function Home() {
                 </div>
 
                 <div>
-                  <div className="mb-2 flex items-center justify-between">
-                    <label className="text-sm font-medium text-brown-300">Player(s)</label>
-                    <button type="button" onClick={addKid} className="text-sm text-mesa-accent hover:text-yellow-300">
-                      + Add another player
-                    </button>
-                  </div>
+                  {(() => {
+                    const campForLimit = camps[modal.sessionIndex];
+                    const dayStart = campForLimit?.time.split("-")[0]?.trim() || campForLimit?.time || "";
+                    const campMaxKids = campForLimit && campSelectedDays.size > 0
+                      ? Math.min(...Array.from(campSelectedDays).map((day) => {
+                          const enrolled = groupEnrollment[`${day}|${dayStart}`] || 0;
+                          return Math.max(0, campForLimit.maxSpots - enrolled);
+                        }))
+                      : (campForLimit?.maxSpots ?? 10);
+                    return (
+                      <div className="mb-2 flex items-center justify-between">
+                        <label className="text-sm font-medium text-brown-300">Player(s)</label>
+                        {kids.length < campMaxKids ? (
+                          <button type="button" onClick={addKid} className="text-sm text-mesa-accent hover:text-yellow-300">
+                            + Add another player
+                          </button>
+                        ) : (
+                          <span className="text-xs text-yellow-500">Max {campMaxKids} athlete{campMaxKids !== 1 ? "s" : ""} (spots available)</span>
+                        )}
+                      </div>
+                    );
+                  })()}
                   {kids.map((kid, i) => (
                     <div key={i} className="mb-3 flex flex-col gap-2">
                       <div className="flex gap-2 items-center">
@@ -2577,12 +2593,25 @@ export default function Home() {
                   </select>
                 </div>
                 <div>
-                  <div className="mb-2 flex items-center justify-between">
-                    <label className="text-sm font-medium text-brown-300">Player(s)</label>
-                    {kids.length < 3 && (
-                      <button type="button" onClick={addKid} className="text-sm text-mesa-accent hover:text-yellow-300">+ Add another player</button>
-                    )}
-                  </div>
+                  {(() => {
+                    const groupSessions = modal.selectedGroupSessions || [];
+                    const groupMaxKids = groupSessions.length > 0
+                      ? Math.min(...groupSessions.map((s) => {
+                          const enrolled = groupEnrollment[`${s.date}|${s.startTime}`] || 0;
+                          return Math.max(0, s.maxSpots - enrolled);
+                        }))
+                      : 10;
+                    return (
+                      <div className="mb-2 flex items-center justify-between">
+                        <label className="text-sm font-medium text-brown-300">Player(s)</label>
+                        {kids.length < groupMaxKids ? (
+                          <button type="button" onClick={addKid} className="text-sm text-mesa-accent hover:text-yellow-300">+ Add another player</button>
+                        ) : (
+                          <span className="text-xs text-yellow-500">Max {groupMaxKids} athlete{groupMaxKids !== 1 ? "s" : ""} (spots available)</span>
+                        )}
+                      </div>
+                    );
+                  })()}
                   {kids.map((kid, i) => (
                     <div key={i} className="mb-3 flex flex-col gap-2">
                       <div className="flex gap-2 items-center">
