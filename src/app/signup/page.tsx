@@ -27,6 +27,7 @@ export default function SignupPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
+  const [resendStatus, setResendStatus] = useState("");
   const router = useRouter();
 
   function addKid() {
@@ -88,6 +89,16 @@ export default function SignupPage() {
     }
   }
 
+  async function handleResend() {
+    setResendStatus("sending");
+    const { error } = await authClient.auth.resend({
+      type: "signup",
+      email,
+      options: { emailRedirectTo: "https://www.mesabasketballtraining.com/auth/callback" },
+    });
+    setResendStatus(error ? "error" : "sent");
+  }
+
   if (confirmed) {
     return (
       <div className="min-h-screen bg-brown-950 flex items-center justify-center px-6 py-12">
@@ -109,6 +120,13 @@ export default function SignupPage() {
             >
               Go to Login
             </a>
+            <button
+              onClick={handleResend}
+              disabled={resendStatus === "sending" || resendStatus === "sent"}
+              className="block w-full text-sm text-brown-400 hover:text-white transition disabled:opacity-50"
+            >
+              {resendStatus === "sending" ? "Sending..." : resendStatus === "sent" ? "Email resent!" : resendStatus === "error" ? "Failed to resend — try again" : "Didn't get it? Resend email"}
+            </button>
           </div>
         </div>
       </div>
