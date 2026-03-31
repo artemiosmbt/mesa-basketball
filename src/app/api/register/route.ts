@@ -131,7 +131,18 @@ export async function POST(req: NextRequest) {
         type: "weekly",
         sessionDetails: `Group Session${weeklySessions.length !== 1 ? "s" : ""} (${weeklySessions.length} ${weeklySessions.length !== 1 ? "dates" : "date"}):<br/>${allSessionsList}${priceNote ? "<br/>" + priceNote : ""}`,
         totalParticipants: totalParticipants || 1,
+        referralCode,
       });
+
+      if (submittedReferralCode) {
+        const newClient = await isNewClient(email, phone);
+        if (newClient) {
+          const referrerEmail = await findReferrerByCode(submittedReferralCode);
+          if (referrerEmail && referrerEmail !== email) {
+            await addReferralCredit(referrerEmail);
+          }
+        }
+      }
 
       if (smsConsent) {
         await sendConfirmationSMS(phone, `Mesa Basketball: You're registered for ${weeklySessions.length} group session${weeklySessions.length !== 1 ? "s" : ""}! Check your email for details. Reply STOP to opt out.`);
@@ -197,7 +208,18 @@ export async function POST(req: NextRequest) {
         type: "camp",
         sessionDetails: `${firstSession.campName}${firstSession.gradeGroup ? ` — ${firstSession.gradeGroup}` : ""}<br/>Days registered (${campSessions.length}):<br/>${daysList}${priceNote}`,
         totalParticipants: totalParticipants || 1,
+        referralCode,
       });
+
+      if (submittedReferralCode) {
+        const newClient = await isNewClient(email, phone);
+        if (newClient) {
+          const referrerEmail = await findReferrerByCode(submittedReferralCode);
+          if (referrerEmail && referrerEmail !== email) {
+            await addReferralCredit(referrerEmail);
+          }
+        }
+      }
 
       if (smsConsent) {
         const priceText = campTotalPrice ? ` Total: ${campTotalPrice}.` : "";
@@ -270,7 +292,7 @@ export async function POST(req: NextRequest) {
       }
 
       // Handle referral: if a verified new client used a referral code, reward the referrer
-      if (submittedReferralCode && isPrivateType) {
+      if (submittedReferralCode) {
         const newClient = await isNewClient(email, phone);
         if (newClient) {
           const referrerEmail = await findReferrerByCode(submittedReferralCode);
