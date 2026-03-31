@@ -186,7 +186,7 @@ export default function AdminPage() {
             <table className="w-full text-sm">
               <thead className="bg-brown-900/60 text-xs uppercase tracking-wider text-brown-400">
                 <tr>
-                  <th className="px-4 py-3 text-left">Date</th>
+                  <th className="px-4 py-3 text-left">Registered</th>
                   <th className="px-4 py-3 text-left">Parent</th>
                   <th className="px-4 py-3 text-left">Email</th>
                   <th className="px-4 py-3 text-left">Phone</th>
@@ -198,41 +198,54 @@ export default function AdminPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-brown-800">
-                {filtered.map((r) => (
-                  <tr key={r.id} className="hover:bg-brown-900/30 transition">
-                    <td className="px-4 py-3 text-brown-400 whitespace-nowrap text-xs">
-                      {new Date(r.created_at).toLocaleDateString()}
-                    </td>
-                    <td className="px-4 py-3 font-medium whitespace-nowrap">{r.parent_name}</td>
-                    <td className="px-4 py-3 text-brown-300 text-xs">{r.email}</td>
-                    <td className="px-4 py-3 text-brown-300 text-xs whitespace-nowrap">{r.phone}</td>
-                    <td className="px-4 py-3 text-brown-400 text-xs max-w-[160px] truncate" title={r.kids}>{r.kids}</td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <span className="rounded-full bg-brown-800 px-2 py-0.5 text-xs text-mesa-accent">
-                        {TYPE_LABELS[r.type] || r.type}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-brown-400 text-xs max-w-[200px] truncate" title={r.session_details}>
-                      {r.session_details}
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${r.status === "confirmed" ? "bg-green-900/40 text-green-400" : "bg-red-900/40 text-red-400"}`}>
-                        {r.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      {r.status === "confirmed" && (
-                        <button
-                          onClick={() => cancelRegistration(r.id)}
-                          disabled={cancelling === r.id}
-                          className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50"
-                        >
-                          {cancelling === r.id ? "..." : "Cancel"}
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                {filtered.map((r) => {
+                  // Parse athlete names only (strip DOB/grade details)
+                  const athleteNames = r.kids
+                    ? r.kids.split(",").map((k) => k.split("(")[0].trim()).filter(Boolean).join(", ")
+                    : "—";
+                  // Strip HTML tags from session details and replace <br/> with newlines
+                  const sessionText = r.session_details
+                    ? r.session_details.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim()
+                    : "—";
+                  return (
+                    <tr key={r.id} className="hover:bg-brown-900/30 transition">
+                      <td className="px-4 py-3 text-brown-400 whitespace-nowrap text-xs">
+                        <div>{new Date(r.created_at).toLocaleDateString()}</div>
+                        {r.booked_date && (
+                          <div className="text-mesa-accent font-medium mt-0.5">↳ {r.booked_date}</div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 font-medium whitespace-nowrap">{r.parent_name}</td>
+                      <td className="px-4 py-3 text-brown-300 text-xs">{r.email}</td>
+                      <td className="px-4 py-3 text-brown-300 text-xs whitespace-nowrap">{r.phone}</td>
+                      <td className="px-4 py-3 text-brown-300 text-xs">{athleteNames}</td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <span className="rounded-full bg-brown-800 px-2 py-0.5 text-xs text-mesa-accent">
+                          {TYPE_LABELS[r.type] || r.type}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-brown-400 text-xs max-w-[240px]">
+                        <div className="whitespace-pre-line leading-relaxed">{sessionText}</div>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${r.status === "confirmed" ? "bg-green-900/40 text-green-400" : "bg-red-900/40 text-red-400"}`}>
+                          {r.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        {r.status === "confirmed" && (
+                          <button
+                            onClick={() => cancelRegistration(r.id)}
+                            disabled={cancelling === r.id}
+                            className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50"
+                          >
+                            {cancelling === r.id ? "..." : "Cancel"}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
                 {filtered.length === 0 && (
                   <tr>
                     <td colSpan={9} className="px-4 py-8 text-center text-brown-500">No registrations found.</td>
