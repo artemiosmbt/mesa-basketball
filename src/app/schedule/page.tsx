@@ -721,7 +721,7 @@ export default function Home() {
             sessionDetails: modal.sessionDetails,
             totalParticipants,
             weeklySessions: modal.selectedGroupSessions,
-            weeklyTotalPrice: modal.weeklyTotalPrice,
+            weeklyTotalPrice: (modal.weeklyTotalPrice || 0) * kids.length,
             submittedReferralCode: referralCode.trim() || undefined,
           }),
         });
@@ -1564,6 +1564,7 @@ export default function Home() {
                                 {groupPricing.count} session{groupPricing.count !== 1 ? "s" : ""} &times; ${groupPricing.unitPrice}
                                 {" = "}
                                 <span className="text-mesa-accent">${groupPricing.totalPrice}</span>
+                                <span className="text-brown-400 text-xs font-normal ml-1">per athlete</span>
                               </p>
                               {groupPricing.savings > 0 && (
                                 <p className="text-xs text-green-400 mt-0.5">
@@ -2014,6 +2015,7 @@ export default function Home() {
             <div>
               <p className="text-sm font-semibold text-white">
                 {groupPricing.count} session{groupPricing.count !== 1 ? "s" : ""} &times; ${groupPricing.unitPrice} = <span className="text-mesa-accent">${groupPricing.totalPrice}</span>
+                <span className="text-brown-400 text-xs font-normal ml-1">per athlete</span>
               </p>
               {groupPricing.savings > 0 && (
                 <p className="text-xs text-green-400">{groupPricing.discountLabel} — You save ${groupPricing.savings}!</p>
@@ -2212,13 +2214,16 @@ export default function Home() {
                 </div>
                 <div className="mt-3 border-t border-brown-700 pt-2">
                   <p className="text-sm font-semibold text-mesa-accent">
-                    Total: ${modal.weeklyTotalPrice}
+                    Total: ${(modal.weeklyTotalPrice || 0) * kids.length}
                     {modal.weeklySavings && modal.weeklySavings > 0 ? (
                       <span className="ml-2 text-xs text-green-400">
-                        (You save ${modal.weeklySavings}!)
+                        (You save ${modal.weeklySavings * kids.length}!)
                       </span>
                     ) : null}
                   </p>
+                  {kids.length > 1 && (
+                    <p className="text-xs text-brown-400 mt-0.5">${modal.weeklyTotalPrice} &times; {kids.length} athletes</p>
+                  )}
                   <p className="text-xs text-brown-500 mt-0.5">Payment due upon registration — Cash, Venmo, or Zelle</p>
                 </div>
               </div>
