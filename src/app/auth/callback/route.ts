@@ -13,10 +13,11 @@ export async function GET(request: NextRequest) {
     );
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
-      return NextResponse.redirect(`${origin}${next}`);
+      return NextResponse.redirect(`${origin}/login?confirmed=1`);
     }
+    // Code expired or already used
+    return NextResponse.redirect(`${origin}/login?confirm_error=1`);
   }
 
-  // Code already used or expired — email is likely already confirmed, just send to login
-  return NextResponse.redirect(`${origin}/login?confirmed=1`);
+  return NextResponse.redirect(`${origin}/login`);
 }
