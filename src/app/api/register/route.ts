@@ -129,7 +129,7 @@ export async function POST(req: NextRequest) {
         phone,
         kids,
         type: "weekly",
-        sessionDetails: `Group Sessions (${weeklySessions.length} dates):<br/>${allSessionsList}${priceNote ? "<br/>" + priceNote : ""}`,
+        sessionDetails: `Group Session${weeklySessions.length !== 1 ? "s" : ""} (${weeklySessions.length} ${weeklySessions.length !== 1 ? "dates" : "date"}):<br/>${allSessionsList}${priceNote ? "<br/>" + priceNote : ""}`,
         totalParticipants: totalParticipants || 1,
       });
 
