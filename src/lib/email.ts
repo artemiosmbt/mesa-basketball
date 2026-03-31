@@ -139,6 +139,30 @@ export async function sendRegistrationNotification(data: {
   if (clientResult.error) console.error("Resend client email error:", clientResult.error, "to:", data.email);
 }
 
+export async function sendReferralCreditNotification(data: {
+  referrerName: string;
+  referrerEmail: string;
+  newClientName: string;
+}) {
+  const resend = getResend();
+  await resend.emails.send({
+    from: FROM_EMAIL,
+    to: data.referrerEmail,
+    replyTo: ARTEMI_EMAIL,
+    subject: `You earned a 50% off private session — Mesa Basketball Training`,
+    html: `
+      <h2>You earned a reward!</h2>
+      <p>Hi ${data.referrerName},</p>
+      <p>Great news — <strong>${data.newClientName}</strong> just booked their first session using your referral code. As a thank you, you've earned <strong>50% off your next private session</strong>.</p>
+      <p>Your discount will be applied automatically the next time you book a private session.</p>
+      <p><a href="${BASE_URL}/my-bookings" style="color: #d4af37; font-weight: bold;">View My Bookings</a> — check your referral credits anytime.</p>
+      <br/>
+      <p>Questions? Contact Artemios at (631) 599-1280 or <a href="mailto:artemios@mesabasketballtraining.com">artemios@mesabasketballtraining.com</a>.</p>
+      <p>— Mesa Basketball Training</p>
+    `,
+  });
+}
+
 export async function sendCancellationNotification(data: {
   parentName: string;
   email: string;

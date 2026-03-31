@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { sendRegistrationNotification } from "@/lib/email";
+import { sendRegistrationNotification, sendReferralCreditNotification } from "@/lib/email";
 import twilio from "twilio";
 
 function formatPhone(phone: string): string {
@@ -28,6 +28,7 @@ import {
   decrementReferralCredit,
   addReferralCredit,
   findReferrerByCode,
+  findReferrerInfoByCode,
   generateUniqueReferralCode,
   checkGroupSessionCapacity,
   getActivePackage,
@@ -73,6 +74,18 @@ export async function POST(req: NextRequest) {
     // Handle weekly multi-session registration
     if (type === "weekly" && weeklySessions && weeklySessions.length > 0) {
       const referralCode = await generateUniqueReferralCode(parentName, email);
+
+      // Check referral BEFORE saving (isNewClient returns false after registration is stored)
+      let weeklyReferrer: { email: string; name: string } | null = null;
+      if (submittedReferralCode) {
+        const newClient = await isNewClient(email, phone);
+        if (newClient) {
+          const info = await findReferrerInfoByCode(submittedReferralCode);
+          if (info && info.email !== email) {
+            weeklyReferrer = info;
+          }
+        }
+      }
 
       // Check capacity for all selected sessions
       const capacityChecks = await Promise.all(
@@ -134,14 +147,9 @@ export async function POST(req: NextRequest) {
         referralCode,
       });
 
-      if (submittedReferralCode) {
-        const newClient = await isNewClient(email, phone);
-        if (newClient) {
-          const referrerEmail = await findReferrerByCode(submittedReferralCode);
-          if (referrerEmail && referrerEmail !== email) {
-            await addReferralCredit(referrerEmail);
-          }
-        }
+      if (weeklyReferrer) {
+        await addReferralCredit(weeklyReferrer.email);
+        await sendReferralCreditNotification({ referrerName: weeklyReferrer.name, referrerEmail: weeklyReferrer.email, newClientName: parentName });
       }
 
       if (smsConsent) {
@@ -154,6 +162,18 @@ export async function POST(req: NextRequest) {
     // Handle camp multi-day registration
     if (type === "camp" && campSessions && campSessions.length > 0) {
       const referralCode = await generateUniqueReferralCode(parentName, email);
+
+      // Check referral BEFORE saving (isNewClient returns false after registration is stored)
+      let campReferrer: { email: string; name: string } | null = null;
+      if (submittedReferralCode) {
+        const newClient = await isNewClient(email, phone);
+        if (newClient) {
+          const info = await findReferrerInfoByCode(submittedReferralCode);
+          if (info && info.email !== email) {
+            campReferrer = info;
+          }
+        }
+      }
 
       // Parse total price string (e.g. "$290" or "$290 (Early Bird)") to a number
       const campTotalNum = campTotalPrice ? parseInt(String(campTotalPrice).replace(/\D/g, "")) || 0 : 0;
@@ -211,14 +231,9 @@ export async function POST(req: NextRequest) {
         referralCode,
       });
 
-      if (submittedReferralCode) {
-        const newClient = await isNewClient(email, phone);
-        if (newClient) {
-          const referrerEmail = await findReferrerByCode(submittedReferralCode);
-          if (referrerEmail && referrerEmail !== email) {
-            await addReferralCredit(referrerEmail);
-          }
-        }
+      if (campReferrer) {
+        await addReferralCredit(campReferrer.email);
+        await sendReferralCreditNotification({ referrerName: campReferrer.name, referrerEmail: campReferrer.email, newClientName: parentName });
       }
 
       if (smsConsent) {
@@ -239,11 +254,20 @@ export async function POST(req: NextRequest) {
 
     // Save to Supabase (unless this is an email-only request)
     if (!emailOnly) {
+      // Check new-client status and referral BEFORE saving
+      const newClient = await isNewClient(email, phone);
+      let privateReferrer: { email: string; name: string } | null = null;
+      if (submittedReferralCode && newClient) {
+        const info = await findReferrerInfoByCode(submittedReferralCode);
+        if (info && info.email !== email) {
+          privateReferrer = info;
+        }
+      }
+
       // Check first-time discount and referral credit
       if (isPrivateType) {
-        const newClient = await isNewClient(email, phone);
         if (newClient) {
-          isFree = true; // repurposed: means "discount applied" (50% off)
+          isFree = true; // first-time 50% off
           isFirstTime = true;
         } else {
           const credits = await getReferralCredits(email);
@@ -280,7 +304,6 @@ export async function POST(req: NextRequest) {
           : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
         const activePkg = bookingMonth ? await getActivePackage(email, bookingMonth) : null;
         if (activePkg && bookingMonth) {
-          // Count confirmed sessions including the one just saved
           const confirmedCount = await countConfirmedPrivateSessions(email, bookingMonth);
           const newUsed = Math.min(activePkg.package_type, confirmedCount);
           await setPackageSessions(activePkg.id, newUsed);
@@ -291,15 +314,10 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Handle referral: if a verified new client used a referral code, reward the referrer
-      if (submittedReferralCode) {
-        const newClient = await isNewClient(email, phone);
-        if (newClient) {
-          const referrerEmail = await findReferrerByCode(submittedReferralCode);
-          if (referrerEmail && referrerEmail !== email) {
-            await addReferralCredit(referrerEmail); // referrer gets 1 half-off credit
-          }
-        }
+      // Award referral credit to referrer and notify them
+      if (privateReferrer) {
+        await addReferralCredit(privateReferrer.email);
+        await sendReferralCreditNotification({ referrerName: privateReferrer.name, referrerEmail: privateReferrer.email, newClientName: parentName });
       }
     }
 

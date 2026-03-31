@@ -129,11 +129,9 @@ export default function MyBookings() {
                     <p className="mt-2 text-xs text-brown-500 leading-relaxed">
                       Share your code — when a new client books with it, you earn a 50% off credit on your next private session.
                     </p>
-                    {rewards.referralCredits > 0 && (
-                      <p className="mt-3 text-sm font-semibold text-mesa-accent">
-                        {rewards.referralCredits} half-off credit{rewards.referralCredits !== 1 ? "s" : ""} available
-                      </p>
-                    )}
+                    <p className={`mt-3 text-sm font-semibold ${rewards.referralCredits > 0 ? "text-mesa-accent" : "text-brown-500"}`}>
+                      {rewards.referralCredits} half-off credit{rewards.referralCredits !== 1 ? "s" : ""} available
+                    </p>
                   </div>
                 )}
 

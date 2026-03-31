@@ -261,6 +261,19 @@ export async function findReferrerByCode(code: string): Promise<string | null> {
   return data.email;
 }
 
+/** Look up the name and email of the family that owns a referral code */
+export async function findReferrerInfoByCode(code: string): Promise<{ email: string; name: string } | null> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("registrations")
+    .select("email, parent_name")
+    .eq("referral_code", code.toUpperCase())
+    .limit(1)
+    .single();
+  if (error || !data) return null;
+  return { email: data.email, name: data.parent_name };
+}
+
 /** Generate a referral code from parent name: LASTNAME-MESA */
 export function generateReferralCode(parentName: string): string {
   const parts = parentName.trim().split(/\s+/);
