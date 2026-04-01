@@ -644,14 +644,13 @@ export default function Home() {
     const endLabel = formatTimeFromMins(endMins);
     const details = `Private Session — ${window.date} ${startLabel}-${endLabel} (${sel.duration} min) at ${window.location}`;
 
-    // Find future weeks with matching day, location, and time availability
+    // Find future weeks with matching day and time availability (any location)
     const selectedDate = new Date(window.date);
     const dayOfWeek = selectedDate.getUTCDay();
     const futureWeeks: typeof recurringWeeks = [];
 
     for (const w of timeWindows) {
       if (w.date === window.date) continue; // skip current
-      if (w.location !== window.location) continue;
       const wDate = new Date(w.date);
       if (wDate.getUTCDay() !== dayOfWeek) continue;
       if (wDate <= selectedDate) continue;
@@ -2475,12 +2474,13 @@ export default function Home() {
                 {(modal.type === "private" || modal.type === "group-private") && recurringWeeks.length > 0 && (
                   <div>
                     <label className="mb-2 block text-sm font-medium text-brown-300">
-                      Repeat weekly? (same time &amp; location)
+                      Repeat weekly?
                     </label>
                     <div className="space-y-2 rounded-lg border border-brown-700 bg-brown-800/50 p-3">
                       {(showAllRecurring ? recurringWeeks : recurringWeeks.slice(0, 3)).map((week, wi) => {
                         const d = new Date(week.date);
                         const dayName = d.toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" });
+                        const diffLocation = week.location !== modal.bookedLocation;
                         return (
                           <label key={wi} className="flex items-center gap-2 text-sm cursor-pointer">
                             <input
@@ -2496,7 +2496,10 @@ export default function Home() {
                               className="rounded border-brown-600 accent-mesa-accent"
                             />
                             <span className="text-brown-300">
-                              {dayName}, {week.date}
+                              {dayName}, {week.date}{" "}
+                              <span className={diffLocation ? "text-mesa-accent font-medium" : "text-brown-500"}>
+                                ({week.location})
+                              </span>
                             </span>
                           </label>
                         );
