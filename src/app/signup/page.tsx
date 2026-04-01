@@ -218,29 +218,38 @@ export default function SignupPage() {
                     )}
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                    <input
-                      type="text"
-                      value={kid.name}
-                      onChange={(e) => updateKid(i, "name", e.target.value)}
-                      placeholder="Name"
-                      className="rounded-lg border border-brown-700 bg-brown-800/60 px-3 py-2 text-sm text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
-                    />
-                    <input
-                      type="date"
-                      value={kid.dob}
-                      onChange={(e) => updateKid(i, "dob", e.target.value)}
-                      className="rounded-lg border border-brown-700 bg-brown-800/60 px-3 py-2 text-sm text-white focus:border-mesa-accent focus:outline-none"
-                    />
-                    <select
-                      value={kid.grade}
-                      onChange={(e) => updateKid(i, "grade", e.target.value)}
-                      className="rounded-lg border border-brown-700 bg-brown-800/60 px-3 py-2 text-sm text-white focus:border-mesa-accent focus:outline-none"
-                    >
-                      <option value="">Grade</option>
-                      {ALL_GRADES.map((g) => (
-                        <option key={g.value} value={g.value}>{g.label}</option>
-                      ))}
-                    </select>
+                    <div>
+                      <label className="mb-1 block text-xs text-brown-400">Name</label>
+                      <input
+                        type="text"
+                        value={kid.name}
+                        onChange={(e) => updateKid(i, "name", e.target.value)}
+                        placeholder="Player's full name"
+                        className="w-full rounded-lg border border-brown-700 bg-brown-800/60 px-3 py-2 text-sm text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs text-brown-400">Date of Birth</label>
+                      <input
+                        type="date"
+                        value={kid.dob}
+                        onChange={(e) => updateKid(i, "dob", e.target.value)}
+                        className="w-full rounded-lg border border-brown-700 bg-brown-800/60 px-3 py-2 text-sm text-white focus:border-mesa-accent focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs text-brown-400">Grade</label>
+                      <select
+                        value={kid.grade}
+                        onChange={(e) => updateKid(i, "grade", e.target.value)}
+                        className="w-full rounded-lg border border-brown-700 bg-brown-800/60 px-3 py-2 text-sm text-white focus:border-mesa-accent focus:outline-none"
+                      >
+                        <option value="">Select grade...</option>
+                        {ALL_GRADES.map((g) => (
+                          <option key={g.value} value={g.value}>{g.label}</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                 </div>
               ))}

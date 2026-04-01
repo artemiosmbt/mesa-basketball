@@ -2314,7 +2314,7 @@ export default function Home() {
                         )}
                       </div>
                       <div className="overflow-hidden">
-                        <label className="mb-1 block text-xs text-brown-500">Date of Birth</label>
+                        <label className="mb-1 block text-xs text-brown-300">Date of Birth</label>
                         <div className="overflow-hidden rounded-lg border border-brown-700 bg-brown-800">
                           <input
                             type="date"
@@ -2326,7 +2326,7 @@ export default function Home() {
                         </div>
                       </div>
                       <div>
-                        <label className="mb-1 block text-xs text-brown-500">Grade</label>
+                        <label className="mb-1 block text-xs text-brown-300">Grade</label>
                         <select
                           required
                           value={kid.grade}
@@ -2624,7 +2624,7 @@ export default function Home() {
                         )}
                       </div>
                       <div className="overflow-hidden">
-                        <label className="mb-1 block text-xs text-brown-500">Date of Birth</label>
+                        <label className="mb-1 block text-xs text-brown-300">Date of Birth</label>
                         <div className="overflow-hidden rounded-lg border border-brown-700 bg-brown-800">
                           <input
                             type="date"
@@ -2636,7 +2636,7 @@ export default function Home() {
                         </div>
                       </div>
                       <div>
-                        <label className="mb-1 block text-xs text-brown-500">Grade</label>
+                        <label className="mb-1 block text-xs text-brown-300">Grade</label>
                         <select
                           required
                           value={kid.grade}
