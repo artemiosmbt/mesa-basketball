@@ -23,6 +23,21 @@ interface Kid {
   grade: string;
 }
 
+// Convert YYYY-MM-DD (old date input format) → MM/DD/YYYY
+function normalizeDob(dob: string): string {
+  const iso = dob.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) return `${iso[2]}/${iso[3]}/${iso[1]}`;
+  return dob;
+}
+
+// Auto-format typed DOB: digits only, slashes inserted, max 8 digits
+function formatDob(raw: string): string {
+  const digits = raw.replace(/\D/g, "").slice(0, 8);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+  return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
+}
+
 export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -53,7 +68,7 @@ export default function SettingsPage() {
         if (data.parent_name) setParentName(data.parent_name);
         if (data.phone) setPhone(data.phone);
         if (data.kids && Array.isArray(data.kids) && data.kids.length > 0) {
-          setKids(data.kids);
+          setKids(data.kids.map((k: Kid) => ({ ...k, dob: normalizeDob(k.dob) })));
         }
         if (typeof data.marketing_emails === "boolean") {
           setMarketingEmails(data.marketing_emails);
@@ -203,7 +218,7 @@ export default function SettingsPage() {
                         inputMode="numeric"
                         placeholder="MM/DD/YYYY"
                         value={kid.dob}
-                        onChange={(e) => updateKid(i, "dob", e.target.value)}
+                        onChange={(e) => updateKid(i, "dob", formatDob(e.target.value))}
                         className="w-full rounded-lg border border-brown-700 bg-brown-800/60 px-3 py-2 text-sm text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
                       />
                     </div>

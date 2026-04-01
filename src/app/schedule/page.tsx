@@ -52,6 +52,13 @@ interface Camp {
 }
 
 // Early bird ends March 31, 2026 end of day Eastern (April 1 04:00 UTC)
+function formatDob(raw: string): string {
+  const digits = raw.replace(/\D/g, "").slice(0, 8);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+  return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
+}
+
 function isEarlyBirdActive(): boolean {
   return new Date() < new Date("2026-04-01T04:00:00Z");
 }
@@ -2321,7 +2328,7 @@ export default function Home() {
                           required
                           placeholder="MM/DD/YYYY"
                           value={kid.dob}
-                          onChange={(e) => updateKid(i, "dob", e.target.value)}
+                          onChange={(e) => updateKid(i, "dob", formatDob(e.target.value))}
                           className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white text-sm placeholder-brown-600 focus:border-mesa-accent focus:outline-none"
                         />
                       </div>
@@ -2631,7 +2638,7 @@ export default function Home() {
                           required
                           placeholder="MM/DD/YYYY"
                           value={kid.dob}
-                          onChange={(e) => updateKid(i, "dob", e.target.value)}
+                          onChange={(e) => updateKid(i, "dob", formatDob(e.target.value))}
                           className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white text-sm placeholder-brown-600 focus:border-mesa-accent focus:outline-none"
                         />
                       </div>
