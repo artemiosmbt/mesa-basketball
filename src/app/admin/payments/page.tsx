@@ -117,10 +117,10 @@ export default function PaymentsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-brown-950 text-white">
+    <div className="min-h-screen bg-brown-950 text-white flex flex-col">
       {/* Header */}
       <div className="border-b border-gray-200 bg-white px-6 py-4">
-        <div className="mx-auto max-w-7xl flex items-center justify-between">
+        <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="h-14 w-14 rounded-full bg-white border border-gray-100 overflow-hidden flex items-center justify-center">
               <img src="/logo.png" alt="Mesa" className="h-14 w-14 object-contain scale-125" />
@@ -130,14 +130,32 @@ export default function PaymentsPage() {
               <p className="text-xs text-brown-500">Mesa Basketball Training</p>
             </div>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4 md:hidden">
             <Link href="/admin" className="text-sm text-brown-500 hover:text-mesa-dark">← Registrations</Link>
             <Link href="/" className="text-sm text-brown-500 hover:text-mesa-dark">← Site</Link>
           </div>
         </div>
       </div>
 
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 py-8 space-y-12">
+      <div className="flex flex-1">
+        {/* Sidebar — desktop only */}
+        <aside className="hidden md:flex flex-col w-52 shrink-0 border-r border-brown-800 bg-brown-900/30 px-3 py-6">
+          <nav className="flex-1 space-y-1">
+            <Link href="/admin" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-brown-400 hover:text-white hover:bg-brown-800 transition">
+              Dashboard
+            </Link>
+            <Link href="/admin/payments" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold bg-brown-800 text-white">
+              Payments
+            </Link>
+          </nav>
+          <div className="border-t border-brown-800 pt-4 mt-4 space-y-1">
+            <Link href="/" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-brown-400 hover:text-white hover:bg-brown-800 transition">
+              ← Back to Site
+            </Link>
+          </div>
+        </aside>
+
+      <div className="flex-1 px-4 sm:px-6 py-8 space-y-12">
 
         {/* Unpaid */}
         <div>
@@ -263,6 +281,7 @@ export default function PaymentsPage() {
           )}
         </div>
 
+      </div>
       </div>
     </div>
   );
