@@ -13,6 +13,10 @@ import {
   sendCancellationNotification,
   sendRescheduleNotification,
 } from "@/lib/email";
+import {
+  deletePrivateSessionFromCalendar,
+  upsertGroupSessionCalendarEvent,
+} from "@/lib/calendar";
 
 // GET — fetch booking details
 export async function GET(
@@ -126,6 +130,23 @@ export async function DELETE(
       isLateCancel,
       lateFeeAmount,
     });
+    // Update calendar for this camp day (count decreases after cancellation)
+    if (reg.booked_date && reg.booked_start_time) {
+      try {
+        await upsertGroupSessionCalendarEvent({
+          sessionType: "camp",
+          sessionLabel: campName,
+          bookedDate: reg.booked_date,
+          bookedStartTime: reg.booked_start_time,
+          bookedEndTime: reg.booked_end_time || reg.booked_start_time,
+          bookedLocation: reg.booked_location || "",
+          kidsJustRegistered: reg.kids,
+          participantsJustRegistered: reg.total_participants || 1,
+        });
+      } catch (err) {
+        console.error("Calendar sync error (camp cancel):", err);
+      }
+    }
     return NextResponse.json({ success: true, isLateCancel });
   }
 
@@ -170,6 +191,34 @@ export async function DELETE(
     isLateCancel,
     lateFeeAmount,
   });
+
+  // Sync calendar after cancellation
+  if (reg.booked_date && reg.booked_start_time) {
+    const isPrivate = reg.type === "private" || reg.type === "group-private";
+    try {
+      if (isPrivate) {
+        await deletePrivateSessionFromCalendar({
+          email: reg.email,
+          bookedDate: reg.booked_date,
+        });
+      } else {
+        // Group/weekly: update the event count (DB already reflects cancellation)
+        const sessionLabel = reg.session_details.split(" — ")[0] || "Group Session";
+        await upsertGroupSessionCalendarEvent({
+          sessionType: reg.type as "weekly" | "camp",
+          sessionLabel,
+          bookedDate: reg.booked_date,
+          bookedStartTime: reg.booked_start_time,
+          bookedEndTime: reg.booked_end_time || reg.booked_start_time,
+          bookedLocation: reg.booked_location || "",
+          kidsJustRegistered: reg.kids,
+          participantsJustRegistered: reg.total_participants || 1,
+        });
+      }
+    } catch (err) {
+      console.error("Calendar sync error (cancel):", err);
+    }
+  }
 
   return NextResponse.json({ success: true, isLateCancel });
 }

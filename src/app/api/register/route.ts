@@ -160,19 +160,23 @@ export async function POST(req: NextRequest) {
         await sendConfirmationSMS(phone, `Mesa Basketball: You're registered for ${weeklySessions.length} group session${weeklySessions.length !== 1 ? "s" : ""}! Check your email for details. Reply STOP to opt out.`);
       }
 
-      // Fire-and-forget: update Google Calendar for each weekly session
+      // Update Google Calendar for each weekly session
       for (const session of weeklySessions) {
-        upsertGroupSessionCalendarEvent({
-          sessionType: "weekly",
-          sessionLabel: session.group || "Group Session",
-          bookedDate: session.date,
-          bookedStartTime: session.startTime,
-          bookedEndTime: session.endTime,
-          bookedLocation: session.location,
-          maxSpots: session.maxSpots,
-          kidsJustRegistered: kids,
-          participantsJustRegistered: totalParticipants || 1,
-        }).catch((err) => console.error("Calendar sync error (weekly):", err));
+        try {
+          await upsertGroupSessionCalendarEvent({
+            sessionType: "weekly",
+            sessionLabel: session.group || "Group Session",
+            bookedDate: session.date,
+            bookedStartTime: session.startTime,
+            bookedEndTime: session.endTime,
+            bookedLocation: session.location,
+            maxSpots: session.maxSpots,
+            kidsJustRegistered: kids,
+            participantsJustRegistered: totalParticipants || 1,
+          });
+        } catch (err) {
+          console.error("Calendar sync error (weekly):", err);
+        }
       }
 
       return NextResponse.json({ success: true, count: weeklySessions.length });
@@ -261,18 +265,22 @@ export async function POST(req: NextRequest) {
         await sendConfirmationSMS(phone, `Mesa Basketball: Camp registration confirmed for ${campSessions.length} day${campSessions.length !== 1 ? "s" : ""}!${priceText} Check your email for details. Reply STOP to opt out.`);
       }
 
-      // Fire-and-forget: update Google Calendar for each camp day
+      // Update Google Calendar for each camp day
       for (const session of campSessions) {
-        upsertGroupSessionCalendarEvent({
-          sessionType: "camp",
-          sessionLabel: session.campName || "Camp",
-          bookedDate: session.date,
-          bookedStartTime: session.startTime,
-          bookedEndTime: session.endTime || session.startTime,
-          bookedLocation: session.location,
-          kidsJustRegistered: kids,
-          participantsJustRegistered: totalParticipants || 1,
-        }).catch((err) => console.error("Calendar sync error (camp):", err));
+        try {
+          await upsertGroupSessionCalendarEvent({
+            sessionType: "camp",
+            sessionLabel: session.campName || "Camp",
+            bookedDate: session.date,
+            bookedStartTime: session.startTime,
+            bookedEndTime: session.endTime || session.startTime,
+            bookedLocation: session.location,
+            kidsJustRegistered: kids,
+            participantsJustRegistered: totalParticipants || 1,
+          });
+        } catch (err) {
+          console.error("Calendar sync error (camp):", err);
+        }
       }
 
       return NextResponse.json({ success: true, count: campSessions.length });
@@ -380,19 +388,23 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Fire-and-forget: add to Google Calendar (private sessions only; group/camp handled above)
+    // Add to Google Calendar (private sessions only; group/camp handled above)
     if (!emailOnly && bookedDate && bookedStartTime && bookedEndTime) {
       if (isPrivateType) {
-        addPrivateSessionToCalendar({
-          parentName,
-          email,
-          phone,
-          kids,
-          bookedDate,
-          bookedStartTime,
-          bookedEndTime,
-          bookedLocation: bookedLocation || "",
-        }).catch((err) => console.error("Calendar sync error (private):", err));
+        try {
+          await addPrivateSessionToCalendar({
+            parentName,
+            email,
+            phone,
+            kids,
+            bookedDate,
+            bookedStartTime,
+            bookedEndTime,
+            bookedLocation: bookedLocation || "",
+          });
+        } catch (err) {
+          console.error("Calendar sync error (private):", err);
+        }
       }
     }
 

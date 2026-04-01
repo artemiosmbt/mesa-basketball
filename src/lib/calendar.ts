@@ -189,6 +189,14 @@ async function createEvent(
   return data.id as string;
 }
 
+/** Delete a calendar event by id */
+async function deleteEvent(calendarId: string, token: string, eventId: string): Promise<void> {
+  await fetch(
+    `${CALENDAR_BASE}/${encodeURIComponent(calendarId)}/events/${eventId}`,
+    { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }
+  );
+}
+
 /** Patch an existing calendar event's description (and optionally summary) */
 async function patchEvent(
   calendarId: string,
@@ -292,12 +300,15 @@ export async function addPrivateSessionToCalendar(
   const token = await getAccessToken(saEmail, privateKey);
 
   const summary = `Private — ${params.parentName} (${params.kids})`;
+  const tag = `[mesa-private:${params.bookedDate}|${params.email}]`;
   const description = [
     `Parent: ${params.parentName}`,
     `Email: ${params.email}`,
     `Phone: ${params.phone}`,
     `Athletes: ${params.kids}`,
     `Location: ${params.bookedLocation}`,
+    "",
+    tag,
   ].join("\n");
 
   const event: CalendarEvent = {
@@ -308,6 +319,24 @@ export async function addPrivateSessionToCalendar(
   };
 
   await createEvent(calendarId, token, event);
+}
+
+/** Delete a private session calendar event when a booking is cancelled */
+export async function deletePrivateSessionFromCalendar(params: {
+  email: string;
+  bookedDate: string;
+}): Promise<void> {
+  const calendarId = process.env.GOOGLE_CALENDAR_ID;
+  const saEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+  const privateKey = process.env.GOOGLE_PRIVATE_KEY;
+  if (!calendarId || !saEmail || !privateKey) return;
+
+  const token = await getAccessToken(saEmail, privateKey);
+  const tag = `[mesa-private:${params.bookedDate}|${params.email}]`;
+  const existing = await findExistingEvent(calendarId, token, params.bookedDate, tag);
+  if (existing) {
+    await deleteEvent(calendarId, token, existing.id);
+  }
 }
 
 /**
