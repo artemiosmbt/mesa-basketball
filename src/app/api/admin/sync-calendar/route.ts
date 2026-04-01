@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { getWeeklySchedule, getCamps } from "@/lib/sheets";
 import { upsertGroupSessionCalendarEvent } from "@/lib/calendar";
 
-/** Split "9:00 AM - 12:00 PM" into start/end, or return time as both */
 function splitTime(time: string): { start: string; end: string } {
   const parts = time.split(/\s*[-–]\s*/);
   return { start: parts[0]?.trim() || time, end: parts[1]?.trim() || parts[0]?.trim() || time };
@@ -10,88 +9,56 @@ function splitTime(time: string): { start: string; end: string } {
 
 export async function GET() {
   const today = new Date().toISOString().split("T")[0];
-  let synced = 0;
-  let errors = 0;
-  const log: string[] = [];
+  const tasks: Promise<{ label: string; ok: boolean }>[] = [];
 
-  try {
-    const sessions = await getWeeklySchedule();
-    for (const session of sessions) {
-      if (!session.date || session.date < today) continue;
-      try {
-        await upsertGroupSessionCalendarEvent({
-          sessionType: "weekly",
-          sessionLabel: session.group || "Group Session",
-          bookedDate: session.date,
-          bookedStartTime: session.startTime,
-          bookedEndTime: session.endTime,
-          bookedLocation: session.location,
-          maxSpots: session.maxSpots,
+  const [sessions, camps] = await Promise.all([getWeeklySchedule(), getCamps()]);
+
+  for (const session of sessions) {
+    if (!session.date || session.date < today) continue;
+    tasks.push(
+      upsertGroupSessionCalendarEvent({
+        sessionType: "weekly",
+        sessionLabel: session.group || "Group Session",
+        bookedDate: session.date,
+        bookedStartTime: session.startTime,
+        bookedEndTime: session.endTime,
+        bookedLocation: session.location,
+        maxSpots: session.maxSpots,
+        kidsJustRegistered: "",
+        participantsJustRegistered: 0,
+      })
+        .then(() => ({ label: `✓ Group: ${session.group} on ${session.date}`, ok: true }))
+        .catch((err) => ({ label: `✗ Group: ${session.group} on ${session.date} — ${err}`, ok: false }))
+    );
+  }
+
+  for (const camp of camps) {
+    const { start: campStart, end: campEnd } = splitTime(camp.time);
+    const days = camp.campDays?.length ? camp.campDays : [camp.startDate];
+    for (const day of days) {
+      if (!day || day < today) continue;
+      tasks.push(
+        upsertGroupSessionCalendarEvent({
+          sessionType: "camp",
+          sessionLabel: camp.name,
+          bookedDate: day,
+          bookedStartTime: campStart,
+          bookedEndTime: campEnd,
+          bookedLocation: camp.location,
+          maxSpots: camp.maxSpots,
           kidsJustRegistered: "",
           participantsJustRegistered: 0,
-        });
-        log.push(`✓ Group: ${session.group} on ${session.date}`);
-        synced++;
-      } catch (err) {
-        log.push(`✗ Group: ${session.group} on ${session.date} — ${err}`);
-        errors++;
-      }
+        })
+          .then(() => ({ label: `✓ Camp: ${camp.name} on ${day}`, ok: true }))
+          .catch((err) => ({ label: `✗ Camp: ${camp.name} on ${day} — ${err}`, ok: false }))
+      );
     }
-  } catch (err) {
-    log.push(`✗ Failed to fetch weekly schedule: ${err}`);
   }
 
-  try {
-    const camps = await getCamps();
-    for (const camp of camps) {
-      const { start: campStart, end: campEnd } = splitTime(camp.time);
-      if (!camp.campDays || camp.campDays.length === 0) {
-        if (!camp.startDate || camp.startDate < today) continue;
-        try {
-          await upsertGroupSessionCalendarEvent({
-            sessionType: "camp",
-            sessionLabel: camp.name,
-            bookedDate: camp.startDate,
-            bookedStartTime: campStart,
-            bookedEndTime: campEnd,
-            bookedLocation: camp.location,
-            maxSpots: camp.maxSpots,
-            kidsJustRegistered: "",
-            participantsJustRegistered: 0,
-          });
-          log.push(`✓ Camp: ${camp.name} on ${camp.startDate}`);
-          synced++;
-        } catch (err) {
-          log.push(`✗ Camp: ${camp.name} on ${camp.startDate} — ${err}`);
-          errors++;
-        }
-      } else {
-        for (const day of camp.campDays) {
-          if (!day || day < today) continue;
-          try {
-            await upsertGroupSessionCalendarEvent({
-              sessionType: "camp",
-              sessionLabel: camp.name,
-              bookedDate: day,
-              bookedStartTime: campStart,
-              bookedEndTime: campEnd,
-              bookedLocation: camp.location,
-              maxSpots: camp.maxSpots,
-              kidsJustRegistered: "",
-              participantsJustRegistered: 0,
-            });
-            log.push(`✓ Camp day: ${camp.name} on ${day}`);
-            synced++;
-          } catch (err) {
-            log.push(`✗ Camp day: ${camp.name} on ${day} — ${err}`);
-            errors++;
-          }
-        }
-      }
-    }
-  } catch (err) {
-    log.push(`✗ Failed to fetch camps: ${err}`);
-  }
+  const results = await Promise.all(tasks);
+  const log = results.map((r) => r.label);
+  const synced = results.filter((r) => r.ok).length;
+  const errors = results.filter((r) => !r.ok).length;
 
   return NextResponse.json({ synced, errors, log });
 }
