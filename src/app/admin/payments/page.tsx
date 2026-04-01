@@ -86,6 +86,10 @@ export default function PaymentsPage() {
     registrations.filter((r) => r.status === "confirmed" && !r.is_paid),
   [registrations]);
 
+  const paid = useMemo(() =>
+    registrations.filter((r) => r.status === "confirmed" && r.is_paid),
+  [registrations]);
+
   const cancelFees = useMemo(() =>
     registrations.filter((r) => r.is_late_cancel && r.session_price && !r.cancel_fee_settled),
   [registrations]);
@@ -255,6 +259,73 @@ export default function PaymentsPage() {
                   })}
                 </tbody>
               </table>
+            </div>
+          )}
+        </div>
+
+        {/* Paid — with undo */}
+        <div>
+          <h2 className="font-[family-name:var(--font-oswald)] text-lg font-bold tracking-wide text-white mb-1">
+            PAID
+            {paid.length > 0 && (
+              <span className="ml-2 rounded-full bg-green-700 px-2 py-0.5 text-xs font-medium text-white">{paid.length}</span>
+            )}
+          </h2>
+          <p className="text-xs text-brown-500 mb-4">Tap the checkmark to undo if you marked someone paid by mistake.</p>
+
+          {paid.length === 0 ? (
+            <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-6 py-8 text-center text-brown-500 text-sm">
+              No paid registrations yet.
+            </div>
+          ) : (
+            <div className="rounded-xl border border-brown-700 overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-brown-900/60 text-xs uppercase tracking-wider text-brown-400">
+                    <tr>
+                      <th className="px-4 py-3 text-left">Parent</th>
+                      <th className="px-4 py-3 text-left">Phone</th>
+                      <th className="px-4 py-3 text-left">Type</th>
+                      <th className="px-4 py-3 text-left">Session</th>
+                      <th className="px-4 py-3 text-left">Date</th>
+                      <th className="px-4 py-3 text-left">Undo</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-brown-800">
+                    {paid.map((r) => {
+                      const sessionText = r.session_details
+                        ? r.session_details.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "").split("\n")[0]
+                        : "—";
+                      return (
+                        <tr key={r.id} className="hover:bg-brown-900/30 transition opacity-60">
+                          <td className="px-4 py-3 font-medium whitespace-nowrap">
+                            <div>{r.parent_name}</div>
+                            <div className="text-xs text-brown-400">{r.email}</div>
+                          </td>
+                          <td className="px-4 py-3 text-brown-300 text-xs whitespace-nowrap">{r.phone}</td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <span className="rounded-full bg-brown-800 px-2 py-0.5 text-xs text-mesa-accent">
+                              {TYPE_LABELS[r.type] || r.type}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-brown-400 text-xs max-w-[220px] truncate">{sessionText}</td>
+                          <td className="px-4 py-3 text-brown-400 text-xs whitespace-nowrap">{r.booked_date || "—"}</td>
+                          <td className="px-4 py-3">
+                            <button
+                              onClick={() => togglePaid(r.id, r.is_paid)}
+                              disabled={togglingPaid === r.id}
+                              className="w-8 h-8 rounded-full border-2 border-green-500 bg-green-500/20 flex items-center justify-center transition text-xs font-bold text-green-400 hover:border-red-500 hover:bg-red-500/10 hover:text-red-400"
+                              title="Undo — mark unpaid"
+                            >
+                              {togglingPaid === r.id ? "…" : "✓"}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </div>
