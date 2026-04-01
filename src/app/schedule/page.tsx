@@ -52,6 +52,12 @@ interface Camp {
 }
 
 // Early bird ends March 31, 2026 end of day Eastern (April 1 04:00 UTC)
+function normalizeDob(dob: string): string {
+  const iso = dob.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) return `${iso[2]}/${iso[3]}/${iso[1]}`;
+  return dob;
+}
+
 function formatDob(raw: string): string {
   const digits = raw.replace(/\D/g, "").slice(0, 8);
   const endsSlash = raw.trimEnd().endsWith("/");
@@ -498,11 +504,14 @@ export default function Home() {
           if (profile.parent_name) setParentName(profile.parent_name);
           if (profile.email) setEmail(profile.email);
           if (profile.phone) setPhone(profile.phone);
-          if (profile.kids?.length) setKids(profile.kids);
+          const normalizedKids = profile.kids?.length
+            ? profile.kids.map((k: { name: string; dob: string; grade: string }) => ({ ...k, dob: normalizeDob(k.dob) }))
+            : [{ name: "", dob: "", grade: "" }];
+          if (profile.kids?.length) setKids(normalizedKids);
           profileRef.current = {
             parentName: profile.parent_name || "",
             phone: profile.phone || "",
-            kids: profile.kids?.length ? profile.kids : [{ name: "", dob: "", grade: "" }],
+            kids: normalizedKids,
           };
         });
     });
