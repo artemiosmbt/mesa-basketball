@@ -83,22 +83,28 @@ export default function PaymentsPage() {
     setSettlingFee(null);
   }
 
-  const today = new Date().toISOString().split("T")[0];
+  const todayMs = new Date().setHours(0, 0, 0, 0);
+
+  function dateMs(dateStr: string | null): number {
+    if (!dateStr) return 0;
+    const d = new Date(dateStr);
+    return isNaN(d.getTime()) ? 0 : d.setHours(0, 0, 0, 0);
+  }
 
   const unpaid = useMemo(() =>
     registrations
       .filter((r) => r.status === "confirmed" && !r.is_paid)
-      .sort((a, b) => (a.booked_date ?? "").localeCompare(b.booked_date ?? "")),
+      .sort((a, b) => dateMs(a.booked_date) - dateMs(b.booked_date)),
   [registrations]);
 
   const paid = useMemo(() =>
     registrations
       .filter((r) =>
         r.status === "confirmed" && r.is_paid &&
-        r.booked_date && r.booked_date > today
+        dateMs(r.booked_date) > todayMs
       )
-      .sort((a, b) => (a.booked_date ?? "").localeCompare(b.booked_date ?? "")),
-  [registrations, today]);
+      .sort((a, b) => dateMs(a.booked_date) - dateMs(b.booked_date)),
+  [registrations, todayMs]);
 
   const cancelFees = useMemo(() =>
     registrations.filter((r) => r.is_late_cancel && r.session_price && !r.cancel_fee_settled),
