@@ -30,6 +30,12 @@ const TYPE_LABELS: Record<string, string> = {
   "group-private": "Group Private",
 };
 
+function sessionLabel(r: Registration) {
+  return r.session_details
+    ? r.session_details.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "").split("\n")[0]
+    : "—";
+}
+
 export default function PaymentsPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -63,9 +69,7 @@ export default function PaymentsPage() {
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({ id, field: "is_paid", value: !currentValue }),
     });
-    setRegistrations((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, is_paid: !currentValue } : r))
-    );
+    setRegistrations((prev) => prev.map((r) => (r.id === id ? { ...r, is_paid: !currentValue } : r)));
     setTogglingPaid(null);
   }
 
@@ -77,18 +81,15 @@ export default function PaymentsPage() {
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({ id, field: "cancel_fee_settled", value: true }),
     });
-    setRegistrations((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, cancel_fee_settled: true } : r))
-    );
+    setRegistrations((prev) => prev.map((r) => (r.id === id ? { ...r, cancel_fee_settled: true } : r)));
     setSettlingFee(null);
   }
 
   const todayMs = new Date().setHours(0, 0, 0, 0);
-
-  function dateMs(dateStr: string | null): number {
-    if (!dateStr) return 0;
-    const d = new Date(dateStr);
-    return isNaN(d.getTime()) ? 0 : d.setHours(0, 0, 0, 0);
+  function dateMs(d: string | null) {
+    if (!d) return 0;
+    const parsed = new Date(d);
+    return isNaN(parsed.getTime()) ? 0 : parsed.setHours(0, 0, 0, 0);
   }
 
   const unpaid = useMemo(() =>
@@ -99,10 +100,7 @@ export default function PaymentsPage() {
 
   const paid = useMemo(() =>
     registrations
-      .filter((r) =>
-        r.status === "confirmed" && r.is_paid &&
-        dateMs(r.booked_date) > todayMs
-      )
+      .filter((r) => r.status === "confirmed" && r.is_paid && dateMs(r.booked_date) > todayMs)
       .sort((a, b) => dateMs(a.booked_date) - dateMs(b.booked_date)),
   [registrations, todayMs]);
 
@@ -139,70 +137,41 @@ export default function PaymentsPage() {
         </div>
       </div>
 
-      <div className="mx-auto max-w-7xl px-6 py-8 space-y-12">
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 py-8 space-y-12">
 
-        {/* Unpaid Registrations */}
+        {/* Unpaid */}
         <div>
           <h2 className="font-[family-name:var(--font-oswald)] text-lg font-bold tracking-wide text-white mb-4">
             UNPAID
-            {unpaid.length > 0 && (
-              <span className="ml-2 rounded-full bg-mesa-accent px-2 py-0.5 text-xs font-medium text-white">{unpaid.length}</span>
-            )}
+            {unpaid.length > 0 && <span className="ml-2 rounded-full bg-mesa-accent px-2 py-0.5 text-xs font-medium text-white">{unpaid.length}</span>}
           </h2>
-
           {unpaid.length === 0 ? (
-            <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-6 py-8 text-center text-brown-500 text-sm">
-              Everyone is paid up.
-            </div>
+            <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-6 py-8 text-center text-brown-500 text-sm">Everyone is paid up.</div>
           ) : (
-            <div className="rounded-xl border border-brown-700 overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-brown-900/60 text-xs uppercase tracking-wider text-brown-400">
-                    <tr>
-                      <th className="px-4 py-3 text-left">Parent</th>
-                      <th className="px-4 py-3 text-left">Phone</th>
-                      <th className="px-4 py-3 text-left">Type</th>
-                      <th className="px-4 py-3 text-left">Session</th>
-                      <th className="px-4 py-3 text-left">Date</th>
-                      <th className="px-4 py-3 text-left">Paid</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-brown-800">
-                    {unpaid.map((r) => {
-                      const sessionText = r.session_details
-                        ? r.session_details.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "").split("\n")[0]
-                        : "—";
-                      return (
-                        <tr key={r.id} className="hover:bg-brown-900/30 transition">
-                          <td className="px-4 py-3 font-medium whitespace-nowrap">
-                            <div>{r.parent_name}</div>
-                            <div className="text-xs text-brown-400">{r.email}</div>
-                          </td>
-                          <td className="px-4 py-3 text-brown-300 text-xs whitespace-nowrap">{r.phone}</td>
-                          <td className="px-4 py-3 whitespace-nowrap">
-                            <span className="rounded-full bg-brown-800 px-2 py-0.5 text-xs text-mesa-accent">
-                              {TYPE_LABELS[r.type] || r.type}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-brown-400 text-xs max-w-[220px] truncate">{sessionText}</td>
-                          <td className="px-4 py-3 text-brown-400 text-xs whitespace-nowrap">{r.booked_date || "—"}</td>
-                          <td className="px-4 py-3">
-                            <button
-                              onClick={() => togglePaid(r.id, r.is_paid)}
-                              disabled={togglingPaid === r.id}
-                              className="w-8 h-8 rounded-full border-2 border-brown-600 hover:border-green-500 flex items-center justify-center transition text-xs font-bold text-brown-600 hover:text-green-500"
-                              title="Mark paid"
-                            >
-                              {togglingPaid === r.id ? "…" : "✓"}
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+            <div className="space-y-2">
+              {unpaid.map((r) => (
+                <div key={r.id} className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-3 flex items-center justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                      <span className="font-medium text-sm">{r.parent_name}</span>
+                      <span className="rounded-full bg-brown-800 px-2 py-0.5 text-xs text-mesa-accent shrink-0">{TYPE_LABELS[r.type] || r.type}</span>
+                    </div>
+                    <div className="text-xs text-brown-400 mt-0.5 truncate">{sessionLabel(r)}</div>
+                    <div className="flex flex-wrap gap-x-3 mt-1 text-xs text-brown-500">
+                      <span>{r.booked_date || "—"}</span>
+                      <span>{r.phone}</span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => togglePaid(r.id, r.is_paid)}
+                    disabled={togglingPaid === r.id}
+                    className="w-9 h-9 shrink-0 rounded-full border-2 border-brown-600 hover:border-green-500 flex items-center justify-center transition font-bold text-brown-600 hover:text-green-500 text-sm"
+                    title="Mark paid"
+                  >
+                    {togglingPaid === r.id ? "…" : "✓"}
+                  </button>
+                </div>
+              ))}
             </div>
           )}
         </div>
@@ -211,70 +180,40 @@ export default function PaymentsPage() {
         <div>
           <h2 className="font-[family-name:var(--font-oswald)] text-lg font-bold tracking-wide text-white mb-4">
             CANCELLATION FEES
-            {cancelFees.length > 0 && (
-              <span className="ml-2 rounded-full bg-red-500 px-2 py-0.5 text-xs font-medium text-white">{cancelFees.length}</span>
-            )}
+            {cancelFees.length > 0 && <span className="ml-2 rounded-full bg-red-500 px-2 py-0.5 text-xs font-medium text-white">{cancelFees.length}</span>}
           </h2>
-
           {cancelFees.length === 0 ? (
-            <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-6 py-8 text-center text-brown-500 text-sm">
-              No outstanding cancellation fees.
-            </div>
+            <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-6 py-8 text-center text-brown-500 text-sm">No outstanding cancellation fees.</div>
           ) : (
-            <div className="rounded-xl border border-brown-700 overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-brown-900/60 text-xs uppercase tracking-wider text-brown-400">
-                  <tr>
-                    <th className="px-4 py-3 text-left">Parent</th>
-                    <th className="px-4 py-3 text-left">Session</th>
-                    <th className="px-4 py-3 text-left">Date</th>
-                    <th className="px-4 py-3 text-left">Fee</th>
-                    <th className="px-4 py-3 text-left">Status</th>
-                    <th className="px-4 py-3 text-left">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-brown-800">
-                  {cancelFees.map((r) => {
-                    const fee = Math.round((r.session_price ?? 0) * 0.5);
-                    const owesRefund = r.is_paid;
-                    const sessionText = r.session_details
-                      ?.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "").split("\n")[0] || "—";
-                    return (
-                      <tr key={r.id} className="hover:bg-brown-900/30 transition">
-                        <td className="px-4 py-3 font-medium whitespace-nowrap">
-                          <div>{r.parent_name}</div>
-                          <div className="text-xs text-brown-400">{r.email}</div>
-                        </td>
-                        <td className="px-4 py-3 text-brown-300 text-xs max-w-[200px] truncate">{sessionText}</td>
-                        <td className="px-4 py-3 text-brown-400 text-xs whitespace-nowrap">{r.booked_date}</td>
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          <span className="text-lg font-bold text-mesa-accent">${fee}</span>
-                        </td>
-                        <td className="px-4 py-3">
-                          {owesRefund ? (
-                            <span className="rounded-full bg-blue-900/40 px-2 py-0.5 text-xs font-medium text-blue-400">
-                              You owe refund
-                            </span>
-                          ) : (
-                            <span className="rounded-full bg-red-900/40 px-2 py-0.5 text-xs font-medium text-red-400">
-                              Owes you
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3">
-                          <button
-                            onClick={() => settleFee(r.id)}
-                            disabled={settlingFee === r.id}
-                            className="rounded-lg bg-brown-700 hover:bg-brown-600 px-3 py-1.5 text-xs font-medium text-white transition disabled:opacity-50"
-                          >
-                            {settlingFee === r.id ? "…" : "Mark Settled"}
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+            <div className="space-y-2">
+              {cancelFees.map((r) => {
+                const fee = Math.round((r.session_price ?? 0) * 0.5);
+                const owesRefund = r.is_paid;
+                return (
+                  <div key={r.id} className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-3 flex items-center justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                        <span className="font-medium text-sm">{r.parent_name}</span>
+                        <span className="text-lg font-bold text-mesa-accent">${fee}</span>
+                        {owesRefund ? (
+                          <span className="rounded-full bg-blue-900/40 px-2 py-0.5 text-xs font-medium text-blue-400">You owe refund</span>
+                        ) : (
+                          <span className="rounded-full bg-red-900/40 px-2 py-0.5 text-xs font-medium text-red-400">Owes you</span>
+                        )}
+                      </div>
+                      <div className="text-xs text-brown-400 mt-0.5 truncate">{sessionLabel(r)}</div>
+                      <div className="text-xs text-brown-500 mt-1">{r.booked_date}</div>
+                    </div>
+                    <button
+                      onClick={() => settleFee(r.id)}
+                      disabled={settlingFee === r.id}
+                      className="shrink-0 rounded-lg bg-brown-700 hover:bg-brown-600 px-3 py-1.5 text-xs font-medium text-white transition disabled:opacity-50"
+                    >
+                      {settlingFee === r.id ? "…" : "Settled"}
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -283,65 +222,33 @@ export default function PaymentsPage() {
         <div>
           <h2 className="font-[family-name:var(--font-oswald)] text-lg font-bold tracking-wide text-white mb-1">
             PAID
-            {paid.length > 0 && (
-              <span className="ml-2 rounded-full bg-green-700 px-2 py-0.5 text-xs font-medium text-white">{paid.length}</span>
-            )}
+            {paid.length > 0 && <span className="ml-2 rounded-full bg-green-700 px-2 py-0.5 text-xs font-medium text-white">{paid.length}</span>}
           </h2>
           <p className="text-xs text-brown-500 mb-4">Tap the checkmark to undo if you marked someone paid by mistake.</p>
-
           {paid.length === 0 ? (
-            <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-6 py-8 text-center text-brown-500 text-sm">
-              No paid registrations yet.
-            </div>
+            <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-6 py-8 text-center text-brown-500 text-sm">No paid registrations yet.</div>
           ) : (
-            <div className="rounded-xl border border-brown-700 overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-brown-900/60 text-xs uppercase tracking-wider text-brown-400">
-                    <tr>
-                      <th className="px-4 py-3 text-left">Parent</th>
-                      <th className="px-4 py-3 text-left">Phone</th>
-                      <th className="px-4 py-3 text-left">Type</th>
-                      <th className="px-4 py-3 text-left">Session</th>
-                      <th className="px-4 py-3 text-left">Date</th>
-                      <th className="px-4 py-3 text-left">Undo</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-brown-800">
-                    {(showAllPaid ? paid : paid.slice(0, 3)).map((r) => {
-                      const sessionText = r.session_details
-                        ? r.session_details.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "").split("\n")[0]
-                        : "—";
-                      return (
-                        <tr key={r.id} className="hover:bg-brown-900/30 transition opacity-60">
-                          <td className="px-4 py-3 font-medium whitespace-nowrap">
-                            <div>{r.parent_name}</div>
-                            <div className="text-xs text-brown-400">{r.email}</div>
-                          </td>
-                          <td className="px-4 py-3 text-brown-300 text-xs whitespace-nowrap">{r.phone}</td>
-                          <td className="px-4 py-3 whitespace-nowrap">
-                            <span className="rounded-full bg-brown-800 px-2 py-0.5 text-xs text-mesa-accent">
-                              {TYPE_LABELS[r.type] || r.type}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-brown-400 text-xs max-w-[220px] truncate">{sessionText}</td>
-                          <td className="px-4 py-3 text-brown-400 text-xs whitespace-nowrap">{r.booked_date || "—"}</td>
-                          <td className="px-4 py-3">
-                            <button
-                              onClick={() => togglePaid(r.id, r.is_paid)}
-                              disabled={togglingPaid === r.id}
-                              className="w-8 h-8 rounded-full border-2 border-green-500 bg-green-500/20 flex items-center justify-center transition text-xs font-bold text-green-400 hover:border-red-500 hover:bg-red-500/10 hover:text-red-400"
-                              title="Undo — mark unpaid"
-                            >
-                              {togglingPaid === r.id ? "…" : "✓"}
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+            <div className="space-y-2">
+              {(showAllPaid ? paid : paid.slice(0, 3)).map((r) => (
+                <div key={r.id} className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-3 flex items-center justify-between gap-3 opacity-60">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                      <span className="font-medium text-sm">{r.parent_name}</span>
+                      <span className="rounded-full bg-brown-800 px-2 py-0.5 text-xs text-mesa-accent shrink-0">{TYPE_LABELS[r.type] || r.type}</span>
+                    </div>
+                    <div className="text-xs text-brown-400 mt-0.5 truncate">{sessionLabel(r)}</div>
+                    <div className="text-xs text-brown-500 mt-1">{r.booked_date || "—"}</div>
+                  </div>
+                  <button
+                    onClick={() => togglePaid(r.id, r.is_paid)}
+                    disabled={togglingPaid === r.id}
+                    className="w-9 h-9 shrink-0 rounded-full border-2 border-green-500 bg-green-500/20 flex items-center justify-center transition font-bold text-green-400 hover:border-red-500 hover:bg-red-500/10 hover:text-red-400 text-sm"
+                    title="Undo — mark unpaid"
+                  >
+                    {togglingPaid === r.id ? "…" : "✓"}
+                  </button>
+                </div>
+              ))}
             </div>
           )}
           {paid.length > 3 && (
