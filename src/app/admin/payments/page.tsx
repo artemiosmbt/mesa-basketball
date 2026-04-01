@@ -37,6 +37,7 @@ export default function PaymentsPage() {
   const [token, setToken] = useState<string | null>(null);
   const [togglingPaid, setTogglingPaid] = useState<string | null>(null);
   const [settlingFee, setSettlingFee] = useState<string | null>(null);
+  const [showAllPaid, setShowAllPaid] = useState(false);
 
   useEffect(() => {
     authClient.auth.getSession().then(({ data: { session } }) => {
@@ -86,9 +87,13 @@ export default function PaymentsPage() {
     registrations.filter((r) => r.status === "confirmed" && !r.is_paid),
   [registrations]);
 
+  const today = new Date().toISOString().split("T")[0];
   const paid = useMemo(() =>
-    registrations.filter((r) => r.status === "confirmed" && r.is_paid),
-  [registrations]);
+    registrations.filter((r) =>
+      r.status === "confirmed" && r.is_paid &&
+      (!r.booked_date || r.booked_date >= today)
+    ),
+  [registrations, today]);
 
   const cancelFees = useMemo(() =>
     registrations.filter((r) => r.is_late_cancel && r.session_price && !r.cancel_fee_settled),
@@ -292,7 +297,7 @@ export default function PaymentsPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-brown-800">
-                    {paid.map((r) => {
+                    {(showAllPaid ? paid : paid.slice(0, 3)).map((r) => {
                       const sessionText = r.session_details
                         ? r.session_details.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "").split("\n")[0]
                         : "—";
@@ -327,6 +332,14 @@ export default function PaymentsPage() {
                 </table>
               </div>
             </div>
+          )}
+          {paid.length > 3 && (
+            <button
+              onClick={() => setShowAllPaid((v) => !v)}
+              className="mt-3 text-xs text-brown-400 hover:text-white transition"
+            >
+              {showAllPaid ? "Show less" : `View ${paid.length - 3} more`}
+            </button>
           )}
         </div>
 
