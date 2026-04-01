@@ -15,7 +15,13 @@ interface Registration {
   type: string;
   session_details: string;
   booked_date: string | null;
+  booked_start_time: string | null;
   status: string;
+  is_paid: boolean;
+  is_late_cancel: boolean;
+  cancel_fee_settled: boolean;
+  session_price: number | null;
+  total_participants: number | null;
 }
 
 const TYPE_LABELS: Record<string, string> = {
@@ -34,6 +40,8 @@ export default function AdminPage() {
   const [search, setSearch] = useState("");
   const [cancelling, setCancelling] = useState<string | null>(null);
   const [token, setToken] = useState<string | null>(null);
+  const [togglingPaid, setTogglingPaid] = useState<string | null>(null);
+  const [settlingFee, setSettlingFee] = useState<string | null>(null);
 
   useEffect(() => {
     authClient.auth.getSession().then(({ data: { session } }) => {
@@ -50,6 +58,34 @@ export default function AdminPage() {
         .finally(() => setLoading(false));
     });
   }, [router]);
+
+  async function togglePaid(id: string, currentValue: boolean) {
+    if (!token) return;
+    setTogglingPaid(id);
+    await fetch("/api/admin/update-payment", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ id, field: "is_paid", value: !currentValue }),
+    });
+    setRegistrations((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, is_paid: !currentValue } : r))
+    );
+    setTogglingPaid(null);
+  }
+
+  async function settleFee(id: string) {
+    if (!token) return;
+    setSettlingFee(id);
+    await fetch("/api/admin/update-payment", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ id, field: "cancel_fee_settled", value: true }),
+    });
+    setRegistrations((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, cancel_fee_settled: true } : r))
+    );
+    setSettlingFee(null);
+  }
 
   async function cancelRegistration(id: string) {
     if (!token) return;
@@ -85,6 +121,10 @@ export default function AdminPage() {
       return true;
     });
   }, [registrations, typeFilter, statusFilter, search]);
+
+  const cancelFees = useMemo(() =>
+    registrations.filter((r) => r.is_late_cancel && r.session_price && !r.cancel_fee_settled),
+  [registrations]);
 
   const stats = useMemo(() => ({
     total: registrations.length,
@@ -193,6 +233,7 @@ export default function AdminPage() {
                   <th className="px-4 py-3 text-left">Athletes</th>
                   <th className="px-4 py-3 text-left">Type</th>
                   <th className="px-4 py-3 text-left">Session</th>
+                  <th className="px-4 py-3 text-left">Paid</th>
                   <th className="px-4 py-3 text-left">Status</th>
                   <th className="px-4 py-3 text-left">Action</th>
                 </tr>
@@ -227,6 +268,16 @@ export default function AdminPage() {
                       <td className="px-4 py-3 text-brown-400 text-xs max-w-[240px]">
                         <div className="whitespace-pre-line leading-relaxed">{sessionText}</div>
                       </td>
+                      <td className="px-4 py-3">
+                        <button
+                          onClick={() => togglePaid(r.id, r.is_paid)}
+                          disabled={togglingPaid === r.id}
+                          className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition text-xs font-bold ${r.is_paid ? "border-green-500 bg-green-500/20 text-green-400" : "border-brown-600 text-brown-600 hover:border-brown-400"}`}
+                          title={r.is_paid ? "Mark unpaid" : "Mark paid"}
+                        >
+                          {togglingPaid === r.id ? "…" : r.is_paid ? "✓" : ""}
+                        </button>
+                      </td>
                       <td className="px-4 py-3 whitespace-nowrap">
                         <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${r.status === "confirmed" ? "bg-green-900/40 text-green-400" : "bg-red-900/40 text-red-400"}`}>
                           {r.status}
@@ -248,12 +299,84 @@ export default function AdminPage() {
                 })}
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={9} className="px-4 py-8 text-center text-brown-500">No registrations found.</td>
+                    <td colSpan={10} className="px-4 py-8 text-center text-brown-500">No registrations found.</td>
                   </tr>
                 )}
               </tbody>
             </table>
           </div>
+        </div>
+
+        {/* Cancellation Fees */}
+        <div className="mt-10">
+          <h2 className="font-[family-name:var(--font-oswald)] text-lg font-bold tracking-wide text-white mb-4">
+            CANCELLATION FEES
+            {cancelFees.length > 0 && (
+              <span className="ml-2 rounded-full bg-red-500 px-2 py-0.5 text-xs font-medium text-white">{cancelFees.length}</span>
+            )}
+          </h2>
+
+          {cancelFees.length === 0 ? (
+            <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-6 py-8 text-center text-brown-500 text-sm">
+              No outstanding cancellation fees.
+            </div>
+          ) : (
+            <div className="rounded-xl border border-brown-700 overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-brown-900/60 text-xs uppercase tracking-wider text-brown-400">
+                  <tr>
+                    <th className="px-4 py-3 text-left">Parent</th>
+                    <th className="px-4 py-3 text-left">Session</th>
+                    <th className="px-4 py-3 text-left">Date</th>
+                    <th className="px-4 py-3 text-left">Fee</th>
+                    <th className="px-4 py-3 text-left">Status</th>
+                    <th className="px-4 py-3 text-left">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-brown-800">
+                  {cancelFees.map((r) => {
+                    const fee = Math.round((r.session_price ?? 0) * 0.5);
+                    const owesRefund = r.is_paid;
+                    return (
+                      <tr key={r.id} className="hover:bg-brown-900/30 transition">
+                        <td className="px-4 py-3 font-medium whitespace-nowrap">
+                          <div>{r.parent_name}</div>
+                          <div className="text-xs text-brown-400">{r.email}</div>
+                        </td>
+                        <td className="px-4 py-3 text-brown-300 text-xs max-w-[200px]">
+                          {r.session_details?.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "").split("\n")[0]}
+                        </td>
+                        <td className="px-4 py-3 text-brown-400 text-xs whitespace-nowrap">{r.booked_date}</td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <span className="text-lg font-bold text-mesa-accent">${fee}</span>
+                        </td>
+                        <td className="px-4 py-3">
+                          {owesRefund ? (
+                            <span className="rounded-full bg-blue-900/40 px-2 py-0.5 text-xs font-medium text-blue-400">
+                              You owe refund
+                            </span>
+                          ) : (
+                            <span className="rounded-full bg-red-900/40 px-2 py-0.5 text-xs font-medium text-red-400">
+                              Owes you
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <button
+                            onClick={() => settleFee(r.id)}
+                            disabled={settlingFee === r.id}
+                            className="rounded-lg bg-brown-700 hover:bg-brown-600 px-3 py-1.5 text-xs font-medium text-white transition disabled:opacity-50"
+                          >
+                            {settlingFee === r.id ? "…" : "Mark Settled"}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
     </div>

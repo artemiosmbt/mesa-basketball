@@ -150,7 +150,7 @@ export async function DELETE(
     return NextResponse.json({ success: true, isLateCancel });
   }
 
-  const success = await cancelRegistration(token);
+  const success = await cancelRegistration(token, isLateCancel);
   if (!success) {
     return NextResponse.json(
       { error: "Failed to cancel" },

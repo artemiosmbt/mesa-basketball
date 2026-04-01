@@ -115,11 +115,11 @@ export async function getRegistrationsByEmail(
   return (data || []) as Registration[];
 }
 
-export async function cancelRegistration(token: string): Promise<boolean> {
+export async function cancelRegistration(token: string, isLateCancel = false): Promise<boolean> {
   const supabase = getSupabase();
   const { error } = await supabase
     .from("registrations")
-    .update({ status: "cancelled" })
+    .update({ status: "cancelled", is_late_cancel: isLateCancel })
     .eq("manage_token", token)
     .eq("status", "confirmed");
   return !error;
