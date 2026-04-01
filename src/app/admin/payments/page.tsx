@@ -1,0 +1,265 @@
+"use client";
+
+import { useState, useEffect, useMemo } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { authClient, ADMIN_EMAIL } from "@/lib/auth";
+
+interface Registration {
+  id: string;
+  parent_name: string;
+  email: string;
+  phone: string;
+  kids: string;
+  type: string;
+  session_details: string;
+  booked_date: string | null;
+  booked_start_time: string | null;
+  status: string;
+  is_paid: boolean;
+  is_late_cancel: boolean;
+  cancel_fee_settled: boolean;
+  session_price: number | null;
+  total_participants: number | null;
+}
+
+const TYPE_LABELS: Record<string, string> = {
+  weekly: "Group",
+  camp: "Camp",
+  private: "Private",
+  "group-private": "Group Private",
+};
+
+export default function PaymentsPage() {
+  const router = useRouter();
+  const [loading, setLoading] = useState(true);
+  const [registrations, setRegistrations] = useState<Registration[]>([]);
+  const [token, setToken] = useState<string | null>(null);
+  const [togglingPaid, setTogglingPaid] = useState<string | null>(null);
+  const [settlingFee, setSettlingFee] = useState<string | null>(null);
+
+  useEffect(() => {
+    authClient.auth.getSession().then(({ data: { session } }) => {
+      if (!session || session.user.email !== ADMIN_EMAIL) {
+        router.replace("/login");
+        return;
+      }
+      setToken(session.access_token);
+      fetch("/api/admin/data", {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      })
+        .then((r) => r.json())
+        .then((data) => setRegistrations(data.registrations || []))
+        .finally(() => setLoading(false));
+    });
+  }, [router]);
+
+  async function togglePaid(id: string, currentValue: boolean) {
+    if (!token) return;
+    setTogglingPaid(id);
+    await fetch("/api/admin/update-payment", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ id, field: "is_paid", value: !currentValue }),
+    });
+    setRegistrations((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, is_paid: !currentValue } : r))
+    );
+    setTogglingPaid(null);
+  }
+
+  async function settleFee(id: string) {
+    if (!token) return;
+    setSettlingFee(id);
+    await fetch("/api/admin/update-payment", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ id, field: "cancel_fee_settled", value: true }),
+    });
+    setRegistrations((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, cancel_fee_settled: true } : r))
+    );
+    setSettlingFee(null);
+  }
+
+  const unpaid = useMemo(() =>
+    registrations.filter((r) => r.status === "confirmed" && !r.is_paid),
+  [registrations]);
+
+  const cancelFees = useMemo(() =>
+    registrations.filter((r) => r.is_late_cancel && r.session_price && !r.cancel_fee_settled),
+  [registrations]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-brown-950 flex items-center justify-center">
+        <p className="text-brown-400">Loading...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-brown-950 text-white">
+      {/* Header */}
+      <div className="border-b border-gray-200 bg-white px-6 py-4">
+        <div className="mx-auto max-w-7xl flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="h-14 w-14 rounded-full bg-white border border-gray-100 overflow-hidden flex items-center justify-center">
+              <img src="/logo.png" alt="Mesa" className="h-14 w-14 object-contain scale-125" />
+            </div>
+            <div>
+              <p className="font-[family-name:var(--font-oswald)] text-xl font-bold tracking-wide text-mesa-dark">PAYMENTS</p>
+              <p className="text-xs text-brown-500">Mesa Basketball Training</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-4">
+            <Link href="/admin" className="text-sm text-brown-500 hover:text-mesa-dark">← Registrations</Link>
+            <Link href="/" className="text-sm text-brown-500 hover:text-mesa-dark">← Site</Link>
+          </div>
+        </div>
+      </div>
+
+      <div className="mx-auto max-w-7xl px-6 py-8 space-y-12">
+
+        {/* Unpaid Registrations */}
+        <div>
+          <h2 className="font-[family-name:var(--font-oswald)] text-lg font-bold tracking-wide text-white mb-4">
+            UNPAID
+            {unpaid.length > 0 && (
+              <span className="ml-2 rounded-full bg-mesa-accent px-2 py-0.5 text-xs font-medium text-white">{unpaid.length}</span>
+            )}
+          </h2>
+
+          {unpaid.length === 0 ? (
+            <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-6 py-8 text-center text-brown-500 text-sm">
+              Everyone is paid up.
+            </div>
+          ) : (
+            <div className="rounded-xl border border-brown-700 overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-brown-900/60 text-xs uppercase tracking-wider text-brown-400">
+                    <tr>
+                      <th className="px-4 py-3 text-left">Parent</th>
+                      <th className="px-4 py-3 text-left">Phone</th>
+                      <th className="px-4 py-3 text-left">Type</th>
+                      <th className="px-4 py-3 text-left">Session</th>
+                      <th className="px-4 py-3 text-left">Date</th>
+                      <th className="px-4 py-3 text-left">Paid</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-brown-800">
+                    {unpaid.map((r) => {
+                      const sessionText = r.session_details
+                        ? r.session_details.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "").split("\n")[0]
+                        : "—";
+                      return (
+                        <tr key={r.id} className="hover:bg-brown-900/30 transition">
+                          <td className="px-4 py-3 font-medium whitespace-nowrap">
+                            <div>{r.parent_name}</div>
+                            <div className="text-xs text-brown-400">{r.email}</div>
+                          </td>
+                          <td className="px-4 py-3 text-brown-300 text-xs whitespace-nowrap">{r.phone}</td>
+                          <td className="px-4 py-3 whitespace-nowrap">
+                            <span className="rounded-full bg-brown-800 px-2 py-0.5 text-xs text-mesa-accent">
+                              {TYPE_LABELS[r.type] || r.type}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-brown-400 text-xs max-w-[220px] truncate">{sessionText}</td>
+                          <td className="px-4 py-3 text-brown-400 text-xs whitespace-nowrap">{r.booked_date || "—"}</td>
+                          <td className="px-4 py-3">
+                            <button
+                              onClick={() => togglePaid(r.id, r.is_paid)}
+                              disabled={togglingPaid === r.id}
+                              className="w-8 h-8 rounded-full border-2 border-brown-600 hover:border-green-500 flex items-center justify-center transition text-xs font-bold text-brown-600 hover:text-green-500"
+                              title="Mark paid"
+                            >
+                              {togglingPaid === r.id ? "…" : "✓"}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Cancellation Fees */}
+        <div>
+          <h2 className="font-[family-name:var(--font-oswald)] text-lg font-bold tracking-wide text-white mb-4">
+            CANCELLATION FEES
+            {cancelFees.length > 0 && (
+              <span className="ml-2 rounded-full bg-red-500 px-2 py-0.5 text-xs font-medium text-white">{cancelFees.length}</span>
+            )}
+          </h2>
+
+          {cancelFees.length === 0 ? (
+            <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-6 py-8 text-center text-brown-500 text-sm">
+              No outstanding cancellation fees.
+            </div>
+          ) : (
+            <div className="rounded-xl border border-brown-700 overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-brown-900/60 text-xs uppercase tracking-wider text-brown-400">
+                  <tr>
+                    <th className="px-4 py-3 text-left">Parent</th>
+                    <th className="px-4 py-3 text-left">Session</th>
+                    <th className="px-4 py-3 text-left">Date</th>
+                    <th className="px-4 py-3 text-left">Fee</th>
+                    <th className="px-4 py-3 text-left">Status</th>
+                    <th className="px-4 py-3 text-left">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-brown-800">
+                  {cancelFees.map((r) => {
+                    const fee = Math.round((r.session_price ?? 0) * 0.5);
+                    const owesRefund = r.is_paid;
+                    const sessionText = r.session_details
+                      ?.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "").split("\n")[0] || "—";
+                    return (
+                      <tr key={r.id} className="hover:bg-brown-900/30 transition">
+                        <td className="px-4 py-3 font-medium whitespace-nowrap">
+                          <div>{r.parent_name}</div>
+                          <div className="text-xs text-brown-400">{r.email}</div>
+                        </td>
+                        <td className="px-4 py-3 text-brown-300 text-xs max-w-[200px] truncate">{sessionText}</td>
+                        <td className="px-4 py-3 text-brown-400 text-xs whitespace-nowrap">{r.booked_date}</td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <span className="text-lg font-bold text-mesa-accent">${fee}</span>
+                        </td>
+                        <td className="px-4 py-3">
+                          {owesRefund ? (
+                            <span className="rounded-full bg-blue-900/40 px-2 py-0.5 text-xs font-medium text-blue-400">
+                              You owe refund
+                            </span>
+                          ) : (
+                            <span className="rounded-full bg-red-900/40 px-2 py-0.5 text-xs font-medium text-red-400">
+                              Owes you
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <button
+                            onClick={() => settleFee(r.id)}
+                            disabled={settlingFee === r.id}
+                            className="rounded-lg bg-brown-700 hover:bg-brown-600 px-3 py-1.5 text-xs font-medium text-white transition disabled:opacity-50"
+                          >
+                            {settlingFee === r.id ? "…" : "Mark Settled"}
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+      </div>
+    </div>
+  );
+}
