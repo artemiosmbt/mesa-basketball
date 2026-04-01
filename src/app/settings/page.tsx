@@ -152,7 +152,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-brown-950 px-6 py-12">
+    <div className="min-h-screen bg-brown-950 px-4 sm:px-6 py-12">
       <div className="mx-auto max-w-lg">
         {/* Back links */}
         <div className="flex items-center gap-4">
@@ -175,7 +175,7 @@ export default function SettingsPage() {
         <form onSubmit={handleSave} className="space-y-8">
 
           {/* Contact Info */}
-          <div className="bg-brown-900/40 border border-brown-700 rounded-xl px-6 py-6 space-y-4">
+          <div className="bg-brown-900/40 border border-brown-700 rounded-xl px-4 sm:px-6 py-6 space-y-4">
             <h2 className="text-xs font-semibold uppercase tracking-widest text-mesa-accent">Contact Info</h2>
 
             <div>
@@ -206,7 +206,7 @@ export default function SettingsPage() {
           </div>
 
           {/* Athletes */}
-          <div className="bg-brown-900/40 border border-brown-700 rounded-xl px-6 py-6 space-y-4">
+          <div className="bg-brown-900/40 border border-brown-700 rounded-xl px-4 sm:px-6 py-6 space-y-4">
             <h2 className="text-xs font-semibold uppercase tracking-widest text-mesa-accent">Athletes</h2>
             <div className="divide-y divide-brown-700 rounded-lg border border-brown-700 overflow-hidden">
               {kids.map((kid, i) => (
@@ -265,7 +265,7 @@ export default function SettingsPage() {
           </div>
 
           {/* Preferences */}
-          <div className="bg-brown-900/40 border border-brown-700 rounded-xl px-6 py-6 space-y-4">
+          <div className="bg-brown-900/40 border border-brown-700 rounded-xl px-4 sm:px-6 py-6 space-y-4">
             <h2 className="text-xs font-semibold uppercase tracking-widest text-mesa-accent">Preferences</h2>
 
             <label className="flex items-start gap-3 cursor-pointer">

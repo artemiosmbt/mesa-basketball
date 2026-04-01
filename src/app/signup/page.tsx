@@ -136,13 +136,13 @@ export default function SignupPage() {
 
   if (confirmed) {
     return (
-      <div className="min-h-screen bg-brown-950 flex items-center justify-center px-6 py-12">
+      <div className="min-h-screen bg-brown-950 flex items-center justify-center px-4 sm:px-6 py-12">
         <div className="w-full max-w-md text-center">
           <div className="h-28 w-28 mx-auto mb-6 rounded-full bg-white overflow-hidden flex items-center justify-center">
             <img src="/logo.png" alt="Mesa Basketball" className="h-28 w-28 object-contain scale-125" />
           </div>
           <h1 className="font-[family-name:var(--font-oswald)] text-3xl font-bold text-white tracking-wide mb-4">CHECK YOUR EMAIL</h1>
-          <div className="bg-brown-900/40 border border-brown-700 rounded-xl px-8 py-8 space-y-4">
+          <div className="bg-brown-900/40 border border-brown-700 rounded-xl px-4 sm:px-8 py-8 space-y-4">
             <p className="text-brown-200 text-base leading-relaxed">
               A confirmation email has been sent to <span className="text-white font-semibold">{email}</span>.
             </p>
@@ -169,7 +169,7 @@ export default function SignupPage() {
   }
 
   return (
-    <div className="min-h-screen bg-brown-950 flex items-center justify-center px-6 py-12">
+    <div className="min-h-screen bg-brown-950 flex items-center justify-center px-4 sm:px-6 py-12">
       <div className="w-full max-w-lg">
         <div className="text-center mb-8">
           <div className="h-28 w-28 mx-auto mb-4 rounded-full bg-white overflow-hidden flex items-center justify-center">
@@ -178,7 +178,7 @@ export default function SignupPage() {
           <h1 className="font-[family-name:var(--font-oswald)] text-3xl font-bold text-white tracking-wide">CREATE ACCOUNT</h1>
           <p className="text-brown-400 mt-1 text-sm">Save your info and book faster every time</p>
         </div>
-        <form onSubmit={handleSubmit} className="bg-brown-900/40 border border-brown-700 rounded-xl px-8 py-8 space-y-5">
+        <form onSubmit={handleSubmit} className="bg-brown-900/40 border border-brown-700 rounded-xl px-4 sm:px-8 py-6 sm:py-8 space-y-5">
           {error && <p className="text-red-400 text-sm text-center">{error}</p>}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
