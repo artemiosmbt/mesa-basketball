@@ -47,6 +47,7 @@ export default function AdminPage() {
   const [typeFilter, setTypeFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [cancelling, setCancelling] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [selectedClient, setSelectedClient] = useState<string | null>(null);
 
@@ -65,6 +66,19 @@ export default function AdminPage() {
         .finally(() => setLoading(false));
     });
   }, [router]);
+
+  async function deleteRegistration(id: string) {
+    if (!token) return;
+    if (!confirm("Permanently delete this registration? This cannot be undone.")) return;
+    setDeleting(id);
+    await fetch("/api/admin/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ id }),
+    });
+    setRegistrations((prev) => prev.filter((r) => r.id !== id));
+    setDeleting(null);
+  }
 
   async function cancelRegistration(id: string) {
     if (!token) return;
@@ -137,7 +151,7 @@ export default function AdminPage() {
     groups: registrations.filter((r) => r.type === "weekly" && r.status === "confirmed").length,
   }), [registrations]);
 
-  function RegCard({ r }: { r: Registration }) {
+  function RegCard({ r, showDelete = false }: { r: Registration; showDelete?: boolean }) {
     return (
       <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-3">
         <div className="flex items-start justify-between gap-2">
@@ -160,6 +174,11 @@ export default function AdminPage() {
             {r.status === "confirmed" && (
               <button onClick={() => cancelRegistration(r.id)} disabled={cancelling === r.id} className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50">
                 {cancelling === r.id ? "..." : "Cancel"}
+              </button>
+            )}
+            {showDelete && (
+              <button onClick={() => deleteRegistration(r.id)} disabled={deleting === r.id} className="text-xs text-brown-600 hover:text-red-500 transition disabled:opacity-50">
+                {deleting === r.id ? "..." : "Delete"}
               </button>
             )}
           </div>
@@ -362,7 +381,7 @@ export default function AdminPage() {
           <>
             <button onClick={() => setSelectedClient(null)} className="text-sm text-mesa-accent hover:underline mb-4 inline-block">← All Clients</button>
             <div className="space-y-3">
-              {clientRegistrations.map((r) => <RegCard key={r.id} r={r} />)}
+              {clientRegistrations.map((r) => <RegCard key={r.id} r={r} showDelete />)}
               {clientRegistrations.length === 0 && <p className="text-brown-500 text-sm">No registrations found.</p>}
             </div>
           </>
