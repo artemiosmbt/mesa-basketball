@@ -156,6 +156,7 @@ export default function PaymentsPage() {
                       <span className="font-medium text-sm">{r.parent_name}</span>
                       <span className="rounded-full bg-brown-800 px-2 py-0.5 text-xs text-mesa-accent shrink-0">{TYPE_LABELS[r.type] || r.type}</span>
                     </div>
+                    {r.kids && <div className="text-xs text-white mt-0.5">{r.kids.split(",").map((k) => k.split("(")[0].trim()).filter(Boolean).join(", ")}</div>}
                     <div className="text-xs text-brown-400 mt-0.5 truncate">{sessionLabel(r)}</div>
                     <div className="flex flex-wrap gap-x-3 mt-1 text-xs text-brown-500">
                       <span>{r.booked_date || "—"}</span>
@@ -236,6 +237,7 @@ export default function PaymentsPage() {
                       <span className="font-medium text-sm">{r.parent_name}</span>
                       <span className="rounded-full bg-brown-800 px-2 py-0.5 text-xs text-mesa-accent shrink-0">{TYPE_LABELS[r.type] || r.type}</span>
                     </div>
+                    {r.kids && <div className="text-xs text-white mt-0.5">{r.kids.split(",").map((k) => k.split("(")[0].trim()).filter(Boolean).join(", ")}</div>}
                     <div className="text-xs text-brown-400 mt-0.5 truncate">{sessionLabel(r)}</div>
                     <div className="text-xs text-brown-500 mt-1">{r.booked_date || "—"}</div>
                   </div>

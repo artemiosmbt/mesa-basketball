@@ -178,8 +178,56 @@ export default function AdminPage() {
 
         <p className="text-xs text-brown-500 mb-3">{filtered.length} registration{filtered.length !== 1 ? "s" : ""}</p>
 
-        {/* Table */}
-        <div className="rounded-xl border border-brown-700 overflow-hidden">
+        {/* Cards (mobile) */}
+        <div className="md:hidden space-y-3">
+          {filtered.length === 0 && (
+            <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-8 text-center text-brown-500 text-sm">No registrations found.</div>
+          )}
+          {filtered.map((r) => {
+            const athleteNames = r.kids
+              ? r.kids.split(",").map((k) => k.split("(")[0].trim()).filter(Boolean).join(", ")
+              : "—";
+            const sessionText = r.session_details
+              ? r.session_details.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "").split("\n")[0]
+              : "—";
+            return (
+              <div key={r.id} className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                      <span className="font-medium text-sm">{r.parent_name}</span>
+                      <span className="rounded-full bg-brown-800 px-2 py-0.5 text-xs text-mesa-accent">{TYPE_LABELS[r.type] || r.type}</span>
+                    </div>
+                    <div className="text-xs text-brown-300 mt-0.5">{athleteNames}</div>
+                    <div className="text-xs text-brown-400 mt-0.5 truncate">{sessionText}</div>
+                    <div className="flex flex-wrap gap-x-3 mt-1 text-xs text-brown-500">
+                      {r.booked_date && <span className="text-mesa-accent">{r.booked_date}</span>}
+                      <span>{r.phone}</span>
+                      <span>{r.email}</span>
+                    </div>
+                  </div>
+                  <div className="flex flex-col items-end gap-2 shrink-0">
+                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${r.status === "confirmed" ? "bg-green-900/40 text-green-400" : "bg-red-900/40 text-red-400"}`}>
+                      {r.status}
+                    </span>
+                    {r.status === "confirmed" && (
+                      <button
+                        onClick={() => cancelRegistration(r.id)}
+                        disabled={cancelling === r.id}
+                        className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50"
+                      >
+                        {cancelling === r.id ? "..." : "Cancel"}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Table (desktop) */}
+        <div className="hidden md:block rounded-xl border border-brown-700 overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-brown-900/60 text-xs uppercase tracking-wider text-brown-400">
