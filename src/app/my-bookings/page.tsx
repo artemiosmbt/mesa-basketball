@@ -212,16 +212,10 @@ export default function MyBookings() {
             return d;
           }
 
-          // Hide cancelled bookings where session (or creation) date is older than 7 days
-          const visible = bookings.filter((b) => {
-            if (b.status !== "cancelled") return true;
-            const ref = sessionDateTime(b) ?? new Date(b.createdAt);
-            return ref >= sevenDaysAgo;
-          });
-
-          // Upcoming: no date, or session datetime is in the future
-          const upcoming = visible
+          // Upcoming: confirmed only, future date (or no date)
+          const upcoming = bookings
             .filter((b) => {
+              if (b.status !== "confirmed") return false;
               const dt = sessionDateTime(b);
               return !dt || dt > now;
             })
@@ -233,14 +227,17 @@ export default function MyBookings() {
               return da.getTime() - db.getTime();
             });
 
-          // Past: session datetime is in the past
-          const past = visible
+          // Past: anything with a past date OR any cancelled session
+          const past = bookings
             .filter((b) => {
+              if (b.status === "cancelled") return true;
               const dt = sessionDateTime(b);
               return dt !== null && dt <= now;
             })
             .sort((a, b) => {
-              return sessionDateTime(b)!.getTime() - sessionDateTime(a)!.getTime();
+              const da = sessionDateTime(a)?.getTime() ?? 0;
+              const db = sessionDateTime(b)?.getTime() ?? 0;
+              return db - da;
             });
 
           function renderCard(b: BookingRecord) {
