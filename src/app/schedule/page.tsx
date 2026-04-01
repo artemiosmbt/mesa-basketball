@@ -2315,15 +2315,15 @@ export default function Home() {
                       </div>
                       <div className="overflow-hidden">
                         <label className="mb-1 block text-xs text-brown-300">Date of Birth</label>
-                        <div className="overflow-hidden rounded-lg border border-brown-700 bg-brown-800">
-                          <input
-                            type="date"
-                            required
-                            value={kid.dob}
-                            onChange={(e) => updateKid(i, "dob", e.target.value)}
-                            className="w-full bg-transparent px-3 py-2 text-white text-sm focus:outline-none"
-                          />
-                        </div>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          required
+                          placeholder="MM/DD/YYYY"
+                          value={kid.dob}
+                          onChange={(e) => updateKid(i, "dob", e.target.value)}
+                          className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white text-sm placeholder-brown-600 focus:border-mesa-accent focus:outline-none"
+                        />
                       </div>
                       <div>
                         <label className="mb-1 block text-xs text-brown-300">Grade</label>
@@ -2625,15 +2625,15 @@ export default function Home() {
                       </div>
                       <div className="overflow-hidden">
                         <label className="mb-1 block text-xs text-brown-300">Date of Birth</label>
-                        <div className="overflow-hidden rounded-lg border border-brown-700 bg-brown-800">
-                          <input
-                            type="date"
-                            required
-                            value={kid.dob}
-                            onChange={(e) => updateKid(i, "dob", e.target.value)}
-                            className="w-full bg-transparent px-3 py-2 text-white text-sm focus:outline-none"
-                          />
-                        </div>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          required
+                          placeholder="MM/DD/YYYY"
+                          value={kid.dob}
+                          onChange={(e) => updateKid(i, "dob", e.target.value)}
+                          className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white text-sm placeholder-brown-600 focus:border-mesa-accent focus:outline-none"
+                        />
                       </div>
                       <div>
                         <label className="mb-1 block text-xs text-brown-300">Grade</label>

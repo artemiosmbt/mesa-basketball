@@ -199,10 +199,12 @@ export default function SettingsPage() {
                     <div>
                       <label className="mb-1 block text-xs text-brown-400">Date of Birth</label>
                       <input
-                        type="date"
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="MM/DD/YYYY"
                         value={kid.dob}
                         onChange={(e) => updateKid(i, "dob", e.target.value)}
-                        className="w-full rounded-lg border border-brown-700 bg-brown-800/60 px-3 py-2 text-sm text-white focus:border-mesa-accent focus:outline-none"
+                        className="w-full rounded-lg border border-brown-700 bg-brown-800/60 px-3 py-2 text-sm text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
                       />
                     </div>
                     <div>
