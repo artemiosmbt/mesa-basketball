@@ -208,9 +208,9 @@ export default function SignupPage() {
 
           <div>
             <p className="text-xs font-semibold uppercase tracking-widest text-brown-400 mb-3">Athletes</p>
-            <div className="space-y-3">
+            <div className="divide-y divide-brown-700 rounded-lg border border-brown-700 overflow-hidden">
               {kids.map((kid, i) => (
-                <div key={i} className="rounded-lg border border-brown-700 bg-brown-800/30 px-4 py-3 space-y-2">
+                <div key={i} className="bg-brown-800/30 px-4 py-3 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-brown-400 font-medium">Athlete {i + 1}</span>
                     {kids.length > 1 && (

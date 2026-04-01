@@ -2297,7 +2297,7 @@ export default function Home() {
                     );
                   })()}
                   {kids.map((kid, i) => (
-                    <div key={i} className="mb-3 flex flex-col gap-2">
+                    <div key={i} className={`flex flex-col gap-2 pb-3 ${i > 0 ? "border-t border-brown-700 pt-3" : ""}`}>
                       <div className="flex gap-2 items-center">
                         <input
                           type="text"
@@ -2609,7 +2609,7 @@ export default function Home() {
                     );
                   })()}
                   {kids.map((kid, i) => (
-                    <div key={i} className="mb-3 flex flex-col gap-2">
+                    <div key={i} className={`flex flex-col gap-2 pb-3 ${i > 0 ? "border-t border-brown-700 pt-3" : ""}`}>
                       <div className="flex gap-2 items-center">
                         <input
                           type="text"

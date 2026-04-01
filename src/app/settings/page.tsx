@@ -170,9 +170,9 @@ export default function SettingsPage() {
           {/* Athletes */}
           <div className="bg-brown-900/40 border border-brown-700 rounded-xl px-6 py-6 space-y-4">
             <h2 className="text-xs font-semibold uppercase tracking-widest text-mesa-accent">Athletes</h2>
-            <div className="space-y-3">
+            <div className="divide-y divide-brown-700 rounded-lg border border-brown-700 overflow-hidden">
               {kids.map((kid, i) => (
-                <div key={i} className="rounded-lg border border-brown-700 bg-brown-800/30 px-4 py-3 space-y-2">
+                <div key={i} className="bg-brown-800/30 px-4 py-3 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-brown-400 font-medium">Athlete {i + 1}</span>
                     {kids.length > 1 && (
@@ -185,30 +185,39 @@ export default function SettingsPage() {
                       </button>
                     )}
                   </div>
-                  <div className="grid grid-cols-3 gap-2">
-                    <input
-                      type="text"
-                      value={kid.name}
-                      onChange={(e) => updateKid(i, "name", e.target.value)}
-                      placeholder="Name"
-                      className="rounded-lg border border-brown-700 bg-brown-800/60 px-3 py-2 text-sm text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
-                    />
-                    <input
-                      type="date"
-                      value={kid.dob}
-                      onChange={(e) => updateKid(i, "dob", e.target.value)}
-                      className="rounded-lg border border-brown-700 bg-brown-800/60 px-3 py-2 text-sm text-white focus:border-mesa-accent focus:outline-none"
-                    />
-                    <select
-                      value={kid.grade}
-                      onChange={(e) => updateKid(i, "grade", e.target.value)}
-                      className="rounded-lg border border-brown-700 bg-brown-800/60 px-3 py-2 text-sm text-white focus:border-mesa-accent focus:outline-none"
-                    >
-                      <option value="">Grade</option>
-                      {ALL_GRADES.map((g) => (
-                        <option key={g.value} value={g.value}>{g.label}</option>
-                      ))}
-                    </select>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <div>
+                      <label className="mb-1 block text-xs text-brown-400">Name</label>
+                      <input
+                        type="text"
+                        value={kid.name}
+                        onChange={(e) => updateKid(i, "name", e.target.value)}
+                        placeholder="Player's full name"
+                        className="w-full rounded-lg border border-brown-700 bg-brown-800/60 px-3 py-2 text-sm text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs text-brown-400">Date of Birth</label>
+                      <input
+                        type="date"
+                        value={kid.dob}
+                        onChange={(e) => updateKid(i, "dob", e.target.value)}
+                        className="w-full rounded-lg border border-brown-700 bg-brown-800/60 px-3 py-2 text-sm text-white focus:border-mesa-accent focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs text-brown-400">Grade</label>
+                      <select
+                        value={kid.grade}
+                        onChange={(e) => updateKid(i, "grade", e.target.value)}
+                        className="w-full rounded-lg border border-brown-700 bg-brown-800/60 px-3 py-2 text-sm text-white focus:border-mesa-accent focus:outline-none"
+                      >
+                        <option value="">Select grade...</option>
+                        {ALL_GRADES.map((g) => (
+                          <option key={g.value} value={g.value}>{g.label}</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                 </div>
               ))}
