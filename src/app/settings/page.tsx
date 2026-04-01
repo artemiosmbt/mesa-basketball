@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { authClient } from "@/lib/auth";
@@ -30,17 +30,35 @@ function normalizeDob(dob: string): string {
   return dob;
 }
 
-// Auto-format typed DOB: digits only, slashes auto-inserted or preserved
-function formatDob(raw: string): string {
-  const digits = raw.replace(/\D/g, "").slice(0, 8);
-  const endsSlash = raw.trimEnd().endsWith("/");
-  if (digits.length === 0) return "";
-  if (digits.length <= 2) return endsSlash && digits.length === 2 ? `${digits}/` : digits;
-  if (digits.length <= 4) {
-    const base = `${digits.slice(0, 2)}/${digits.slice(2)}`;
-    return endsSlash && digits.length === 4 ? `${base}/` : base;
-  }
-  return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
+function parseDob(dob: string): [string, string, string] {
+  const p = dob.split("/");
+  return [p[0] || "", p[1] || "", p[2] || ""];
+}
+function buildDob(mm: string, dd: string, yyyy: string): string {
+  if (!mm && !dd && !yyyy) return "";
+  if (!dd && !yyyy) return mm;
+  if (!yyyy) return `${mm}/${dd}`;
+  return `${mm}/${dd}/${yyyy}`;
+}
+function DobInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [mm, dd, yyyy] = parseDob(value);
+  const ddRef = useRef<HTMLInputElement>(null);
+  const yyyyRef = useRef<HTMLInputElement>(null);
+  return (
+    <div className="flex items-center w-full rounded-lg border border-brown-700 bg-brown-800/60 text-sm text-white focus-within:border-mesa-accent">
+      <input type="text" inputMode="numeric" maxLength={2} placeholder="MM" value={mm}
+        onChange={e => { const v = e.target.value.replace(/\D/g, "").slice(0, 2); onChange(buildDob(v, dd, yyyy)); if (v.length === 2) ddRef.current?.focus(); }}
+        className="w-8 bg-transparent px-2 py-2 text-center placeholder-brown-500 focus:outline-none" />
+      <span className="text-brown-500 select-none">/</span>
+      <input ref={ddRef} type="text" inputMode="numeric" maxLength={2} placeholder="DD" value={dd}
+        onChange={e => { const v = e.target.value.replace(/\D/g, "").slice(0, 2); onChange(buildDob(mm, v, yyyy)); if (v.length === 2) yyyyRef.current?.focus(); }}
+        className="w-8 bg-transparent px-2 py-2 text-center placeholder-brown-500 focus:outline-none" />
+      <span className="text-brown-500 select-none">/</span>
+      <input ref={yyyyRef} type="text" inputMode="numeric" maxLength={4} placeholder="YYYY" value={yyyy}
+        onChange={e => { const v = e.target.value.replace(/\D/g, "").slice(0, 4); onChange(buildDob(mm, dd, v)); }}
+        className="w-14 bg-transparent px-2 py-2 text-center placeholder-brown-500 focus:outline-none" />
+    </div>
+  );
 }
 
 export default function SettingsPage() {
@@ -218,14 +236,7 @@ export default function SettingsPage() {
                     </div>
                     <div>
                       <label className="mb-1 block text-xs text-brown-400">Date of Birth</label>
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        placeholder="MM/DD/YYYY"
-                        value={kid.dob}
-                        onChange={(e) => updateKid(i, "dob", formatDob(e.target.value))}
-                        className="w-full rounded-lg border border-brown-700 bg-brown-800/60 px-3 py-2 text-sm text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
-                      />
+                      <DobInput value={kid.dob} onChange={(v) => updateKid(i, "dob", v)} />
                     </div>
                     <div>
                       <label className="mb-1 block text-xs text-brown-400">Grade</label>

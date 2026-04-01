@@ -58,16 +58,35 @@ function normalizeDob(dob: string): string {
   return dob;
 }
 
-function formatDob(raw: string): string {
-  const digits = raw.replace(/\D/g, "").slice(0, 8);
-  const endsSlash = raw.trimEnd().endsWith("/");
-  if (digits.length === 0) return "";
-  if (digits.length <= 2) return endsSlash && digits.length === 2 ? `${digits}/` : digits;
-  if (digits.length <= 4) {
-    const base = `${digits.slice(0, 2)}/${digits.slice(2)}`;
-    return endsSlash && digits.length === 4 ? `${base}/` : base;
-  }
-  return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
+function parseDob(dob: string): [string, string, string] {
+  const p = dob.split("/");
+  return [p[0] || "", p[1] || "", p[2] || ""];
+}
+function buildDob(mm: string, dd: string, yyyy: string): string {
+  if (!mm && !dd && !yyyy) return "";
+  if (!dd && !yyyy) return mm;
+  if (!yyyy) return `${mm}/${dd}`;
+  return `${mm}/${dd}/${yyyy}`;
+}
+function DobInput({ value, onChange, required }: { value: string; onChange: (v: string) => void; required?: boolean }) {
+  const [mm, dd, yyyy] = parseDob(value);
+  const ddRef = useRef<HTMLInputElement>(null);
+  const yyyyRef = useRef<HTMLInputElement>(null);
+  return (
+    <div className="flex items-center w-full rounded-lg border border-brown-700 bg-brown-800 text-sm text-white focus-within:border-mesa-accent">
+      <input type="text" inputMode="numeric" maxLength={2} placeholder="MM" value={mm} required={required}
+        onChange={e => { const v = e.target.value.replace(/\D/g, "").slice(0, 2); onChange(buildDob(v, dd, yyyy)); if (v.length === 2) ddRef.current?.focus(); }}
+        className="w-8 bg-transparent px-2 py-2 text-center placeholder-brown-600 focus:outline-none" />
+      <span className="text-brown-500 select-none">/</span>
+      <input ref={ddRef} type="text" inputMode="numeric" maxLength={2} placeholder="DD" value={dd}
+        onChange={e => { const v = e.target.value.replace(/\D/g, "").slice(0, 2); onChange(buildDob(mm, v, yyyy)); if (v.length === 2) yyyyRef.current?.focus(); }}
+        className="w-8 bg-transparent px-2 py-2 text-center placeholder-brown-600 focus:outline-none" />
+      <span className="text-brown-500 select-none">/</span>
+      <input ref={yyyyRef} type="text" inputMode="numeric" maxLength={4} placeholder="YYYY" value={yyyy}
+        onChange={e => { const v = e.target.value.replace(/\D/g, "").slice(0, 4); onChange(buildDob(mm, dd, v)); }}
+        className="w-14 bg-transparent px-2 py-2 text-center placeholder-brown-600 focus:outline-none" />
+    </div>
+  );
 }
 
 function isEarlyBirdActive(): boolean {
@@ -2334,17 +2353,9 @@ export default function Home() {
                           </button>
                         )}
                       </div>
-                      <div className="overflow-hidden">
+                      <div>
                         <label className="mb-1 block text-xs text-brown-300">Date of Birth</label>
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          required
-                          placeholder="MM/DD/YYYY"
-                          value={kid.dob}
-                          onChange={(e) => updateKid(i, "dob", formatDob(e.target.value))}
-                          className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white text-sm placeholder-brown-600 focus:border-mesa-accent focus:outline-none"
-                        />
+                        <DobInput value={kid.dob} onChange={(v) => updateKid(i, "dob", v)} required />
                       </div>
                       <div>
                         <label className="mb-1 block text-xs text-brown-300">Grade</label>
@@ -2644,17 +2655,9 @@ export default function Home() {
                           <button type="button" onClick={() => removeKid(i)} className="text-brown-500 hover:text-red-400 text-xl leading-none">&times;</button>
                         )}
                       </div>
-                      <div className="overflow-hidden">
+                      <div>
                         <label className="mb-1 block text-xs text-brown-300">Date of Birth</label>
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          required
-                          placeholder="MM/DD/YYYY"
-                          value={kid.dob}
-                          onChange={(e) => updateKid(i, "dob", formatDob(e.target.value))}
-                          className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white text-sm placeholder-brown-600 focus:border-mesa-accent focus:outline-none"
-                        />
+                        <DobInput value={kid.dob} onChange={(v) => updateKid(i, "dob", v)} required />
                       </div>
                       <div>
                         <label className="mb-1 block text-xs text-brown-300">Grade</label>
