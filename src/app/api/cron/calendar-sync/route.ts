@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { getWeeklySchedule, getCamps } from "@/lib/sheets";
 import { upsertGroupSessionCalendarEvent } from "@/lib/calendar";
 
+function splitTime(time: string): { start: string; end: string } {
+  const parts = time.split(/\s*[-–]\s*/);
+  return { start: parts[0]?.trim() || time, end: parts[1]?.trim() || parts[0]?.trim() || time };
+}
+
 export async function GET(req: NextRequest) {
   const authHeader = req.headers.get("authorization");
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
@@ -43,16 +48,16 @@ export async function GET(req: NextRequest) {
   try {
     const camps = await getCamps();
     for (const camp of camps) {
+      const { start: campStart, end: campEnd } = splitTime(camp.time);
       if (!camp.campDays || camp.campDays.length === 0) {
-        // Single-block camp — use startDate as the one day
         if (!camp.startDate || camp.startDate < today) continue;
         try {
           await upsertGroupSessionCalendarEvent({
             sessionType: "camp",
             sessionLabel: camp.name,
             bookedDate: camp.startDate,
-            bookedStartTime: camp.time,
-            bookedEndTime: camp.time,
+            bookedStartTime: campStart,
+            bookedEndTime: campEnd,
             bookedLocation: camp.location,
             maxSpots: camp.maxSpots,
             kidsJustRegistered: "",
@@ -64,7 +69,6 @@ export async function GET(req: NextRequest) {
           errors++;
         }
       } else {
-        // Multi-day camp — sync each day
         for (const day of camp.campDays) {
           if (!day || day < today) continue;
           try {
@@ -72,8 +76,8 @@ export async function GET(req: NextRequest) {
               sessionType: "camp",
               sessionLabel: camp.name,
               bookedDate: day,
-              bookedStartTime: camp.time,
-              bookedEndTime: camp.time,
+              bookedStartTime: campStart,
+              bookedEndTime: campEnd,
               bookedLocation: camp.location,
               maxSpots: camp.maxSpots,
               kidsJustRegistered: "",

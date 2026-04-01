@@ -2,6 +2,12 @@ import { NextResponse } from "next/server";
 import { getWeeklySchedule, getCamps } from "@/lib/sheets";
 import { upsertGroupSessionCalendarEvent } from "@/lib/calendar";
 
+/** Split "9:00 AM - 12:00 PM" into start/end, or return time as both */
+function splitTime(time: string): { start: string; end: string } {
+  const parts = time.split(/\s*[-–]\s*/);
+  return { start: parts[0]?.trim() || time, end: parts[1]?.trim() || parts[0]?.trim() || time };
+}
+
 export async function GET() {
   const today = new Date().toISOString().split("T")[0];
   let synced = 0;
@@ -38,6 +44,7 @@ export async function GET() {
   try {
     const camps = await getCamps();
     for (const camp of camps) {
+      const { start: campStart, end: campEnd } = splitTime(camp.time);
       if (!camp.campDays || camp.campDays.length === 0) {
         if (!camp.startDate || camp.startDate < today) continue;
         try {
@@ -45,8 +52,8 @@ export async function GET() {
             sessionType: "camp",
             sessionLabel: camp.name,
             bookedDate: camp.startDate,
-            bookedStartTime: camp.time,
-            bookedEndTime: camp.time,
+            bookedStartTime: campStart,
+            bookedEndTime: campEnd,
             bookedLocation: camp.location,
             maxSpots: camp.maxSpots,
             kidsJustRegistered: "",
@@ -66,8 +73,8 @@ export async function GET() {
               sessionType: "camp",
               sessionLabel: camp.name,
               bookedDate: day,
-              bookedStartTime: camp.time,
-              bookedEndTime: camp.time,
+              bookedStartTime: campStart,
+              bookedEndTime: campEnd,
               bookedLocation: camp.location,
               maxSpots: camp.maxSpots,
               kidsJustRegistered: "",

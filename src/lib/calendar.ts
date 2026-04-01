@@ -101,7 +101,23 @@ const TIMEZONE = "America/New_York";
 const CALENDAR_BASE = "https://www.googleapis.com/calendar/v3/calendars";
 
 /**
- * Convert a date string (YYYY-MM-DD) and a time string (HH:MM or H:MM AM/PM)
+ * Normalize any date string to YYYY-MM-DD for the Calendar API.
+ * Handles "March 20, 2026", "2026-03-20", "3/20/2026", etc.
+ */
+function normalizeDate(dateStr: string): string {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
+  const d = new Date(dateStr);
+  if (!isNaN(d.getTime())) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  }
+  return dateStr;
+}
+
+/**
+ * Convert a date string (any format) and a time string (HH:MM or H:MM AM/PM)
  * into a full ISO-8601 dateTime string for the Calendar API.
  */
 function toDateTime(date: string, time: string): string {
@@ -127,7 +143,7 @@ function toDateTime(date: string, time: string): string {
 
   const hh = String(hours).padStart(2, "0");
   const mm = String(minutes).padStart(2, "0");
-  return `${date}T${hh}:${mm}:00`;
+  return `${normalizeDate(date)}T${hh}:${mm}:00`;
 }
 
 /**
@@ -141,8 +157,9 @@ async function findExistingEvent(
   date: string,
   tag: string
 ): Promise<{ id: string; description: string } | null> {
-  const timeMin = encodeURIComponent(`${date}T00:00:00Z`);
-  const timeMax = encodeURIComponent(`${date}T23:59:59Z`);
+  const isoDate = normalizeDate(date);
+  const timeMin = encodeURIComponent(`${isoDate}T00:00:00Z`);
+  const timeMax = encodeURIComponent(`${isoDate}T23:59:59Z`);
   const url =
     `${CALENDAR_BASE}/${encodeURIComponent(calendarId)}/events` +
     `?timeMin=${timeMin}&timeMax=${timeMax}&singleEvents=true&maxResults=50`;
