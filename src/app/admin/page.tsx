@@ -238,9 +238,9 @@ export default function AdminPage() {
       <div className="border-b border-gray-200 bg-white px-6 py-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="h-14 w-14 rounded-full bg-white border border-gray-100 overflow-hidden flex items-center justify-center">
+            <Link href="/" className="h-14 w-14 rounded-full bg-white border border-gray-100 overflow-hidden flex items-center justify-center hover:opacity-80 transition">
               <img src="/logo.png" alt="Mesa" className="h-14 w-14 object-contain scale-125" />
-            </div>
+            </Link>
             <div>
               <p className="font-[family-name:var(--font-oswald)] text-xl font-bold tracking-wide text-mesa-dark">ADMIN DASHBOARD</p>
               <p className="text-xs text-brown-500">Mesa Basketball Training</p>
@@ -258,7 +258,7 @@ export default function AdminPage() {
 
       <div className="flex flex-1">
         {/* Sidebar — desktop only */}
-        <aside className="hidden md:flex flex-col w-52 shrink-0 border-r border-brown-800 bg-brown-900/30 px-3 py-6">
+        <aside className="hidden md:flex flex-col w-52 shrink-0 border-r border-brown-800 bg-brown-900/30 px-3 py-6 sticky top-0 h-screen">
           <nav className="flex-1 space-y-1">
             <Link href="/admin" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold bg-brown-800 text-white">
               Dashboard
