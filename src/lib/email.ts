@@ -102,10 +102,11 @@ export async function sendRegistrationNotification(data: {
     ? ""
     : "<p>Payment is due upon registration via Zelle (<strong>artemios@mesabasketballtraining.com</strong>), Cash, or Venmo (<strong>@Artemios-Gavalas</strong>). Please provide at least 48 hours' notice if you need to cancel or reschedule a session. Rescheduling or canceling within 48 hours of the scheduled session will result in a 50% charge of the session fee.</p>";
 
+  const discountedPrice = data.type === "group-private" ? 125 : 75;
   const freeNote = !isPackageBooking && data.isFree && data.isFirstTime
-    ? '<p style="background: #162d5a; color: #d4af37; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">First Session Discount Applied — 50% Off! Payment due upon registration: $75 (private) or $125 (group private) via Cash, Venmo, or Zelle.</p>'
+    ? `<p style="background: #162d5a; color: #d4af37; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">First Session Discount Applied — 50% Off! Payment due upon registration: $${discountedPrice} via Cash, Venmo, or Zelle.</p>`
     : !isPackageBooking && data.isFree
-    ? '<p style="background: #162d5a; color: #d4af37; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">Referral Credit Applied — 50% Off This Session! Payment due upon registration: $75 (private) or $125 (group private) via Cash, Venmo, or Zelle.</p>'
+    ? `<p style="background: #162d5a; color: #d4af37; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">Referral Credit Applied — 50% Off This Session! Payment due upon registration: $${discountedPrice} via Cash, Venmo, or Zelle.</p>`
     : "";
 
   const manageSection = `<p><a href="${BASE_URL}/my-bookings" style="color: #d4af37; font-weight: bold;">View My Bookings</a> — Manage, cancel, or reschedule your sessions</p>`;
