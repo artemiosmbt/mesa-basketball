@@ -54,8 +54,13 @@ interface Camp {
 // Early bird ends March 31, 2026 end of day Eastern (April 1 04:00 UTC)
 function formatDob(raw: string): string {
   const digits = raw.replace(/\D/g, "").slice(0, 8);
-  if (digits.length <= 2) return digits;
-  if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+  const endsSlash = raw.trimEnd().endsWith("/");
+  if (digits.length === 0) return "";
+  if (digits.length <= 2) return endsSlash && digits.length === 2 ? `${digits}/` : digits;
+  if (digits.length <= 4) {
+    const base = `${digits.slice(0, 2)}/${digits.slice(2)}`;
+    return endsSlash && digits.length === 4 ? `${base}/` : base;
+  }
   return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
 }
 
