@@ -233,7 +233,7 @@ export default function AdminPage() {
   const displayedPast = applyFilters(past);
 
   return (
-    <div className="min-h-screen bg-brown-950 text-white flex flex-col">
+    <div className="min-h-screen bg-brown-950 text-white flex flex-col overflow-x-hidden">
       {/* Header */}
       <div className="border-b border-gray-200 bg-white px-6 py-4">
         <div className="flex items-center justify-between">
@@ -318,7 +318,7 @@ export default function AdminPage() {
               placeholder="Search by name, email, or phone..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="rounded-lg border border-brown-700 bg-brown-800/60 px-4 py-2 text-sm text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none w-64"
+              className="rounded-lg border border-brown-700 bg-brown-800/60 px-4 py-2 text-sm text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none w-full sm:w-64"
             />
             <div className="flex flex-wrap gap-1">
               {["all", "weekly", "camp", "private", "group-private"].map((t) => (
