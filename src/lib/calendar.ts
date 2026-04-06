@@ -373,6 +373,11 @@ export async function upsertGroupSessionCalendarEvent(
     return;
   }
 
+  // Never touch past events — prevents re-creating deleted events and avoids
+  // creating duplicates when manually-edited Apple Calendar notes wipe the tag.
+  const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+  if (normalizeDate(params.bookedDate) < todayStr) return;
+
   const token = await getAccessToken(saEmail, privateKey);
 
   // A stable tag embedded in the description so we can find the event later.
@@ -409,7 +414,9 @@ export async function upsertGroupSessionCalendarEvent(
 
   if (existing) {
     await patchEvent(calendarId, token, existing.id, { description });
-  } else {
+  } else if (totalSignedUp > 0) {
+    // Only create a new event if someone is actually registered — avoids
+    // re-creating events the user deleted because no one showed up.
     const event: CalendarEvent = {
       summary,
       description,
