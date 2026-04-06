@@ -1391,7 +1391,7 @@ export default function Home() {
       {/* Page Header */}
       <header className="relative border-b border-brown-800 overflow-hidden min-h-[38vh] md:min-h-[65vh] flex items-end">
         <Image
-          src="/photos/grid5.jpg"
+          src="/photos/grid12.jpg"
           alt="Basketball training session"
           fill
           className="object-cover object-center"

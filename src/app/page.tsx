@@ -68,7 +68,7 @@ export default function LandingPage() {
         <div className="md:hidden">
           <div className="relative w-full h-[115vw] overflow-hidden">
             <Image
-              src="/photos/grid2.jpg"
+              src="/photos/grid11.jpg"
               alt="Mesa Basketball Training session"
               fill
               className="object-cover object-center"
@@ -101,7 +101,7 @@ export default function LandingPage() {
         <div className="hidden md:flex relative overflow-hidden min-h-[85vh] items-center">
           <div className="absolute inset-0">
             <Image
-              src="/photos/grid2.jpg"
+              src="/photos/grid11.jpg"
               alt="Mesa Basketball Training session"
               fill
               className="object-cover object-center"
@@ -202,7 +202,7 @@ export default function LandingPage() {
       {/* Full-width action photo strip */}
       <div className="relative h-56 md:h-[44rem] overflow-hidden">
         <Image
-          src="/photos/grid8.jpg"
+          src="/photos/grid13.jpg"
           alt="Basketball training in action"
           fill
           className="object-cover object-top md:object-center"
@@ -212,19 +212,6 @@ export default function LandingPage() {
           <p className="font-[family-name:var(--font-fira-cond)] text-2xl md:text-5xl font-black tracking-wide md:tracking-widest text-white text-center px-6 drop-shadow-lg">
             EVERY REP.<span className="text-mesa-accent"> EVERY SESSION.</span><br className="hidden md:block" /> EVERY PLAYER.
           </p>
-        </div>
-      </div>
-
-      {/* Photo gallery strip */}
-      <div className="grid grid-cols-3">
-        <div className="relative h-48 md:h-80 overflow-hidden">
-          <Image src="/photos/grid11.jpg" alt="Basketball training at St. John's" fill className="object-cover object-center" />
-        </div>
-        <div className="relative h-48 md:h-80 overflow-hidden">
-          <Image src="/photos/grid12.jpg" alt="Jump shot training" fill className="object-cover object-top" />
-        </div>
-        <div className="relative h-48 md:h-80 overflow-hidden">
-          <Image src="/photos/grid13.jpg" alt="One-on-one coaching at St. John's" fill className="object-cover object-center" />
         </div>
       </div>
 
