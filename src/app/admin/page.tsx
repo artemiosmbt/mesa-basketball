@@ -256,7 +256,7 @@ export default function AdminPage() {
         </div>
       </div>
 
-      <div className="flex flex-1">
+      <div className="flex flex-1 min-w-0 w-full">
         {/* Sidebar — desktop only */}
         <aside className="hidden md:flex flex-col w-52 shrink-0 border-r border-brown-800 bg-brown-900/30 px-3 py-6 sticky top-0 h-screen">
           <nav className="flex-1 space-y-1">
@@ -280,7 +280,7 @@ export default function AdminPage() {
           </div>
         </aside>
 
-      <div className="flex-1 px-4 sm:px-6 py-8">
+      <div className="flex-1 min-w-0 px-4 sm:px-6 py-8">
         {/* Stats */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
           {[

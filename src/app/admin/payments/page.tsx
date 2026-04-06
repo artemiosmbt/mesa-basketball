@@ -117,7 +117,7 @@ export default function PaymentsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-brown-950 text-white flex flex-col">
+    <div className="min-h-screen bg-brown-950 text-white flex flex-col w-full max-w-full">
       {/* Header */}
       <div className="border-b border-gray-200 bg-white px-4 sm:px-6 py-3 sm:py-4">
         <div className="flex items-center justify-between gap-2">
@@ -137,7 +137,7 @@ export default function PaymentsPage() {
         </div>
       </div>
 
-      <div className="flex flex-1">
+      <div className="flex flex-1 min-w-0 w-full">
         {/* Sidebar — desktop only */}
         <aside className="hidden md:flex flex-col w-52 shrink-0 border-r border-brown-800 bg-brown-900/30 px-3 py-6 sticky top-0 h-screen">
           <nav className="flex-1 space-y-1">
@@ -155,7 +155,7 @@ export default function PaymentsPage() {
           </div>
         </aside>
 
-      <div className="flex-1 px-4 sm:px-6 py-8 space-y-12">
+      <div className="flex-1 min-w-0 px-4 sm:px-6 py-8 space-y-12">
 
         {/* Unpaid */}
         <div>
@@ -174,7 +174,7 @@ export default function PaymentsPage() {
                       <span className="font-medium text-sm">{r.parent_name}</span>
                       <span className="rounded-full bg-brown-800 px-2 py-0.5 text-xs text-mesa-accent shrink-0">{TYPE_LABELS[r.type] || r.type}</span>
                     </div>
-                    {r.kids && <div className="text-xs text-white mt-0.5">{r.kids.split(",").map((k) => k.split("(")[0].trim()).filter(Boolean).join(", ")}</div>}
+                    {r.kids && <div className="text-xs text-white mt-0.5 truncate">{r.kids.split(",").map((k) => k.split("(")[0].trim()).filter(Boolean).join(", ")}</div>}
                     <div className="text-xs text-brown-400 mt-0.5 truncate">{sessionLabel(r)}</div>
                     <div className="flex flex-wrap gap-x-3 mt-1 text-xs text-brown-500">
                       <span>{r.booked_date || "—"}</span>
@@ -255,7 +255,7 @@ export default function PaymentsPage() {
                       <span className="font-medium text-sm">{r.parent_name}</span>
                       <span className="rounded-full bg-brown-800 px-2 py-0.5 text-xs text-mesa-accent shrink-0">{TYPE_LABELS[r.type] || r.type}</span>
                     </div>
-                    {r.kids && <div className="text-xs text-white mt-0.5">{r.kids.split(",").map((k) => k.split("(")[0].trim()).filter(Boolean).join(", ")}</div>}
+                    {r.kids && <div className="text-xs text-white mt-0.5 truncate">{r.kids.split(",").map((k) => k.split("(")[0].trim()).filter(Boolean).join(", ")}</div>}
                     <div className="text-xs text-brown-400 mt-0.5 truncate">{sessionLabel(r)}</div>
                     <div className="text-xs text-brown-500 mt-1">{r.booked_date || "—"}</div>
                   </div>
