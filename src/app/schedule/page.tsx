@@ -1802,7 +1802,7 @@ export default function Home() {
           src="/photos/grid2.jpg"
           alt="Private basketball training session"
           fill
-          className="object-cover object-center md:object-[center_40%]"
+          className="object-cover object-center md:object-[center_58%]"
         />
         <div className="absolute inset-0 bg-gradient-to-r from-mesa-dark/85 via-mesa-dark/50 to-mesa-dark/85" />
         <div className="absolute inset-0 flex items-center justify-center">
