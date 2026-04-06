@@ -119,20 +119,20 @@ export default function PaymentsPage() {
   return (
     <div className="min-h-screen bg-brown-950 text-white flex flex-col">
       {/* Header */}
-      <div className="border-b border-gray-200 bg-white px-6 py-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Link href="/" className="h-14 w-14 rounded-full bg-white border border-gray-100 overflow-hidden flex items-center justify-center hover:opacity-80 transition">
-              <img src="/logo.png" alt="Mesa" className="h-14 w-14 object-contain scale-125" />
+      <div className="border-b border-gray-200 bg-white px-4 sm:px-6 py-3 sm:py-4">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <Link href="/" className="h-10 w-10 sm:h-14 sm:w-14 shrink-0 rounded-full bg-white border border-gray-100 overflow-hidden flex items-center justify-center hover:opacity-80 transition">
+              <img src="/logo.png" alt="Mesa" className="h-10 w-10 sm:h-14 sm:w-14 object-contain scale-125" />
             </Link>
-            <div>
-              <p className="font-[family-name:var(--font-oswald)] text-xl font-bold tracking-wide text-mesa-dark">PAYMENTS</p>
-              <p className="text-xs text-brown-500">Mesa Basketball Training</p>
+            <div className="min-w-0">
+              <p className="font-[family-name:var(--font-oswald)] text-base sm:text-xl font-bold tracking-wide text-mesa-dark leading-tight">PAYMENTS</p>
+              <p className="text-xs text-brown-500 leading-tight">Mesa Basketball Training</p>
             </div>
           </div>
-          <div className="flex items-center gap-4 md:hidden">
-            <Link href="/admin" className="text-sm text-brown-500 hover:text-mesa-dark">← Registrations</Link>
-            <Link href="/" className="text-sm text-brown-500 hover:text-mesa-dark">← Site</Link>
+          <div className="flex items-center gap-2 shrink-0 md:hidden">
+            <Link href="/admin" className="text-xs text-brown-500 hover:text-mesa-dark">← Registrations</Link>
+            <Link href="/" className="text-xs text-brown-500 hover:text-mesa-dark">← Site</Link>
           </div>
         </div>
       </div>
