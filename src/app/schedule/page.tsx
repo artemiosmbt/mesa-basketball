@@ -1394,7 +1394,7 @@ export default function Home() {
           src="/photos/grid12.jpg"
           alt="Basketball training session"
           fill
-          className="object-cover object-top"
+          className="object-cover object-[center_20%]"
           priority
         />
         <div className="absolute inset-0 bg-gradient-to-t from-mesa-dark via-mesa-dark/60 to-transparent" />
@@ -1832,6 +1832,12 @@ export default function Home() {
           <p className="mt-2 text-center text-sm text-green-400/80">
             New Clients: First Session 50% Off
           </p>
+
+          {/* Photo */}
+          <div className="relative mt-8 h-56 md:h-80 rounded-xl overflow-hidden">
+            <Image src="/photos/grid2.jpg" alt="Private basketball training" fill className="object-cover object-[center_30%]" />
+            <div className="absolute inset-0 bg-mesa-dark/30" />
+          </div>
 
           {/* Monthly Packages */}
           <div className="mt-10 border-t border-brown-800 pt-8">
