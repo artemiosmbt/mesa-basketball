@@ -215,6 +215,19 @@ export default function LandingPage() {
         </div>
       </div>
 
+      {/* Photo gallery strip */}
+      <div className="grid grid-cols-3">
+        <div className="relative h-48 md:h-80 overflow-hidden">
+          <Image src="/photos/grid11.jpg" alt="Basketball training at St. John's" fill className="object-cover object-center" />
+        </div>
+        <div className="relative h-48 md:h-80 overflow-hidden">
+          <Image src="/photos/grid12.jpg" alt="Jump shot training" fill className="object-cover object-top" />
+        </div>
+        <div className="relative h-48 md:h-80 overflow-hidden">
+          <Image src="/photos/grid13.jpg" alt="One-on-one coaching at St. John's" fill className="object-cover object-center" />
+        </div>
+      </div>
+
       {/* The Name */}
       <section className="bg-brown-950 border-t border-brown-800 py-14 md:py-20">
         <div className="mx-auto max-w-2xl px-6 text-center">
