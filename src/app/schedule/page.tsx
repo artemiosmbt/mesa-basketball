@@ -2093,6 +2093,12 @@ export default function Home() {
         </div>
       )}
 
+      {/* Photo divider */}
+      <div className="relative h-52 md:h-72 overflow-hidden">
+        <Image src="/photos/grid10.jpg" alt="Basketball group training session" fill className="object-cover object-center" />
+        <div className="absolute inset-0 bg-mesa-dark/40" />
+      </div>
+
       {/* Contact Footer */}
       <footer className="border-t border-brown-800 bg-mesa-dark py-12">
         <div className="mx-auto max-w-4xl px-6 text-center">

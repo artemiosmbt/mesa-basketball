@@ -363,6 +363,12 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* Photo divider */}
+      <div className="relative h-52 md:h-80 overflow-hidden">
+        <Image src="/photos/grid1.jpg" alt="One-on-one basketball training" fill className="object-cover object-center" />
+        <div className="absolute inset-0 bg-mesa-dark/40" />
+      </div>
+
       {/* CTA Banner */}
       <section className="bg-mesa-accent py-16 md:py-20">
         <div className="mx-auto max-w-4xl px-6 text-center">
