@@ -233,7 +233,7 @@ export default function AdminPage() {
   const displayedPast = applyFilters(past);
 
   return (
-    <div className="min-h-screen bg-brown-950 text-white flex flex-col overflow-x-hidden">
+    <div className="min-h-screen bg-brown-950 text-white flex flex-col w-full max-w-full">
       {/* Header */}
       <div className="border-b border-gray-200 bg-white px-4 sm:px-6 py-3 sm:py-4">
         <div className="flex items-center justify-between gap-2">
@@ -298,12 +298,12 @@ export default function AdminPage() {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-2 mb-6">
+        <div className="flex flex-wrap gap-2 mb-6">
           {(["upcoming", "past", "clients"] as const).map((t) => (
             <button
               key={t}
               onClick={() => { setTab(t); setSelectedClient(null); }}
-              className={`px-4 py-2 rounded-lg text-sm font-semibold capitalize transition ${tab === t ? "bg-mesa-accent text-white" : "bg-brown-900 text-brown-400 hover:text-white"}`}
+              className={`px-3 py-2 rounded-lg text-sm font-semibold capitalize transition ${tab === t ? "bg-mesa-accent text-white" : "bg-brown-900 text-brown-400 hover:text-white"}`}
             >
               {t === "upcoming" ? `Upcoming (${upcoming.length})` : t === "past" ? "Past" : "Clients"}
             </button>
@@ -385,9 +385,9 @@ export default function AdminPage() {
                   <div className="min-w-0">
                     <div className="font-medium text-sm">{c.name}</div>
                     <div className="text-xs text-brown-400 mt-0.5">{c.kids}</div>
-                    <div className="flex flex-wrap gap-x-3 mt-1 text-xs text-brown-500">
+                    <div className="flex flex-col gap-0.5 mt-1 text-xs text-brown-500">
                       <span>{c.phone}</span>
-                      <span>{c.email}</span>
+                      <span className="truncate">{c.email}</span>
                     </div>
                   </div>
                   <div className="shrink-0 text-right">
