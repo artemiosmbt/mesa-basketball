@@ -205,7 +205,7 @@ export default function LandingPage() {
           src="/photos/grid13.jpg"
           alt="Basketball training in action"
           fill
-          className="object-cover object-top md:object-center"
+          className="object-cover object-[center_20%]"
         />
         <div className="absolute inset-0 bg-gradient-to-r from-mesa-dark/90 via-mesa-dark/50 to-mesa-dark/90" />
         <div className="absolute inset-0 flex items-center justify-center">
@@ -224,6 +224,12 @@ export default function LandingPage() {
           </p>
         </div>
       </section>
+
+      {/* Photo divider */}
+      <div className="relative h-52 md:h-80 overflow-hidden">
+        <Image src="/photos/grid8.jpg" alt="Basketball coaching session" fill className="object-cover object-[center_30%]" />
+        <div className="absolute inset-0 bg-mesa-dark/40" />
+      </div>
 
       {/* What We Offer — cards with photos */}
       <section className="bg-gradient-to-b from-brown-950 to-mesa-dark border-t border-brown-800 py-16 md:py-24">
@@ -257,7 +263,7 @@ export default function LandingPage() {
                 tag: "Personalized. 1-on-1. Targeted.",
                 desc: "Customized training programs built around your position, goals, and development needs.",
                 anchor: "/schedule#private",
-                photo: "/photos/grid1.jpg",
+                photo: "/photos/grid2.jpg",
                 photoAlt: "One-on-one private basketball training session",
               },
             ].map((item) => (

@@ -1394,7 +1394,7 @@ export default function Home() {
           src="/photos/grid12.jpg"
           alt="Basketball training session"
           fill
-          className="object-cover object-center"
+          className="object-cover object-top"
           priority
         />
         <div className="absolute inset-0 bg-gradient-to-t from-mesa-dark via-mesa-dark/60 to-transparent" />
@@ -1659,8 +1659,8 @@ export default function Home() {
       {/* Photo divider before camps */}
       <div className="relative h-64 md:h-[26rem] overflow-hidden">
         <Image
-          src="/photos/grid10.jpg"
-          alt="Basketball camp training"
+          src="/photos/grid5.jpg"
+          alt="Basketball group training"
           fill
           className="object-cover object-center"
         />
