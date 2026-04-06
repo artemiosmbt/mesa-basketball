@@ -703,11 +703,12 @@ export default function Home() {
     setIsGroupRate(false);
     setUpsellExtra(0);
     setReferralCode("");
-    // Pre-select all days for camps with day selection
+    // Pre-select future days only for camps with day selection
     if (type === "camp") {
       const camp = camps[sessionIndex];
       if (camp?.campDays?.length > 0) {
-        setCampSelectedDays(new Set(camp.campDays));
+        const futureDays = camp.campDays.filter((d) => isFutureCampDay(d, camp.time));
+        setCampSelectedDays(new Set(futureDays));
       } else {
         setCampSelectedDays(new Set());
       }
@@ -1111,6 +1112,20 @@ export default function Home() {
     const sessionStartMins = parseTime(s.startTime);
     const currentMins = now.getHours() * 60 + now.getMinutes();
     return sessionStartMins > currentMins;
+  }
+
+  function isFutureCampDay(day: string, campTime: string): boolean {
+    const dayDate = new Date(day);
+    if (isNaN(dayDate.getTime())) return true;
+    const now = new Date();
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    dayDate.setHours(0, 0, 0, 0);
+    if (dayDate > today) return true;
+    if (dayDate < today) return false;
+    // Same day — check start time
+    const startMins = parseTime(campTime.split("-")[0]?.trim() || campTime);
+    return startMins > now.getHours() * 60 + now.getMinutes();
   }
 
   function isSessionFull(s: WeeklySession): boolean {
@@ -1714,22 +1729,28 @@ export default function Home() {
                     </div>
                     {firstCamp.description && <p className="mt-2 text-sm text-brown-400">{firstCamp.description}</p>}
                     <div className="mt-4 grid gap-3 sm:grid-cols-3">
-                      {group.camps.map(({ camp, index }) => (
-                        <div key={camp.id} className="rounded-lg border border-brown-600 bg-brown-800/50 p-4 flex flex-col gap-2">
-                          <p className="font-semibold text-white text-sm">{camp.gradeGroup}</p>
-                          <p className="text-xs text-brown-400">{camp.time}</p>
-                          <button
-                            onClick={() => openModal("camp", index, `${camp.name} — ${camp.gradeGroup} at ${camp.location}`)}
-                            className="mt-auto rounded bg-mesa-accent px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-yellow-600"
-                          >
-                            Register
-                          </button>
-                        </div>
-                      ))}
+                      {group.camps.map(({ camp, index }) => {
+                        const futureDays = camp.campDays.filter((d) => isFutureCampDay(d, camp.time));
+                        const ended = camp.campDays.length > 0 && futureDays.length === 0;
+                        return (
+                          <div key={camp.id} className="rounded-lg border border-brown-600 bg-brown-800/50 p-4 flex flex-col gap-2">
+                            <p className="font-semibold text-white text-sm">{camp.gradeGroup}</p>
+                            <p className="text-xs text-brown-400">{camp.time}</p>
+                            {!ended && (
+                              <button
+                                onClick={() => openModal("camp", index, `${camp.name} — ${camp.gradeGroup} at ${camp.location}`)}
+                                className="mt-auto rounded bg-mesa-accent px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-yellow-600"
+                              >
+                                Register
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
-                    {firstCamp.campDays.length > 0 && (
+                    {firstCamp.campDays.filter((d) => isFutureCampDay(d, firstCamp.time)).length > 0 && (
                       <p className="mt-3 text-xs text-brown-500">
-                        Select any combination of days — {firstCamp.dropInPrice}/day drop-in, or {earlyBird && firstCamp.earlyBirdPrice ? `${firstCamp.earlyBirdPrice} early bird` : firstCamp.price} for all {firstCamp.campDays.length} days.
+                        Select any combination of days — {firstCamp.dropInPrice}/day drop-in, or {earlyBird && firstCamp.earlyBirdPrice ? `${firstCamp.earlyBirdPrice} early bird` : firstCamp.price} for all {firstCamp.campDays.filter((d) => isFutureCampDay(d, firstCamp.time)).length} remaining days.
                       </p>
                     )}
                   </div>
@@ -1740,6 +1761,8 @@ export default function Home() {
               const { camp, index } = group.camps[0];
               const spotsLeft = camp.maxSpots - camp.currentEnrolled;
               const full = spotsLeft <= 0;
+              const futureCampDays = camp.campDays.filter((d) => isFutureCampDay(d, camp.time));
+              const campEnded = camp.campDays.length > 0 ? futureCampDays.length === 0 : false;
               return (
                 <div key={camp.id} className="mt-8 rounded-xl border border-brown-700 bg-brown-900/40 p-6">
                   <div className="flex items-start justify-between">
@@ -1757,7 +1780,7 @@ export default function Home() {
                     <span className={`text-sm font-medium ${full ? "text-red-400" : "text-yellow-400"}`}>
                       {full ? "FULL" : spotsLeft <= 3 ? `${spotsLeft} spot${spotsLeft !== 1 ? "s" : ""} left` : ""}
                     </span>
-                    {!full && (
+                    {!full && !campEnded && (
                       <button
                         onClick={() => openModal("camp", index, `${camp.name} (${camp.startDate}${camp.endDate ? ` — ${camp.endDate}` : ""}) at ${camp.location}`)}
                         className="rounded bg-mesa-accent px-4 py-2 text-sm font-semibold text-white transition hover:bg-yellow-600"
@@ -2184,7 +2207,7 @@ export default function Home() {
                 <div className="mt-3 rounded-lg border border-brown-700 bg-brown-800/50 p-4">
                   <p className="text-xs font-semibold text-brown-300 mb-2">Select the days you&apos;d like to attend:</p>
                   <div className="space-y-2">
-                    {camp.campDays.map((day) => {
+                    {camp.campDays.filter((day) => isFutureCampDay(day, camp.time)).map((day) => {
                       const dayStartTime = camp.time.split("-")[0]?.trim() || camp.time;
                       const enrolled = groupEnrollment[`${day}|${dayStartTime}`] || 0;
                       const spotsLeft = camp.maxSpots - enrolled;
