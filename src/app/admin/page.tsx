@@ -160,7 +160,7 @@ export default function AdminPage() {
               <span className="font-medium text-sm">{r.parent_name}</span>
               <span className="rounded-full bg-brown-800 px-2 py-0.5 text-xs text-mesa-accent">{TYPE_LABELS[r.type] || r.type}</span>
             </div>
-            <div className="text-xs text-brown-300 mt-0.5">{athleteNames(r.kids || "")}</div>
+            <div className="text-xs text-brown-300 mt-0.5 truncate">{athleteNames(r.kids || "")}</div>
             <div className="text-xs text-brown-400 mt-0.5 truncate">{sessionText(r.session_details)}</div>
             <div className="flex flex-wrap gap-x-3 mt-1 text-xs text-brown-500">
               {r.booked_date && <span className="text-mesa-accent">{r.booked_date}</span>}
