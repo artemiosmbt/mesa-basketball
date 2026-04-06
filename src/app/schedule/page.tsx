@@ -1799,10 +1799,10 @@ export default function Home() {
       {/* Photo divider before private */}
       <div className="relative h-64 md:h-[26rem] overflow-hidden">
         <Image
-          src="/photos/grid3.jpg"
+          src="/photos/grid2.jpg"
           alt="Private basketball training session"
           fill
-          className="object-cover object-top md:object-top"
+          className="object-cover object-center md:object-[center_40%]"
         />
         <div className="absolute inset-0 bg-gradient-to-r from-mesa-dark/85 via-mesa-dark/50 to-mesa-dark/85" />
         <div className="absolute inset-0 flex items-center justify-center">
@@ -1832,12 +1832,6 @@ export default function Home() {
           <p className="mt-2 text-center text-sm text-green-400/80">
             New Clients: First Session 50% Off
           </p>
-
-          {/* Photo */}
-          <div className="relative mt-8 h-56 md:h-80 rounded-xl overflow-hidden">
-            <Image src="/photos/grid2.jpg" alt="Private basketball training" fill className="object-cover object-[center_30%]" />
-            <div className="absolute inset-0 bg-mesa-dark/30" />
-          </div>
 
           {/* Monthly Packages */}
           <div className="mt-10 border-t border-brown-800 pt-8">
@@ -2099,11 +2093,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* Photo divider */}
-      <div className="relative h-52 md:h-72 overflow-hidden">
-        <Image src="/photos/grid10.jpg" alt="Basketball group training session" fill className="object-cover object-center" />
-        <div className="absolute inset-0 bg-mesa-dark/40" />
-      </div>
 
       {/* Contact Footer */}
       <footer className="border-t border-brown-800 bg-mesa-dark py-12">

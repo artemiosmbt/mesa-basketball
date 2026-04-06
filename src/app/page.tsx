@@ -205,7 +205,7 @@ export default function LandingPage() {
           src="/photos/grid13.jpg"
           alt="Basketball training in action"
           fill
-          className="object-cover object-[center_45%]"
+          className="object-cover object-[center_45%] md:object-[center_38%]"
         />
         <div className="absolute inset-0 bg-gradient-to-r from-mesa-dark/90 via-mesa-dark/50 to-mesa-dark/90" />
         <div className="absolute inset-0 flex items-center justify-center">
@@ -255,7 +255,7 @@ export default function LandingPage() {
                 tag: "Intense. Immersive. High-Volume.",
                 desc: "Multi-day intensive camps built for rapid skill growth, competitive games, and confidence-building in a high-energy environment.",
                 anchor: "/schedule#camps",
-                photo: "/photos/grid9.jpg",
+                photo: "/photos/grid10.jpg",
                 photoAlt: "Mini camp group training session",
               },
               {
@@ -362,12 +362,6 @@ export default function LandingPage() {
           <p className="mt-8 text-xs text-mesa-accent text-center">Serving athletes across Long Island — NYC, Manhasset, Garden City, Hempstead, Long Beach, Huntington, Southampton &amp; surrounding areas.</p>
         </div>
       </section>
-
-      {/* Photo divider */}
-      <div className="relative h-52 md:h-80 overflow-hidden">
-        <Image src="/photos/grid1.jpg" alt="One-on-one basketball training" fill className="object-cover object-center" />
-        <div className="absolute inset-0 bg-mesa-dark/40" />
-      </div>
 
       {/* CTA Banner */}
       <section className="bg-mesa-accent py-16 md:py-20">
