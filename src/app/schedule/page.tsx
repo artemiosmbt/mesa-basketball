@@ -396,7 +396,7 @@ export default function Home() {
   const [parentName, setParentName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
-  const [smsConsent, setSmsConsent] = useState(true);
+  const [smsConsent, setSmsConsent] = useState(false);
   const [kids, setKids] = useState([{ name: "", dob: "", grade: "" }]);
   const [isGroupRate, setIsGroupRate] = useState(false);
   const [hideUpsell, setHideUpsell] = useState(false);
@@ -683,7 +683,7 @@ export default function Home() {
     setSubmitResult(null);
     setParentName(profileRef.current?.parentName ?? "");
     setPhone(profileRef.current?.phone ?? "");
-    setSmsConsent(true);
+    setSmsConsent(false);
     setShowAllRecurring(false);
     setKids(profileRef.current?.kids ?? [{ name: "", dob: "", grade: "" }]);
     setIsGroupRate(false);
@@ -697,7 +697,7 @@ export default function Home() {
     setSubmitResult(null);
     setParentName(profileRef.current?.parentName ?? "");
     setPhone(profileRef.current?.phone ?? "");
-    setSmsConsent(true);
+    setSmsConsent(false);
     setShowAllRecurring(false);
     setKids(profileRef.current?.kids ?? [{ name: "", dob: "", grade: "" }]);
     setIsGroupRate(false);
@@ -1245,7 +1245,7 @@ export default function Home() {
     setSubmitResult(null);
     setParentName(profileRef.current?.parentName ?? "");
     setPhone(profileRef.current?.phone ?? "");
-    setSmsConsent(true);
+    setSmsConsent(false);
     setShowAllRecurring(false);
     setKids(profileRef.current?.kids ?? [{ name: "", dob: "", grade: "" }]);
     setIsGroupRate(false);
@@ -2595,7 +2595,9 @@ export default function Home() {
                     className="mt-0.5 h-4 w-4 rounded border-brown-600 accent-mesa-accent"
                   />
                   <span className="text-xs text-brown-400 leading-relaxed">
-                    I agree to receive text message reminders from Mesa Basketball Training about upcoming sessions. Reply STOP at any time to opt out.
+                    I agree to receive SMS text messages from Mesa Basketball Training (program name: Mesa Basketball Training) including session reminders, schedule updates, and booking confirmations. Message frequency varies (approx. weekly). Message &amp; data rates may apply. Reply STOP to cancel, HELP for help. See our{" "}
+                    <a href="/terms" className="underline hover:text-mesa-accent">Terms</a>{" "}and{" "}
+                    <a href="/privacy-policy" className="underline hover:text-mesa-accent">Privacy Policy</a>.
                   </span>
                 </label>
 
