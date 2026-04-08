@@ -95,7 +95,7 @@ export async function getCamps(): Promise<Camp[]> {
     earlyBirdPrice: row[11] || "",
     dropInPrice: row[12] || "",
     campDays: row[13] ? row[13].split("|").map((d) => d.trim()).filter(Boolean) : [],
-  }));
+  })).filter((camp) => camp.name);
 }
 
 export async function getPrivateSlots(): Promise<PrivateSlot[]> {
