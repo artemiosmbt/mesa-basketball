@@ -129,6 +129,34 @@ function parseTime(t: string): number {
   return hours * 60 + mins;
 }
 
+// Parse a camp time range like "8-10am", "12-2pm", "8:00 AM - 10:00 AM" → start minutes since midnight
+function parseCampStartMins(campTime: string): number {
+  // Split on hyphen(s) with optional surrounding spaces
+  const parts = campTime.split(/\s*-\s*/);
+  const startRaw = parts[0]?.trim() ?? campTime;
+  const endRaw = parts[parts.length - 1]?.trim() ?? "";
+
+  // Try existing parseTime first (handles "8:00 AM" format)
+  const fromExisting = parseTime(startRaw);
+  if (fromExisting > 0) return fromExisting;
+
+  // Infer AM/PM: look for it on start first, then fall back to end token
+  const periodOf = (s: string) => s.match(/\b(am|pm)\b/i)?.[1]?.toLowerCase();
+  const period = periodOf(startRaw) ?? periodOf(endRaw);
+
+  const numMatch = startRaw.match(/^(\d+)(?::(\d+))?/);
+  if (!numMatch) return 0;
+
+  let h = parseInt(numMatch[1]);
+  const m = numMatch[2] ? parseInt(numMatch[2]) : 0;
+
+  if (period === "pm" && h !== 12) h += 12;
+  else if (period === "am" && h === 12) h = 0;
+  else if (!period && h < 8) h += 12; // bare "1", "2" etc. are afternoon for camps
+
+  return h * 60 + m;
+}
+
 // Minutes since midnight → "4:30 PM"
 function formatTimeFromMins(mins: number): string {
   const h24 = Math.floor(mins / 60);
@@ -1123,9 +1151,10 @@ export default function Home() {
     dayDate.setHours(0, 0, 0, 0);
     if (dayDate > today) return true;
     if (dayDate < today) return false;
-    // Same day — check start time
-    const startMins = parseTime(campTime.split("-")[0]?.trim() || campTime);
-    return startMins > now.getHours() * 60 + now.getMinutes();
+    // Same day — allow registration until 30 mins before this group's start time
+    const startMins = parseCampStartMins(campTime);
+    const nowMins = now.getHours() * 60 + now.getMinutes();
+    return nowMins < startMins - 30;
   }
 
   function isSessionFull(s: WeeklySession): boolean {
