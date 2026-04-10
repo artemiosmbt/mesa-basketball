@@ -1,13 +1,9 @@
-import type { Metadata } from "next";
+"use client";
+
+import { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import LandingNav from "../LandingNav";
-
-export const metadata: Metadata = {
-  title: "Virtual Training | Mesa Basketball Training",
-  description:
-    "Train on your own time with Mesa Basketball's online workout library. New content added weekly. Monthly, 6-month, and yearly plans available.",
-};
 
 const plans = [
   {
@@ -49,6 +45,24 @@ const included = [
 ];
 
 export default function VirtualTrainingPage() {
+  const [email, setEmail] = useState("");
+  const [status, setStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setStatus("loading");
+    try {
+      const res = await fetch("/api/waitlist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      setStatus(res.ok ? "done" : "error");
+    } catch {
+      setStatus("error");
+    }
+  }
+
   return (
     <div className="min-h-screen bg-mesa-dark text-white">
       <LandingNav />
@@ -75,7 +89,7 @@ export default function VirtualTrainingPage() {
             A growing library of basketball workouts built by Artemios Gavalas — designed for players who want to put in the work outside of sessions. New content every week.
           </p>
           <div className="mt-4 inline-block rounded-full bg-mesa-accent/20 border border-mesa-accent/40 px-5 py-1.5 text-sm font-semibold text-mesa-accent">
-            Coming Soon — Join the Waitlist Below
+            Coming Soon — Waitlist Open
           </div>
         </div>
       </section>
@@ -182,14 +196,32 @@ export default function VirtualTrainingPage() {
             BE THE FIRST TO KNOW.
           </h2>
           <p className="text-white/80 text-lg mb-8">
-            Virtual training is launching soon. Reach out directly to get on the early access list.
+            Virtual training is launching soon. Drop your email and we&apos;ll reach out when it&apos;s ready.
           </p>
-          <a
-            href="mailto:artemios@mesabasketballtraining.com?subject=Virtual Training Waitlist"
-            className="inline-block rounded-lg bg-white px-10 py-4 font-bold text-mesa-accent text-lg hover:bg-brown-100 transition"
-          >
-            Get Early Access
-          </a>
+          {status === "done" ? (
+            <p className="text-white font-semibold text-lg">You&apos;re on the list! We&apos;ll be in touch.</p>
+          ) : (
+            <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row gap-3 justify-center">
+              <input
+                type="email"
+                required
+                placeholder="Enter your email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="rounded-lg px-5 py-4 text-mesa-dark font-medium text-base w-full sm:w-80 focus:outline-none focus:ring-2 focus:ring-white"
+              />
+              <button
+                type="submit"
+                disabled={status === "loading"}
+                className="rounded-lg bg-white px-8 py-4 font-bold text-mesa-accent text-base hover:bg-brown-100 transition disabled:opacity-60 whitespace-nowrap"
+              >
+                {status === "loading" ? "Joining..." : "Join the Waitlist"}
+              </button>
+            </form>
+          )}
+          {status === "error" && (
+            <p className="mt-3 text-white/80 text-sm">Something went wrong — try emailing us directly at artemios@mesabasketballtraining.com</p>
+          )}
         </div>
       </section>
 
