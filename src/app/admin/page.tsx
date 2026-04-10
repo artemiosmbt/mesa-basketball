@@ -255,7 +255,6 @@ export default function AdminPage() {
         <Link href="/admin/virtual-training" className="shrink-0 px-3 py-2.5 text-sm text-brown-400 border-b-2 border-transparent">Virtual Training</Link>
         <div className="ml-auto flex items-center gap-3 shrink-0 pl-2">
           <Link href="/" className="text-xs text-brown-400">← Site</Link>
-          <button onClick={() => authClient.auth.signOut().then(() => router.push("/login"))} className="text-xs text-brown-400">Sign Out</button>
         </div>
       </div>
 
