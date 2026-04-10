@@ -88,8 +88,34 @@ export default function VirtualTrainingPage() {
           <p className="mt-6 max-w-xl mx-auto text-brown-300 text-lg leading-relaxed">
             A growing library of basketball workouts built by Artemios Gavalas — designed for players who want to put in the work outside of sessions. New content every week.
           </p>
-          <div className="mt-4 inline-block rounded-full bg-mesa-accent/20 border border-mesa-accent/40 px-5 py-1.5 text-sm font-semibold text-mesa-accent">
-            Coming Soon — Waitlist Open
+          <p className="mt-4 text-sm font-semibold uppercase tracking-widest text-mesa-accent">
+            Coming Soon — Join the Waitlist
+          </p>
+          <div className="mt-4 max-w-md mx-auto">
+            {status === "done" ? (
+              <p className="text-white font-semibold text-lg">You&apos;re on the list! We&apos;ll be in touch.</p>
+            ) : (
+              <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row gap-3">
+                <input
+                  type="email"
+                  required
+                  placeholder="Enter your email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="rounded-lg px-5 py-3.5 text-mesa-dark font-medium text-sm w-full focus:outline-none focus:ring-2 focus:ring-mesa-accent"
+                />
+                <button
+                  type="submit"
+                  disabled={status === "loading"}
+                  className="rounded-lg bg-mesa-accent px-7 py-3.5 font-bold text-white text-sm hover:bg-yellow-600 transition disabled:opacity-60 whitespace-nowrap"
+                >
+                  {status === "loading" ? "Joining..." : "Join Waitlist"}
+                </button>
+              </form>
+            )}
+            {status === "error" && (
+              <p className="mt-2 text-brown-300 text-xs">Something went wrong — email us at artemios@mesabasketballtraining.com</p>
+            )}
           </div>
         </div>
       </section>
@@ -189,39 +215,15 @@ export default function VirtualTrainingPage() {
         </div>
       </section>
 
-      {/* Waitlist CTA */}
-      <section className="bg-mesa-accent py-16 md:py-20">
+      {/* Bottom CTA */}
+      <section className="bg-mesa-accent py-14 md:py-16">
         <div className="mx-auto max-w-2xl px-6 text-center">
-          <h2 className="font-[family-name:var(--font-fira-cond)] text-4xl md:text-5xl font-black tracking-wide text-white mb-4">
-            BE THE FIRST TO KNOW.
+          <h2 className="font-[family-name:var(--font-fira-cond)] text-4xl md:text-5xl font-black tracking-wide text-white mb-3">
+            LAUNCHING SOON.
           </h2>
-          <p className="text-white/80 text-lg mb-8">
-            Virtual training is launching soon. Drop your email and we&apos;ll reach out when it&apos;s ready.
+          <p className="text-white/80 text-lg">
+            Questions? Call or text <a href="tel:6315991280" className="font-bold text-white hover:underline">(631) 599-1280</a>
           </p>
-          {status === "done" ? (
-            <p className="text-white font-semibold text-lg">You&apos;re on the list! We&apos;ll be in touch.</p>
-          ) : (
-            <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row gap-3 justify-center">
-              <input
-                type="email"
-                required
-                placeholder="Enter your email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="rounded-lg px-5 py-4 text-mesa-dark font-medium text-base w-full sm:w-80 focus:outline-none focus:ring-2 focus:ring-white"
-              />
-              <button
-                type="submit"
-                disabled={status === "loading"}
-                className="rounded-lg bg-white px-8 py-4 font-bold text-mesa-accent text-base hover:bg-brown-100 transition disabled:opacity-60 whitespace-nowrap"
-              >
-                {status === "loading" ? "Joining..." : "Join the Waitlist"}
-              </button>
-            </form>
-          )}
-          {status === "error" && (
-            <p className="mt-3 text-white/80 text-sm">Something went wrong — try emailing us directly at artemios@mesabasketballtraining.com</p>
-          )}
         </div>
       </section>
 
