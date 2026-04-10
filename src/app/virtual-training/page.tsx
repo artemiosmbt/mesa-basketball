@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import Image from "next/image";
 import LandingNav from "../LandingNav";
 
 export const metadata: Metadata = {
@@ -53,8 +54,17 @@ export default function VirtualTrainingPage() {
       <LandingNav />
 
       {/* Hero */}
-      <section className="bg-gradient-to-br from-mesa-dark via-brown-900 to-brown-800 py-24 md:py-36">
-        <div className="mx-auto max-w-4xl px-6 text-center">
+      <section className="relative overflow-hidden min-h-[60vh] md:min-h-[80vh] flex items-center">
+        <Image
+          src="/photos/virtual1.jpg"
+          alt="Basketball training at St. John's"
+          fill
+          className="object-cover object-center"
+          priority
+        />
+        <div className="absolute inset-0 bg-gradient-to-br from-mesa-dark/90 via-mesa-dark/70 to-brown-900/50" />
+        <div className="absolute inset-0 bg-gradient-to-t from-mesa-dark via-transparent to-transparent" />
+        <div className="relative mx-auto max-w-4xl px-6 py-32 text-center w-full">
           <p className="mb-4 text-sm font-semibold uppercase tracking-widest text-mesa-accent">
             Online Training
           </p>
@@ -87,6 +97,22 @@ export default function VirtualTrainingPage() {
           </div>
         </div>
       </section>
+
+      {/* Photo divider */}
+      <div className="relative h-56 md:h-[36rem] overflow-hidden">
+        <Image
+          src="/photos/virtual2.jpg"
+          alt="Ball handling drill on court"
+          fill
+          className="object-cover object-[center_30%]"
+        />
+        <div className="absolute inset-0 bg-gradient-to-r from-mesa-dark/80 via-mesa-dark/40 to-mesa-dark/80" />
+        <div className="absolute inset-0 flex items-center justify-center">
+          <p className="font-[family-name:var(--font-fira-cond)] text-2xl md:text-5xl font-black tracking-widest text-white text-center px-6 drop-shadow-lg">
+            EVERY WORKOUT.<span className="text-mesa-accent"> EVERY WEEK.</span>
+          </p>
+        </div>
+      </div>
 
       {/* Pricing */}
       <section className="bg-mesa-dark border-t border-brown-800 py-16 md:py-24">
