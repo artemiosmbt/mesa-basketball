@@ -82,7 +82,7 @@ export default function VirtualTrainingPage() {
           <p className="mb-4 text-xl font-semibold uppercase tracking-widest text-mesa-accent">
             Online Training
           </p>
-          <h1 className="font-[family-name:var(--font-fira-cond)] text-6xl md:text-8xl font-black tracking-wide leading-none">
+          <h1 className="font-[family-name:var(--font-fira-cond)] text-4xl md:text-8xl font-black tracking-wide leading-none">
             TRAIN ON YOUR<br />OWN TIME.
           </h1>
           <p className="mt-6 max-w-xl mx-auto text-brown-300 text-lg leading-relaxed">
