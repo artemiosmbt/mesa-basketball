@@ -137,6 +137,7 @@ export default function PaymentsPage() {
         <Link href="/admin" className="shrink-0 px-3 py-2.5 text-sm text-brown-400 border-b-2 border-transparent">Dashboard</Link>
         <Link href="/admin/payments" className="shrink-0 px-3 py-2.5 text-sm font-semibold text-mesa-dark border-b-2 border-mesa-dark">Payments</Link>
         <Link href="/admin/virtual-training" className="shrink-0 px-3 py-2.5 text-sm text-brown-400 border-b-2 border-transparent">Virtual Training</Link>
+        <Link href="/admin/virtual-training/drills" className="shrink-0 px-3 py-2.5 text-sm text-brown-400 border-b-2 border-transparent">Drills</Link>
         <div className="ml-auto flex items-center gap-3 shrink-0 pl-2">
           <Link href="/" className="text-xs text-brown-400">← Site</Link>
         </div>
@@ -154,6 +155,9 @@ export default function PaymentsPage() {
             </Link>
             <Link href="/admin/virtual-training" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-brown-400 hover:text-white hover:bg-brown-800 transition">
               Virtual Training
+            </Link>
+            <Link href="/admin/virtual-training/drills" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-brown-400 hover:text-white hover:bg-brown-800 transition">
+              Drills
             </Link>
           </nav>
           <div className="border-t border-brown-800 pt-4 mt-4 space-y-1">
