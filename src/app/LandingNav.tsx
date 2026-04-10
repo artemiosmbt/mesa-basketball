@@ -59,7 +59,7 @@ export default function LandingNav() {
             </div>
           </div>
           <span className="hidden md:inline text-brown-300">|</span>
-          <Link href="/virtual-training" className="hidden md:inline text-mesa-accent hover:text-yellow-600 font-medium">Virtual Training</Link>
+          <Link href="/virtual-training" className="hidden md:inline text-brown-600 hover:text-mesa-dark">Virtual Training</Link>
           <span className="hidden md:inline text-brown-300">|</span>
           {/* Account / Login */}
           {userEmail ? (
@@ -130,7 +130,7 @@ export default function LandingNav() {
               </div>
             )}
           </div>
-          <Link href="/virtual-training" onClick={() => setMobileMenuOpen(false)} className="block text-mesa-accent hover:text-yellow-600 py-1 font-medium">Virtual Training</Link>
+          <Link href="/virtual-training" onClick={() => setMobileMenuOpen(false)} className="block text-brown-600 hover:text-mesa-dark py-1">Virtual Training</Link>
           <a href="https://www.instagram.com/mesabasketballtraining" target="_blank" rel="noopener noreferrer" onClick={() => setMobileMenuOpen(false)} className="flex items-center gap-2 text-brown-600 hover:text-mesa-dark py-1">
             Instagram
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
