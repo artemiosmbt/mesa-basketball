@@ -123,7 +123,9 @@ export default function TrainingPage() {
       {/* Header */}
       <header className="bg-mesa-dark text-white px-6 py-4 flex items-center justify-between">
         <Link href="/" className="flex items-center gap-3">
-          <Image src="/logo.png" alt="Mesa Basketball" width={36} height={36} className="rounded-full object-cover" />
+          <div className="w-9 h-9 rounded-full bg-white flex items-center justify-center overflow-hidden">
+            <Image src="/logo.png" alt="Mesa Basketball" width={32} height={32} className="object-contain" />
+          </div>
           <span className="font-bold text-lg">Mesa Virtual Training</span>
         </Link>
         <button
