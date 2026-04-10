@@ -16,6 +16,7 @@ export default function VirtualTrainingAdminPage() {
   const [loading, setLoading] = useState(true);
   const [waitlist, setWaitlist] = useState<WaitlistEntry[]>([]);
   const [token, setToken] = useState<string | null>(null);
+  const [removing, setRemoving] = useState<string | null>(null);
 
   useEffect(() => {
     authClient.auth.getSession().then(({ data: { session } }) => {
@@ -32,6 +33,19 @@ export default function VirtualTrainingAdminPage() {
         .finally(() => setLoading(false));
     });
   }, [router]);
+
+  async function removeFromWaitlist(id: string, email: string) {
+    if (!token) return;
+    if (!confirm(`Remove ${email} from the waitlist?`)) return;
+    setRemoving(id);
+    await fetch("/api/admin/virtual-training", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ id }),
+    });
+    setWaitlist((prev) => prev.filter((e) => e.id !== id));
+    setRemoving(null);
+  }
 
   return (
     <div className="min-h-screen bg-mesa-dark text-white flex flex-col">
@@ -123,6 +137,7 @@ export default function VirtualTrainingAdminPage() {
                       <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-brown-400">Email</th>
                       <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-brown-400">Signed Up</th>
                       <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-brown-400">Plan</th>
+                      <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-brown-400"></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -135,6 +150,15 @@ export default function VirtualTrainingAdminPage() {
                         </td>
                         <td className="px-4 py-3">
                           <span className="text-xs rounded-full bg-brown-800 px-2.5 py-1 text-brown-400">Waitlist</span>
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <button
+                            onClick={() => removeFromWaitlist(entry.id, entry.email)}
+                            disabled={removing === entry.id}
+                            className="text-xs text-red-400 hover:text-red-300 disabled:opacity-40 transition"
+                          >
+                            {removing === entry.id ? "Removing…" : "Remove"}
+                          </button>
                         </td>
                       </tr>
                     ))}
