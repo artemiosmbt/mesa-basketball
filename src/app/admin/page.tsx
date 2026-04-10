@@ -246,13 +246,16 @@ export default function AdminPage() {
               <p className="text-xs text-brown-500 leading-tight">Dashboard</p>
             </div>
           </div>
-          <div className="flex items-center gap-2 shrink-0 md:hidden">
-            <Link href="/admin/payments" className="text-xs font-medium text-mesa-accent hover:underline">Payments</Link>
-            <Link href="/" className="text-xs text-brown-500 hover:text-mesa-dark">← Site</Link>
-            <button onClick={() => authClient.auth.signOut().then(() => router.push("/login"))} className="text-xs rounded-lg border border-brown-300 px-2 py-1 text-brown-500 hover:text-mesa-dark hover:border-brown-400 transition">
-              Sign Out
-            </button>
-          </div>
+        </div>
+      </div>
+      {/* Mobile tab bar */}
+      <div className="md:hidden border-b border-gray-200 bg-white px-4 flex items-center gap-1 overflow-x-auto">
+        <Link href="/admin" className="shrink-0 px-3 py-2.5 text-sm font-semibold text-mesa-dark border-b-2 border-mesa-dark">Dashboard</Link>
+        <Link href="/admin/payments" className="shrink-0 px-3 py-2.5 text-sm text-brown-400 border-b-2 border-transparent">Payments</Link>
+        <Link href="/admin/virtual-training" className="shrink-0 px-3 py-2.5 text-sm text-brown-400 border-b-2 border-transparent">Virtual Training</Link>
+        <div className="ml-auto flex items-center gap-3 shrink-0 pl-2">
+          <Link href="/" className="text-xs text-brown-400">← Site</Link>
+          <button onClick={() => authClient.auth.signOut().then(() => router.push("/login"))} className="text-xs text-brown-400">Sign Out</button>
         </div>
       </div>
 
