@@ -1580,7 +1580,16 @@ export default function Home() {
           </p>
 
           {camps.length === 0 && !loading && (
-            <p className="mt-8 text-center text-brown-500">No camps are currently open for registration. Check back soon or reach out to be notified when the next one is announced.</p>
+            <div className="mt-10 rounded-2xl border border-brown-700 bg-brown-900/40 px-8 py-12 text-center max-w-xl mx-auto">
+              <p className="font-[family-name:var(--font-fira-cond)] text-2xl font-black tracking-wide text-white mb-3">NO CAMPS OPEN RIGHT NOW</p>
+              <p className="text-brown-400 text-sm leading-relaxed mb-6">Check back soon or reach out directly to be notified when the next camp is announced.</p>
+              <a
+                href="tel:6315991280"
+                className="inline-block rounded-lg bg-mesa-accent px-7 py-3 font-semibold text-white text-sm hover:bg-yellow-600 transition"
+              >
+                Call / Text to Get Notified
+              </a>
+            </div>
           )}
 
           {(() => {
