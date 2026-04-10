@@ -1,0 +1,162 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { authClient, ADMIN_EMAIL } from "@/lib/auth";
+
+interface WaitlistEntry {
+  id: string;
+  email: string;
+  created_at: string;
+}
+
+export default function VirtualTrainingAdminPage() {
+  const router = useRouter();
+  const [loading, setLoading] = useState(true);
+  const [waitlist, setWaitlist] = useState<WaitlistEntry[]>([]);
+  const [token, setToken] = useState<string | null>(null);
+
+  useEffect(() => {
+    authClient.auth.getSession().then(({ data: { session } }) => {
+      if (!session || session.user.email !== ADMIN_EMAIL) {
+        router.replace("/login");
+        return;
+      }
+      setToken(session.access_token);
+      fetch("/api/admin/virtual-training", {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      })
+        .then((r) => r.json())
+        .then((data) => setWaitlist(data.waitlist || []))
+        .finally(() => setLoading(false));
+    });
+  }, [router]);
+
+  return (
+    <div className="min-h-screen bg-mesa-dark text-white flex flex-col">
+      {/* Top bar */}
+      <header className="border-b border-brown-800 bg-brown-900/40 px-6 py-3 flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-3">
+          <Link href="/">
+            <img src="/logo.png" alt="Mesa" className="h-10 w-10 object-contain" />
+          </Link>
+          <div className="min-w-0">
+            <p className="font-[family-name:var(--font-oswald)] text-base sm:text-xl font-bold tracking-wide text-mesa-dark leading-tight" style={{ color: "white" }}>ADMIN</p>
+            <p className="text-xs text-brown-500 leading-tight">Virtual Training</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0 md:hidden">
+          <Link href="/" className="text-xs text-brown-500 hover:text-mesa-dark">← Site</Link>
+        </div>
+      </header>
+
+      <div className="flex flex-1 min-w-0 w-full">
+        {/* Sidebar */}
+        <aside className="hidden md:flex flex-col w-52 shrink-0 border-r border-brown-800 bg-brown-900/30 px-3 py-6 sticky top-0 h-screen">
+          <nav className="flex-1 space-y-1">
+            <Link href="/admin" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-brown-400 hover:text-white hover:bg-brown-800 transition">
+              Dashboard
+            </Link>
+            <Link href="/admin/payments" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-brown-400 hover:text-white hover:bg-brown-800 transition">
+              Payments
+            </Link>
+            <Link href="/admin/virtual-training" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold bg-brown-800 text-white">
+              Virtual Training
+            </Link>
+          </nav>
+          <div className="border-t border-brown-800 pt-4 mt-4 space-y-1">
+            <Link href="/" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-brown-400 hover:text-white hover:bg-brown-800 transition">
+              ← Back to Site
+            </Link>
+            <button
+              onClick={() => authClient.auth.signOut().then(() => router.push("/login"))}
+              className="w-full text-left px-3 py-2 rounded-lg text-sm text-brown-400 hover:text-white hover:bg-brown-800 transition"
+            >
+              Sign Out
+            </button>
+          </div>
+        </aside>
+
+        <div className="flex-1 min-w-0 px-4 sm:px-6 py-8 space-y-8">
+
+          {/* Stats */}
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-6 py-5 text-center">
+              <p className="font-[family-name:var(--font-oswald)] text-4xl font-bold text-mesa-accent">
+                {loading ? "—" : waitlist.length}
+              </p>
+              <p className="text-xs text-brown-400 mt-1 uppercase tracking-wide">Waitlist Sign-Ups</p>
+            </div>
+            <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-6 py-5 text-center">
+              <p className="font-[family-name:var(--font-oswald)] text-4xl font-bold text-brown-500">0</p>
+              <p className="text-xs text-brown-400 mt-1 uppercase tracking-wide">Active Subscribers</p>
+            </div>
+            <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-6 py-5 text-center col-span-2 md:col-span-1">
+              <p className="font-[family-name:var(--font-oswald)] text-4xl font-bold text-brown-500">—</p>
+              <p className="text-xs text-brown-400 mt-1 uppercase tracking-wide">Monthly Revenue</p>
+            </div>
+          </div>
+
+          {/* Waitlist */}
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-[family-name:var(--font-oswald)] text-xl font-bold tracking-wide">
+                Waitlist
+                <span className="ml-2 text-sm font-normal text-brown-400">({loading ? "…" : waitlist.length} emails)</span>
+              </h2>
+              <span className="text-xs rounded-full bg-mesa-accent/20 border border-mesa-accent/40 px-3 py-1 text-mesa-accent font-semibold">
+                Pre-Launch
+              </span>
+            </div>
+
+            {loading ? (
+              <p className="text-brown-500 text-sm">Loading...</p>
+            ) : waitlist.length === 0 ? (
+              <p className="text-brown-500 text-sm">No sign-ups yet.</p>
+            ) : (
+              <div className="rounded-xl border border-brown-700 overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-brown-700 bg-brown-900/60 text-left">
+                      <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-brown-400">#</th>
+                      <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-brown-400">Email</th>
+                      <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-brown-400">Signed Up</th>
+                      <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-brown-400">Plan</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {waitlist.map((entry, i) => (
+                      <tr key={entry.id} className="border-b border-brown-800 last:border-0 hover:bg-brown-900/40 transition">
+                        <td className="px-4 py-3 text-brown-500">{i + 1}</td>
+                        <td className="px-4 py-3 text-white font-medium">{entry.email}</td>
+                        <td className="px-4 py-3 text-brown-400">
+                          {new Date(entry.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="text-xs rounded-full bg-brown-800 px-2.5 py-1 text-brown-400">Waitlist</span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Subscriptions placeholder */}
+          <div>
+            <h2 className="font-[family-name:var(--font-oswald)] text-xl font-bold tracking-wide mb-4">
+              Subscribers
+              <span className="ml-2 text-sm font-normal text-brown-400">(0 active)</span>
+            </h2>
+            <div className="rounded-xl border border-brown-700 bg-brown-900/20 px-8 py-10 text-center">
+              <p className="text-brown-500 text-sm">No active subscribers yet — launching soon.</p>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  );
+}

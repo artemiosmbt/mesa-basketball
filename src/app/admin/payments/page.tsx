@@ -147,6 +147,9 @@ export default function PaymentsPage() {
             <Link href="/admin/payments" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold bg-brown-800 text-white">
               Payments
             </Link>
+            <Link href="/admin/virtual-training" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-brown-400 hover:text-white hover:bg-brown-800 transition">
+              Virtual Training
+            </Link>
           </nav>
           <div className="border-t border-brown-800 pt-4 mt-4 space-y-1">
             <Link href="/" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-brown-400 hover:text-white hover:bg-brown-800 transition">
