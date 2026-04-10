@@ -79,7 +79,7 @@ export default function VirtualTrainingPage() {
         <div className="absolute inset-0 bg-gradient-to-br from-mesa-dark/90 via-mesa-dark/70 to-brown-900/50" />
         <div className="absolute inset-0 bg-gradient-to-t from-mesa-dark via-transparent to-transparent" />
         <div className="relative mx-auto max-w-4xl px-6 py-32 text-center w-full">
-          <p className="mb-4 text-sm font-semibold uppercase tracking-widest text-mesa-accent">
+          <p className="mb-4 text-xl font-semibold uppercase tracking-widest text-mesa-accent">
             Online Training
           </p>
           <h1 className="font-[family-name:var(--font-fira-cond)] text-6xl md:text-8xl font-black tracking-wide leading-none">
