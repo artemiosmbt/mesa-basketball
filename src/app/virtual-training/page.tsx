@@ -24,7 +24,7 @@ const plans = [
     period: "/ 6 months",
     billing: "Billed every 6 months",
     perMonth: "$20 / mo",
-    highlight: true,
+    highlight: false,
     savings: "Save $60",
   },
   {
@@ -33,8 +33,8 @@ const plans = [
     period: "/ year",
     billing: "Billed annually",
     perMonth: "$15 / mo",
-    highlight: false,
-    savings: "Save $180",
+    highlight: true,
+    savings: "Best Value",
   },
 ];
 
@@ -108,10 +108,10 @@ export default function VirtualTrainingPage() {
               >
                 {plan.highlight && (
                   <div className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-mesa-accent px-4 py-0.5 text-xs font-bold text-white uppercase tracking-wide whitespace-nowrap">
-                    Most Popular
+                    Best Value
                   </div>
                 )}
-                {plan.savings && (
+                {plan.savings && !plan.highlight && (
                   <div className="absolute top-4 right-4 rounded-full bg-mesa-accent/20 border border-mesa-accent/40 px-2.5 py-0.5 text-xs font-semibold text-mesa-accent">
                     {plan.savings}
                   </div>
