@@ -88,10 +88,10 @@ export default function VirtualTrainingPage() {
           <p className="mt-6 max-w-xl mx-auto text-brown-300 text-lg leading-relaxed">
             A growing library of basketball workouts built by Artemios Gavalas — designed for players who want to put in the work outside of sessions. New content every week.
           </p>
-          <div className="mt-5 inline-block rounded-full bg-mesa-accent/20 border border-mesa-accent/40 px-5 py-1.5 text-sm font-semibold text-mesa-accent">
+          <div className="mt-10 inline-block rounded-full bg-mesa-accent/20 border border-mesa-accent/40 px-5 py-1.5 text-sm font-semibold text-mesa-accent">
             Coming Soon — Join the Waitlist
           </div>
-          <div className="mt-5 max-w-md mx-auto">
+          <div className="mt-4 max-w-md mx-auto">
             {status === "done" ? (
               <p className="text-white font-semibold text-lg">You&apos;re on the list! We&apos;ll be in touch.</p>
             ) : (
