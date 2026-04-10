@@ -88,10 +88,10 @@ export default function VirtualTrainingPage() {
           <p className="mt-6 max-w-xl mx-auto text-brown-300 text-lg leading-relaxed">
             A growing library of basketball workouts built by Artemios Gavalas — designed for players who want to put in the work outside of sessions. New content every week.
           </p>
-          <p className="mt-4 text-sm font-semibold uppercase tracking-widest text-mesa-accent">
+          <div className="mt-5 inline-block rounded-full bg-mesa-accent/20 border border-mesa-accent/40 px-5 py-1.5 text-sm font-semibold text-mesa-accent">
             Coming Soon — Join the Waitlist
-          </p>
-          <div className="mt-4 max-w-md mx-auto">
+          </div>
+          <div className="mt-5 max-w-md mx-auto">
             {status === "done" ? (
               <p className="text-white font-semibold text-lg">You&apos;re on the list! We&apos;ll be in touch.</p>
             ) : (
@@ -102,7 +102,7 @@ export default function VirtualTrainingPage() {
                   placeholder="Enter your email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="rounded-lg px-5 py-3.5 text-mesa-dark font-medium text-sm w-full focus:outline-none focus:ring-2 focus:ring-mesa-accent"
+                  className="rounded-lg px-5 py-3.5 bg-white/90 text-mesa-dark placeholder-brown-500 font-medium text-sm w-full focus:outline-none focus:ring-2 focus:ring-mesa-accent"
                 />
                 <button
                   type="submit"
