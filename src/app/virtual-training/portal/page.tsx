@@ -126,7 +126,7 @@ export default function TrainingPage() {
           <div className="w-9 h-9 rounded-full bg-white flex items-center justify-center overflow-hidden">
             <Image src="/logo.png" alt="Mesa Basketball" width={32} height={32} className="object-contain" />
           </div>
-          <span className="font-bold text-lg">MESA VIRTUAL TRAINING</span>
+          <span className="font-bold text-lg">ΜΕΣΑ VIRTUAL TRAINING</span>
         </Link>
         <button
           onClick={() => authClient.auth.signOut().then(() => router.push("/"))}
