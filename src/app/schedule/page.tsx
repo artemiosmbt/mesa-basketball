@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import Image from "next/image";
-import { authClient, ADMIN_EMAIL } from "@/lib/auth";
+import { authClient } from "@/lib/auth";
+import LandingNav from "@/app/LandingNav";
 
 const LOCATION_LINKS: Record<string, { name: string; url: string }> = {
   "St. Pauls": { name: "St. Paul's Cathedral", url: "https://share.google/kgiqMxAj2iAFEAGI6" },
@@ -449,8 +450,6 @@ export default function Home() {
     }
   }, []);
 
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [schedulingOpen, setSchedulingOpen] = useState(false);
 
   const [recurringWeeks, setRecurringWeeks] = useState<
     { date: string; startTime: string; endTime: string; location: string; selected: boolean }[]
@@ -1286,136 +1285,7 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-mesa-dark text-white">
-      {/* Sticky Nav */}
-      <nav className="sticky top-0 z-50 border-b border-gray-200 bg-white/95 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3">
-          <a href="/" className="flex items-center gap-2 text-lg font-bold text-mesa-dark -ml-5 md:ml-0">
-            <div className="h-10 w-[120px] flex items-center overflow-visible">
-              <img src="/logo.png" alt="Mesa Basketball Logo" className="h-[120px] w-[120px] object-contain" />
-            </div>
-            <span className="hidden sm:inline">ΜΕΣΑ BASKETBALL</span>
-          </a>
-          {/* Desktop nav */}
-          <div className="hidden md:flex items-center gap-4 text-sm">
-            <a href="/" className="text-brown-600 hover:text-mesa-dark">Home</a>
-            <span className="text-brown-300">|</span>
-            <a href="/about" className="text-brown-600 hover:text-mesa-dark">About</a>
-            <span className="text-brown-300">|</span>
-            <div className="relative group">
-              <a href="#schedule" className="flex items-center gap-1 text-brown-600 hover:text-mesa-dark">
-                Programs
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                </svg>
-              </a>
-              <div className="absolute top-full left-0 w-44 z-50 hidden group-hover:block pt-2">
-                <div className="rounded-lg border border-gray-200 bg-white shadow-lg py-1">
-                  <a href="#schedule" className="block px-4 py-2 text-brown-600 hover:text-mesa-dark hover:bg-gray-50">Group Sessions</a>
-                  <a href="#camps" className="block px-4 py-2 text-brown-600 hover:text-mesa-dark hover:bg-gray-50">Camps</a>
-                  <a href="#private" className="block px-4 py-2 text-brown-600 hover:text-mesa-dark hover:bg-gray-50">Private Sessions</a>
-                </div>
-              </div>
-            </div>
-            <span className="text-brown-300">|</span>
-            {userEmail ? (
-              <div className="relative group">
-                <button className="flex items-center gap-1 rounded bg-brown-600/20 px-3 py-1 text-brown-600 hover:bg-brown-600/30">
-                  Account
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                  </svg>
-                </button>
-                <div className="absolute top-full right-0 w-44 z-50 hidden group-hover:block pt-2">
-                  <div className="rounded-lg border border-gray-200 bg-white shadow-lg py-1">
-                    <div className="px-4 py-2 border-b border-gray-100">
-                      <p className="text-xs text-brown-400">Signed in as</p>
-                      <p className="text-xs font-medium text-brown-700 truncate max-w-[160px]">{userEmail}</p>
-                    </div>
-                    <a href="/my-bookings" className="block px-4 py-2 text-brown-600 hover:text-mesa-dark hover:bg-gray-50">My Bookings</a>
-                    <a href="/settings" className="block px-4 py-2 text-brown-600 hover:text-mesa-dark hover:bg-gray-50">Settings</a>
-                    {userEmail === ADMIN_EMAIL && (
-                      <a href="/admin" className="block px-4 py-2 text-mesa-accent hover:text-yellow-600 hover:bg-gray-50 font-medium">Admin</a>
-                    )}
-                    <div className="border-t border-gray-100 mt-1 pt-1">
-                      <button onClick={async () => { await authClient.auth.signOut(); window.location.href = "/"; }} className="w-full text-left block px-4 py-2 text-brown-600 hover:text-mesa-dark hover:bg-gray-50">Sign Out</button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <a href="/login?next=/schedule" className="rounded bg-brown-600/20 px-3 py-1 text-brown-600 hover:bg-brown-600/30">Login</a>
-            )}
-            <a href="https://www.instagram.com/mesabasketballtraining" target="_blank" rel="noopener noreferrer" aria-label="Instagram" className="text-brown-600 hover:text-mesa-dark">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <rect x="2" y="2" width="20" height="20" rx="5" ry="5" />
-                <circle cx="12" cy="12" r="4" />
-                <circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none" />
-              </svg>
-            </a>
-          </div>
-          {/* Mobile hamburger */}
-          <button
-            className="md:hidden text-brown-600 hover:text-mesa-dark p-1"
-            onClick={() => setMobileMenuOpen((o) => !o)}
-            aria-label="Toggle menu"
-          >
-            {mobileMenuOpen ? (
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            ) : (
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-              </svg>
-            )}
-          </button>
-        </div>
-        {/* Mobile dropdown menu */}
-        {mobileMenuOpen && (
-          <div className="md:hidden border-t border-gray-200 bg-white px-6 py-4 space-y-4 text-sm">
-            <a href="/" onClick={() => setMobileMenuOpen(false)} className="block text-brown-600 hover:text-mesa-dark py-1">Home</a>
-            <a href="/about" onClick={() => setMobileMenuOpen(false)} className="block text-brown-600 hover:text-mesa-dark py-1">About</a>
-            <div>
-              <div className="flex items-center justify-between">
-                <a href="/schedule" onClick={() => setMobileMenuOpen(false)} className="flex-1 py-2 text-brown-600 hover:text-mesa-dark">Programs</a>
-                <button onClick={() => setSchedulingOpen((o) => !o)} className="px-3 py-2 text-brown-600 hover:text-mesa-dark" aria-label="Toggle programs submenu">
-                  <svg xmlns="http://www.w3.org/2000/svg" className={`h-3 w-3 transition-transform ${schedulingOpen ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                  </svg>
-                </button>
-              </div>
-              {schedulingOpen && (
-                <div className="ml-4 mt-1 space-y-1">
-                  <a href="#schedule" onClick={() => setMobileMenuOpen(false)} className="block text-brown-500 hover:text-mesa-dark py-1">Group Sessions</a>
-                  <a href="#camps" onClick={() => setMobileMenuOpen(false)} className="block text-brown-500 hover:text-mesa-dark py-1">Camps</a>
-                  <a href="#private" onClick={() => setMobileMenuOpen(false)} className="block text-brown-500 hover:text-mesa-dark py-1">Private Sessions</a>
-                </div>
-              )}
-            </div>
-            <a href="https://www.instagram.com/mesabasketballtraining" target="_blank" rel="noopener noreferrer" onClick={() => setMobileMenuOpen(false)} className="flex items-center gap-2 text-brown-600 hover:text-mesa-dark py-1">
-              Instagram
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <rect x="2" y="2" width="20" height="20" rx="5" ry="5" />
-                <circle cx="12" cy="12" r="4" />
-                <circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none" />
-              </svg>
-            </a>
-            {userEmail ? (
-              <>
-                <p className="text-xs text-brown-400 px-1">Signed in as <span className="font-medium text-brown-600">{userEmail}</span></p>
-                <a href="/my-bookings" onClick={() => setMobileMenuOpen(false)} className="block rounded bg-brown-600/20 px-3 py-2 text-brown-600 hover:bg-brown-600/30 text-center font-medium">My Bookings</a>
-                <a href="/settings" onClick={() => setMobileMenuOpen(false)} className="block rounded bg-brown-600/20 px-3 py-2 text-brown-600 hover:bg-brown-600/30 text-center font-medium">Settings</a>
-                {userEmail === ADMIN_EMAIL && (
-                  <a href="/admin" onClick={() => setMobileMenuOpen(false)} className="block rounded bg-mesa-accent/20 px-3 py-2 text-mesa-accent hover:bg-mesa-accent/30 text-center font-medium">Admin</a>
-                )}
-                <button onClick={async () => { await authClient.auth.signOut(); window.location.href = "/"; }} className="block w-full text-center rounded bg-brown-600/20 px-3 py-2 text-brown-600 hover:bg-brown-600/30 font-medium">Sign Out</button>
-              </>
-            ) : (
-              <a href="/login?next=/schedule" onClick={() => setMobileMenuOpen(false)} className="block rounded bg-brown-600/20 px-3 py-2 text-brown-600 hover:bg-brown-600/30 text-center font-medium">Login</a>
-            )}
-          </div>
-        )}
-      </nav>
+      <LandingNav />
 
       {/* Page Header */}
       <header className="relative border-b border-brown-800 overflow-hidden min-h-[38vh] md:min-h-[65vh] flex items-end">

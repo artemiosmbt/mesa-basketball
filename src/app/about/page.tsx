@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import Image from "next/image";
-import AboutNav from "./AboutNav";
+import LandingNav from "../LandingNav";
 
 export const metadata: Metadata = {
   title: "About Artemios Gavalas | Mesa Basketball Training",
@@ -27,7 +27,7 @@ export default function AboutPage() {
   return (
     <div className="min-h-screen bg-mesa-dark text-white">
       {/* Nav */}
-      <AboutNav />
+      <LandingNav />
 
       {/* Hero */}
       <section className="relative overflow-hidden bg-gradient-to-br from-mesa-dark via-brown-900 to-brown-800 py-20 md:py-28">
