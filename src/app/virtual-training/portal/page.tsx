@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import Link from "next/link";
 import { authClient } from "@/lib/auth";
 
@@ -122,8 +123,8 @@ export default function TrainingPage() {
       {/* Header */}
       <header className="bg-mesa-dark text-white px-6 py-4 flex items-center justify-between">
         <Link href="/" className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-mesa-accent rounded-full flex items-center justify-center text-sm font-bold">M</div>
-          <span className="font-bold text-lg">Mesa Training</span>
+          <Image src="/logo.png" alt="Mesa Basketball" width={36} height={36} className="rounded-full object-cover" />
+          <span className="font-bold text-lg">Mesa Virtual Training</span>
         </Link>
         <button
           onClick={() => authClient.auth.signOut().then(() => router.push("/"))}
@@ -170,7 +171,7 @@ export default function TrainingPage() {
           </h1>
           {session && !isCompleted && (
             <Link
-              href="/training/play"
+              href="/virtual-training/portal/play"
               className="bg-mesa-accent text-white px-5 py-2.5 rounded-xl font-semibold text-sm hover:bg-mesa-accent/90 transition-colors"
             >
               Start Workout
@@ -236,7 +237,7 @@ export default function TrainingPage() {
             <div className="flex flex-col sm:flex-row gap-3">
               {!isCompleted && (
                 <Link
-                  href="/training/play"
+                  href="/virtual-training/portal/play"
                   className="flex-1 bg-mesa-accent text-white py-3.5 rounded-xl font-bold text-center text-base hover:bg-mesa-accent/90 transition-colors"
                 >
                   Start Workout

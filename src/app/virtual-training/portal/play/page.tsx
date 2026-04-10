@@ -56,7 +56,7 @@ export default function PlayPage() {
         .then((r) => r.json())
         .then((d) => {
           if (!d.session || d.drills?.length === 0) {
-            router.replace("/training");
+            router.replace("/virtual-training/portal");
             return;
           }
           setSession(d.session);
@@ -109,7 +109,7 @@ export default function PlayPage() {
         <h1 className="text-3xl font-bold text-white mb-3">Workout Done!</h1>
         <p className="text-white/60 text-lg mb-8">Great work. Keep grinding.</p>
         <button
-          onClick={() => router.push("/training")}
+          onClick={() => router.push("/virtual-training/portal")}
           className="bg-mesa-accent text-white px-8 py-3.5 rounded-xl font-bold text-base hover:bg-mesa-accent/90 transition-colors"
         >
           Back to Dashboard
@@ -128,7 +128,7 @@ export default function PlayPage() {
       {/* Top bar */}
       <div className="flex items-center justify-between px-5 py-4">
         <button
-          onClick={() => router.push("/training")}
+          onClick={() => router.push("/virtual-training/portal")}
           className="text-white/60 hover:text-white transition-colors text-sm"
         >
           ← Exit
