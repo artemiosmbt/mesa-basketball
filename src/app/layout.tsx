@@ -19,6 +19,9 @@ export const metadata: Metadata = {
     default: "Mesa Basketball Training | Long Island",
     template: "%s | Mesa Basketball Training",
   },
+  icons: {
+    apple: "/apple-touch-icon.png",
+  },
   description:
     "Elite basketball training on Long Island with former D1 and international professional player Artemios Gavalas. Group sessions, private lessons, and mini camps for all ages.",
   keywords: [
