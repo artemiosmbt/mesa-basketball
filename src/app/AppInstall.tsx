@@ -166,7 +166,7 @@ export function AppInstallBanner() {
 
   return (
     <div
-      className="fixed bottom-0 left-0 right-0 z-50 bg-brown-900 border-t border-brown-700 px-4 py-3 flex items-center gap-3 shadow-2xl cursor-pointer"
+      className="fixed bottom-0 left-0 right-0 z-50 bg-mesa-accent px-4 py-3 flex items-center gap-3 shadow-2xl cursor-pointer"
       onClick={scrollToSection}
     >
       <div className="relative w-10 h-10 rounded-xl overflow-hidden flex-shrink-0 bg-white">
@@ -174,9 +174,9 @@ export function AppInstallBanner() {
       </div>
       <div className="flex-1 min-w-0">
         <p className="text-white text-sm font-semibold leading-tight uppercase tracking-wide">ADD ΜΕΣΑ TO YOUR HOME SCREEN</p>
-        <p className="text-brown-400 text-xs mt-0.5 uppercase tracking-wide">Tap for instructions ↓</p>
+        <p className="text-white/70 text-xs mt-0.5 uppercase tracking-wide">Tap for instructions ↓</p>
       </div>
-      <button onClick={dismiss} aria-label="Dismiss" className="flex-shrink-0 text-brown-500 hover:text-white transition p-1">
+      <button onClick={dismiss} aria-label="Dismiss" className="flex-shrink-0 text-white/60 hover:text-white transition p-1">
         <CloseIcon />
       </button>
     </div>

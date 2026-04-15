@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import Image from "next/image";
 import LandingNav from "./LandingNav";
-import { AppInstallSection, AppInstallBanner, AppInstallDesktopPopup } from "./AppInstall";
+import { AppInstallSection } from "./AppInstall";
 
 export const metadata: Metadata = {
   title: "Mesa Basketball Training | Long Island",
@@ -427,8 +427,6 @@ export default function LandingPage() {
           </div>
         </div>
       </footer>
-      <AppInstallBanner />
-      <AppInstallDesktopPopup />
     </div>
   );
 }

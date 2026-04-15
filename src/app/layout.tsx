@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Oswald, Fira_Sans_Condensed } from "next/font/google";
 import "./globals.css";
+import { AppInstallBanner, AppInstallDesktopPopup } from "./AppInstall";
 
 const oswald = Oswald({
   subsets: ["latin"],
@@ -60,7 +61,11 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${oswald.variable} ${firaCond.variable} antialiased`}>{children}</body>
+      <body className={`${oswald.variable} ${firaCond.variable} antialiased`}>
+        {children}
+        <AppInstallBanner />
+        <AppInstallDesktopPopup />
+      </body>
     </html>
   );
 }
