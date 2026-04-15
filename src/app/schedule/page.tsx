@@ -2503,7 +2503,7 @@ export default function Home() {
                     className="mt-0.5 h-4 w-4 rounded border-brown-600 accent-mesa-accent"
                   />
                   <span className="text-xs text-brown-400 leading-relaxed">
-                    I agree to receive SMS text messages from Mesa Basketball Training (program name: Mesa Basketball Training) including session reminders, schedule updates, and booking confirmations. Message frequency varies (approx. weekly). Message &amp; data rates may apply. Reply STOP to cancel, HELP for help. See our{" "}
+                    I agree to receive SMS text messages from Mesa Basketball Training including session reminders, schedule updates, and booking confirmations. Message frequency varies (approx. weekly). Msg &amp; data rates may apply. Reply STOP to cancel, HELP for help. See our{" "}
                     <a href="/terms" className="underline hover:text-mesa-accent">Terms</a>{" "}and{" "}
                     <a href="/privacy-policy" className="underline hover:text-mesa-accent">Privacy Policy</a>.
                   </span>
