@@ -8,28 +8,31 @@ import LandingNav from "../LandingNav";
 const plans = [
   {
     name: "Monthly",
-    price: "$30",
+    price: "$60",
     period: "/ month",
     billing: "Billed monthly",
-    perMonth: "$30 / mo",
+    perMonth: "$60 / mo",
+    total: null,
     highlight: false,
     savings: null,
   },
   {
     name: "6-Month",
-    price: "$120",
-    period: "/ 6 months",
-    billing: "Billed every 6 months",
-    perMonth: "$20 / mo",
+    price: "$50",
+    period: "/ month",
+    billing: "$300 billed every 6 months",
+    perMonth: "$300 total",
+    total: "Save $60 vs monthly",
     highlight: false,
     savings: "Save $60",
   },
   {
     name: "Yearly",
-    price: "$180",
-    period: "/ year",
-    billing: "Billed annually",
-    perMonth: "$15 / mo",
+    price: "$40",
+    period: "/ month",
+    billing: "$480 billed annually",
+    perMonth: "$480 total",
+    total: "Save $240 vs monthly",
     highlight: true,
     savings: "Best Value",
   },
@@ -190,6 +193,9 @@ export default function VirtualTrainingPage() {
                   </div>
                   <p className="text-mesa-accent text-sm font-semibold mt-1">{plan.perMonth}</p>
                   <p className="text-brown-500 text-xs mt-0.5">{plan.billing}</p>
+                  {plan.total && (
+                    <p className="text-green-400 text-xs font-semibold mt-1">{plan.total}</p>
+                  )}
                 </div>
                 <div className="border-t border-brown-700 pt-4 flex-1">
                   <ul className="space-y-2 text-sm text-brown-300">
