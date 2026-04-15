@@ -159,39 +159,39 @@ export default function VirtualTrainingPage() {
 
           <div className="grid gap-8 md:grid-cols-2">
 
-            <div className="rounded-2xl border border-brown-700 bg-brown-900/40 px-7 py-8">
+            <div className="rounded-2xl border border-brown-700 bg-brown-900/40 px-7 py-8 text-center">
               <p className="font-[family-name:var(--font-fira-cond)] text-2xl font-black tracking-wide text-mesa-accent mb-3">
                 STRUCTURED AROUND YOU.
               </p>
               <p className="text-brown-300 text-sm leading-relaxed">
-                When you join, I place you into an 8-week program based on your current level. Beginner, Intermediate, or Advanced. Each week builds on the last. You show up, I handle the rest.
+                When you join, Artemios places you into an 8-week program based on your current level. Beginner, Intermediate, or Advanced. Each week builds on the last. You show up, he handles the rest.
               </p>
             </div>
 
-            <div className="rounded-2xl border border-brown-700 bg-brown-900/40 px-7 py-8">
+            <div className="rounded-2xl border border-brown-700 bg-brown-900/40 px-7 py-8 text-center">
               <p className="font-[family-name:var(--font-fira-cond)] text-2xl font-black tracking-wide text-mesa-accent mb-3">
                 YOUR FEEDBACK SHAPES YOUR PROGRAM.
               </p>
               <p className="text-brown-300 text-sm leading-relaxed">
-                After every drill you rate it — <span className="text-white font-semibold">Need More Work</span>, <span className="text-white font-semibold">Got It</span>, or <span className="text-white font-semibold">Too Easy</span>. I use that to structure what comes next. Drills you&apos;re struggling with stay in your rotation. Drills you&apos;ve locked down move to the background. No two players train exactly the same way.
+                After every drill you rate it — <span className="text-white font-semibold">Need More Work</span>, <span className="text-white font-semibold">Got It</span>, or <span className="text-white font-semibold">Too Easy</span>. Artemios uses that to structure what comes next. Drills you are struggling with stay in rotation. Drills you have locked down move to the background. No two players train the same way.
               </p>
             </div>
 
-            <div className="rounded-2xl border border-brown-700 bg-brown-900/40 px-7 py-8">
+            <div className="rounded-2xl border border-brown-700 bg-brown-900/40 px-7 py-8 text-center">
               <p className="font-[family-name:var(--font-fira-cond)] text-2xl font-black tracking-wide text-mesa-accent mb-3">
                 BUILT FROM REAL EXPERIENCE.
               </p>
               <p className="text-brown-300 text-sm leading-relaxed">
-                Every drill, every progression, every coaching cue — I built it. The content comes from what I learned competing at the D1 and professional level, and what I see working with players every day on the court.
+                Every drill, every progression, every coaching cue was built by Artemios. The content comes from competing at the D1 and professional level and working with players every day on the court.
               </p>
             </div>
 
-            <div className="rounded-2xl border border-brown-700 bg-brown-900/40 px-7 py-8">
+            <div className="rounded-2xl border border-brown-700 bg-brown-900/40 px-7 py-8 text-center">
               <p className="font-[family-name:var(--font-fira-cond)] text-2xl font-black tracking-wide text-mesa-accent mb-3">
                 THE FULL GAME. EVERY SESSION.
               </p>
               <p className="text-brown-300 text-sm leading-relaxed">
-                Each workout covers Ball Handling, Finishing, Mid Range, and Shooting in one focused hour. You&apos;re always developing across the full game — not just one skill over and over.
+                Each workout covers Ball Handling, Finishing, Mid Range, and Shooting in one focused hour. You are always developing across the full game, not just one skill over and over.
               </p>
             </div>
 
@@ -199,10 +199,10 @@ export default function VirtualTrainingPage() {
 
           <div className="mt-10 rounded-2xl border border-mesa-accent/30 bg-mesa-accent/5 px-8 py-7 text-center">
             <p className="font-[family-name:var(--font-fira-cond)] text-2xl font-black tracking-wide text-white mb-2">
-              THE MORE YOU TRAIN, THE SMARTER YOUR PROGRAM GETS.
+              THE MORE YOU TRAIN, THE MORE DIALED IN YOUR PROGRAM GETS.
             </p>
             <p className="text-brown-400 text-sm max-w-xl mx-auto leading-relaxed">
-              Two players at the same level in the same week will likely get different workouts because their feedback history is different. I structure everything around what you&apos;ve shown me.
+              Two players at the same level in the same week will likely get different workouts because their feedback history is different. Artemios structures everything around what you have shown him.
             </p>
           </div>
         </div>
