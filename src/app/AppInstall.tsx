@@ -165,20 +165,22 @@ export function AppInstallBanner() {
   if (!visible) return null;
 
   return (
-    <div
-      className="fixed bottom-0 left-0 right-0 z-50 bg-mesa-accent px-4 py-3 flex items-center gap-3 shadow-2xl cursor-pointer"
-      onClick={scrollToSection}
-    >
-      <div className="relative w-10 h-10 rounded-xl overflow-hidden flex-shrink-0 bg-white">
-        <Image src="/logo.png" alt="Mesa Basketball" fill className="object-cover" />
+    <div className="fixed bottom-4 left-4 right-4 z-50">
+      <div
+        className="bg-mesa-accent rounded-2xl shadow-2xl px-4 py-3 flex items-center gap-3 cursor-pointer"
+        onClick={scrollToSection}
+      >
+        <div className="relative w-10 h-10 rounded-xl overflow-hidden flex-shrink-0 bg-white">
+          <Image src="/logo.png" alt="Mesa Basketball" fill className="object-cover" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-mesa-dark text-sm font-semibold leading-tight uppercase tracking-wide">ADD ΜΕΣΑ TO YOUR HOME SCREEN</p>
+          <p className="text-mesa-dark/70 text-xs mt-0.5 uppercase tracking-wide">Tap for instructions ↓</p>
+        </div>
+        <button onClick={dismiss} aria-label="Dismiss" className="flex-shrink-0 text-mesa-dark/60 hover:text-mesa-dark transition p-1">
+          <CloseIcon />
+        </button>
       </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-white text-sm font-semibold leading-tight uppercase tracking-wide">ADD ΜΕΣΑ TO YOUR HOME SCREEN</p>
-        <p className="text-white/70 text-xs mt-0.5 uppercase tracking-wide">Tap for instructions ↓</p>
-      </div>
-      <button onClick={dismiss} aria-label="Dismiss" className="flex-shrink-0 text-white/60 hover:text-white transition p-1">
-        <CloseIcon />
-      </button>
     </div>
   );
 }
