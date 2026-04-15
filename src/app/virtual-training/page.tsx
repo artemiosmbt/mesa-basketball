@@ -148,7 +148,7 @@ export default function VirtualTrainingPage() {
       <section className="bg-mesa-dark border-t border-brown-800 py-16 md:py-24">
         <div className="mx-auto max-w-5xl px-6">
           <div className="text-center mb-14">
-            <p className="text-sm font-semibold uppercase tracking-widest text-mesa-accent mb-2">Built Different</p>
+            <p className="text-sm font-semibold uppercase tracking-widest text-mesa-accent mb-2">Built Differently</p>
             <h2 className="font-[family-name:var(--font-fira-cond)] text-4xl md:text-5xl font-black tracking-wide">
               NOT JUST A VIDEO LIBRARY.
             </h2>
