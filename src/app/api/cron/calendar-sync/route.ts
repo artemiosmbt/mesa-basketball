@@ -16,6 +16,7 @@ export async function GET(req: NextRequest) {
   const today = new Date().toISOString().split("T")[0];
   let synced = 0;
   let errors = 0;
+  const errorDetails: string[] = [];
 
   // Build a set of expected tags from the current schedule so we can clean up stale events
   const expectedTags = new Set<string>();
@@ -40,7 +41,9 @@ export async function GET(req: NextRequest) {
         });
         synced++;
       } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
         console.error(`Calendar sync error (weekly ${session.date}):`, err);
+        errorDetails.push(`weekly ${session.date} ${session.startTime} (${session.group}): ${msg}`);
         errors++;
       }
     }
@@ -110,5 +113,5 @@ export async function GET(req: NextRequest) {
     console.error("Failed to clean up stale calendar events:", err);
   }
 
-  return NextResponse.json({ synced, errors, deleted });
+  return NextResponse.json({ synced, errors, deleted, errorDetails });
 }
