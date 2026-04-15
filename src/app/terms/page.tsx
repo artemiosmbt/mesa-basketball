@@ -85,23 +85,25 @@ export default function TermsPage() {
               4. SMS MESSAGING TERMS
             </h2>
             <p className="mb-4">
-              By providing a mobile phone number during registration, you consent to receive SMS text
-              messages from Mesa Basketball Training LLC related to your enrollment and program updates.
+              During registration on mesabasketballtraining.com, you are presented with a required opt-in
+              checkbox before your registration can be submitted. By checking that box, you explicitly
+              consent to receive SMS text messages from Mesa Basketball Training LLC. The checkbox is
+              unchecked by default and the registration form cannot be submitted without checking it.
             </p>
             <div className="rounded-lg border border-brown-700 bg-brown-900/40 px-6 py-5 space-y-3 text-brown-300">
               <p>
                 <span className="text-white font-semibold">Program name:</span> Mesa Basketball Training
               </p>
               <p>
-                <span className="text-white font-semibold">Message types:</span> Session reminders,
-                schedule changes, program announcements
+                <span className="text-white font-semibold">Message types:</span> Booking confirmations,
+                session reminders, schedule updates, and program announcements
               </p>
               <p>
                 <span className="text-white font-semibold">Message frequency:</span> Approximately weekly;
                 frequency may vary based on active registrations and program activity
               </p>
               <p>
-                <span className="text-white font-semibold">Message &amp; data rates:</span> Message and
+                <span className="text-white font-semibold">Msg &amp; data rates:</span> Message and
                 data rates may apply. Standard carrier rates apply based on your mobile plan.
               </p>
               <p>

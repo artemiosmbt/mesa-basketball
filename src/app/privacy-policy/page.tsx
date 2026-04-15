@@ -81,12 +81,15 @@ export default function PrivacyPolicyPage() {
               4. SMS COMMUNICATIONS
             </h2>
             <p className="mb-4">
-              By providing your mobile phone number and registering for a Mesa program, you consent to
-              receive SMS text messages from Mesa Basketball Training LLC. These messages may include:
+              During registration on mesabasketballtraining.com, you are presented with a required opt-in
+              checkbox before your registration can be submitted. By checking that box, you explicitly
+              consent to receive SMS text messages from Mesa Basketball Training LLC. The checkbox is
+              unchecked by default and no SMS messages are sent unless you check it. These messages may include:
             </p>
             <ul className="list-disc list-inside space-y-2 text-brown-300 ml-2">
+              <li>Booking confirmations</li>
               <li>Session reminders (typically sent the day before a scheduled session)</li>
-              <li>Schedule changes, cancellations, or weather-related updates</li>
+              <li>Schedule updates, cancellations, or weather-related notices</li>
               <li>Program announcements and new session availability</li>
             </ul>
             <p className="mt-4">
@@ -106,7 +109,7 @@ export default function PrivacyPolicyPage() {
               </a>.
             </p>
             <p className="mt-3 text-brown-400 text-sm">
-              Message and data rates may apply. Mesa Basketball Training LLC is not responsible for any
+              Msg &amp; data rates may apply. Mesa Basketball Training LLC is not responsible for any
               fees charged by your mobile carrier.
             </p>
           </section>
