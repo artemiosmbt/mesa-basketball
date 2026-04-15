@@ -195,7 +195,7 @@ export function AppInstallDesktopPopup() {
     if (localStorage.getItem(DISMISSED_KEY)) return;
     if (detectDevice() === "desktop") {
       // Small delay so it doesn't flash immediately on load
-      const t = setTimeout(() => setVisible(true), 1500);
+      const t = setTimeout(() => setVisible(true), 5000);
       return () => clearTimeout(t);
     }
   }, []);
@@ -217,8 +217,8 @@ export function AppInstallDesktopPopup() {
         <Image src="/logo.png" alt="Mesa Basketball" fill className="object-cover" />
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-white text-sm font-semibold leading-tight">Add Mesa to your home screen</p>
-        <p className="text-brown-400 text-xs mt-0.5">Click to see how ↓</p>
+        <p className="text-white text-sm font-semibold leading-tight uppercase tracking-wide">ADD ΜΕΣΑ TO YOUR HOME SCREEN</p>
+        <p className="text-brown-400 text-xs mt-0.5 uppercase tracking-wide">Click to see how ↓</p>
       </div>
       <button onClick={dismiss} aria-label="Dismiss" className="flex-shrink-0 text-brown-500 hover:text-white transition p-1">
         <CloseIcon />
