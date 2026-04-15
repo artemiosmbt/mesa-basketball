@@ -307,7 +307,7 @@ export default function LandingPage() {
           {/* Section heading */}
           <div className="text-center mb-12">
             <p className="text-sm font-semibold uppercase tracking-widest text-mesa-accent mb-2">Proven Experience. Trusted Development.</p>
-            <h2 className="font-[family-name:var(--font-fira-cond)] text-4xl font-black tracking-wide">WHY MESA</h2>
+            <h2 className="font-[family-name:var(--font-fira-cond)] text-4xl font-black tracking-wide">WHY ΜΕΣΑ</h2>
           </div>
 
           {/* Stats bar */}

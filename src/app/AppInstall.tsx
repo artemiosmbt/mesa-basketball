@@ -104,7 +104,7 @@ export function AppInstallSection() {
           </div>
           <p className="text-sm font-semibold uppercase tracking-widest text-mesa-accent mb-2">Free — No App Store Needed</p>
           <h2 className="font-[family-name:var(--font-fira-cond)] text-4xl font-black tracking-wide">
-            ADD MESA TO YOUR HOME SCREEN
+            ADD ΜΕΣΑ TO YOUR HOME SCREEN
           </h2>
           <p className="mt-3 text-brown-400 text-sm max-w-md mx-auto">
             Get instant access to sessions, bookings, and your schedule — right from your phone&apos;s home screen. No download required.
@@ -173,10 +173,8 @@ export function AppInstallBanner() {
         <Image src="/logo.png" alt="Mesa Basketball" fill className="object-cover" />
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-white text-sm font-semibold leading-tight">Add Mesa to your home screen</p>
-        <p className="text-brown-400 text-xs mt-0.5">
-          {device === "ios" ? "Tap for instructions ↓" : "Tap for instructions ↓"}
-        </p>
+        <p className="text-white text-sm font-semibold leading-tight uppercase tracking-wide">ADD ΜΕΣΑ TO YOUR HOME SCREEN</p>
+        <p className="text-brown-400 text-xs mt-0.5 uppercase tracking-wide">Tap for instructions ↓</p>
       </div>
       <button onClick={dismiss} aria-label="Dismiss" className="flex-shrink-0 text-brown-500 hover:text-white transition p-1">
         <CloseIcon />
@@ -208,17 +206,17 @@ export function AppInstallDesktopPopup() {
 
   return (
     <div
-      className="fixed bottom-6 right-6 z-50 bg-brown-900 border border-brown-700 rounded-2xl shadow-2xl px-4 py-3 flex items-center gap-3 cursor-pointer max-w-xs hover:border-brown-500 transition"
+      className="fixed bottom-6 right-6 z-50 bg-white border border-gray-200 rounded-2xl shadow-2xl px-4 py-3 flex items-center gap-3 cursor-pointer max-w-xs hover:shadow-xl transition"
       onClick={() => { scrollToSection(); sessionStorage.setItem(SESSION_KEY, "1"); setVisible(false); }}
     >
-      <div className="relative w-10 h-10 rounded-xl overflow-hidden flex-shrink-0 bg-white">
+      <div className="relative w-10 h-10 rounded-xl overflow-hidden flex-shrink-0 bg-white border border-gray-100">
         <Image src="/logo.png" alt="Mesa Basketball" fill className="object-cover" />
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-white text-sm font-semibold leading-tight uppercase tracking-wide">ADD ΜΕΣΑ TO YOUR HOME SCREEN</p>
-        <p className="text-brown-400 text-xs mt-0.5 uppercase tracking-wide">Click to see how ↓</p>
+        <p className="text-mesa-dark text-sm font-semibold leading-tight uppercase tracking-wide">ADD ΜΕΣΑ TO YOUR HOME SCREEN</p>
+        <p className="text-brown-500 text-xs mt-0.5 uppercase tracking-wide">Click to see how ↓</p>
       </div>
-      <button onClick={dismiss} aria-label="Dismiss" className="flex-shrink-0 text-brown-500 hover:text-white transition p-1">
+      <button onClick={dismiss} aria-label="Dismiss" className="flex-shrink-0 text-gray-400 hover:text-mesa-dark transition p-1">
         <CloseIcon />
       </button>
     </div>
