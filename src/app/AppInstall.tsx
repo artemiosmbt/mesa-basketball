@@ -213,8 +213,8 @@ export function AppInstallDesktopPopup() {
         <Image src="/logo.png" alt="Mesa Basketball" fill className="object-cover" />
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-white text-sm font-semibold leading-tight uppercase tracking-wide">GET THE ΜΕΣΑ APP</p>
-        <p className="text-white/70 text-xs mt-0.5 uppercase tracking-wide">Click to see how ↓</p>
+        <p className="text-mesa-dark text-sm font-semibold leading-tight uppercase tracking-wide">GET THE ΜΕΣΑ APP</p>
+        <p className="text-mesa-dark/70 text-xs mt-0.5 uppercase tracking-wide">Click to see how ↓</p>
       </div>
       <button onClick={dismiss} aria-label="Dismiss" className="flex-shrink-0 text-white/60 hover:text-white transition p-1">
         <CloseIcon />
