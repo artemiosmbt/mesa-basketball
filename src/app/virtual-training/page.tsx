@@ -193,7 +193,7 @@ export default function VirtualTrainingPage() {
               TRAIN LIKE A PRO FROM ANYWHERE.
             </p>
             <p className="text-brown-400 text-sm max-w-lg mx-auto leading-relaxed">
-              This is the same level of detail and structure Artemios brings to every in-person session, now available to any player regardless of location, schedule, or budget.
+              The same structure Artemios brings in person, now available to any player regardless of location or schedule.
             </p>
           </div>
         </div>
