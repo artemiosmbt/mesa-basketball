@@ -134,6 +134,76 @@ export function AppInstallSection() {
   );
 }
 
+// ─── Nav Modal ───────────────────────────────────────────────────────────────
+
+export function GetAppModal({ onClose }: { onClose: () => void }) {
+  const [device, setDevice] = useState<DeviceType>(null);
+
+  useEffect(() => {
+    setDevice(detectDevice());
+    // Close on Escape
+    function onKey(e: KeyboardEvent) { if (e.key === "Escape") onClose(); }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+      <div
+        className="relative bg-brown-950 border border-brown-700 rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 md:p-8"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Close */}
+        <button onClick={onClose} aria-label="Close" className="absolute top-4 right-4 text-brown-500 hover:text-white transition">
+          <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+
+        {/* Header */}
+        <div className="flex items-center gap-4 mb-6">
+          <div className="relative w-14 h-14 rounded-2xl overflow-hidden flex-shrink-0 bg-white shadow-lg">
+            <Image src="/logo.png" alt="Mesa Basketball" fill className="object-cover" />
+          </div>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-widest text-mesa-accent mb-0.5">Free — No App Store Needed</p>
+            <h3 className="font-[family-name:var(--font-fira-cond)] text-2xl font-black tracking-wide text-white leading-tight">
+              ADD MESA TO YOUR<br />HOME SCREEN
+            </h3>
+          </div>
+        </div>
+
+        {/* Steps */}
+        {(device === "ios") && (
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-widest text-brown-500 mb-4">iPhone / iPad</p>
+            <IOSSteps />
+          </div>
+        )}
+        {(device === "android") && (
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-widest text-brown-500 mb-4">Android</p>
+            <AndroidSteps />
+          </div>
+        )}
+        {(device === "desktop") && (
+          <div className="space-y-6">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-widest text-brown-500 mb-4">iPhone / iPad</p>
+              <IOSSteps />
+            </div>
+            <div className="border-t border-brown-800 pt-6">
+              <p className="text-xs font-semibold uppercase tracking-widest text-brown-500 mb-4">Android</p>
+              <AndroidSteps />
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Sticky Mobile Banner ────────────────────────────────────────────────────
 
 export function AppInstallBanner() {

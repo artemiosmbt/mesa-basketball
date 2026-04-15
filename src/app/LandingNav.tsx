@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import { authClient, ADMIN_EMAIL } from "@/lib/auth";
+import { GetAppModal } from "./AppInstall";
 
 const chevron = (open?: boolean) => (
   <svg xmlns="http://www.w3.org/2000/svg" className={`h-3 w-3 mt-0.5 transition-transform ${open ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -15,6 +16,7 @@ export default function LandingNav() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [schedulingOpen, setSchedulingOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
+  const [getAppOpen, setGetAppOpen] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const router = useRouter();
   const pathname = usePathname();
@@ -87,6 +89,9 @@ export default function LandingNav() {
           ) : (
             <Link href={`/login?next=${pathname}`} className="hidden md:inline rounded bg-brown-600/20 px-3 py-1 text-brown-600 hover:bg-brown-600/30">Login</Link>
           )}
+          <button onClick={() => setGetAppOpen(true)} className="hidden md:inline rounded bg-mesa-accent/10 px-3 py-1 text-mesa-accent hover:bg-mesa-accent/20 font-semibold transition text-sm">
+            Get App
+          </button>
           <a href="https://www.instagram.com/mesabasketballtraining" target="_blank" rel="noopener noreferrer" aria-label="Instagram" className="hidden md:inline text-brown-600 hover:text-mesa-dark">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
               <rect x="2" y="2" width="20" height="20" rx="5" ry="5" />
@@ -131,6 +136,9 @@ export default function LandingNav() {
             )}
           </div>
           <Link href="/virtual-training" onClick={() => setMobileMenuOpen(false)} className="block text-brown-600 hover:text-mesa-dark py-1">Virtual Training</Link>
+          <button onClick={() => { setGetAppOpen(true); setMobileMenuOpen(false); }} className="block w-full text-left text-mesa-accent font-semibold py-1">
+            Get App
+          </button>
           <a href="https://www.instagram.com/mesabasketballtraining" target="_blank" rel="noopener noreferrer" onClick={() => setMobileMenuOpen(false)} className="flex items-center gap-2 text-brown-600 hover:text-mesa-dark py-1">
             Instagram
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -163,6 +171,7 @@ export default function LandingNav() {
           )}
         </div>
       )}
+      {getAppOpen && <GetAppModal onClose={() => setGetAppOpen(false)} />}
     </nav>
   );
 }
