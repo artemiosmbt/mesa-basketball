@@ -23,6 +23,16 @@ function isStandalone(): boolean {
 
 const DISMISSED_KEY = "mesa_app_banner_dismissed";
 
+function scrollToSection() {
+  document.getElementById("app-install")?.scrollIntoView({ behavior: "smooth" });
+}
+
+const CloseIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+  </svg>
+);
+
 const IOSSteps = () => (
   <ol className="space-y-3 text-sm text-brown-300">
     <li className="flex items-start gap-3">
@@ -69,14 +79,14 @@ const AndroidSteps = () => (
   </ol>
 );
 
-// ─── Homepage Section ────────────────────────────────────────────────────────
+// ─── Homepage Section (footer) ───────────────────────────────────────────────
 
 export function AppInstallSection() {
   const [device, setDevice] = useState<DeviceType>(null);
   const [hidden, setHidden] = useState(true);
 
   useEffect(() => {
-    if (isStandalone()) return; // already installed — hide everything
+    if (isStandalone()) return;
     setDevice(detectDevice());
     setHidden(false);
   }, []);
@@ -84,7 +94,7 @@ export function AppInstallSection() {
   if (hidden) return null;
 
   return (
-    <section className="bg-brown-950 border-t border-brown-800 py-16 md:py-20">
+    <section id="app-install" className="bg-brown-950 border-t border-brown-800 py-16 md:py-20">
       <div className="mx-auto max-w-4xl px-6">
         <div className="text-center mb-10">
           <div className="flex justify-center mb-4">
@@ -101,23 +111,19 @@ export function AppInstallSection() {
           </p>
         </div>
 
-        {/* Mobile: show only relevant platform */}
-        {(device === "ios") && (
+        {device === "ios" && (
           <div className="max-w-md mx-auto rounded-xl border border-brown-700 bg-brown-900/40 px-6 py-7">
             <p className="font-[family-name:var(--font-fira-cond)] text-lg font-black tracking-wide text-white mb-5">iPhone / iPad</p>
             <IOSSteps />
           </div>
         )}
-
-        {(device === "android") && (
+        {device === "android" && (
           <div className="max-w-md mx-auto rounded-xl border border-brown-700 bg-brown-900/40 px-6 py-7">
             <p className="font-[family-name:var(--font-fira-cond)] text-lg font-black tracking-wide text-white mb-5">Android</p>
             <AndroidSteps />
           </div>
         )}
-
-        {/* Desktop: show both side by side */}
-        {(device === "desktop") && (
+        {device === "desktop" && (
           <div className="grid md:grid-cols-2 gap-6">
             <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-6 py-7">
               <p className="font-[family-name:var(--font-fira-cond)] text-lg font-black tracking-wide text-white mb-5">iPhone / iPad</p>
@@ -134,77 +140,7 @@ export function AppInstallSection() {
   );
 }
 
-// ─── Nav Modal ───────────────────────────────────────────────────────────────
-
-export function GetAppModal({ onClose }: { onClose: () => void }) {
-  const [device, setDevice] = useState<DeviceType>(null);
-
-  useEffect(() => {
-    setDevice(detectDevice());
-    // Close on Escape
-    function onKey(e: KeyboardEvent) { if (e.key === "Escape") onClose(); }
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
-      <div
-        className="relative bg-brown-950 border border-brown-700 rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 md:p-8"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Close */}
-        <button onClick={onClose} aria-label="Close" className="absolute top-4 right-4 text-brown-500 hover:text-white transition">
-          <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-
-        {/* Header */}
-        <div className="flex items-center gap-4 mb-6">
-          <div className="relative w-14 h-14 rounded-2xl overflow-hidden flex-shrink-0 bg-white shadow-lg">
-            <Image src="/logo.png" alt="Mesa Basketball" fill className="object-cover" />
-          </div>
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-widest text-mesa-accent mb-0.5">Free — No App Store Needed</p>
-            <h3 className="font-[family-name:var(--font-fira-cond)] text-2xl font-black tracking-wide text-white leading-tight">
-              ADD MESA TO YOUR<br />HOME SCREEN
-            </h3>
-          </div>
-        </div>
-
-        {/* Steps */}
-        {(device === "ios") && (
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-widest text-brown-500 mb-4">iPhone / iPad</p>
-            <IOSSteps />
-          </div>
-        )}
-        {(device === "android") && (
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-widest text-brown-500 mb-4">Android</p>
-            <AndroidSteps />
-          </div>
-        )}
-        {(device === "desktop") && (
-          <div className="space-y-6">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-widest text-brown-500 mb-4">iPhone / iPad</p>
-              <IOSSteps />
-            </div>
-            <div className="border-t border-brown-800 pt-6">
-              <p className="text-xs font-semibold uppercase tracking-widest text-brown-500 mb-4">Android</p>
-              <AndroidSteps />
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ─── Sticky Mobile Banner ────────────────────────────────────────────────────
+// ─── Mobile sticky banner ────────────────────────────────────────────────────
 
 export function AppInstallBanner() {
   const [visible, setVisible] = useState(false);
@@ -220,7 +156,8 @@ export function AppInstallBanner() {
     }
   }, []);
 
-  function dismiss() {
+  function dismiss(e: React.MouseEvent) {
+    e.stopPropagation();
     localStorage.setItem(DISMISSED_KEY, "1");
     setVisible(false);
   }
@@ -228,24 +165,63 @@ export function AppInstallBanner() {
   if (!visible) return null;
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-50 bg-brown-900 border-t border-brown-700 px-4 py-3 flex items-center gap-3 shadow-2xl">
+    <div
+      className="fixed bottom-0 left-0 right-0 z-50 bg-brown-900 border-t border-brown-700 px-4 py-3 flex items-center gap-3 shadow-2xl cursor-pointer"
+      onClick={scrollToSection}
+    >
       <div className="relative w-10 h-10 rounded-xl overflow-hidden flex-shrink-0 bg-white">
         <Image src="/logo.png" alt="Mesa Basketball" fill className="object-cover" />
       </div>
       <div className="flex-1 min-w-0">
         <p className="text-white text-sm font-semibold leading-tight">Add Mesa to your home screen</p>
         <p className="text-brown-400 text-xs mt-0.5">
-          {device === "ios" ? "Tap Share → Add to Home Screen" : "Tap menu → Add to Home Screen"}
+          {device === "ios" ? "Tap for instructions ↓" : "Tap for instructions ↓"}
         </p>
       </div>
-      <button
-        onClick={dismiss}
-        aria-label="Dismiss"
-        className="flex-shrink-0 text-brown-500 hover:text-white transition p-1"
-      >
-        <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-        </svg>
+      <button onClick={dismiss} aria-label="Dismiss" className="flex-shrink-0 text-brown-500 hover:text-white transition p-1">
+        <CloseIcon />
+      </button>
+    </div>
+  );
+}
+
+// ─── Desktop popup ───────────────────────────────────────────────────────────
+
+export function AppInstallDesktopPopup() {
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    if (isStandalone()) return;
+    if (localStorage.getItem(DISMISSED_KEY)) return;
+    if (detectDevice() === "desktop") {
+      // Small delay so it doesn't flash immediately on load
+      const t = setTimeout(() => setVisible(true), 1500);
+      return () => clearTimeout(t);
+    }
+  }, []);
+
+  function dismiss(e: React.MouseEvent) {
+    e.stopPropagation();
+    localStorage.setItem(DISMISSED_KEY, "1");
+    setVisible(false);
+  }
+
+  if (!visible) return null;
+
+  return (
+    <div
+      className="fixed bottom-6 right-6 z-50 bg-brown-900 border border-brown-700 rounded-2xl shadow-2xl px-4 py-3 flex items-center gap-3 cursor-pointer max-w-xs hover:border-brown-500 transition"
+      onClick={() => { scrollToSection(); localStorage.setItem(DISMISSED_KEY, "1"); setVisible(false); }}
+    >
+      <div className="relative w-10 h-10 rounded-xl overflow-hidden flex-shrink-0 bg-white">
+        <Image src="/logo.png" alt="Mesa Basketball" fill className="object-cover" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-white text-sm font-semibold leading-tight">Add Mesa to your home screen</p>
+        <p className="text-brown-400 text-xs mt-0.5">Click to see how ↓</p>
+      </div>
+      <button onClick={dismiss} aria-label="Dismiss" className="flex-shrink-0 text-brown-500 hover:text-white transition p-1">
+        <CloseIcon />
       </button>
     </div>
   );
