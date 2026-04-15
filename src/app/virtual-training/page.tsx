@@ -190,10 +190,10 @@ export default function VirtualTrainingPage() {
 
           <div className="mt-10 rounded-2xl border border-mesa-accent/30 bg-mesa-accent/5 px-8 py-7 text-center">
             <p className="font-[family-name:var(--font-fira-cond)] text-2xl font-black tracking-wide text-white mb-2">
-              THE MORE YOU TRAIN, THE MORE DIALED IN YOUR PROGRAM GETS.
+              TRAIN LIKE A PRO FROM ANYWHERE.
             </p>
             <p className="text-brown-400 text-sm max-w-lg mx-auto leading-relaxed">
-              Want to go deeper on a specific skill? The full library is always there. But if you just want to train, your program is ready and waiting.
+              This is the same level of detail and structure Artemios brings to every in-person session, now available to any player regardless of location, schedule, or budget.
             </p>
           </div>
         </div>
