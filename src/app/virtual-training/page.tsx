@@ -150,7 +150,7 @@ export default function VirtualTrainingPage() {
           <div className="text-center mb-14">
             <p className="text-sm font-semibold uppercase tracking-widest text-mesa-accent mb-2">Built Different</p>
             <h2 className="font-[family-name:var(--font-fira-cond)] text-4xl md:text-5xl font-black tracking-wide">
-              THIS IS NOT JUST A VIDEO LIBRARY.
+              NOT JUST A VIDEO LIBRARY.
             </h2>
             <p className="mt-4 text-brown-400 text-base max-w-2xl mx-auto leading-relaxed">
               Every player gets a fully structured program that evolves with them. The longer you train, the more personalized it gets.
