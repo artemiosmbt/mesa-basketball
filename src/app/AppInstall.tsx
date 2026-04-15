@@ -31,14 +31,18 @@ const IOSSteps = () => (
     </li>
     <li className="flex items-start gap-3">
       <span className="flex-shrink-0 w-6 h-6 rounded-full bg-mesa-accent text-white text-xs font-bold flex items-center justify-center mt-0.5">2</span>
-      <span>Tap the <span className="text-white font-semibold">Share</span> button — the box with an arrow pointing up at the bottom of the screen</span>
+      <span>Tap the <span className="text-white font-semibold">three dots (•••)</span> in the bottom right corner of Safari</span>
     </li>
     <li className="flex items-start gap-3">
       <span className="flex-shrink-0 w-6 h-6 rounded-full bg-mesa-accent text-white text-xs font-bold flex items-center justify-center mt-0.5">3</span>
-      <span>Scroll down and tap <span className="text-white font-semibold">&ldquo;Add to Home Screen&rdquo;</span></span>
+      <span>Tap <span className="text-white font-semibold">&ldquo;Share&rdquo;</span></span>
     </li>
     <li className="flex items-start gap-3">
       <span className="flex-shrink-0 w-6 h-6 rounded-full bg-mesa-accent text-white text-xs font-bold flex items-center justify-center mt-0.5">4</span>
+      <span>Scroll down and tap <span className="text-white font-semibold">&ldquo;Add to Home Screen&rdquo;</span></span>
+    </li>
+    <li className="flex items-start gap-3">
+      <span className="flex-shrink-0 w-6 h-6 rounded-full bg-mesa-accent text-white text-xs font-bold flex items-center justify-center mt-0.5">5</span>
       <span>Tap <span className="text-white font-semibold">&ldquo;Add&rdquo;</span> — the Mesa icon will appear on your home screen</span>
     </li>
   </ol>
@@ -84,7 +88,7 @@ export function AppInstallSection() {
       <div className="mx-auto max-w-4xl px-6">
         <div className="text-center mb-10">
           <div className="flex justify-center mb-4">
-            <div className="relative w-16 h-16 rounded-2xl overflow-hidden shadow-lg">
+            <div className="relative w-16 h-16 rounded-2xl overflow-hidden shadow-lg bg-white">
               <Image src="/logo.png" alt="Mesa Basketball" fill className="object-cover" />
             </div>
           </div>
@@ -155,7 +159,7 @@ export function AppInstallBanner() {
 
   return (
     <div className="fixed bottom-0 left-0 right-0 z-50 bg-brown-900 border-t border-brown-700 px-4 py-3 flex items-center gap-3 shadow-2xl">
-      <div className="relative w-10 h-10 rounded-xl overflow-hidden flex-shrink-0">
+      <div className="relative w-10 h-10 rounded-xl overflow-hidden flex-shrink-0 bg-white">
         <Image src="/logo.png" alt="Mesa Basketball" fill className="object-cover" />
       </div>
       <div className="flex-1 min-w-0">
