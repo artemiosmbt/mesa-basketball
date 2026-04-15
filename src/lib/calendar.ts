@@ -214,6 +214,53 @@ async function deleteEvent(calendarId: string, token: string, eventId: string): 
   );
 }
 
+/**
+ * Fetch all future group session events (tagged with [mesa-session:...]) and
+ * delete any whose tag is not in the provided set of expected tags.
+ * Called by the calendar-sync cron to clean up stale events after schedule changes.
+ */
+export async function deleteStaleGroupSessionEvents(
+  expectedTags: Set<string>
+): Promise<{ deleted: number }> {
+  const calendarId = process.env.GOOGLE_CALENDAR_ID;
+  const saEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+  const privateKey = process.env.GOOGLE_PRIVATE_KEY;
+  if (!calendarId || !saEmail || !privateKey) return { deleted: 0 };
+
+  const token = await getAccessToken(saEmail, privateKey);
+
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+  const future = new Date();
+  future.setDate(future.getDate() + 120);
+  const futureStr = future.toISOString().split("T")[0];
+
+  const timeMin = encodeURIComponent(`${today}T00:00:00Z`);
+  const timeMax = encodeURIComponent(`${futureStr}T23:59:59Z`);
+  const url =
+    `${CALENDAR_BASE}/${encodeURIComponent(calendarId)}/events` +
+    `?timeMin=${timeMin}&timeMax=${timeMax}&singleEvents=true&maxResults=500`;
+
+  const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!resp.ok) return { deleted: 0 };
+
+  const data = await resp.json();
+  const items: Array<{ id: string; description?: string }> = data.items || [];
+
+  let deleted = 0;
+  for (const item of items) {
+    if (!item.description) continue;
+    const match = item.description.match(/\[mesa-session:[^\]]+\]/);
+    if (!match) continue;
+    const tag = match[0];
+    if (!expectedTags.has(tag)) {
+      await deleteEvent(calendarId, token, item.id);
+      deleted++;
+    }
+  }
+
+  return { deleted };
+}
+
 /** Patch an existing calendar event's description (and optionally summary) */
 async function patchEvent(
   calendarId: string,
