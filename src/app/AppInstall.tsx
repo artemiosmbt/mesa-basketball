@@ -21,7 +21,7 @@ function isStandalone(): boolean {
   );
 }
 
-const DISMISSED_KEY = "mesa_app_banner_dismissed";
+const SESSION_KEY = "mesa_app_banner_dismissed";
 
 function scrollToSection() {
   document.getElementById("app-install")?.scrollIntoView({ behavior: "smooth" });
@@ -148,7 +148,7 @@ export function AppInstallBanner() {
 
   useEffect(() => {
     if (isStandalone()) return;
-    if (localStorage.getItem(DISMISSED_KEY)) return;
+    if (sessionStorage.getItem(SESSION_KEY)) return;
     const d = detectDevice();
     if (d === "ios" || d === "android") {
       setDevice(d);
@@ -158,7 +158,7 @@ export function AppInstallBanner() {
 
   function dismiss(e: React.MouseEvent) {
     e.stopPropagation();
-    localStorage.setItem(DISMISSED_KEY, "1");
+    sessionStorage.setItem(SESSION_KEY, "1");
     setVisible(false);
   }
 
@@ -192,17 +192,15 @@ export function AppInstallDesktopPopup() {
 
   useEffect(() => {
     if (isStandalone()) return;
-    if (localStorage.getItem(DISMISSED_KEY)) return;
+    if (sessionStorage.getItem(SESSION_KEY)) return;
     if (detectDevice() === "desktop") {
-      // Small delay so it doesn't flash immediately on load
-      const t = setTimeout(() => setVisible(true), 5000);
-      return () => clearTimeout(t);
+      setVisible(true);
     }
   }, []);
 
   function dismiss(e: React.MouseEvent) {
     e.stopPropagation();
-    localStorage.setItem(DISMISSED_KEY, "1");
+    sessionStorage.setItem(SESSION_KEY, "1");
     setVisible(false);
   }
 
@@ -211,7 +209,7 @@ export function AppInstallDesktopPopup() {
   return (
     <div
       className="fixed bottom-6 right-6 z-50 bg-brown-900 border border-brown-700 rounded-2xl shadow-2xl px-4 py-3 flex items-center gap-3 cursor-pointer max-w-xs hover:border-brown-500 transition"
-      onClick={() => { scrollToSection(); localStorage.setItem(DISMISSED_KEY, "1"); setVisible(false); }}
+      onClick={() => { scrollToSection(); sessionStorage.setItem(SESSION_KEY, "1"); setVisible(false); }}
     >
       <div className="relative w-10 h-10 rounded-xl overflow-hidden flex-shrink-0 bg-white">
         <Image src="/logo.png" alt="Mesa Basketball" fill className="object-cover" />
