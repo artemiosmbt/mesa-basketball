@@ -157,14 +157,14 @@ export default function VirtualTrainingPage() {
             </p>
           </div>
 
-          <div className="grid gap-8 md:grid-cols-2">
+          <div className="grid gap-8 md:grid-cols-3">
 
             <div className="rounded-2xl border border-brown-700 bg-brown-900/40 px-7 py-8 text-center">
               <p className="font-[family-name:var(--font-fira-cond)] text-2xl font-black tracking-wide text-mesa-accent mb-3">
                 STRUCTURED AROUND YOU.
               </p>
               <p className="text-brown-300 text-sm leading-relaxed">
-                When you join, Artemios places you into an 8-week program based on your current level. Beginner, Intermediate, or Advanced. Each week builds on the last. You show up, he handles the rest.
+                When you join, Artemios places you into a program built around your level. Each week builds on the last. You show up, he handles the rest.
               </p>
             </div>
 
@@ -173,7 +173,7 @@ export default function VirtualTrainingPage() {
                 FEEDBACK DRIVES YOUR PROGRAM.
               </p>
               <p className="text-brown-300 text-sm leading-relaxed">
-                After every drill you leave feedback. Artemios uses that to structure what comes next. Drills you are struggling with stay in rotation. Drills you have locked down move to the background. No two players train the same way.
+                After every drill you leave feedback. Artemios uses that to shape what comes next. No two players train the same way.
               </p>
             </div>
 
@@ -182,16 +182,7 @@ export default function VirtualTrainingPage() {
                 BUILT FROM REAL EXPERIENCE.
               </p>
               <p className="text-brown-300 text-sm leading-relaxed">
-                Every drill, every progression, every coaching cue was built by Artemios. The content comes from competing at the D1 and professional level and working with players every day on the court.
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-brown-700 bg-brown-900/40 px-7 py-8 text-center">
-              <p className="font-[family-name:var(--font-fira-cond)] text-2xl font-black tracking-wide text-mesa-accent mb-3">
-                THE FULL GAME. EVERY SESSION.
-              </p>
-              <p className="text-brown-300 text-sm leading-relaxed">
-                Each workout covers Ball Handling, Finishing, Mid Range, and Shooting in one focused hour. You are always developing across the full game, not just one skill over and over.
+                Every drill and progression was built by Artemios from the ground up — drawn from competing at the D1 and professional level.
               </p>
             </div>
 
@@ -201,8 +192,8 @@ export default function VirtualTrainingPage() {
             <p className="font-[family-name:var(--font-fira-cond)] text-2xl font-black tracking-wide text-white mb-2">
               THE MORE YOU TRAIN, THE MORE DIALED IN YOUR PROGRAM GETS.
             </p>
-            <p className="text-brown-400 text-sm max-w-xl mx-auto leading-relaxed">
-              Two players at the same level in the same week will likely get different workouts because their feedback history is different. Artemios structures everything around what you have shown him.
+            <p className="text-brown-400 text-sm max-w-lg mx-auto leading-relaxed">
+              Want to go deeper on a specific skill? The full library is always there. But if you just want to train, your program is ready and waiting.
             </p>
           </div>
         </div>
