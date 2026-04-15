@@ -10,31 +10,34 @@ const plans = [
     name: "Monthly",
     price: "$60",
     period: "/ month",
-    billing: "Billed monthly",
-    perMonth: "$60 / mo",
-    total: null,
-    highlight: false,
+    sub: "Billed monthly",
+    perMonth: null,
     savings: null,
+    savingsVs: null,
+    highlight: false,
+    badge: null,
   },
   {
     name: "6-Month",
-    price: "$50",
-    period: "/ month",
-    billing: "$300 billed every 6 months",
-    perMonth: "$300 total",
-    total: "Save $60 vs monthly",
-    highlight: false,
+    price: "$300",
+    period: "billed every 6 months",
+    sub: "$50 / mo",
+    perMonth: "$50 / mo",
     savings: "Save $60",
+    savingsVs: "vs monthly",
+    highlight: false,
+    badge: "Save $60",
   },
   {
     name: "Yearly",
-    price: "$40",
-    period: "/ month",
-    billing: "$480 billed annually",
-    perMonth: "$480 total",
-    total: "Save $240 vs monthly",
+    price: "$480",
+    period: "billed annually",
+    sub: "$40 / mo — only $1.32 a day",
+    perMonth: "$40 / mo",
+    savings: "Save $240",
+    savingsVs: "vs monthly",
     highlight: true,
-    savings: "Best Value",
+    badge: "Best Value",
   },
 ];
 
@@ -230,52 +233,58 @@ export default function VirtualTrainingPage() {
             <h2 className="font-[family-name:var(--font-fira-cond)] text-4xl font-black tracking-wide">CHOOSE YOUR PLAN</h2>
             <p className="mt-3 text-brown-400 text-sm">All plans include full access. Commit longer, pay less per month.</p>
           </div>
-          <div className="grid gap-6 md:grid-cols-3">
+          <div className="grid gap-6 md:grid-cols-3 items-start">
             {plans.map((plan) => (
               <div
                 key={plan.name}
-                className={`relative rounded-2xl border px-7 py-8 flex flex-col gap-4 ${
+                className={`relative rounded-2xl border flex flex-col gap-4 ${
                   plan.highlight
-                    ? "border-mesa-accent bg-brown-900/60 shadow-lg shadow-mesa-accent/10"
-                    : "border-brown-700 bg-brown-900/30"
+                    ? "border-mesa-accent bg-brown-900/60 shadow-2xl shadow-mesa-accent/20 px-7 py-10 scale-[1.03]"
+                    : "border-brown-700 bg-brown-900/30 px-7 py-8"
                 }`}
               >
-                {plan.highlight && (
-                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-mesa-accent px-4 py-0.5 text-xs font-bold text-white uppercase tracking-wide whitespace-nowrap">
-                    Best Value
+                {plan.badge && (
+                  <div className={`absolute -top-3.5 left-1/2 -translate-x-1/2 rounded-full px-4 py-1 text-xs font-bold uppercase tracking-wide whitespace-nowrap ${
+                    plan.highlight ? "bg-mesa-accent text-white" : "bg-mesa-accent/20 border border-mesa-accent/40 text-mesa-accent"
+                  }`}>
+                    {plan.badge}
                   </div>
                 )}
-                {plan.savings && !plan.highlight && (
-                  <div className="absolute top-4 right-4 rounded-full bg-mesa-accent/20 border border-mesa-accent/40 px-2.5 py-0.5 text-xs font-semibold text-mesa-accent">
-                    {plan.savings}
-                  </div>
-                )}
+
+                {/* Plan name */}
+                <p className="text-xs font-semibold uppercase tracking-widest text-brown-400 mt-1">{plan.name}</p>
+
+                {/* Big price */}
                 <div>
-                  <p className="text-sm font-semibold uppercase tracking-widest text-brown-400 mb-1">{plan.name}</p>
-                  <div className="flex items-end gap-1">
-                    <span className="font-[family-name:var(--font-fira-cond)] text-5xl font-black text-white">{plan.price}</span>
-                    <span className="text-brown-400 text-sm mb-1.5">{plan.period}</span>
+                  <div className="flex items-end gap-1.5">
+                    <span className="font-[family-name:var(--font-fira-cond)] text-6xl font-black text-white leading-none">{plan.price}</span>
                   </div>
-                  <p className="text-mesa-accent text-sm font-semibold mt-1">{plan.perMonth}</p>
-                  <p className="text-brown-500 text-xs mt-0.5">{plan.billing}</p>
-                  {plan.total && (
-                    <p className="text-green-400 text-xs font-semibold mt-1">{plan.total}</p>
+                  <p className="text-brown-500 text-xs mt-1">{plan.period}</p>
+                  <p className={`text-sm font-semibold mt-2 ${plan.highlight ? "text-mesa-accent" : "text-brown-300"}`}>{plan.sub}</p>
+                  {plan.savings && (
+                    <p className="text-green-400 text-xs font-semibold mt-1">{plan.savings} <span className="text-brown-500 font-normal">{plan.savingsVs}</span></p>
                   )}
                 </div>
+
+                {/* Features */}
                 <div className="border-t border-brown-700 pt-4 flex-1">
                   <ul className="space-y-2 text-sm text-brown-300">
                     <li className="flex items-center gap-2"><span className="text-mesa-accent">✓</span> Full library access</li>
                     <li className="flex items-center gap-2"><span className="text-mesa-accent">✓</span> Weekly new content</li>
                     <li className="flex items-center gap-2"><span className="text-mesa-accent">✓</span> All skill levels</li>
                     <li className="flex items-center gap-2"><span className="text-mesa-accent">✓</span> Cancel anytime</li>
+                    {plan.highlight && (
+                      <li className="flex items-center gap-2"><span className="text-mesa-accent">✓</span> <span className="text-white font-semibold">Best rate — locked in for the year</span></li>
+                    )}
                   </ul>
                 </div>
+
                 <button
                   disabled
-                  className={`mt-2 w-full rounded-lg py-3 font-semibold text-sm transition ${
+                  className={`mt-2 w-full rounded-lg py-3 font-semibold text-sm transition cursor-not-allowed ${
                     plan.highlight
-                      ? "bg-mesa-accent text-white opacity-60 cursor-not-allowed"
-                      : "border border-brown-600 text-brown-400 opacity-60 cursor-not-allowed"
+                      ? "bg-mesa-accent text-white opacity-70"
+                      : "border border-brown-600 text-brown-400 opacity-60"
                   }`}
                 >
                   Coming Soon
