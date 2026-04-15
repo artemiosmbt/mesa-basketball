@@ -170,10 +170,10 @@ export default function VirtualTrainingPage() {
 
             <div className="rounded-2xl border border-brown-700 bg-brown-900/40 px-7 py-8 text-center">
               <p className="font-[family-name:var(--font-fira-cond)] text-2xl font-black tracking-wide text-mesa-accent mb-3">
-                YOUR FEEDBACK SHAPES YOUR PROGRAM.
+                FEEDBACK DRIVES YOUR PROGRAM.
               </p>
               <p className="text-brown-300 text-sm leading-relaxed">
-                After every drill you rate it — <span className="text-white font-semibold">Need More Work</span>, <span className="text-white font-semibold">Got It</span>, or <span className="text-white font-semibold">Too Easy</span>. Artemios uses that to structure what comes next. Drills you are struggling with stay in rotation. Drills you have locked down move to the background. No two players train the same way.
+                After every drill you leave feedback. Artemios uses that to structure what comes next. Drills you are struggling with stay in rotation. Drills you have locked down move to the background. No two players train the same way.
               </p>
             </div>
 
