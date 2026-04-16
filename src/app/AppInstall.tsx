@@ -89,6 +89,12 @@ export function AppInstallSection() {
     setHidden(false);
   }, []);
 
+  useEffect(() => {
+    if (!hidden && window.location.hash === "#app-install") {
+      document.getElementById("app-install")?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [hidden]);
+
   if (hidden) return null;
 
   return (
