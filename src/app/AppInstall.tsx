@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import { useEffect, useState } from "react";
+import { useRouter, usePathname } from "next/navigation";
 
 type DeviceType = "ios" | "android" | "desktop" | null;
 
@@ -23,9 +24,6 @@ function isStandalone(): boolean {
 
 const SESSION_KEY = "mesa_app_banner_dismissed";
 
-function scrollToSection() {
-  document.getElementById("app-install")?.scrollIntoView({ behavior: "smooth" });
-}
 
 const CloseIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -145,6 +143,8 @@ export function AppInstallSection() {
 export function AppInstallBanner() {
   const [visible, setVisible] = useState(false);
   const [device, setDevice] = useState<DeviceType>(null);
+  const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
     if (isStandalone()) return;
@@ -155,6 +155,14 @@ export function AppInstallBanner() {
       setVisible(true);
     }
   }, []);
+
+  function scrollToInstall() {
+    if (pathname === "/") {
+      document.getElementById("app-install")?.scrollIntoView({ behavior: "smooth" });
+    } else {
+      router.push("/#app-install");
+    }
+  }
 
   function dismiss(e: React.MouseEvent) {
     e.stopPropagation();
@@ -168,7 +176,7 @@ export function AppInstallBanner() {
     <div className="fixed bottom-4 left-4 right-4 z-50">
       <div
         className="bg-mesa-accent rounded-2xl shadow-2xl px-4 py-3 flex items-center gap-3 cursor-pointer"
-        onClick={scrollToSection}
+        onClick={scrollToInstall}
       >
         <div className="relative w-10 h-10 rounded-xl overflow-hidden flex-shrink-0 bg-white">
           <Image src="/logo.png" alt="Mesa Basketball" fill className="object-cover" />
@@ -189,6 +197,8 @@ export function AppInstallBanner() {
 
 export function AppInstallDesktopPopup() {
   const [visible, setVisible] = useState(false);
+  const router = useRouter();
+  const pathname = usePathname();
 
   useEffect(() => {
     if (isStandalone()) return;
@@ -197,6 +207,16 @@ export function AppInstallDesktopPopup() {
       setVisible(true);
     }
   }, []);
+
+  function scrollToInstall() {
+    sessionStorage.setItem(SESSION_KEY, "1");
+    setVisible(false);
+    if (pathname === "/") {
+      document.getElementById("app-install")?.scrollIntoView({ behavior: "smooth" });
+    } else {
+      router.push("/#app-install");
+    }
+  }
 
   function dismiss(e: React.MouseEvent) {
     e.stopPropagation();
@@ -209,7 +229,7 @@ export function AppInstallDesktopPopup() {
   return (
     <div
       className="fixed bottom-6 right-6 z-50 bg-mesa-accent rounded-2xl shadow-2xl px-4 py-3 flex items-center gap-3 cursor-pointer max-w-xs hover:brightness-110 transition"
-      onClick={() => { scrollToSection(); sessionStorage.setItem(SESSION_KEY, "1"); setVisible(false); }}
+      onClick={scrollToInstall}
     >
       <div className="relative w-10 h-10 rounded-xl overflow-hidden flex-shrink-0 bg-white">
         <Image src="/logo.png" alt="Mesa Basketball" fill className="object-cover" />
