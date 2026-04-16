@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { useEffect, useState } from "react";
-import { useRouter, usePathname } from "next/navigation";
+import { usePathname } from "next/navigation";
 
 type DeviceType = "ios" | "android" | "desktop" | null;
 
@@ -143,7 +143,6 @@ export function AppInstallSection() {
 export function AppInstallBanner() {
   const [visible, setVisible] = useState(false);
   const [device, setDevice] = useState<DeviceType>(null);
-  const router = useRouter();
   const pathname = usePathname();
 
   useEffect(() => {
@@ -160,7 +159,7 @@ export function AppInstallBanner() {
     if (pathname === "/") {
       document.getElementById("app-install")?.scrollIntoView({ behavior: "smooth" });
     } else {
-      router.push("/#app-install");
+      window.location.href = "/#app-install";
     }
   }
 
@@ -197,7 +196,6 @@ export function AppInstallBanner() {
 
 export function AppInstallDesktopPopup() {
   const [visible, setVisible] = useState(false);
-  const router = useRouter();
   const pathname = usePathname();
 
   useEffect(() => {
@@ -214,7 +212,7 @@ export function AppInstallDesktopPopup() {
     if (pathname === "/") {
       document.getElementById("app-install")?.scrollIntoView({ behavior: "smooth" });
     } else {
-      router.push("/#app-install");
+      window.location.href = "/#app-install";
     }
   }
 
