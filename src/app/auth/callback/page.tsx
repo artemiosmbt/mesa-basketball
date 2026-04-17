@@ -9,47 +9,54 @@ export default function AuthCallbackPage() {
   const [status, setStatus] = useState<"loading" | "error">("loading");
 
   useEffect(() => {
-    async function handleCallback() {
-      const params = new URLSearchParams(window.location.search);
-      const code = params.get("code");
-      const next = params.get("next") ?? "/";
-
-      if (!code) {
-        router.replace("/login?confirm_error=1");
-        return;
-      }
-
-      const { data, error } = await authClient.auth.exchangeCodeForSession(code);
-
-      if (error || !data.session) {
-        setStatus("error");
-        setTimeout(() => router.replace("/login?confirm_error=1"), 2000);
-        return;
-      }
-
-      // Save any pending profile data stored during signup
-      const pending = localStorage.getItem("mesa_pending_profile");
-      if (pending) {
-        try {
-          const profile = JSON.parse(pending);
-          await fetch("/api/profile", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${data.session.access_token}`,
-            },
-            body: JSON.stringify(profile),
-          });
-          localStorage.removeItem("mesa_pending_profile");
-        } catch {
-          // non-critical
-        }
-      }
-
-      router.replace(next);
+    // Check for an error in the hash (e.g. expired link from Supabase)
+    const hashParams = new URLSearchParams(window.location.hash.substring(1));
+    if (hashParams.get("error")) {
+      setStatus("error");
+      setTimeout(() => router.replace("/login?confirm_error=1"), 2000);
+      return;
     }
 
-    handleCallback();
+    // With implicit flow, Supabase auto-processes the hash tokens and fires SIGNED_IN.
+    // We listen for that event, save any pending profile, then redirect to login.
+    const timeoutId = setTimeout(() => {
+      setStatus("error");
+      setTimeout(() => router.replace("/login?confirm_error=1"), 2000);
+    }, 10000);
+
+    const { data: { subscription } } = authClient.auth.onAuthStateChange(
+      async (event, session) => {
+        if ((event === "SIGNED_IN" || event === "TOKEN_REFRESHED") && session) {
+          clearTimeout(timeoutId);
+
+          // Save any pending profile data stored during signup
+          const pending = localStorage.getItem("mesa_pending_profile");
+          if (pending) {
+            try {
+              const profile = JSON.parse(pending);
+              await fetch("/api/profile", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "Authorization": `Bearer ${session.access_token}`,
+                },
+                body: JSON.stringify(profile),
+              });
+              localStorage.removeItem("mesa_pending_profile");
+            } catch {
+              // non-critical
+            }
+          }
+
+          router.replace("/login?confirmed=1");
+        }
+      }
+    );
+
+    return () => {
+      clearTimeout(timeoutId);
+      subscription.unsubscribe();
+    };
   }, [router]);
 
   return (
