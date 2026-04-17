@@ -46,5 +46,12 @@ export async function POST(req: NextRequest) {
     updated_at: new Date().toISOString(),
   });
 
+  // Keep auth display name in sync so it shows in Supabase dashboard
+  if (body.parentName) {
+    await supabase.auth.admin.updateUserById(user.id, {
+      user_metadata: { display_name: body.parentName },
+    });
+  }
+
   return NextResponse.json({ ok: true });
 }
