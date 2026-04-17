@@ -145,7 +145,7 @@ export default function TermsPage() {
                 illness or emergency.
               </li>
               <li>
-                <span className="text-white">No-shows</span> without prior notice are non-refundable.
+                <span className="text-white">No-shows</span> without prior notice will be charged the <strong className="text-white">full session fee</strong> (not a partial fee — the complete amount).
               </li>
               <li>
                 <span className="text-white">Mesa-initiated cancellations</span> (e.g., weather, facility

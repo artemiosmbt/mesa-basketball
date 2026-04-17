@@ -16,6 +16,7 @@ interface Registration {
   session_details: string;
   booked_date: string | null;
   status: string;
+  session_price: number | null;
 }
 
 const TYPE_LABELS: Record<string, string> = {
@@ -48,6 +49,8 @@ export default function AdminPage() {
   const [search, setSearch] = useState("");
   const [cancelling, setCancelling] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [noShowConfirm, setNoShowConfirm] = useState<string | null>(null);
+  const [noShowing, setNoShowing] = useState<string | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [selectedClient, setSelectedClient] = useState<string | null>(null);
 
@@ -91,6 +94,19 @@ export default function AdminPage() {
     });
     setRegistrations((prev) => prev.map((r) => (r.id === id ? { ...r, status: "cancelled" } : r)));
     setCancelling(null);
+  }
+
+  async function markNoShow(id: string) {
+    if (!token) return;
+    setNoShowing(id);
+    setNoShowConfirm(null);
+    await fetch("/api/admin/no-show", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ id }),
+    });
+    setRegistrations((prev) => prev.map((r) => (r.id === id ? { ...r, status: "no_show" } : r)));
+    setNoShowing(null);
   }
 
   const todayMs = new Date().setHours(0, 0, 0, 0);
@@ -168,13 +184,31 @@ export default function AdminPage() {
             </div>
           </div>
           <div className="flex flex-col items-end gap-2 shrink-0">
-            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${r.status === "confirmed" ? "bg-green-900/40 text-green-400" : "bg-red-900/40 text-red-400"}`}>
-              {r.status}
+            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${r.status === "confirmed" ? "bg-green-900/40 text-green-400" : r.status === "no_show" ? "bg-orange-900/40 text-orange-400" : "bg-red-900/40 text-red-400"}`}>
+              {r.status === "no_show" ? "no show" : r.status}
             </span>
             {r.status === "confirmed" && (
               <button onClick={() => cancelRegistration(r.id)} disabled={cancelling === r.id} className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50">
                 {cancelling === r.id ? "..." : "Cancel"}
               </button>
+            )}
+            {r.status === "confirmed" && noShowConfirm !== r.id && (
+              <button onClick={() => setNoShowConfirm(r.id)} disabled={noShowing === r.id} className="text-xs text-orange-400 hover:text-orange-300 transition disabled:opacity-50">
+                No Show
+              </button>
+            )}
+            {r.status === "confirmed" && noShowConfirm === r.id && (
+              <div className="flex flex-col items-end gap-1">
+                <span className="text-xs text-orange-300 font-semibold">Are you sure?</span>
+                <div className="flex gap-2">
+                  <button onClick={() => markNoShow(r.id)} disabled={noShowing === r.id} className="text-xs text-orange-400 hover:text-orange-300 font-semibold transition disabled:opacity-50">
+                    {noShowing === r.id ? "..." : "Yes"}
+                  </button>
+                  <button onClick={() => setNoShowConfirm(null)} className="text-xs text-brown-500 hover:text-brown-300 transition">
+                    Cancel
+                  </button>
+                </div>
+              </div>
             )}
             {showDelete && (
               <button onClick={() => deleteRegistration(r.id)} disabled={deleting === r.id} className="text-xs text-brown-600 hover:text-red-500 transition disabled:opacity-50">
@@ -207,13 +241,34 @@ export default function AdminPage() {
               <div className="whitespace-pre-line leading-relaxed">{r.session_details ? r.session_details.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim() : "—"}</div>
             </td>
             <td className="px-4 py-3 whitespace-nowrap">
-              <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${r.status === "confirmed" ? "bg-green-900/40 text-green-400" : "bg-red-900/40 text-red-400"}`}>{r.status}</span>
+              <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${r.status === "confirmed" ? "bg-green-900/40 text-green-400" : r.status === "no_show" ? "bg-orange-900/40 text-orange-400" : "bg-red-900/40 text-red-400"}`}>
+                {r.status === "no_show" ? "no show" : r.status}
+              </span>
             </td>
             <td className="px-4 py-3">
               {r.status === "confirmed" && (
-                <button onClick={() => cancelRegistration(r.id)} disabled={cancelling === r.id} className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50">
-                  {cancelling === r.id ? "..." : "Cancel"}
-                </button>
+                <div className="flex flex-col gap-1">
+                  <button onClick={() => cancelRegistration(r.id)} disabled={cancelling === r.id} className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50">
+                    {cancelling === r.id ? "..." : "Cancel"}
+                  </button>
+                  {noShowConfirm !== r.id ? (
+                    <button onClick={() => setNoShowConfirm(r.id)} disabled={noShowing === r.id} className="text-xs text-orange-400 hover:text-orange-300 transition disabled:opacity-50">
+                      No Show
+                    </button>
+                  ) : (
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-xs text-orange-300 font-semibold">Are you sure?</span>
+                      <div className="flex gap-2">
+                        <button onClick={() => markNoShow(r.id)} disabled={noShowing === r.id} className="text-xs text-orange-400 hover:text-orange-300 font-semibold transition disabled:opacity-50">
+                          {noShowing === r.id ? "..." : "Yes"}
+                        </button>
+                        <button onClick={() => setNoShowConfirm(null)} className="text-xs text-brown-500 hover:text-brown-300 transition">
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               )}
             </td>
           </tr>

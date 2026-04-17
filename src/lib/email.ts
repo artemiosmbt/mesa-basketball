@@ -100,7 +100,7 @@ export async function sendRegistrationNotification(data: {
 
   const paymentNote = isPackageBooking || data.isFree
     ? ""
-    : "<p>Payment is due upon registration via Zelle (<strong>artemios@mesabasketballtraining.com</strong>), Cash, or Venmo (<strong>@Artemios-Gavalas</strong>). Please provide at least 48 hours' notice if you need to cancel or reschedule a session. Rescheduling or canceling within 48 hours of the scheduled session will result in a 50% charge of the session fee.</p>";
+    : "<p>Payment is due upon registration via Zelle (<strong>artemios@mesabasketballtraining.com</strong>), Cash, or Venmo (<strong>@Artemios-Gavalas</strong>). Please provide at least 48 hours' notice if you need to cancel or reschedule a session. Rescheduling or canceling within 48 hours of the scheduled session will result in a 50% charge of the session fee. <strong>No-shows without prior notice will be charged the full session fee.</strong></p>";
 
   const discountedPrice = data.type === "group-private" ? 125 : 75;
   const freeNote = !isPackageBooking && data.isFree && data.isFirstTime
@@ -216,6 +216,57 @@ export async function sendCancellationNotification(data: {
   });
 }
 
+export async function sendNoShowNotification(data: {
+  parentName: string;
+  email: string;
+  sessionDetails: string;
+  sessionType?: string;
+  feeAmount: number;
+}) {
+  const resend = getResend();
+
+  // Email to Artemi
+  await resend.emails.send({
+    from: FROM_EMAIL,
+    to: ARTEMI_EMAIL,
+    subject: `No-Show: ${data.parentName}`,
+    html: `
+      <h2>No-Show Recorded</h2>
+      <p><strong>Parent:</strong> ${data.parentName}</p>
+      <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails)}</p>
+      <p><strong>Full fee due:</strong> $${data.feeAmount}</p>
+    `,
+  });
+
+  // Email to parent
+  await resend.emails.send({
+    from: FROM_EMAIL,
+    to: data.email,
+    replyTo: ARTEMI_EMAIL,
+    subject: `No-Show — Session Fee Due — Mesa Basketball Training`,
+    html: `
+      <h2>No-Show on File</h2>
+      <p>Hi ${data.parentName},</p>
+      <p>You were marked as a <strong>no-show</strong> for the following session:</p>
+      <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails)}</p>
+      <p style="background: #3b1515; color: #fca5a5; padding: 14px; border-radius: 8px; margin: 12px 0;">
+        Per our policy, <strong>no-shows without prior notice are charged the full session fee</strong>.<br/>
+        <strong>Amount due: $${data.feeAmount}</strong>
+      </p>
+      <p>Please send payment via:</p>
+      <ul>
+        <li><strong>Zelle:</strong> artemios@mesabasketballtraining.com</li>
+        <li><strong>Venmo:</strong> @Artemios-Gavalas</li>
+        <li><strong>Cash</strong> at your next session</li>
+      </ul>
+      <p>If you believe this was marked in error, please reply to this email or contact Artemios directly.</p>
+      <br/>
+      <p>Questions? Contact Artemios at (631) 599-1280 or <a href="mailto:artemios@mesabasketballtraining.com">artemios@mesabasketballtraining.com</a>.</p>
+      <p>— Mesa Basketball Training</p>
+    `,
+  });
+}
+
 function formatMonthYear(monthYear: string): string {
   const [year, month] = monthYear.split("-");
   const d = new Date(parseInt(year), parseInt(month) - 1, 1);
@@ -279,7 +330,7 @@ export async function sendPackageConfirmation(data: {
       <h3>Payment</h3>
       <p>Payment is due upon registration: <strong>Cash, Venmo (@Artemios-Gavalas), or Zelle (artemios@mesabasketballtraining.com)</strong>.</p>
       <h3>Cancellation &amp; Rescheduling Policy</h3>
-      <p>Cancellations and reschedules within 48 hours of a scheduled session incur a <strong>$75 fee</strong> (50% of the standard $150 private rate).</p>
+      <p>Cancellations and reschedules within 48 hours of a scheduled session incur a <strong>$75 fee</strong> (50% of the standard $150 private rate). <strong>No-shows without prior notice will be charged the full session fee.</strong></p>
       <h3>Track Your Sessions</h3>
       <p><a href="${BASE_URL}/my-bookings" style="color: #d4af37; font-weight: bold;">View My Bookings</a> — check how many sessions you've used this month.</p>
       <br/>
