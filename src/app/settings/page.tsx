@@ -286,23 +286,24 @@ export default function SettingsPage() {
             </button>
           </div>
 
-          {/* Referral Code */}
-          <div className="bg-brown-900/40 border border-brown-700 rounded-xl px-4 sm:px-6 py-6 space-y-3">
-            <h2 className="text-xs font-semibold uppercase tracking-widest text-mesa-accent">Referral Code</h2>
-            <p className="text-xs text-brown-400">Share this code with friends and family. When they register for the first time and enter your code, you both get credit toward a free session.</p>
-            <div>
-              <label className="block text-xs font-semibold uppercase tracking-widest text-brown-400 mb-1.5">Your Code</label>
-              <input
-                type="text"
-                value={referralCode}
-                onChange={(e) => { setReferralCode(e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, "")); setReferralCodeError(""); }}
-                placeholder="Auto-generated on first save"
-                className="w-full rounded-lg border border-brown-700 bg-brown-800/60 px-4 py-2.5 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none font-mono tracking-wider"
-              />
-              {referralCodeError && <p className="mt-1 text-xs text-red-400">{referralCodeError}</p>}
-              <p className="mt-1 text-xs text-brown-600">Letters, numbers, and hyphens only. Leave blank to keep your current code.</p>
+          {/* Referral Code — admin only */}
+          {userEmail === "artemios@mesabasketballtraining.com" && (
+            <div className="bg-brown-900/40 border border-brown-700 rounded-xl px-4 sm:px-6 py-6 space-y-3">
+              <h2 className="text-xs font-semibold uppercase tracking-widest text-mesa-accent">Referral Code</h2>
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-widest text-brown-400 mb-1.5">Your Code</label>
+                <input
+                  type="text"
+                  value={referralCode}
+                  onChange={(e) => { setReferralCode(e.target.value.toUpperCase().replace(/[^A-Z0-9-]/g, "")); setReferralCodeError(""); }}
+                  placeholder="Auto-generated on first save"
+                  className="w-full rounded-lg border border-brown-700 bg-brown-800/60 px-4 py-2.5 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none font-mono tracking-wider"
+                />
+                {referralCodeError && <p className="mt-1 text-xs text-red-400">{referralCodeError}</p>}
+                <p className="mt-1 text-xs text-brown-600">Letters, numbers, and hyphens only. Leave blank to keep your current code.</p>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Preferences */}
           <div className="bg-brown-900/40 border border-brown-700 rounded-xl px-4 sm:px-6 py-6 space-y-4">

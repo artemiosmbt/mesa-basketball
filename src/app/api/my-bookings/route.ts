@@ -3,6 +3,7 @@ import {
   getRegistrationsByEmail,
   getReferralCredits,
   generateReferralCode,
+  getProfileReferralCode,
   getActivePackage,
 } from "@/lib/supabase";
 
@@ -19,14 +20,16 @@ export async function POST(req: NextRequest) {
 
   try {
     const currentMonthYear = new Date().toISOString().substring(0, 7); // "2026-03"
-    const [registrations, referralCredits, activePackage] = await Promise.all([
+    const [registrations, referralCredits, activePackage, profileCode] = await Promise.all([
       getRegistrationsByEmail(email),
       getReferralCredits(email).catch(() => 0),
       getActivePackage(email, currentMonthYear).catch(() => null),
+      getProfileReferralCode(email).catch(() => null),
     ]);
 
-    // Get referral code from most recent registration, or generate one (fall back to email username)
+    // Profile is source of truth; fall back to registrations, then generate from name
     const referralCode =
+      profileCode ||
       registrations.find((r) => r.referral_code)?.referral_code ||
       generateReferralCode(
         registrations.length > 0 ? registrations[0].parent_name : email.split("@")[0]
