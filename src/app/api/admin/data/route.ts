@@ -23,10 +23,10 @@ export async function GET(req: NextRequest) {
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
 
-  const { data: registrations } = await supabase
-    .from("registrations")
-    .select("*")
-    .order("created_at", { ascending: false });
+  const [{ data: registrations }, { data: profiles }] = await Promise.all([
+    supabase.from("registrations").select("*").order("created_at", { ascending: false }),
+    supabase.from("profiles").select("email, video_consent"),
+  ]);
 
-  return NextResponse.json({ registrations: registrations || [] });
+  return NextResponse.json({ registrations: registrations || [], profiles: profiles || [] });
 }

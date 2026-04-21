@@ -67,6 +67,7 @@ export async function POST(req: NextRequest) {
     kids: body.kids || [],
     marketing_emails: body.marketingEmails ?? true,
     sms_consent: body.smsConsent ?? true,
+    video_consent: body.videoConsent ?? true,
     updated_at: new Date().toISOString(),
   };
   if (referralCodeToSave) upsertData.referral_code = referralCodeToSave;

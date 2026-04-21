@@ -59,6 +59,7 @@ export default function SignupPage() {
   const [kids, setKids] = useState([{ name: "", dob: "", grade: "", gender: "" }]);
   const [smsConsent, setSmsConsent] = useState(false);
   const [marketingEmails, setMarketingEmails] = useState(true);
+  const [videoConsent, setVideoConsent] = useState(true);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
@@ -112,13 +113,13 @@ export default function SignupPage() {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ parentName, phone, kids, smsConsent, marketingEmails }),
+        body: JSON.stringify({ parentName, phone, kids, smsConsent, marketingEmails, videoConsent }),
       });
       const next = new URLSearchParams(window.location.search).get("next");
       router.push(next || "/");
     } else {
       // Email confirmation required — stash profile data so login page can save it after confirm
-      localStorage.setItem("mesa_pending_profile", JSON.stringify({ parentName, phone, kids, smsConsent, marketingEmails }));
+      localStorage.setItem("mesa_pending_profile", JSON.stringify({ parentName, phone, kids, smsConsent, marketingEmails, videoConsent }));
       setConfirmed(true);
       setLoading(false);
     }
@@ -326,6 +327,17 @@ export default function SignupPage() {
               />
               <span className="text-xs text-brown-400 leading-relaxed">
                 I agree to receive emails about new sessions, camps, promotions, and updates from Mesa Basketball Training.
+              </span>
+            </label>
+            <label className="flex items-start gap-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={videoConsent}
+                onChange={(e) => setVideoConsent(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-brown-600 accent-mesa-accent"
+              />
+              <span className="text-xs text-brown-400 leading-relaxed">
+                I consent to Mesa Basketball Training photographing or filming my athlete during training sessions for use in promotional materials, including social media.
               </span>
             </label>
           </div>

@@ -44,6 +44,7 @@ export default function AdminPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [registrations, setRegistrations] = useState<Registration[]>([]);
+  const [videoConsentMap, setVideoConsentMap] = useState<Record<string, boolean>>({});
   const [tab, setTab] = useState<"upcoming" | "past" | "clients">("upcoming");
   const [typeFilter, setTypeFilter] = useState("all");
   const [search, setSearch] = useState("");
@@ -65,7 +66,14 @@ export default function AdminPage() {
         headers: { Authorization: `Bearer ${session.access_token}` },
       })
         .then((r) => r.json())
-        .then((data) => setRegistrations(data.registrations || []))
+        .then((data) => {
+          setRegistrations(data.registrations || []);
+          const map: Record<string, boolean> = {};
+          for (const p of (data.profiles || [])) {
+            if (p.email) map[p.email] = p.video_consent ?? true;
+          }
+          setVideoConsentMap(map);
+        })
         .finally(() => setLoading(false));
     });
   }, [router]);
@@ -125,7 +133,7 @@ export default function AdminPage() {
 
   // Unique clients sorted by name
   const clients = useMemo(() => {
-    const map = new Map<string, { name: string; email: string; phone: string; kids: string; count: number; lastDate: number }>();
+    const map = new Map<string, { name: string; email: string; phone: string; kids: string; count: number; lastDate: number; videoConsent: boolean | null }>();
     for (const r of registrations) {
       const key = r.email || r.parent_name;
       const existing = map.get(key);
@@ -134,11 +142,12 @@ export default function AdminPage() {
         existing.count++;
         if (d > existing.lastDate) existing.lastDate = d;
       } else {
-        map.set(key, { name: r.parent_name, email: r.email, phone: r.phone, kids: athleteNames(r.kids || ""), count: 1, lastDate: d });
+        const vc = r.email && r.email in videoConsentMap ? videoConsentMap[r.email] : null;
+        map.set(key, { name: r.parent_name, email: r.email, phone: r.phone, kids: athleteNames(r.kids || ""), count: 1, lastDate: d, videoConsent: vc });
       }
     }
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
-  }, [registrations]);
+  }, [registrations, videoConsentMap]);
 
   const clientRegistrations = useMemo(() => {
     if (!selectedClient) return [];
@@ -499,9 +508,14 @@ export default function AdminPage() {
                       <span className="truncate">{c.email}</span>
                     </div>
                   </div>
-                  <div className="shrink-0 text-right">
+                  <div className="shrink-0 text-right space-y-1">
                     <div className="text-mesa-accent font-bold text-sm">{c.count}</div>
                     <div className="text-xs text-brown-500">session{c.count !== 1 ? "s" : ""}</div>
+                    {c.videoConsent !== null && (
+                      <div className={`rounded-full px-2 py-0.5 text-xs font-medium ${c.videoConsent ? "bg-green-900/40 text-green-400" : "bg-red-900/40 text-red-400"}`}>
+                        {c.videoConsent ? "filming ✓" : "no filming"}
+                      </div>
+                    )}
                   </div>
                 </div>
               </button>
