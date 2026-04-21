@@ -56,7 +56,7 @@ export default function SignupPage() {
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [kids, setKids] = useState([{ name: "", dob: "", grade: "" }]);
+  const [kids, setKids] = useState([{ name: "", dob: "", grade: "", gender: "" }]);
   const [smsConsent, setSmsConsent] = useState(false);
   const [marketingEmails, setMarketingEmails] = useState(true);
   const [error, setError] = useState("");
@@ -66,7 +66,7 @@ export default function SignupPage() {
   const router = useRouter();
 
   function addKid() {
-    setKids((prev) => [...prev, { name: "", dob: "", grade: "" }]);
+    setKids((prev) => [...prev, { name: "", dob: "", grade: "", gender: "" }]);
   }
 
   function removeKid(i: number) {
@@ -250,7 +250,7 @@ export default function SignupPage() {
                       <button type="button" onClick={() => removeKid(i)} className="text-xs text-red-400 hover:text-red-300">Remove</button>
                     )}
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <div>
                       <label className="mb-1 block text-xs text-brown-400">Name</label>
                       <input
@@ -276,6 +276,20 @@ export default function SignupPage() {
                         {ALL_GRADES.map((g) => (
                           <option key={g.value} value={g.value}>{g.label}</option>
                         ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs text-brown-400">Gender</label>
+                      <select
+                        value={kid.gender}
+                        onChange={(e) => updateKid(i, "gender", e.target.value)}
+                        className="w-full rounded-lg border border-brown-700 bg-brown-800/60 px-3 py-2 text-sm text-white focus:border-mesa-accent focus:outline-none"
+                      >
+                        <option value="">Select gender...</option>
+                        <option value="Male">Male</option>
+                        <option value="Female">Female</option>
+                        <option value="Other">Other</option>
+                        <option value="Prefer not to say">Prefer not to say</option>
                       </select>
                     </div>
                   </div>
