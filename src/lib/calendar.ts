@@ -460,7 +460,12 @@ export async function upsertGroupSessionCalendarEvent(
   const existing = await findExistingEvent(calendarId, token, params.bookedDate, tag);
 
   if (existing) {
-    await patchEvent(calendarId, token, existing.id, { summary, description });
+    if (totalSignedUp === 0) {
+      // Last registration cancelled — remove the event entirely
+      await deleteEvent(calendarId, token, existing.id);
+    } else {
+      await patchEvent(calendarId, token, existing.id, { summary, description });
+    }
   } else if (totalSignedUp > 0) {
     // Only create a new event if someone is actually registered — avoids
     // re-creating events the user deleted because no one showed up.
