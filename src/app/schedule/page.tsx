@@ -983,6 +983,21 @@ export default function Home() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+
+    // Explicit validation — browser native required is unreliable across devices
+    if (!parentName.trim() || !email.trim() || !phone.trim()) {
+      setSubmitResult({ success: false, message: "Please fill in your name, email, and phone number." });
+      return;
+    }
+    for (let i = 0; i < kids.length; i++) {
+      const k = kids[i];
+      const label = kids.length > 1 ? ` for Athlete ${i + 1}` : "";
+      if (!k.name.trim()) { setSubmitResult({ success: false, message: `Please enter the player's name${label}.` }); return; }
+      if (!k.dob || k.dob.replace(/\D/g, "").length < 8) { setSubmitResult({ success: false, message: `Please enter a valid date of birth${label}.` }); return; }
+      if (!k.grade) { setSubmitResult({ success: false, message: `Please select a grade${label}.` }); return; }
+      if (!k.gender) { setSubmitResult({ success: false, message: `Please select a gender${label}.` }); return; }
+    }
+
     const sessionGender = getModalSessionGender();
     if (sessionGender) {
       const hasMismatch = kids.some((k) =>
