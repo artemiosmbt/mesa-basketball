@@ -168,55 +168,100 @@ export default function AdminPage() {
   }), [registrations]);
 
   function RegCard({ r, showDelete = false }: { r: Registration; showDelete?: boolean }) {
+    const [expanded, setExpanded] = useState(false);
+    const fullSession = r.session_details
+      ? r.session_details.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim()
+      : "—";
     return (
-      <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-3">
-        <div className="flex items-start justify-between gap-2">
+      <div className="rounded-xl border border-brown-700 bg-brown-900/40 overflow-hidden">
+        {/* Tappable summary row */}
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="w-full text-left px-4 py-3 flex items-start justify-between gap-2"
+        >
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
               <span className="font-medium text-sm">{r.parent_name}</span>
               <span className="rounded-full bg-brown-800 px-2 py-0.5 text-xs text-mesa-accent">{TYPE_LABELS[r.type] || r.type}</span>
+              <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${r.status === "confirmed" ? "bg-green-900/40 text-green-400" : r.status === "no_show" ? "bg-orange-900/40 text-orange-400" : "bg-red-900/40 text-red-400"}`}>
+                {r.status === "no_show" ? "no show" : r.status}
+              </span>
             </div>
             <div className="text-xs text-brown-300 mt-0.5 truncate">{athleteNames(r.kids || "")}</div>
-            <div className="text-xs text-brown-400 mt-0.5 truncate">{sessionText(r.session_details)}</div>
             <div className="flex flex-wrap gap-x-3 mt-1 text-xs text-brown-500">
               {r.booked_date && <span className="text-mesa-accent">{r.booked_date}</span>}
               <span>{r.phone}</span>
             </div>
           </div>
-          <div className="flex flex-col items-end gap-2 shrink-0">
-            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${r.status === "confirmed" ? "bg-green-900/40 text-green-400" : r.status === "no_show" ? "bg-orange-900/40 text-orange-400" : "bg-red-900/40 text-red-400"}`}>
-              {r.status === "no_show" ? "no show" : r.status}
-            </span>
-            {r.status === "confirmed" && (
-              <button onClick={() => cancelRegistration(r.id)} disabled={cancelling === r.id} className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50">
-                {cancelling === r.id ? "..." : "Cancel"}
-              </button>
-            )}
-            {r.status === "confirmed" && noShowConfirm !== r.id && (
-              <button onClick={() => setNoShowConfirm(r.id)} disabled={noShowing === r.id} className="text-xs text-orange-400 hover:text-orange-300 transition disabled:opacity-50">
-                No Show
-              </button>
-            )}
-            {r.status === "confirmed" && noShowConfirm === r.id && (
-              <div className="flex flex-col items-end gap-1">
-                <span className="text-xs text-orange-300 font-semibold">Are you sure?</span>
-                <div className="flex gap-2">
-                  <button onClick={() => markNoShow(r.id)} disabled={noShowing === r.id} className="text-xs text-orange-400 hover:text-orange-300 font-semibold transition disabled:opacity-50">
-                    {noShowing === r.id ? "..." : "Yes"}
+          <span className={`shrink-0 mt-0.5 text-brown-500 transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}>
+            ▾
+          </span>
+        </button>
+
+        {/* Expanded detail */}
+        {expanded && (
+          <div className="border-t border-brown-700 px-4 py-3 space-y-3 text-xs">
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+              <div>
+                <p className="text-brown-500 uppercase tracking-wider mb-0.5">Email</p>
+                <p className="text-brown-200 break-all">{r.email || "—"}</p>
+              </div>
+              <div>
+                <p className="text-brown-500 uppercase tracking-wider mb-0.5">Phone</p>
+                <p className="text-brown-200">{r.phone || "—"}</p>
+              </div>
+              <div>
+                <p className="text-brown-500 uppercase tracking-wider mb-0.5">Registered</p>
+                <p className="text-brown-200">{new Date(r.created_at).toLocaleDateString()}</p>
+              </div>
+              <div>
+                <p className="text-brown-500 uppercase tracking-wider mb-0.5">Session Date</p>
+                <p className="text-mesa-accent font-medium">{r.booked_date || "—"}</p>
+              </div>
+            </div>
+            <div>
+              <p className="text-brown-500 uppercase tracking-wider mb-0.5">Athletes</p>
+              <p className="text-brown-200">{r.kids ? r.kids.split(",").map((k) => k.trim()).join("\n") : "—"}</p>
+            </div>
+            <div>
+              <p className="text-brown-500 uppercase tracking-wider mb-0.5">Session Details</p>
+              <p className="text-brown-200 whitespace-pre-line leading-relaxed">{fullSession}</p>
+            </div>
+
+            {/* Actions */}
+            {(r.status === "confirmed" || showDelete) && (
+              <div className="flex flex-wrap gap-3 pt-1 border-t border-brown-800">
+                {r.status === "confirmed" && (
+                  <button onClick={() => cancelRegistration(r.id)} disabled={cancelling === r.id} className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50">
+                    {cancelling === r.id ? "Cancelling..." : "Cancel"}
                   </button>
-                  <button onClick={() => setNoShowConfirm(null)} className="text-xs text-brown-500 hover:text-brown-300 transition">
-                    Cancel
+                )}
+                {r.status === "confirmed" && noShowConfirm !== r.id && (
+                  <button onClick={() => setNoShowConfirm(r.id)} disabled={noShowing === r.id} className="text-xs text-orange-400 hover:text-orange-300 transition disabled:opacity-50">
+                    No Show
                   </button>
-                </div>
+                )}
+                {r.status === "confirmed" && noShowConfirm === r.id && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-orange-300 font-semibold">Sure?</span>
+                    <button onClick={() => markNoShow(r.id)} disabled={noShowing === r.id} className="text-xs text-orange-400 hover:text-orange-300 font-semibold transition disabled:opacity-50">
+                      {noShowing === r.id ? "..." : "Yes"}
+                    </button>
+                    <button onClick={() => setNoShowConfirm(null)} className="text-xs text-brown-500 hover:text-brown-300 transition">
+                      No
+                    </button>
+                  </div>
+                )}
+                {showDelete && (
+                  <button onClick={() => deleteRegistration(r.id)} disabled={deleting === r.id} className="text-xs text-brown-600 hover:text-red-500 transition disabled:opacity-50">
+                    {deleting === r.id ? "Deleting..." : "Delete"}
+                  </button>
+                )}
               </div>
             )}
-            {showDelete && (
-              <button onClick={() => deleteRegistration(r.id)} disabled={deleting === r.id} className="text-xs text-brown-600 hover:text-red-500 transition disabled:opacity-50">
-                {deleting === r.id ? "..." : "Delete"}
-              </button>
-            )}
           </div>
-        </div>
+        )}
       </div>
     );
   }
