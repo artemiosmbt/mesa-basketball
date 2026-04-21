@@ -248,26 +248,40 @@ export async function isNewClient(email: string, phone: string): Promise<boolean
   return true;
 }
 
-/** Look up the email of the family that owns a referral code */
+/** Look up the email of the family that owns a referral code (checks profiles first, then registrations) */
 export async function findReferrerByCode(code: string): Promise<string | null> {
   const supabase = getSupabase();
+  const upper = code.toUpperCase();
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("email")
+    .eq("referral_code", upper)
+    .maybeSingle();
+  if (profile?.email) return profile.email;
   const { data, error } = await supabase
     .from("registrations")
     .select("email")
-    .eq("referral_code", code.toUpperCase())
+    .eq("referral_code", upper)
     .limit(1)
     .single();
   if (error || !data) return null;
   return data.email;
 }
 
-/** Look up the name and email of the family that owns a referral code */
+/** Look up the name and email of the family that owns a referral code (checks profiles first, then registrations) */
 export async function findReferrerInfoByCode(code: string): Promise<{ email: string; name: string } | null> {
   const supabase = getSupabase();
+  const upper = code.toUpperCase();
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("email, parent_name")
+    .eq("referral_code", upper)
+    .maybeSingle();
+  if (profile?.email) return { email: profile.email, name: profile.parent_name || "" };
   const { data, error } = await supabase
     .from("registrations")
     .select("email, parent_name")
-    .eq("referral_code", code.toUpperCase())
+    .eq("referral_code", upper)
     .limit(1)
     .single();
   if (error || !data) return null;
@@ -281,15 +295,54 @@ export function generateReferralCode(parentName: string): string {
   return `${lastName}-MESA`;
 }
 
+/** Get the referral code stored in a user's profile, if any */
+export async function getProfileReferralCode(email: string): Promise<string | null> {
+  const supabase = getSupabase();
+  const { data } = await supabase
+    .from("profiles")
+    .select("referral_code")
+    .eq("email", email)
+    .maybeSingle();
+  return data?.referral_code || null;
+}
+
+/** Check if a referral code is already taken by a different email */
+export async function isReferralCodeTaken(code: string, excludeEmail: string): Promise<boolean> {
+  const supabase = getSupabase();
+  const upper = code.toUpperCase();
+  // Check profiles table
+  const { data: profileMatch } = await supabase
+    .from("profiles")
+    .select("email")
+    .eq("referral_code", upper)
+    .neq("email", excludeEmail)
+    .maybeSingle();
+  if (profileMatch) return true;
+  // Fall back to registrations (legacy codes not yet in profiles)
+  const { data: regMatch } = await supabase
+    .from("registrations")
+    .select("email")
+    .eq("referral_code", upper)
+    .neq("email", excludeEmail)
+    .limit(1)
+    .maybeSingle();
+  return !!regMatch;
+}
+
 /**
- * Generate a unique referral code for a family at registration time.
- * If SMITH-MESA is already taken by another email, tries SMITH-MESA2, SMITH-MESA3, etc.
- * If this email already has a stored code, returns it unchanged.
+ * Generate a unique referral code for a family.
+ * Priority: profile-stored code → registrations-stored code → generate from profile name → generate from parentName arg.
+ * The name used for generation is always the profile's stored name (not the booking form name),
+ * so booking on behalf of someone else never changes your own code.
  */
 export async function generateUniqueReferralCode(parentName: string, email: string): Promise<string> {
   const supabase = getSupabase();
 
-  // If this email already has a code, reuse it
+  // 1. Check profiles table first (source of truth)
+  const profileCode = await getProfileReferralCode(email);
+  if (profileCode) return profileCode;
+
+  // 2. Fall back to registrations for accounts that existed before profiles had referral_code
   const { data: existing } = await supabase
     .from("registrations")
     .select("referral_code")
@@ -300,19 +353,20 @@ export async function generateUniqueReferralCode(parentName: string, email: stri
 
   if (existing?.referral_code) return existing.referral_code;
 
-  const base = generateReferralCode(parentName);
+  // 3. Generate from the profile's stored name (not the booking form name)
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("parent_name")
+    .eq("email", email)
+    .maybeSingle();
+
+  const nameToUse = profile?.parent_name || parentName;
+  const base = generateReferralCode(nameToUse);
   let code = base;
   let suffix = 2;
 
   while (true) {
-    const { data: taken } = await supabase
-      .from("registrations")
-      .select("email")
-      .eq("referral_code", code)
-      .neq("email", email)
-      .limit(1)
-      .maybeSingle();
-
+    const taken = await isReferralCodeTaken(code, email);
     if (!taken) return code;
     code = `${base}${suffix}`;
     suffix++;

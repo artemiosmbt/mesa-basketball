@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { generateUniqueReferralCode, isReferralCodeTaken } from "@/lib/supabase";
 
 function getSupabaseAdmin() {
   return createClient(
@@ -35,7 +36,30 @@ export async function POST(req: NextRequest) {
   const body = await req.json();
   const supabase = getSupabaseAdmin();
 
-  await supabase.from("profiles").upsert({
+  // Handle referral code update
+  let referralCodeToSave: string | undefined;
+  if (body.referralCode !== undefined) {
+    const requested = (body.referralCode as string).toUpperCase().replace(/[^A-Z0-9-]/g, "");
+    if (requested) {
+      const taken = await isReferralCodeTaken(requested, user.email!);
+      if (taken) return NextResponse.json({ error: "That referral code is already taken." }, { status: 409 });
+      referralCodeToSave = requested;
+    }
+  }
+
+  // Auto-generate code on first profile save if not already set and name is provided
+  if (!referralCodeToSave && body.parentName) {
+    const { data: existing } = await supabase
+      .from("profiles")
+      .select("referral_code")
+      .eq("id", user.id)
+      .maybeSingle();
+    if (!existing?.referral_code) {
+      referralCodeToSave = await generateUniqueReferralCode(body.parentName, user.email!);
+    }
+  }
+
+  const upsertData: Record<string, unknown> = {
     id: user.id,
     email: user.email,
     parent_name: body.parentName || null,
@@ -44,7 +68,10 @@ export async function POST(req: NextRequest) {
     marketing_emails: body.marketingEmails ?? true,
     sms_consent: body.smsConsent ?? true,
     updated_at: new Date().toISOString(),
-  });
+  };
+  if (referralCodeToSave) upsertData.referral_code = referralCodeToSave;
+
+  await supabase.from("profiles").upsert(upsertData);
 
   // Keep auth display name in sync so it shows in Supabase dashboard
   if (body.parentName) {
