@@ -582,9 +582,13 @@ export default function Home() {
 
     const result: TimeWindow[] = [];
     for (const w of windows) {
-      // Find bookings that overlap this window
+      // Find bookings that overlap this window's time range
       const overlaps = bookedSlots.filter(
-        (b) => b.date === w.date && b.location === w.location
+        (b) =>
+          b.date === w.date &&
+          b.location === w.location &&
+          parseTime(b.startTime) < w.endMins &&
+          parseTime(b.endTime) > w.startMins
       );
       if (overlaps.length === 0) {
         result.push(w);
