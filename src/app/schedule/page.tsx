@@ -205,6 +205,15 @@ interface BookingModal {
   weeklySavings?: number;
 }
 
+function getSessionGender(groupName: string): "boys" | "girls" | null {
+  const name = groupName.toLowerCase();
+  const hasBoys = name.includes("boys");
+  const hasGirls = name.includes("girls");
+  if (hasBoys && !hasGirls) return "boys";
+  if (hasGirls && !hasBoys) return "girls";
+  return null;
+}
+
 // Group weekly sessions by group name
 function groupByGroup(sessions: WeeklySession[]) {
   const groups: Record<string, WeeklySession[]> = {};
@@ -426,7 +435,8 @@ export default function Home() {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [smsConsent, setSmsConsent] = useState(false);
-  const [kids, setKids] = useState([{ name: "", dob: "", grade: "" }]);
+  const [kids, setKids] = useState([{ name: "", dob: "", grade: "", gender: "" }]);
+  const [showGenderWarning, setShowGenderWarning] = useState(false);
   const [isGroupRate, setIsGroupRate] = useState(false);
   const [hideUpsell, setHideUpsell] = useState(false);
   const [filterDays, setFilterDays] = useState<Set<number>>(new Set());
@@ -499,7 +509,7 @@ export default function Home() {
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [authPrompt, setAuthPrompt] = useState(false);
   const [pendingGroupOpen, setPendingGroupOpen] = useState(false);
-  const profileRef = useRef<{ parentName: string; phone: string; kids: { name: string; dob: string; grade: string }[] } | null>(null);
+  const profileRef = useRef<{ parentName: string; phone: string; kids: { name: string; dob: string; grade: string; gender: string }[] } | null>(null);
   const pendingBookingRef = useRef<{
     kind: "modal"; type: BookingType; sessionIndex: number; details: string;
   } | {
@@ -551,8 +561,8 @@ export default function Home() {
           if (profile.email) setEmail(profile.email);
           if (profile.phone) setPhone(profile.phone);
           const normalizedKids = profile.kids?.length
-            ? profile.kids.map((k: { name: string; dob: string; grade: string }) => ({ ...k, dob: normalizeDob(k.dob) }))
-            : [{ name: "", dob: "", grade: "" }];
+            ? profile.kids.map((k: { name: string; dob: string; grade: string; gender?: string }) => ({ gender: "", ...k, dob: normalizeDob(k.dob) }))
+            : [{ name: "", dob: "", grade: "", gender: "" }];
           if (profile.kids?.length) setKids(normalizedKids);
           profileRef.current = {
             parentName: profile.parent_name || "",
@@ -716,7 +726,7 @@ export default function Home() {
     setPhone(profileRef.current?.phone ?? "");
     setSmsConsent(false);
     setShowAllRecurring(false);
-    setKids(profileRef.current?.kids ?? [{ name: "", dob: "", grade: "" }]);
+    setKids(profileRef.current?.kids ?? [{ name: "", dob: "", grade: "", gender: "" }]);
     setIsGroupRate(false);
     setUpsellExtra(0);
     setReferralCode("");
@@ -730,7 +740,7 @@ export default function Home() {
     setPhone(profileRef.current?.phone ?? "");
     setSmsConsent(false);
     setShowAllRecurring(false);
-    setKids(profileRef.current?.kids ?? [{ name: "", dob: "", grade: "" }]);
+    setKids(profileRef.current?.kids ?? [{ name: "", dob: "", grade: "", gender: "" }]);
     setIsGroupRate(false);
     setUpsellExtra(0);
     setReferralCode("");
@@ -751,19 +761,25 @@ export default function Home() {
   }
 
   function addKid() {
-    setKids((k) => [...k, { name: "", dob: "", grade: "" }]);
+    setKids((k) => [...k, { name: "", dob: "", grade: "", gender: "" }]);
   }
 
   function removeKid(i: number) {
     setKids((k) => k.filter((_, idx) => idx !== i));
   }
 
-  function updateKid(i: number, field: "name" | "dob" | "grade", value: string) {
+  function updateKid(i: number, field: "name" | "dob" | "grade" | "gender", value: string) {
     setKids((k) => k.map((kid, idx) => (idx === i ? { ...kid, [field]: value } : kid)));
   }
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  function getModalSessionGender(): "boys" | "girls" | null {
+    if (modal.type === "weekly" && modal.selectedGroupSessions?.length) {
+      return getSessionGender(modal.selectedGroupSessions[0].group);
+    }
+    return null;
+  }
+
+  async function performSubmit() {
     setSubmitting(true);
     setSubmitResult(null);
 
@@ -774,7 +790,7 @@ export default function Home() {
       bookingType = (isGroupRate || totalParticipants >= 4) ? "group-private" : "private";
     }
 
-    const kidsStr = kids.map((k) => `${k.name} (DOB: ${k.dob}, Grade: ${k.grade})`).join(", ");
+    const kidsStr = kids.map((k) => `${k.name} (DOB: ${k.dob}, Grade: ${k.grade}${k.gender ? `, Gender: ${k.gender === "male" ? "Male" : "Female"}` : ""})`).join(", ");
 
     try {
       // Weekly multi-session registration
@@ -965,11 +981,28 @@ export default function Home() {
     }
   }
 
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const sessionGender = getModalSessionGender();
+    if (sessionGender) {
+      const hasMismatch = kids.some((k) =>
+        k.gender &&
+        ((sessionGender === "boys" && k.gender === "female") ||
+          (sessionGender === "girls" && k.gender === "male"))
+      );
+      if (hasMismatch) {
+        setShowGenderWarning(true);
+        return;
+      }
+    }
+    await performSubmit();
+  }
+
   async function handlePackageSubmit(e: React.FormEvent) {
     e.preventDefault();
     setPkgSubmitting(true);
     setPkgResult(null);
-    const kidsStr = kids.map((k) => `${k.name} (DOB: ${k.dob}, Grade: ${k.grade})`).join(", ");
+    const kidsStr = kids.map((k) => `${k.name} (DOB: ${k.dob}, Grade: ${k.grade}${k.gender ? `, Gender: ${k.gender === "male" ? "Male" : "Female"}` : ""})`).join(", ");
     try {
       const res = await fetch("/api/packages", {
         method: "POST",
@@ -1279,7 +1312,7 @@ export default function Home() {
     setPhone(profileRef.current?.phone ?? "");
     setSmsConsent(false);
     setShowAllRecurring(false);
-    setKids(profileRef.current?.kids ?? [{ name: "", dob: "", grade: "" }]);
+    setKids(profileRef.current?.kids ?? [{ name: "", dob: "", grade: "", gender: "" }]);
     setIsGroupRate(false);
     setUpsellExtra(0);
     setReferralCode("");
@@ -1369,6 +1402,12 @@ export default function Home() {
                   <div className="flex items-center justify-between">
                     <h3 className="text-lg font-bold text-mesa-accent">{group.replace("Grade 5 & Below", "Grades K-5")}</h3>
                     <div className="flex items-center gap-2">
+                      {getSessionGender(group) === "boys" && (
+                        <span className="rounded-full border border-blue-700 bg-blue-900/50 px-2 py-0.5 text-xs font-semibold text-blue-300">Boys Only</span>
+                      )}
+                      {getSessionGender(group) === "girls" && (
+                        <span className="rounded-full border border-pink-700 bg-pink-900/50 px-2 py-0.5 text-xs font-semibold text-pink-300">Girls Only</span>
+                      )}
                       {selectedCount > 0 && (
                         <span className="rounded-full bg-mesa-accent/20 px-2 py-0.5 text-xs font-semibold text-mesa-accent">
                           {selectedCount} selected
@@ -1763,7 +1802,7 @@ export default function Home() {
                   <p className="text-xs text-brown-400">$118.75 per session</p>
                 </div>
                 <button
-                  onClick={() => { if (!userEmail) { setAuthPrompt(true); return; } setPkgModal({ open: true, packageType: 4 }); setPkgName(""); setPkgEmail(""); setPkgPhone(""); setPkgMonth(pkgMonthOptions[0]?.value || ""); setPkgResult(null); setKids([{ name: "", dob: "", grade: "" }]); setReferralCode(""); }}
+                  onClick={() => { if (!userEmail) { setAuthPrompt(true); return; } setPkgModal({ open: true, packageType: 4 }); setPkgName(""); setPkgEmail(""); setPkgPhone(""); setPkgMonth(pkgMonthOptions[0]?.value || ""); setPkgResult(null); setKids([{ name: "", dob: "", grade: "", gender: "" }]); setReferralCode(""); }}
                   className="mt-4 w-full rounded-lg bg-mesa-accent px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-yellow-600"
                 >
                   Enroll — 4 Sessions
@@ -1780,7 +1819,7 @@ export default function Home() {
                   <p className="text-xs text-brown-400">$112.50 per session</p>
                 </div>
                 <button
-                  onClick={() => { if (!userEmail) { setAuthPrompt(true); return; } setPkgModal({ open: true, packageType: 8 }); setPkgName(""); setPkgEmail(""); setPkgPhone(""); setPkgMonth(pkgMonthOptions[0]?.value || ""); setPkgResult(null); setKids([{ name: "", dob: "", grade: "" }]); setReferralCode(""); }}
+                  onClick={() => { if (!userEmail) { setAuthPrompt(true); return; } setPkgModal({ open: true, packageType: 8 }); setPkgName(""); setPkgEmail(""); setPkgPhone(""); setPkgMonth(pkgMonthOptions[0]?.value || ""); setPkgResult(null); setKids([{ name: "", dob: "", grade: "", gender: "" }]); setReferralCode(""); }}
                   className="mt-4 w-full rounded-lg bg-mesa-accent px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-yellow-600"
                 >
                   Enroll — 8 Sessions
@@ -2090,6 +2129,49 @@ export default function Home() {
         </div>
       )}
 
+      {/* Gender Mismatch Warning */}
+      {showGenderWarning && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-sm rounded-2xl border border-yellow-700 bg-brown-900 p-6 shadow-2xl">
+            <h3 className="text-lg font-bold text-yellow-400">Wrong Session?</h3>
+            <p className="mt-2 text-sm text-brown-300">
+              {(() => {
+                const sessionGender = getModalSessionGender();
+                const mismatched = kids.filter(
+                  (k) =>
+                    k.gender &&
+                    ((sessionGender === "boys" && k.gender === "female") ||
+                      (sessionGender === "girls" && k.gender === "male"))
+                );
+                const sessionLabel = sessionGender === "boys" ? "Boys" : "Girls";
+                const athleteLabel = sessionGender === "boys" ? "Female" : "Male";
+                if (mismatched.length === 1) {
+                  return `${mismatched[0].name || "One of your athletes"} is registered as ${athleteLabel}, but this is a ${sessionLabel}-only session.`;
+                }
+                return `${mismatched.length} athletes are registered as ${athleteLabel} but this is a ${sessionLabel}-only session.`;
+              })()}
+            </p>
+            <p className="mt-2 text-xs text-brown-500">
+              Double-check you have the right session. Go back to change it, or continue if this is intentional.
+            </p>
+            <div className="mt-5 flex gap-3">
+              <button
+                onClick={() => setShowGenderWarning(false)}
+                className="flex-1 rounded-lg bg-brown-700 px-4 py-2 text-sm text-brown-300 hover:bg-brown-600"
+              >
+                Go Back
+              </button>
+              <button
+                onClick={() => { setShowGenderWarning(false); performSubmit(); }}
+                className="flex-1 rounded-lg bg-yellow-700 px-4 py-2 text-sm font-semibold text-white hover:bg-yellow-600"
+              >
+                Continue Anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Registration Modal */}
       {modal.open && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
@@ -2292,24 +2374,39 @@ export default function Home() {
                         <label className="mb-1 block text-xs text-brown-300">Date of Birth</label>
                         <DobInput value={kid.dob} onChange={(v) => updateKid(i, "dob", v)} required />
                       </div>
-                      <div>
-                        <label className="mb-1 block text-xs text-brown-300">Grade</label>
-                        <select
-                          required
-                          value={kid.grade}
-                          onChange={(e) => updateKid(i, "grade", e.target.value)}
-                          className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white text-sm focus:border-mesa-accent focus:outline-none"
-                        >
-                          <option value="">Select grade...</option>
-                          {(modal.type === "weekly"
-                            ? getGradesForGroup(modal.sessionDetails.replace(/ — \d+ sessions?$/, ""))
-                            : modal.type === "camp" && camps[modal.sessionIndex]?.gradeGroup
-                            ? getGradesForGroup(camps[modal.sessionIndex].gradeGroup)
-                            : ALL_GRADES
-                          ).map((g) => (
-                            <option key={g.value} value={g.value}>{g.label}</option>
-                          ))}
-                        </select>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="mb-1 block text-xs text-brown-300">Grade</label>
+                          <select
+                            required
+                            value={kid.grade}
+                            onChange={(e) => updateKid(i, "grade", e.target.value)}
+                            className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white text-sm focus:border-mesa-accent focus:outline-none"
+                          >
+                            <option value="">Select grade...</option>
+                            {(modal.type === "weekly"
+                              ? getGradesForGroup(modal.sessionDetails.replace(/ — \d+ sessions?$/, ""))
+                              : modal.type === "camp" && camps[modal.sessionIndex]?.gradeGroup
+                              ? getGradesForGroup(camps[modal.sessionIndex].gradeGroup)
+                              : ALL_GRADES
+                            ).map((g) => (
+                              <option key={g.value} value={g.value}>{g.label}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs text-brown-300">Gender</label>
+                          <select
+                            required
+                            value={kid.gender}
+                            onChange={(e) => updateKid(i, "gender", e.target.value)}
+                            className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white text-sm focus:border-mesa-accent focus:outline-none"
+                          >
+                            <option value="">Select...</option>
+                            <option value="male">Male</option>
+                            <option value="female">Female</option>
+                          </select>
+                        </div>
                       </div>
                     </div>
                   ))}
