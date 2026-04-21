@@ -13,12 +13,9 @@ export default function PrivacyPolicyPage() {
       <LandingNav />
 
       <main className="mx-auto max-w-3xl px-6 py-16 md:py-24">
-        <h1 className="font-[family-name:var(--font-fira-cond)] text-4xl font-black tracking-wide text-mesa-accent mb-2">
+        <h1 className="font-[family-name:var(--font-fira-cond)] text-4xl font-black tracking-wide text-mesa-accent mb-12">
           PRIVACY POLICY
         </h1>
-        <p className="text-brown-400 text-sm mb-12">
-          Mesa Basketball Training LLC &mdash; Last updated March 2025
-        </p>
 
         <div className="space-y-12 text-brown-200 leading-relaxed text-[16px]">
 
@@ -211,6 +208,10 @@ export default function PrivacyPolicyPage() {
           </section>
 
         </div>
+
+        <p className="text-brown-400 text-sm mt-12">
+          Mesa Basketball Training LLC &mdash; Last updated April 2026
+        </p>
       </main>
 
       <footer className="border-t border-brown-800 bg-mesa-dark py-10">
