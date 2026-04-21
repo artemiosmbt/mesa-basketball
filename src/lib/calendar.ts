@@ -181,6 +181,41 @@ async function findExistingEvent(
   return match ? { id: match.id, description: match.description || "" } : null;
 }
 
+/**
+ * Find all Mesa-managed group/camp events on a given date that start at a
+ * specific time (matched by the event startDateTime). Used to clean up
+ * orphaned events whose description tag was stripped (e.g. by Apple Calendar).
+ */
+async function findMesaEventsAtTime(
+  calendarId: string,
+  token: string,
+  date: string,
+  startTime: string
+): Promise<Array<{ id: string }>> {
+  const isoDate = normalizeDate(date);
+  const timeMin = encodeURIComponent(`${isoDate}T00:00:00Z`);
+  const timeMax = encodeURIComponent(`${isoDate}T23:59:59Z`);
+  const url =
+    `${CALENDAR_BASE}/${encodeURIComponent(calendarId)}/events` +
+    `?timeMin=${timeMin}&timeMax=${timeMax}&singleEvents=true&maxResults=50`;
+
+  const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!resp.ok) return [];
+
+  const data = await resp.json();
+  const items: Array<{ id: string; summary?: string; start?: { dateTime?: string } }> =
+    data.items || [];
+
+  // Match events that start at the same time and look like Mesa group/camp events
+  const targetDateTime = toDateTime(date, startTime);
+  return items.filter((ev) => {
+    if (!ev.start?.dateTime) return false;
+    const evStart = ev.start.dateTime.slice(0, 16); // "YYYY-MM-DDTHH:MM"
+    if (evStart !== targetDateTime.slice(0, 16)) return false;
+    return (ev.summary?.startsWith("Group —") || ev.summary?.startsWith("Camp —")) ?? false;
+  });
+}
+
 /** Create a new calendar event; returns the created event id */
 async function createEvent(
   calendarId: string,
@@ -467,8 +502,12 @@ export async function upsertGroupSessionCalendarEvent(
       await patchEvent(calendarId, token, existing.id, { summary, description });
     }
   } else if (totalSignedUp > 0) {
-    // Only create a new event if someone is actually registered — avoids
-    // re-creating events the user deleted because no one showed up.
+    // No tagged event found — the tag may have been stripped (e.g. by Apple Calendar editing).
+    // Delete any orphaned Mesa group/camp events at this date+time before creating the updated one.
+    const orphans = await findMesaEventsAtTime(calendarId, token, params.bookedDate, params.bookedStartTime);
+    for (const orphan of orphans) {
+      await deleteEvent(calendarId, token, orphan.id);
+    }
     const event: CalendarEvent = {
       summary,
       description,
