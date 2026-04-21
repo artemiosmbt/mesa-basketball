@@ -2606,7 +2606,7 @@ export default function Home() {
 
                 <button
                   type="submit"
-                  disabled={submitting || !smsConsent || (modal.type === "camp" && camps[modal.sessionIndex]?.campDays?.length > 0 && campSelectedDays.size === 0)}
+                  disabled={submitting || (modal.type === "camp" && camps[modal.sessionIndex]?.campDays?.length > 0 && campSelectedDays.size === 0)}
                   className="w-full rounded-lg bg-mesa-accent py-3 font-semibold text-white transition hover:bg-yellow-600 disabled:opacity-50"
                 >
                   {submitting ? "Submitting..." : "Confirm Registration"}
