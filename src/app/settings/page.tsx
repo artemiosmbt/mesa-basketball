@@ -21,6 +21,7 @@ interface Kid {
   name: string;
   dob: string;
   grade: string;
+  gender?: string;
 }
 
 // Convert YYYY-MM-DD (old date input format) → MM/DD/YYYY
@@ -105,7 +106,7 @@ export default function SettingsPage() {
   }, [router]);
 
   function addKid() {
-    setKids((prev) => [...prev, { name: "", dob: "", grade: "" }]);
+    setKids((prev) => [...prev, { name: "", dob: "", grade: "", gender: "" }]);
   }
 
   function removeKid(i: number) {
@@ -223,7 +224,7 @@ export default function SettingsPage() {
                       </button>
                     )}
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <div className="space-y-2">
                     <div>
                       <label className="mb-1 block text-xs text-brown-400">Name</label>
                       <input
@@ -249,6 +250,18 @@ export default function SettingsPage() {
                         {ALL_GRADES.map((g) => (
                           <option key={g.value} value={g.value}>{g.label}</option>
                         ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs text-brown-400">Gender</label>
+                      <select
+                        value={kid.gender || ""}
+                        onChange={(e) => updateKid(i, "gender", e.target.value)}
+                        className="w-full rounded-lg border border-brown-700 bg-brown-800/60 px-3 py-2 text-sm text-white focus:border-mesa-accent focus:outline-none"
+                      >
+                        <option value="">Select gender...</option>
+                        <option value="male">Male</option>
+                        <option value="female">Female</option>
                       </select>
                     </div>
                   </div>
