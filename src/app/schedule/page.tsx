@@ -1402,13 +1402,7 @@ export default function Home() {
                   <div className="flex items-center justify-between">
                     <h3 className="text-lg font-bold text-mesa-accent">{group.replace("Grade 5 & Below", "Grades K-5")}</h3>
                     <div className="flex items-center gap-2">
-                      {getSessionGender(group) === "boys" && (
-                        <span className="rounded-full border border-blue-700 bg-blue-900/50 px-2 py-0.5 text-xs font-semibold text-blue-300">Boys Only</span>
-                      )}
-                      {getSessionGender(group) === "girls" && (
-                        <span className="rounded-full border border-pink-700 bg-pink-900/50 px-2 py-0.5 text-xs font-semibold text-pink-300">Girls Only</span>
-                      )}
-                      {selectedCount > 0 && (
+{selectedCount > 0 && (
                         <span className="rounded-full bg-mesa-accent/20 px-2 py-0.5 text-xs font-semibold text-mesa-accent">
                           {selectedCount} selected
                         </span>
