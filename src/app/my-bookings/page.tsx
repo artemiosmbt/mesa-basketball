@@ -240,7 +240,7 @@ export default function MyBookings() {
               return db - da;
             });
 
-          function renderCard(b: BookingRecord) {
+          function renderCard(b: BookingRecord, isPast = false) {
             const isConfirmed = b.status === "confirmed";
             const isCancelled = b.status === "cancelled";
             return (
@@ -280,7 +280,7 @@ export default function MyBookings() {
                     )}
                   </div>
                 </div>
-                {isConfirmed && (
+                {isConfirmed && !isPast && (
                   <div className="mt-3 border-t border-brown-800 pt-3">
                     <a href={`/booking/${b.manageToken}`} className="inline-flex items-center gap-1 text-sm font-medium text-mesa-accent hover:text-yellow-300">
                       Manage Booking &rarr;
@@ -318,14 +318,14 @@ export default function MyBookings() {
 
               {activeTab === "upcoming" && (
                 <div className="space-y-4">
-                  {upcoming.length > 0 ? upcoming.map(renderCard) : (
+                  {upcoming.length > 0 ? upcoming.map((b) => renderCard(b, false)) : (
                     <p className="text-brown-500 text-sm">No upcoming sessions.</p>
                   )}
                 </div>
               )}
               {activeTab === "past" && (
                 <div className="space-y-4">
-                  {past.length > 0 ? past.map(renderCard) : (
+                  {past.length > 0 ? past.map((b) => renderCard(b, true)) : (
                     <p className="text-brown-500 text-sm">No past sessions.</p>
                   )}
                 </div>

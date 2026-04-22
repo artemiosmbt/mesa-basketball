@@ -135,9 +135,8 @@ export default function ManageBooking({
     return hoursUntil >= 0 && hoursUntil < 48;
   }, [booking]);
 
-  // Camp has already started — no cancellation allowed, full amount due
-  const campStarted = useMemo(() => {
-    if (booking?.type !== "camp") return false;
+  // Session has already passed — no changes allowed
+  const sessionPassed = useMemo(() => {
     if (!booking?.bookedDate || !booking?.bookedStartTime) return false;
     const timeMatch = booking.bookedStartTime.match(/(\d+):(\d+)\s*(AM|PM)/i);
     if (!timeMatch) return false;
@@ -150,6 +149,9 @@ export default function ManageBooking({
     sessionDateTime.setHours(hours, mins, 0, 0);
     return Date.now() >= sessionDateTime.getTime();
   }, [booking]);
+
+  // Camp has already started — no cancellation allowed, full amount due
+  const campStarted = sessionPassed && booking?.type === "camp";
 
   // Build time windows for rescheduling
   const timeWindows = useMemo(() => {
@@ -370,6 +372,13 @@ export default function ManageBooking({
                 </p>
               )}
 
+              {/* Session has already passed — no changes allowed */}
+              {sessionPassed && !campStarted && (
+                <p className="mt-4 rounded-lg bg-brown-800/60 px-4 py-2 text-sm text-brown-400">
+                  This session has already taken place. No changes can be made.
+                </p>
+              )}
+
               {/* Camp has started — no cancellation allowed */}
               {campStarted && (
                 <p className="mt-4 rounded-lg bg-red-900/30 px-4 py-2 text-sm text-red-400">
@@ -378,7 +387,7 @@ export default function ManageBooking({
               )}
 
               {/* Full camp — can only cancel entire camp, no individual day cancel or reschedule */}
-              {!campStarted && booking.type === "camp" && booking.isFullCamp ? (
+              {!sessionPassed && booking.type === "camp" && booking.isFullCamp ? (
                 <>
                   <p className="mt-4 rounded-lg bg-brown-800/60 px-4 py-2 text-sm text-brown-300">
                     You registered for the full camp package. Individual days cannot be cancelled or rescheduled — you may only cancel the entire camp.
@@ -420,7 +429,7 @@ export default function ManageBooking({
                     </div>
                   )}
                 </>
-              ) : !campStarted ? (
+              ) : !sessionPassed ? (
                 <>
                   {/* Drop-in or non-camp — normal cancel/reschedule */}
                   {!showCancelConfirm && !showReschedule && (
