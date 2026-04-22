@@ -250,6 +250,25 @@ export async function PUT(
     );
   }
 
+  // Check if original OR new session is within 48 hours → late reschedule fee applies
+  function isWithin48Hours(dateStr: string, timeStr: string): boolean {
+    const timeMatch = timeStr.match(/(\d+):(\d+)\s*(AM|PM)/i);
+    if (!timeMatch) return false;
+    let hours = parseInt(timeMatch[1]);
+    const mins = parseInt(timeMatch[2]);
+    const period = timeMatch[3].toUpperCase();
+    if (period === "PM" && hours !== 12) hours += 12;
+    if (period === "AM" && hours === 12) hours = 0;
+    const dt = new Date(dateStr);
+    dt.setHours(hours, mins, 0, 0);
+    const hoursUntil = (dt.getTime() - Date.now()) / (1000 * 60 * 60);
+    return hoursUntil >= 0 && hoursUntil < 48;
+  }
+
+  const isLateReschedule =
+    (reg.booked_date && reg.booked_start_time && isWithin48Hours(reg.booked_date, reg.booked_start_time)) ||
+    isWithin48Hours(bookedDate, bookedStartTime);
+
   // Cancel old booking
   await cancelRegistration(token);
 
@@ -269,13 +288,17 @@ export async function PUT(
     bookedLocation,
   });
 
+  const lateFeeAmount = reg.session_price && isLateReschedule ? Math.round(reg.session_price * 0.5) : undefined;
+
   await sendRescheduleNotification({
     parentName: reg.parent_name,
     email: reg.email,
     oldSessionDetails: reg.session_details,
     newSessionDetails,
     manageToken: newToken,
+    isLateReschedule: !!isLateReschedule,
+    lateFeeAmount,
   });
 
-  return NextResponse.json({ success: true, newToken });
+  return NextResponse.json({ success: true, newToken, isLateReschedule: !!isLateReschedule });
 }

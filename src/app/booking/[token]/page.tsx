@@ -86,6 +86,7 @@ export default function ManageBooking({
   const [showReschedule, setShowReschedule] = useState(false);
   const [rescheduling, setRescheduling] = useState(false);
   const [rescheduled, setRescheduled] = useState(false);
+  const [isLateReschedule, setIsLateReschedule] = useState(false);
 
   // Schedule data for rescheduling
   const [privateSlots, setPrivateSlots] = useState<
@@ -229,6 +230,16 @@ export default function ManageBooking({
     return result.filter((w) => w.endMins - w.startMins >= 60);
   }, [privateSlots, bookedSlots]);
 
+  // New session (while rescheduling) is within 48 hours
+  const newSessionWithin48Hours = useMemo(() => {
+    if (selectedWindow < 0 || !timeWindows[selectedWindow]) return false;
+    const w = timeWindows[selectedWindow];
+    const dt = new Date(w.date);
+    dt.setHours(Math.floor(selectedStart / 60), selectedStart % 60, 0, 0);
+    const hoursUntil = (dt.getTime() - Date.now()) / (1000 * 60 * 60);
+    return hoursUntil >= 0 && hoursUntil < 48;
+  }, [selectedWindow, selectedStart, timeWindows]);
+
   async function loadSchedule() {
     const res = await fetch("/api/schedule");
     const data = await res.json();
@@ -268,6 +279,7 @@ export default function ManageBooking({
     const data = await res.json();
     if (data.success) {
       setRescheduled(true);
+      setIsLateReschedule(data.isLateReschedule ?? false);
     } else {
       setError(data.error || "Failed to reschedule");
     }
@@ -332,6 +344,11 @@ export default function ManageBooking({
           <p className="mt-4 text-brown-300">
             Your session has been rescheduled. Check your email for the updated details and a new manage booking link.
           </p>
+          {isLateReschedule && (
+            <p className="mt-3 rounded-lg bg-yellow-900/30 px-4 py-2 text-sm text-yellow-400">
+              This reschedule was made within 48 hours of the session. Per our policy, 50% of the session fee is still due.
+            </p>
+          )}
           <a href="/" className="mt-6 inline-block rounded bg-mesa-accent px-6 py-2 font-semibold text-white hover:bg-yellow-600">
             Back to Home
           </a>
@@ -618,6 +635,13 @@ export default function ManageBooking({
                       </div>
                     );
                   })()}
+
+                  {/* Late fee warning when new slot is within 48 hours */}
+                  {newSessionWithin48Hours && (
+                    <p className="mt-4 rounded-lg bg-yellow-900/30 px-4 py-2 text-sm text-yellow-400">
+                      This new session is within 48 hours. Rescheduling will result in a 50% charge of the session fee per our policy.
+                    </p>
+                  )}
 
                   {/* Bottom buttons (for short lists) */}
                   <div className="mt-4 flex gap-3">

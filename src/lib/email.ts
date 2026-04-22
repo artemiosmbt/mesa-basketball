@@ -390,20 +390,26 @@ export async function sendRescheduleNotification(data: {
   oldSessionDetails: string;
   newSessionDetails: string;
   manageToken: string;
+  isLateReschedule?: boolean;
+  lateFeeAmount?: number;
 }) {
   const resend = getResend();
-  const manageLink = `${BASE_URL}/booking/${data.manageToken}`;
+
+  const lateFeeNote = data.isLateReschedule
+    ? `<p style="color: #f59e0b;"><strong>Late Reschedule:</strong> This was rescheduled within 48 hours. 50% of the session fee is due${data.lateFeeAmount ? ` ($${data.lateFeeAmount})` : ""}.</p>`
+    : "";
 
   // Email to Artemi
   await resend.emails.send({
     from: FROM_EMAIL,
     to: ARTEMI_EMAIL,
-    subject: `Reschedule: ${data.parentName}`,
+    subject: `Reschedule${data.isLateReschedule ? " ⚠️ LATE" : ""}: ${data.parentName}`,
     html: `
       <h2>Session Rescheduled</h2>
       <p><strong>Parent:</strong> ${data.parentName}</p>
       <p><strong>Old Session:</strong> ${formatSessionDetailsForEmail(data.oldSessionDetails)}</p>
       <p><strong>New Session:</strong> ${formatSessionDetailsForEmail(data.newSessionDetails)}</p>
+      ${lateFeeNote}
     `,
   });
 
@@ -419,6 +425,7 @@ export async function sendRescheduleNotification(data: {
       <p>Your session has been rescheduled.</p>
       <p><strong>Old Session:</strong> ${formatSessionDetailsForEmail(data.oldSessionDetails)}</p>
       <p><strong>New Session:</strong> ${formatSessionDetailsForEmail(data.newSessionDetails)}</p>
+      ${data.isLateReschedule ? `<p style="color: #f59e0b;">This reschedule was made within 48 hours of the session. Per our policy, 50% of the session fee is still due${data.lateFeeAmount ? ` ($${data.lateFeeAmount})` : ""}.</p>` : ""}
       <p><a href="${BASE_URL}/my-bookings" style="color: #d4af37; font-weight: bold;">View My Bookings</a> — Manage all your sessions</p>
       <br/>
       <p>Questions? Contact Artemios at (631) 599-1280 or email <a href="mailto:artemios@mesabasketballtraining.com">artemios@mesabasketballtraining.com</a>.</p>
