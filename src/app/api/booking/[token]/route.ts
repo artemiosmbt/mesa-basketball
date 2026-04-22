@@ -265,9 +265,7 @@ export async function PUT(
     return hoursUntil >= 0 && hoursUntil < 48;
   }
 
-  const isLateReschedule =
-    (reg.booked_date && reg.booked_start_time && isWithin48Hours(reg.booked_date, reg.booked_start_time)) ||
-    isWithin48Hours(bookedDate, bookedStartTime);
+  const isLateReschedule = !!(reg.booked_date && reg.booked_start_time && isWithin48Hours(reg.booked_date, reg.booked_start_time));
 
   // Cancel old booking
   await cancelRegistration(token);
