@@ -495,13 +495,8 @@ export async function upsertGroupSessionCalendarEvent(
   const existing = await findExistingEvent(calendarId, token, params.bookedDate, tag);
 
   if (existing) {
-    if (totalSignedUp === 0) {
-      // Last registration cancelled — remove the event entirely
-      await deleteEvent(calendarId, token, existing.id);
-    } else {
-      await patchEvent(calendarId, token, existing.id, { summary, description });
-    }
-  } else if (totalSignedUp > 0) {
+    await patchEvent(calendarId, token, existing.id, { summary, description });
+  } else {
     // No tagged event found — the tag may have been stripped (e.g. by Apple Calendar editing).
     // Delete any orphaned Mesa group/camp events at this date+time before creating the updated one.
     const orphans = await findMesaEventsAtTime(calendarId, token, params.bookedDate, params.bookedStartTime);
