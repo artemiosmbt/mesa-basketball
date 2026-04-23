@@ -169,12 +169,10 @@ export async function sendRegistrationNotification(data: {
     const loc = LOCATION_MAP[location]?.name || location;
     const title = data.type === "camp" ? "Mesa Basketball Training — Camp" : data.type === "weekly" ? "Mesa Basketball Training — Group Session" : "Mesa Basketball Training — Private Session";
     const googleUrl = buildGoogleCalendarUrl(date, startTime, endTime, loc, title);
-    const params = new URLSearchParams({ date, start: startTime, end: endTime, location: loc, title });
-    const icsUrl = `${BASE_URL}/api/ics?${params.toString()}`;
     return `<p style="margin-top: 8px;">
-      <a href="${googleUrl}" target="_blank" style="display: inline-block; background: #1a73e8; color: #ffffff; padding: 7px 14px; border-radius: 6px; text-decoration: none; font-size: 12px; font-weight: bold; margin-right: 8px;">Add to Google Calendar</a>
-      <a href="${icsUrl}" style="display: inline-block; background: #3a3a3a; color: #ffffff; padding: 7px 14px; border-radius: 6px; text-decoration: none; font-size: 12px; font-weight: bold;">Add to Apple Calendar</a>
-    </p>`;
+      <a href="${googleUrl}" target="_blank" style="display: inline-block; background: #1a73e8; color: #ffffff; padding: 7px 14px; border-radius: 6px; text-decoration: none; font-size: 12px; font-weight: bold;">Add to Google Calendar</a>
+    </p>
+    <p style="margin: 4px 0 0; font-size: 12px; color: #555555;">Apple / Outlook Calendar: tap the calendar file attached to this email</p>`;
   })();
 
   const icsAttachment = (() => {
