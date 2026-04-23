@@ -1439,6 +1439,27 @@ export default function Home() {
         </div>
       </header>
 
+      {/* Section Nav */}
+      <div className="sticky top-0 z-30 bg-mesa-dark/95 backdrop-blur border-b border-brown-800">
+        <div className="mx-auto max-w-5xl px-6">
+          <div className="flex gap-1 overflow-x-auto py-3 scrollbar-hide">
+            {[
+              { label: "Group Sessions", href: "#schedule" },
+              { label: "Camps", href: "#camps" },
+              { label: "Private Training", href: "#private" },
+            ].map(({ label, href }) => (
+              <a
+                key={href}
+                href={href}
+                className="flex-shrink-0 rounded-full border border-brown-700 bg-brown-800/60 px-5 py-2 text-sm font-semibold text-brown-200 hover:border-mesa-accent hover:text-mesa-accent transition-colors"
+              >
+                {label}
+              </a>
+            ))}
+          </div>
+        </div>
+      </div>
+
       {/* Weekly Schedule */}
       <section id="schedule" className="py-16 scroll-mt-20">
         <div className="mx-auto max-w-5xl px-6">
