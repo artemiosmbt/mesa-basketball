@@ -1604,6 +1604,9 @@ export default function Home() {
               );
             })}
           </div>
+          <p className="mt-6 text-center text-xs text-brown-500">
+            Cancellations &amp; reschedules within 24 hours incur a 50% fee. No-shows without prior notice are charged the full session fee.
+          </p>
         </div>
       </section>
 
@@ -1642,6 +1645,12 @@ export default function Home() {
                 Call / Text to Get Notified
               </a>
             </div>
+          )}
+
+          {camps.length > 0 && (
+            <p className="mt-6 text-center text-xs text-brown-500">
+              Cancellations &amp; reschedules within 24 hours incur a 50% fee. No-shows without prior notice are charged the full session fee.
+            </p>
           )}
 
           {(() => {
@@ -1837,7 +1846,7 @@ export default function Home() {
             </div>
             <p className="mt-4 text-center text-xs text-brown-500">
               Sessions expire at the end of the calendar month — unused sessions do not carry over.
-              Cancellations &amp; reschedules within 24 hours incur a $75 fee (50% of the standard private rate).
+              Cancellations &amp; reschedules within 24 hours incur a $75 fee (50% of the standard private rate). No-shows without prior notice are charged the full session fee.
             </p>
           </div>
 
