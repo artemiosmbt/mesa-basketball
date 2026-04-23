@@ -15,6 +15,7 @@ interface Registration {
   type: string;
   session_details: string;
   booked_date: string | null;
+  booked_start_time: string | null;
   status: string;
   session_price: number | null;
 }
@@ -30,6 +31,25 @@ function dateMs(d: string | null): number {
   if (!d) return 0;
   const p = new Date(d);
   return isNaN(p.getTime()) ? 0 : p.setHours(0, 0, 0, 0);
+}
+
+function sessionMs(date: string | null, startTime: string | null): number {
+  if (!date) return 0;
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return 0;
+  if (startTime) {
+    const m = startTime.match(/(\d+):(\d+)\s*(AM|PM)/i);
+    if (m) {
+      let h = parseInt(m[1]);
+      const min = parseInt(m[2]);
+      if (m[3].toUpperCase() === "PM" && h !== 12) h += 12;
+      if (m[3].toUpperCase() === "AM" && h === 12) h = 0;
+      d.setHours(h, min, 0, 0);
+      return d.getTime();
+    }
+  }
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
 }
 
 function formatDate(d: string | null): string {
@@ -124,19 +144,22 @@ export default function AdminPage() {
     setNoShowing(null);
   }
 
-  const todayMs = new Date().setHours(0, 0, 0, 0);
+  const upcoming = useMemo(() => {
+    const now = Date.now();
+    return registrations
+      .filter((r) => r.status === "confirmed" && sessionMs(r.booked_date, r.booked_start_time) > now)
+      .sort((a, b) => sessionMs(a.booked_date, a.booked_start_time) - sessionMs(b.booked_date, b.booked_start_time));
+  }, [registrations]);
 
-  const upcoming = useMemo(() =>
-    registrations
-      .filter((r) => r.status === "confirmed" && dateMs(r.booked_date) >= todayMs)
-      .sort((a, b) => dateMs(a.booked_date) - dateMs(b.booked_date)),
-  [registrations, todayMs]);
-
-  const past = useMemo(() =>
-    registrations
-      .filter((r) => dateMs(r.booked_date) < todayMs && dateMs(r.booked_date) > 0)
-      .sort((a, b) => dateMs(b.booked_date) - dateMs(a.booked_date)),
-  [registrations, todayMs]);
+  const past = useMemo(() => {
+    const now = Date.now();
+    return registrations
+      .filter((r) => {
+        const ms = sessionMs(r.booked_date, r.booked_start_time);
+        return ms > 0 && ms <= now;
+      })
+      .sort((a, b) => sessionMs(b.booked_date, b.booked_start_time) - sessionMs(a.booked_date, a.booked_start_time));
+  }, [registrations]);
 
   // Unique clients sorted by name
   const clients = useMemo(() => {
