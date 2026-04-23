@@ -2389,17 +2389,17 @@ export default function Home() {
                     <button
                       type="button"
                       onClick={() => downloadICS(calendarSessions)}
-                      className="inline-flex items-center rounded border border-green-700/60 px-3 py-1.5 text-xs text-green-400 hover:bg-green-900/60 transition"
+                      className="inline-flex items-center rounded px-3 py-1.5 text-xs font-semibold text-white transition" style={{ background: "#3a3a3a" }}
                     >
-                      Apple / Outlook Calendar
+                      Add to Apple Calendar
                     </button>
                     <a
                       href={buildGoogleCalUrl(calendarSessions[0])}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center rounded border border-green-700/60 px-3 py-1.5 text-xs text-green-400 hover:bg-green-900/60 transition"
+                      className="inline-flex items-center rounded px-3 py-1.5 text-xs font-semibold text-white transition" style={{ background: "#1a73e8" }}
                     >
-                      Google Calendar
+                      Add to Google Calendar
                     </a>
                   </div>
                 )}
