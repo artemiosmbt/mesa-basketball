@@ -30,6 +30,13 @@ const TYPE_LABELS: Record<string, string> = {
   "group-private": "Group Private",
 };
 
+function formatDate(d: string | null): string {
+  if (!d) return "—";
+  const date = new Date(d);
+  if (isNaN(date.getTime())) return d;
+  return date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
+}
+
 function sessionLabel(r: Registration) {
   return r.session_details
     ? r.session_details.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "").split("\n")[0]
@@ -189,7 +196,7 @@ export default function PaymentsPage() {
                     {r.kids && <div className="text-xs text-white mt-0.5 truncate">{r.kids.split(",").map((k) => k.split("(")[0].trim()).filter(Boolean).join(", ")}</div>}
                     <div className="text-xs text-brown-400 mt-0.5 truncate">{sessionLabel(r)}</div>
                     <div className="flex flex-wrap gap-x-3 mt-1 text-xs text-brown-500">
-                      <span>{r.booked_date || "—"}</span>
+                      <span>{formatDate(r.booked_date)}</span>
                       <span>{r.phone}</span>
                     </div>
                   </div>
@@ -233,7 +240,7 @@ export default function PaymentsPage() {
                         )}
                       </div>
                       <div className="text-xs text-brown-400 mt-0.5 truncate">{sessionLabel(r)}</div>
-                      <div className="text-xs text-brown-500 mt-1">{r.booked_date}</div>
+                      <div className="text-xs text-brown-500 mt-1">{formatDate(r.booked_date)}</div>
                     </div>
                     <button
                       onClick={() => settleFee(r.id)}
@@ -269,7 +276,7 @@ export default function PaymentsPage() {
                     </div>
                     {r.kids && <div className="text-xs text-white mt-0.5 truncate">{r.kids.split(",").map((k) => k.split("(")[0].trim()).filter(Boolean).join(", ")}</div>}
                     <div className="text-xs text-brown-400 mt-0.5 truncate">{sessionLabel(r)}</div>
-                    <div className="text-xs text-brown-500 mt-1">{r.booked_date || "—"}</div>
+                    <div className="text-xs text-brown-500 mt-1">{formatDate(r.booked_date)}</div>
                   </div>
                   <button
                     onClick={() => togglePaid(r.id, r.is_paid)}

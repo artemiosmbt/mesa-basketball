@@ -32,6 +32,13 @@ function dateMs(d: string | null): number {
   return isNaN(p.getTime()) ? 0 : p.setHours(0, 0, 0, 0);
 }
 
+function formatDate(d: string | null): string {
+  if (!d) return "—";
+  const date = new Date(d);
+  if (isNaN(date.getTime())) return d;
+  return date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
+}
+
 function athleteNames(kids: string) {
   return kids ? kids.split(",").map((k) => k.split("(")[0].trim()).filter(Boolean).join(", ") : "—";
 }
@@ -199,7 +206,7 @@ export default function AdminPage() {
             </div>
             <div className="text-xs text-brown-300 mt-0.5 truncate">{athleteNames(r.kids || "")}</div>
             <div className="flex flex-wrap gap-x-3 mt-1 text-xs text-brown-500">
-              {r.booked_date && <span className="text-mesa-accent">{r.booked_date}</span>}
+              {r.booked_date && <span className="text-mesa-accent">{formatDate(r.booked_date)}</span>}
               <span>{r.phone}</span>
             </div>
           </div>
@@ -226,7 +233,7 @@ export default function AdminPage() {
               </div>
               <div>
                 <p className="text-brown-500 uppercase tracking-wider mb-0.5">Session Date</p>
-                <p className="text-mesa-accent font-medium">{r.booked_date || "—"}</p>
+                <p className="text-mesa-accent font-medium">{formatDate(r.booked_date)}</p>
               </div>
             </div>
             <div>
@@ -282,7 +289,7 @@ export default function AdminPage() {
           <tr key={r.id} className="hover:bg-brown-900/30 transition">
             <td className="px-4 py-3 text-brown-400 whitespace-nowrap text-xs">
               <div>{new Date(r.created_at).toLocaleDateString()}</div>
-              {r.booked_date && <div className="text-mesa-accent font-medium mt-0.5">↳ {r.booked_date}</div>}
+              {r.booked_date && <div className="text-mesa-accent font-medium mt-0.5">↳ {formatDate(r.booked_date)}</div>}
             </td>
             <td className="px-4 py-3 font-medium whitespace-nowrap">{r.parent_name}</td>
             <td className="px-4 py-3 text-brown-300 text-xs">{r.email}</td>
