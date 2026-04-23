@@ -253,9 +253,9 @@ export async function sendCancellationNotification(data: {
     : data.sessionType === "group-private" ? 125 : data.sessionType === "weekly" ? 25 : 75;
   const lateNote = data.isLateCancel
     ? `<div style="background: #7c1d1d; border-left: 4px solid #ef4444; border-radius: 6px; padding: 14px 16px; margin: 16px 0;">
-        <p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #fca5a5;">⚠️ Late Cancellation Fee Required</p>
-        <p style="margin: 0; color: #fecaca; font-size: 14px;">This cancellation was made within 24 hours of the session. Per our policy, a <strong>50% cancellation fee of $${lateFee}</strong> is still due.</p>
-        <p style="margin: 8px 0 0 0; color: #fecaca; font-size: 14px;">Please pay via Zelle (<strong>artemios@mesabasketballtraining.com</strong>), Cash, or Venmo (<strong>@Artemios-Gavalas</strong>).</p>
+        <p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #ffffff;">⚠️ Late Cancellation Fee Required</p>
+        <p style="margin: 0; color: #ffffff; font-size: 14px;">This cancellation was made within 24 hours of the session. Per our policy, a <strong>50% cancellation fee of $${lateFee}</strong> is still due.</p>
+        <p style="margin: 8px 0 0 0; color: #ffffff; font-size: 14px;">Please pay via Zelle (<strong>artemios@mesabasketballtraining.com</strong>), Cash, or Venmo (<strong>@Artemios-Gavalas</strong>).</p>
       </div>`
     : "";
 
@@ -473,9 +473,9 @@ export async function sendRescheduleNotification(data: {
 
   const lateFeeNote = data.isLateReschedule
     ? `<div style="background: #7c1d1d; border-left: 4px solid #ef4444; border-radius: 6px; padding: 14px 16px; margin: 16px 0;">
-        <p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #fca5a5;">⚠️ Late Reschedule Fee Required</p>
-        <p style="margin: 0; color: #fecaca; font-size: 14px;">This reschedule was made within 24 hours of the session. Per our policy, a <strong>50% fee${data.lateFeeAmount ? ` of $${data.lateFeeAmount}` : ""}</strong> is still due.</p>
-        <p style="margin: 8px 0 0 0; color: #fecaca; font-size: 14px;">Please pay via Zelle (<strong>artemios@mesabasketballtraining.com</strong>), Cash, or Venmo (<strong>@Artemios-Gavalas</strong>).</p>
+        <p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #ffffff;">⚠️ Late Reschedule Fee Required</p>
+        <p style="margin: 0; color: #ffffff; font-size: 14px;">This reschedule was made within 24 hours of the session. Per our policy, a <strong>50% fee${data.lateFeeAmount ? ` of $${data.lateFeeAmount}` : ""}</strong> is still due.</p>
+        <p style="margin: 8px 0 0 0; color: #ffffff; font-size: 14px;">Please pay via Zelle (<strong>artemios@mesabasketballtraining.com</strong>), Cash, or Venmo (<strong>@Artemios-Gavalas</strong>).</p>
       </div>`
     : "";
 
@@ -505,7 +505,7 @@ export async function sendRescheduleNotification(data: {
       <p>Your session has been rescheduled.</p>
       <p><strong>Old Session:</strong> ${formatSessionDetailsForEmail(data.oldSessionDetails)}</p>
       <p><strong>New Session:</strong> ${formatSessionDetailsForEmail(data.newSessionDetails)}</p>
-      ${data.isLateReschedule ? `<div style="background: #7c1d1d; border-left: 4px solid #ef4444; border-radius: 6px; padding: 14px 16px; margin: 16px 0;"><p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #fca5a5;">⚠️ Late Reschedule Fee Required</p><p style="margin: 0; color: #fecaca; font-size: 14px;">This reschedule was made within 24 hours of the session. Per our policy, a <strong>50% fee${data.lateFeeAmount ? ` of $${data.lateFeeAmount}` : ""}</strong> is still due.</p><p style="margin: 8px 0 0 0; color: #fecaca; font-size: 14px;">Please pay via Zelle (<strong>artemios@mesabasketballtraining.com</strong>), Cash, or Venmo (<strong>@Artemios-Gavalas</strong>).</p></div>` : ""}
+      ${data.isLateReschedule ? `<div style="background: #7c1d1d; border-left: 4px solid #ef4444; border-radius: 6px; padding: 14px 16px; margin: 16px 0;"><p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #ffffff;">⚠️ Late Reschedule Fee Required</p><p style="margin: 0; color: #ffffff; font-size: 14px;">This reschedule was made within 24 hours of the session. Per our policy, a <strong>50% fee${data.lateFeeAmount ? ` of $${data.lateFeeAmount}` : ""}</strong> is still due.</p><p style="margin: 8px 0 0 0; color: #ffffff; font-size: 14px;">Please pay via Zelle (<strong>artemios@mesabasketballtraining.com</strong>), Cash, or Venmo (<strong>@Artemios-Gavalas</strong>).</p></div>` : ""}
       <p><a href="${BASE_URL}/my-bookings" style="color: #d4af37; font-weight: bold;">View My Bookings</a> — Manage all your sessions</p>
       <br/>
       <p>Questions? Contact Artemios at (631) 599-1280 or email <a href="mailto:artemios@mesabasketballtraining.com">artemios@mesabasketballtraining.com</a>.</p>
