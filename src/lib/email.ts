@@ -29,28 +29,51 @@ function getResend() {
   return new Resend(key);
 }
 
+function calDateStr(d: string): string {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return d.replace(/-/g, "");
+  const parsed = new Date(/\d{4}/.test(d) ? d : `${d}, ${new Date().getFullYear()}`);
+  if (!isNaN(parsed.getTime())) {
+    return `${parsed.getFullYear()}${String(parsed.getMonth() + 1).padStart(2, "0")}${String(parsed.getDate()).padStart(2, "0")}`;
+  }
+  return "";
+}
+
+function calTimeStr(t: string): string {
+  const m = t?.match(/(\d+)(?::(\d+))?\s*(am|pm)?/i);
+  if (!m) return "000000";
+  let h = parseInt(m[1]);
+  const min = parseInt(m[2] || "0");
+  const period = (m[3] || "").toLowerCase();
+  if (period === "pm" && h !== 12) h += 12;
+  if (period === "am" && h === 12) h = 0;
+  return `${String(h).padStart(2, "0")}${String(min).padStart(2, "0")}00`;
+}
+
 function buildGoogleCalendarUrl(date: string, startTime: string, endTime: string, location: string, title: string): string {
-  function dateStr(d: string): string {
-    if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return d.replace(/-/g, "");
-    const parsed = new Date(/\d{4}/.test(d) ? d : `${d}, ${new Date().getFullYear()}`);
-    if (!isNaN(parsed.getTime())) {
-      return `${parsed.getFullYear()}${String(parsed.getMonth() + 1).padStart(2, "0")}${String(parsed.getDate()).padStart(2, "0")}`;
-    }
-    return "";
-  }
-  function timeStr(t: string): string {
-    const m = t?.match(/(\d+)(?::(\d+))?\s*(am|pm)?/i);
-    if (!m) return "000000";
-    let h = parseInt(m[1]);
-    const min = parseInt(m[2] || "0");
-    const period = (m[3] || "").toLowerCase();
-    if (period === "pm" && h !== 12) h += 12;
-    if (period === "am" && h === 12) h = 0;
-    return `${String(h).padStart(2, "0")}${String(min).padStart(2, "0")}00`;
-  }
-  const d = dateStr(date);
+  const d = calDateStr(date);
   if (!d) return "";
-  return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(title)}&dates=${d}T${timeStr(startTime)}/${d}T${timeStr(endTime)}&ctz=America%2FNew_York&location=${encodeURIComponent(location)}&details=${encodeURIComponent("Mesa Basketball Training")}`;
+  return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(title)}&dates=${d}T${calTimeStr(startTime)}/${d}T${calTimeStr(endTime)}&ctz=America%2FNew_York&location=${encodeURIComponent(location)}&details=${encodeURIComponent("Mesa Basketball Training")}`;
+}
+
+function buildICSContent(date: string, startTime: string, endTime: string, location: string, title: string): string {
+  const d = calDateStr(date);
+  if (!d) return "";
+  return [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//Mesa Basketball Training//EN",
+    "CALSCALE:GREGORIAN",
+    "METHOD:PUBLISH",
+    "BEGIN:VEVENT",
+    `UID:mesa-${d}T${calTimeStr(startTime)}@mesabasketballtraining.com`,
+    `DTSTART;TZID=America/New_York:${d}T${calTimeStr(startTime)}`,
+    `DTEND;TZID=America/New_York:${d}T${calTimeStr(endTime)}`,
+    `SUMMARY:${title}`,
+    `LOCATION:${location}`,
+    "DESCRIPTION:Mesa Basketball Training",
+    "END:VEVENT",
+    "END:VCALENDAR",
+  ].join("\r\n");
 }
 
 export async function sendRegistrationNotification(data: {
@@ -136,14 +159,26 @@ export async function sendRegistrationNotification(data: {
 
   const manageSection = `<p><a href="${BASE_URL}/my-bookings" style="color: #d4af37; font-weight: bold;">View My Bookings</a> — Manage, cancel, or reschedule your sessions</p>`;
 
-  const calendarSection = (() => {
+  const calendarButtons = (() => {
     if (!data.calendarEvent) return "";
     const { date, startTime, endTime, location } = data.calendarEvent;
     const loc = LOCATION_MAP[location]?.name || location;
     const title = data.type === "camp" ? "Mesa Basketball Training — Camp" : data.type === "weekly" ? "Mesa Basketball Training — Group Session" : "Mesa Basketball Training — Private Session";
-    const params = new URLSearchParams({ date, start: startTime, end: endTime, location: loc, title });
-    const icsUrl = `${BASE_URL}/api/ics?${params.toString()}`;
-    return `<p style="margin-top: 12px;"><a href="${icsUrl}" style="display: inline-block; background: #5c3d2e; color: #ffffff; padding: 8px 16px; border-radius: 6px; text-decoration: none; font-size: 13px; font-weight: bold;">Add to Calendar</a></p>`;
+    const googleUrl = buildGoogleCalendarUrl(date, startTime, endTime, loc, title);
+    return `<p style="margin-top: 8px;">
+      <a href="${googleUrl}" target="_blank" style="display: inline-block; background: #5c3d2e; color: #ffffff; padding: 7px 14px; border-radius: 6px; text-decoration: none; font-size: 12px; font-weight: bold; margin-right: 8px;">Google Calendar</a>
+      <span style="font-size: 12px; color: #8a7060;">or open the .ics attachment for Apple / Outlook</span>
+    </p>`;
+  })();
+
+  const icsAttachment = (() => {
+    if (!data.calendarEvent) return null;
+    const { date, startTime, endTime, location } = data.calendarEvent;
+    const loc = LOCATION_MAP[location]?.name || location;
+    const title = data.type === "camp" ? "Mesa Basketball Training — Camp" : data.type === "weekly" ? "Mesa Basketball Training — Group Session" : "Mesa Basketball Training — Private Session";
+    const content = buildICSContent(date, startTime, endTime, loc, title);
+    if (!content) return null;
+    return { filename: "mesa-basketball.ics", content: Buffer.from(content) };
   })();
 
   const referralSection = data.referralCode
@@ -166,14 +201,15 @@ export async function sendRegistrationNotification(data: {
       ${packageNote}
       ${freeNote}
       ${priceNote}
+      ${calendarButtons}
       ${paymentNote}
       ${manageSection}
-      ${calendarSection}
       ${referralSection}
       <br/>
       <p>Questions? Contact Artemios at (631) 599-1280 or email <a href="mailto:artemios@mesabasketballtraining.com">artemios@mesabasketballtraining.com</a>.</p>
       <p>— Mesa Basketball Training</p>
     `,
+    ...(icsAttachment ? { attachments: [icsAttachment] } : {}),
   });
   if (clientResult.error) console.error("Resend client email error:", clientResult.error, "to:", data.email);
 }
