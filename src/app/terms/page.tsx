@@ -82,10 +82,10 @@ export default function TermsPage() {
               4. SMS MESSAGING TERMS
             </h2>
             <p className="mb-4">
-              During registration on mesabasketballtraining.com, you are presented with a required opt-in
-              checkbox before your registration can be submitted. By checking that box, you explicitly
-              consent to receive SMS text messages from Mesa Basketball Training LLC. The checkbox is
-              unchecked by default and the registration form cannot be submitted without checking it.
+              During registration on mesabasketballtraining.com, you are presented with an optional SMS
+              opt-in checkbox. Checking that box is voluntary — it is unchecked by default and is not
+              required to complete your registration. By checking it, you explicitly consent to receive
+              SMS text messages from Mesa Basketball Training LLC.
             </p>
             <div className="rounded-lg border border-brown-700 bg-brown-900/40 px-6 py-5 space-y-3 text-brown-300">
               <p>
@@ -96,24 +96,31 @@ export default function TermsPage() {
                 session reminders, schedule updates, and program announcements
               </p>
               <p>
-                <span className="text-white font-semibold">Message frequency:</span> Approximately weekly;
-                frequency may vary based on active registrations and program activity
+                <span className="text-white font-semibold">Message frequency:</span> Message frequency
+                varies. Approximately weekly based on active registrations and program activity.
               </p>
               <p>
                 <span className="text-white font-semibold">Msg &amp; data rates:</span> Message and
-                data rates may apply. Standard carrier rates apply based on your mobile plan.
+                data rates may apply.
               </p>
               <p>
-                <span className="text-white font-semibold">To opt out:</span> Reply{" "}
-                <span className="text-mesa-accent font-semibold">STOP</span> at any time to unsubscribe
-                from all SMS messages. You will receive a single confirmation message and no further
-                messages will be sent.
+                <strong className="text-white">To opt out: Reply STOP</strong> at any time to unsubscribe
+                from all SMS messages. You will receive a single confirmation and no further messages will
+                be sent.
               </p>
               <p>
-                <span className="text-white font-semibold">For help:</span> Reply{" "}
-                <span className="text-mesa-accent font-semibold">HELP</span> or contact us at{" "}
+                <strong className="text-white">For help: Reply HELP</strong> or contact us at{" "}
                 <a href="mailto:artemios@mesabasketballtraining.com" className="text-mesa-accent hover:text-yellow-300 underline">
                   artemios@mesabasketballtraining.com
+                </a>{" "}or call (631) 599-1280.
+              </p>
+              <p>
+                <span className="text-white font-semibold">Carrier disclaimer:</span> Carriers are not
+                liable for any delayed or undelivered messages.
+              </p>
+              <p>
+                <a href="/privacy-policy" className="text-mesa-accent hover:text-yellow-300 underline">
+                  Privacy Policy
                 </a>
               </p>
             </div>

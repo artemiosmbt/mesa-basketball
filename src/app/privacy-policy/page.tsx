@@ -78,10 +78,11 @@ export default function PrivacyPolicyPage() {
               4. SMS COMMUNICATIONS
             </h2>
             <p className="mb-4">
-              During registration on mesabasketballtraining.com, you are presented with a required opt-in
-              checkbox before your registration can be submitted. By checking that box, you explicitly
-              consent to receive SMS text messages from Mesa Basketball Training LLC. The checkbox is
-              unchecked by default and no SMS messages are sent unless you check it. These messages may include:
+              During registration on mesabasketballtraining.com, you are presented with an optional SMS
+              opt-in checkbox. Checking that box is voluntary — it is unchecked by default and is not
+              required to complete your registration. By checking it, you explicitly consent to receive SMS
+              text messages from Mesa Basketball Training LLC. No SMS messages are sent unless you check it.
+              These messages may include:
             </p>
             <ul className="list-disc list-inside space-y-2 text-brown-300 ml-2">
               <li>Booking confirmations</li>
@@ -131,6 +132,12 @@ export default function PrivacyPolicyPage() {
                 required by law or in response to a valid legal process.
               </li>
             </ul>
+            <p className="mt-4 text-brown-300">
+              <span className="text-white font-semibold">SMS opt-in data:</span> Text messaging originator
+              opt-in data and consent will not be shared with any third parties or affiliates for marketing
+              or promotional purposes. All categories above exclude text messaging originator opt-in data
+              and consent; this information will not be shared with any third parties.
+            </p>
           </section>
 
           <section>
