@@ -206,7 +206,7 @@ export default function AdminPage() {
     groups: registrations.filter((r) => r.type === "weekly" && r.status === "confirmed").length,
   }), [registrations]);
 
-  function RegCard({ r, showDelete = false }: { r: Registration; showDelete?: boolean }) {
+  function RegCard({ r, showDelete = false, isPast = false }: { r: Registration; showDelete?: boolean; isPast?: boolean }) {
     const [expanded, setExpanded] = useState(false);
     const fullSession = r.session_details
       ? r.session_details.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim()
@@ -269,9 +269,9 @@ export default function AdminPage() {
             </div>
 
             {/* Actions */}
-            {(r.status === "confirmed" || showDelete) && (
+            {(r.status === "confirmed" || showDelete || isPast) && (
               <div className="flex flex-wrap gap-3 pt-1 border-t border-brown-800">
-                {r.status === "confirmed" && (
+                {r.status === "confirmed" && !isPast && (
                   <button onClick={() => cancelRegistration(r.id)} disabled={cancelling === r.id} className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50">
                     {cancelling === r.id ? "Cancelling..." : "Cancel"}
                   </button>
@@ -292,7 +292,7 @@ export default function AdminPage() {
                     </button>
                   </div>
                 )}
-                {showDelete && (
+                {(showDelete || isPast) && (
                   <button onClick={() => deleteRegistration(r.id)} disabled={deleting === r.id} className="text-xs text-brown-600 hover:text-red-500 transition disabled:opacity-50">
                     {deleting === r.id ? "Deleting..." : "Delete"}
                   </button>
@@ -305,7 +305,7 @@ export default function AdminPage() {
     );
   }
 
-  function RegTableRows({ list }: { list: Registration[] }) {
+  function RegTableRows({ list, isPast = false }: { list: Registration[]; isPast?: boolean }) {
     return (
       <>
         {list.map((r) => (
@@ -329,30 +329,29 @@ export default function AdminPage() {
                 {r.status === "no_show" ? "no show" : r.status}
               </span>
             </td>
-            <td className="px-4 py-3">
-              {r.status === "confirmed" && (
-                <div className="flex flex-col gap-1">
-                  <button onClick={() => cancelRegistration(r.id)} disabled={cancelling === r.id} className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50">
-                    {cancelling === r.id ? "..." : "Cancel"}
-                  </button>
-                  {noShowConfirm !== r.id ? (
-                    <button onClick={() => setNoShowConfirm(r.id)} disabled={noShowing === r.id} className="text-xs text-orange-400 hover:text-orange-300 transition disabled:opacity-50">
-                      No Show
+            <td className="px-4 py-3 whitespace-nowrap">
+              {isPast ? (
+                <div className="flex items-center gap-3">
+                  {r.status === "confirmed" && (
+                    <button onClick={() => { if (window.confirm("Mark as no show?")) markNoShow(r.id); }} disabled={noShowing === r.id} className="text-xs text-orange-400 hover:text-orange-300 transition disabled:opacity-50">
+                      {noShowing === r.id ? "..." : "No Show"}
                     </button>
-                  ) : (
-                    <div className="flex flex-col gap-0.5">
-                      <span className="text-xs text-orange-300 font-semibold">Are you sure?</span>
-                      <div className="flex gap-2">
-                        <button onClick={() => markNoShow(r.id)} disabled={noShowing === r.id} className="text-xs text-orange-400 hover:text-orange-300 font-semibold transition disabled:opacity-50">
-                          {noShowing === r.id ? "..." : "Yes"}
-                        </button>
-                        <button onClick={() => setNoShowConfirm(null)} className="text-xs text-brown-500 hover:text-brown-300 transition">
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
                   )}
+                  <button onClick={() => { if (window.confirm("Delete this record permanently?")) deleteRegistration(r.id); }} disabled={deleting === r.id} className="text-xs text-brown-500 hover:text-red-400 transition disabled:opacity-50">
+                    {deleting === r.id ? "..." : "Delete"}
+                  </button>
                 </div>
+              ) : (
+                r.status === "confirmed" && (
+                  <div className="flex items-center gap-3">
+                    <button onClick={() => cancelRegistration(r.id)} disabled={cancelling === r.id} className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50">
+                      {cancelling === r.id ? "..." : "Cancel"}
+                    </button>
+                    <button onClick={() => { if (window.confirm("Mark as no show?")) markNoShow(r.id); }} disabled={noShowing === r.id} className="text-xs text-orange-400 hover:text-orange-300 transition disabled:opacity-50">
+                      {noShowing === r.id ? "..." : "No Show"}
+                    </button>
+                  </div>
+                )
               )}
             </td>
           </tr>
@@ -505,7 +504,7 @@ export default function AdminPage() {
             <p className="text-xs text-brown-500 mb-3">{displayedPast.length} session{displayedPast.length !== 1 ? "s" : ""}</p>
             <div className="md:hidden space-y-3">
               {displayedPast.length === 0 && <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-8 text-center text-brown-500 text-sm">No past sessions.</div>}
-              {displayedPast.map((r) => <RegCard key={r.id} r={r} />)}
+              {displayedPast.map((r) => <RegCard key={r.id} r={r} isPast />)}
             </div>
             <div className="hidden md:block rounded-xl border border-brown-700 overflow-hidden">
               <table className="w-full text-sm">
@@ -514,7 +513,7 @@ export default function AdminPage() {
                     <th className="px-4 py-3 text-left">Registered</th><th className="px-4 py-3 text-left">Parent</th><th className="px-4 py-3 text-left">Email</th><th className="px-4 py-3 text-left">Phone</th><th className="px-4 py-3 text-left">Athletes</th><th className="px-4 py-3 text-left">Type</th><th className="px-4 py-3 text-left">Session</th><th className="px-4 py-3 text-left">Status</th><th className="px-4 py-3 text-left">Action</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-brown-800"><RegTableRows list={displayedPast} /></tbody>
+                <tbody className="divide-y divide-brown-800"><RegTableRows list={displayedPast} isPast /></tbody>
               </table>
             </div>
           </>
