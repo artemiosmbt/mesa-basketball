@@ -1451,7 +1451,7 @@ export default function Home() {
               <a
                 key={href}
                 href={href}
-                className="rounded-full border border-mesa-accent bg-brown-800/60 px-4 py-1.5 text-xs font-semibold text-mesa-accent hover:bg-mesa-accent hover:text-white transition-colors sm:px-5 sm:py-2 sm:text-sm"
+                className="rounded-full border border-mesa-accent bg-brown-800/60 px-4 py-2 text-[13px] font-semibold text-mesa-accent hover:bg-mesa-accent hover:text-white transition-colors sm:px-5 sm:py-2 sm:text-sm"
               >
                 {label}
               </a>
