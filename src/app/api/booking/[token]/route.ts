@@ -18,6 +18,19 @@ import {
   upsertGroupSessionCalendarEvent,
 } from "@/lib/calendar";
 
+// Parse a session date + hours/mins (Eastern time) into a UTC Date for comparison.
+// The server runs UTC; without this, "2:00 PM" is treated as 2pm UTC instead of 2pm ET.
+function parseSessionDateTimeET(dateStr: string, hoursET: number, minsET: number): Date {
+  const ref = new Date(dateStr);
+  ref.setHours(12, 0, 0, 0); // use midday to safely determine DST offset
+  const utcMs = new Date(ref.toLocaleString("en-US", { timeZone: "UTC" })).getTime();
+  const nyMs  = new Date(ref.toLocaleString("en-US", { timeZone: "America/New_York" })).getTime();
+  const offsetMs = utcMs - nyMs; // e.g. 4h for EDT, 5h for EST
+  const sessionLocal = new Date(dateStr);
+  sessionLocal.setHours(hoursET, minsET, 0, 0);
+  return new Date(sessionLocal.getTime() + offsetMs);
+}
+
 // GET — fetch booking details
 export async function GET(
   _req: NextRequest,
@@ -77,8 +90,7 @@ export async function DELETE(
         const period = timeMatch[3].toUpperCase();
         if (period === "PM" && hours !== 12) hours += 12;
         if (period === "AM" && hours === 12) hours = 0;
-        const sessionDateTime = new Date(checkDay.booked_date);
-        sessionDateTime.setHours(hours, mins, 0, 0);
+        const sessionDateTime = parseSessionDateTimeET(checkDay.booked_date, hours, mins);
         if (Date.now() >= sessionDateTime.getTime()) {
           return NextResponse.json(
             { error: "Cancellations are not accepted once the camp has started. The full amount is due." },
@@ -102,10 +114,8 @@ export async function DELETE(
       const period = timeMatch[3].toUpperCase();
       if (period === "PM" && hours !== 12) hours += 12;
       if (period === "AM" && hours === 12) hours = 0;
-      const sessionDateTime = new Date(`${dateStr}`);
-      sessionDateTime.setHours(hours, mins, 0, 0);
-      const hoursUntil =
-        (sessionDateTime.getTime() - Date.now()) / (1000 * 60 * 60);
+      const sessionDateTime = parseSessionDateTimeET(dateStr, hours, mins);
+      const hoursUntil = (sessionDateTime.getTime() - Date.now()) / (1000 * 60 * 60);
       isLateCancel = hoursUntil >= 0 && hoursUntil < 48;
     }
   }
@@ -259,8 +269,7 @@ export async function PUT(
     const period = timeMatch[3].toUpperCase();
     if (period === "PM" && hours !== 12) hours += 12;
     if (period === "AM" && hours === 12) hours = 0;
-    const dt = new Date(dateStr);
-    dt.setHours(hours, mins, 0, 0);
+    const dt = parseSessionDateTimeET(dateStr, hours, mins);
     const hoursUntil = (dt.getTime() - Date.now()) / (1000 * 60 * 60);
     return hoursUntil >= 0 && hoursUntil < 48;
   }
