@@ -292,12 +292,12 @@ export default function MyBookings() {
               </>
             );
 
-            const sharedClass = `rounded-2xl border p-5 transition ${
+            const sharedClass = `rounded-2xl border border-brown-700 bg-brown-800 p-5 transition ${
               isCancelled
-                ? "bg-brown-800/20 border-brown-700 opacity-55"
+                ? "opacity-50"
                 : isClickable
-                ? "bg-brown-800/40 border-brown-700 hover:border-mesa-accent/60 hover:bg-brown-800/60 cursor-pointer"
-                : "bg-brown-800/40 border-brown-700"
+                ? "hover:border-mesa-accent/50 cursor-pointer"
+                : ""
             }`;
 
             if (isClickable) {
