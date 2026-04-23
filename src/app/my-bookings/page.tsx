@@ -294,10 +294,10 @@ export default function MyBookings() {
 
             const sharedClass = `rounded-2xl border p-5 transition ${
               isCancelled
-                ? "bg-brown-900/50 border-brown-800 opacity-55"
+                ? "bg-brown-800/20 border-brown-700 opacity-55"
                 : isClickable
-                ? "bg-brown-900 border-brown-700 hover:border-mesa-accent/60 hover:bg-brown-800/70 cursor-pointer"
-                : "bg-brown-900 border-brown-700"
+                ? "bg-brown-800/40 border-brown-700 hover:border-mesa-accent/60 hover:bg-brown-800/60 cursor-pointer"
+                : "bg-brown-800/40 border-brown-700"
             }`;
 
             if (isClickable) {
