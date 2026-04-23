@@ -292,7 +292,7 @@ export default function MyBookings() {
               </>
             );
 
-            const sharedClass = `rounded-2xl border border-brown-700 bg-brown-800 p-5 transition ${
+            const sharedClass = `block rounded-2xl border border-brown-700 bg-brown-800 p-5 transition ${
               isCancelled
                 ? "opacity-50"
                 : isClickable
