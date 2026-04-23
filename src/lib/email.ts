@@ -100,7 +100,7 @@ export async function sendRegistrationNotification(data: {
 
   const paymentNote = isPackageBooking || data.isFree
     ? ""
-    : "<p>Payment is due upon registration via Zelle (<strong>artemios@mesabasketballtraining.com</strong>), Cash, or Venmo (<strong>@Artemios-Gavalas</strong>). Please provide at least 48 hours' notice if you need to cancel or reschedule a session. Rescheduling or canceling within 48 hours of the scheduled session will result in a 50% charge of the session fee. <strong>No-shows without prior notice will be charged the full session fee.</strong></p>";
+    : "<p>Payment is due upon registration via Zelle (<strong>artemios@mesabasketballtraining.com</strong>), Cash, or Venmo (<strong>@Artemios-Gavalas</strong>). Please provide at least 24 hours' notice if you need to cancel or reschedule a session. Rescheduling or canceling within 24 hours of the scheduled session will result in a 50% charge of the session fee. <strong>No-shows without prior notice will be charged the full session fee.</strong></p>";
 
   const discountedPrice = data.type === "group-private" ? 125 : 75;
   const freeNote = !isPackageBooking && data.isFree && data.isFirstTime
@@ -180,7 +180,7 @@ export async function sendCancellationNotification(data: {
     ? data.lateFeeAmount
     : data.sessionType === "group-private" ? 125 : data.sessionType === "weekly" ? 25 : 75;
   const lateNote = data.isLateCancel
-    ? `<p><strong>Note:</strong> This cancellation was made within 48 hours of the session. Per our policy, a 50% cancellation fee ($${lateFee}) is still due. Please pay via Zelle (<strong>artemios@mesabasketballtraining.com</strong>), Cash, or Venmo (<strong>@Artemios-Gavalas</strong>).</p>`
+    ? `<p><strong>Note:</strong> This cancellation was made within 24 hours of the session. Per our policy, a 50% cancellation fee ($${lateFee}) is still due. Please pay via Zelle (<strong>artemios@mesabasketballtraining.com</strong>), Cash, or Venmo (<strong>@Artemios-Gavalas</strong>).</p>`
     : "";
 
   // Email to Artemi
@@ -192,7 +192,7 @@ export async function sendCancellationNotification(data: {
       <h2>Session Cancelled</h2>
       <p><strong>Parent:</strong> ${data.parentName}</p>
       <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails)}</p>
-      ${data.isLateCancel ? `<p><strong>⚠️ Late cancellation — 50% fee ($${lateFee}) applies</strong></p>` : ""}
+      ${data.isLateCancel ? `<p><strong>⚠️ Late cancellation (within 24h) — 50% fee ($${lateFee}) applies</strong></p>` : ""}
     `,
   });
 
@@ -330,7 +330,7 @@ export async function sendPackageConfirmation(data: {
       <h3>Payment</h3>
       <p>Payment is due upon registration: <strong>Cash, Venmo (@Artemios-Gavalas), or Zelle (artemios@mesabasketballtraining.com)</strong>.</p>
       <h3>Cancellation &amp; Rescheduling Policy</h3>
-      <p>Cancellations and reschedules within 48 hours of a scheduled session incur a <strong>$75 fee</strong> (50% of the standard $150 private rate). <strong>No-shows without prior notice will be charged the full session fee.</strong></p>
+      <p>Cancellations and reschedules within 24 hours of a scheduled session incur a <strong>$75 fee</strong> (50% of the standard $150 private rate). <strong>No-shows without prior notice will be charged the full session fee.</strong></p>
       <h3>Track Your Sessions</h3>
       <p><a href="${BASE_URL}/my-bookings" style="color: #d4af37; font-weight: bold;">View My Bookings</a> — check how many sessions you've used this month.</p>
       <br/>
@@ -396,7 +396,7 @@ export async function sendRescheduleNotification(data: {
   const resend = getResend();
 
   const lateFeeNote = data.isLateReschedule
-    ? `<p style="color: #f59e0b;"><strong>Late Reschedule:</strong> This was rescheduled within 48 hours. 50% of the session fee is due${data.lateFeeAmount ? ` ($${data.lateFeeAmount})` : ""}.</p>`
+    ? `<p style="color: #f59e0b;"><strong>Late Reschedule:</strong> This was rescheduled within 24 hours. 50% of the session fee is due${data.lateFeeAmount ? ` ($${data.lateFeeAmount})` : ""}.</p>`
     : "";
 
   // Email to Artemi
@@ -425,7 +425,7 @@ export async function sendRescheduleNotification(data: {
       <p>Your session has been rescheduled.</p>
       <p><strong>Old Session:</strong> ${formatSessionDetailsForEmail(data.oldSessionDetails)}</p>
       <p><strong>New Session:</strong> ${formatSessionDetailsForEmail(data.newSessionDetails)}</p>
-      ${data.isLateReschedule ? `<p style="color: #f59e0b;">This reschedule was made within 48 hours of the session. Per our policy, 50% of the session fee is still due${data.lateFeeAmount ? ` ($${data.lateFeeAmount})` : ""}.</p>` : ""}
+      ${data.isLateReschedule ? `<p style="color: #f59e0b;">This reschedule was made within 24 hours of the session. Per our policy, 50% of the session fee is still due${data.lateFeeAmount ? ` ($${data.lateFeeAmount})` : ""}.</p>` : ""}
       <p><a href="${BASE_URL}/my-bookings" style="color: #d4af37; font-weight: bold;">View My Bookings</a> — Manage all your sessions</p>
       <br/>
       <p>Questions? Contact Artemios at (631) 599-1280 or email <a href="mailto:artemios@mesabasketballtraining.com">artemios@mesabasketballtraining.com</a>.</p>

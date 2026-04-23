@@ -39,6 +39,7 @@ interface Booking {
   bookedEndTime: string | null;
   bookedLocation: string | null;
   status: string;
+  createdAt: string;
   isFullCamp: boolean;
 }
 
@@ -120,7 +121,7 @@ export default function ManageBooking({
       .finally(() => setLoading(false));
   }, [token]);
 
-  // Check if within 48 hours
+  // True when the session is within 24 hours
   const within24Hours = useMemo(() => {
     if (!booking?.bookedDate || !booking?.bookedStartTime) return false;
     const timeMatch = booking.bookedStartTime.match(/(\d+):(\d+)\s*(AM|PM)/i);
@@ -133,8 +134,27 @@ export default function ManageBooking({
     const sessionDateTime = new Date(booking.bookedDate);
     sessionDateTime.setHours(hours, mins, 0, 0);
     const hoursUntil = (sessionDateTime.getTime() - Date.now()) / (1000 * 60 * 60);
-    return hoursUntil >= 0 && hoursUntil < 48;
+    return hoursUntil >= 0 && hoursUntil < 24;
   }, [booking]);
+
+  // True when within the 30-min grace period after booking (capped at session start)
+  const withinGracePeriod = useMemo(() => {
+    if (!within24Hours || !booking?.bookedDate || !booking?.bookedStartTime || !booking?.createdAt) return false;
+    const timeMatch = booking.bookedStartTime.match(/(\d+):(\d+)\s*(AM|PM)/i);
+    if (!timeMatch) return false;
+    let hours = parseInt(timeMatch[1]);
+    const mins = parseInt(timeMatch[2]);
+    const period = timeMatch[3].toUpperCase();
+    if (period === "PM" && hours !== 12) hours += 12;
+    if (period === "AM" && hours === 12) hours = 0;
+    const sessionDateTime = new Date(booking.bookedDate);
+    sessionDateTime.setHours(hours, mins, 0, 0);
+    const graceEnd = Math.min(
+      new Date(booking.createdAt).getTime() + 30 * 60 * 1000,
+      sessionDateTime.getTime()
+    );
+    return Date.now() < graceEnd;
+  }, [booking, within24Hours]);
 
   // Session has already passed — no changes allowed
   const sessionPassed = useMemo(() => {
@@ -321,8 +341,8 @@ export default function ManageBooking({
           {isLateCancel && (
             <p className="mt-3 rounded-lg bg-yellow-900/30 px-4 py-2 text-sm text-yellow-400">
               {isFullCampCancel
-                ? "This cancellation was made within 48 hours of the camp. Per our policy, 50% of the total camp fee is still due."
-                : "This change was made within 48 hours of the session. Per our policy, 50% of the session fee is still due."}
+                ? "This cancellation was made within 24 hours of the camp. Per our policy, 50% of the total camp fee is still due."
+                : "This change was made within 24 hours of the session. Per our policy, 50% of the session fee is still due."}
             </p>
           )}
           <a href="/" className="mt-6 inline-block rounded bg-mesa-accent px-6 py-2 font-semibold text-white hover:bg-yellow-600">
@@ -343,7 +363,7 @@ export default function ManageBooking({
           </p>
           {isLateReschedule && (
             <p className="mt-3 rounded-lg bg-yellow-900/30 px-4 py-2 text-sm text-yellow-400">
-              This reschedule was made within 48 hours of the session. Per our policy, 50% of the session fee is still due.
+              This reschedule was made within 24 hours of the session. Per our policy, 50% of the session fee is still due.
             </p>
           )}
           <a href="/" className="mt-6 inline-block rounded bg-mesa-accent px-6 py-2 font-semibold text-white hover:bg-yellow-600">
@@ -378,11 +398,11 @@ export default function ManageBooking({
                 <p><span className="text-brown-400">Type:</span> {booking.type === "group-private" ? "Group Private" : "Private"}</p>
               </div>
 
-              {within24Hours && (
+              {within24Hours && !withinGracePeriod && (
                 <p className="mt-4 rounded-lg bg-yellow-900/30 px-4 py-2 text-sm text-yellow-400">
                   {booking.isFullCamp
-                    ? "This camp is within 48 hours. Canceling the entire camp will result in a 50% charge of the total camp fee."
-                    : "This session is within 48 hours. Rescheduling or canceling will result in a 50% charge of the session fee."}
+                    ? "This camp is within 24 hours. Canceling the entire camp will result in a 50% charge of the total camp fee."
+                    : "This session is within 24 hours. Rescheduling or canceling will result in a 50% charge of the session fee."}
                 </p>
               )}
 
@@ -422,8 +442,8 @@ export default function ManageBooking({
                     <div className="mt-6 rounded-lg border border-red-800 bg-red-900/20 p-4">
                       <p className="text-sm text-brown-300">
                         Are you sure you want to cancel the entire camp? All registered days will be cancelled.
-                        {within24Hours &&
-                          " Since the camp is within 48 hours, 50% of the total camp fee will still be due per our cancellation policy."}
+                        {within24Hours && !withinGracePeriod &&
+                          " Since the camp is within 24 hours, 50% of the total camp fee will still be due per our cancellation policy."}
                       </p>
                       <div className="mt-3 flex gap-3">
                         <button
@@ -473,8 +493,8 @@ export default function ManageBooking({
                     <div className="mt-6 rounded-lg border border-red-800 bg-red-900/20 p-4">
                       <p className="text-sm text-brown-300">
                         Are you sure you want to cancel this session?
-                        {within24Hours &&
-                          " Since this is within 48 hours, 50% of the session fee will still be due per our rescheduling/cancellation policy."}
+                        {within24Hours && !withinGracePeriod &&
+                          " Since this is within 24 hours, 50% of the session fee will still be due per our rescheduling/cancellation policy."}
                       </p>
                       <div className="mt-3 flex gap-3">
                         <button

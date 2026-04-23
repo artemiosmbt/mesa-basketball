@@ -140,11 +140,11 @@ export default function TermsPage() {
             </p>
             <ul className="list-disc list-inside space-y-2 text-brown-300 ml-2">
               <li>
-                <span className="text-white">Cancellations made 48+ hours in advance</span> are eligible
+                <span className="text-white">Cancellations made 24+ hours in advance</span> are eligible
                 for a full credit toward a future session of equal value.
               </li>
               <li>
-                <span className="text-white">Cancellations made less than 48 hours in advance</span> are
+                <span className="text-white">Cancellations made less than 24 hours in advance</span> are
                 generally non-refundable. Exceptions may be made at Mesa&apos;s sole discretion in cases of
                 illness or emergency.
               </li>

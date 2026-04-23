@@ -31,6 +31,28 @@ function parseSessionDateTimeET(dateStr: string, hoursET: number, minsET: number
   return new Date(sessionLocal.getTime() + offsetMs);
 }
 
+// Returns true if this action is a late cancel/reschedule:
+// session is within 24h AND the 30-min grace period (from booking time, capped at session start) has expired.
+function isLateAction(dateStr: string, timeStr: string, createdAt: string): boolean {
+  const timeMatch = timeStr.match(/(\d+):(\d+)\s*(AM|PM)/i);
+  if (!timeMatch) return false;
+  let hours = parseInt(timeMatch[1]);
+  const mins = parseInt(timeMatch[2]);
+  const period = timeMatch[3].toUpperCase();
+  if (period === "PM" && hours !== 12) hours += 12;
+  if (period === "AM" && hours === 12) hours = 0;
+  const sessionStart = parseSessionDateTimeET(dateStr, hours, mins);
+  const now = Date.now();
+  const hoursUntil = (sessionStart.getTime() - now) / (1000 * 60 * 60);
+  if (hoursUntil < 0 || hoursUntil >= 24) return false;
+  // Within 24h — check grace: 30 min from booking time, capped at session start
+  const graceEnd = Math.min(
+    new Date(createdAt).getTime() + 30 * 60 * 1000,
+    sessionStart.getTime()
+  );
+  return now >= graceEnd;
+}
+
 // GET — fetch booking details
 export async function GET(
   _req: NextRequest,
@@ -53,6 +75,7 @@ export async function GET(
     bookedEndTime: reg.booked_end_time,
     bookedLocation: reg.booked_location,
     status: reg.status,
+    createdAt: reg.created_at,
     isFullCamp: reg.is_full_camp ?? false,
   });
 }
@@ -101,23 +124,10 @@ export async function DELETE(
     }
   }
 
-  // Check 24-hour policy
+  // Check 24-hour policy with 30-min grace period
   let isLateCancel = false;
   if (reg.booked_date && reg.booked_start_time) {
-    // Parse "March 20, 2026" + "3:00 PM" into a reliable Date
-    const dateStr = reg.booked_date!;
-    const timeStr = reg.booked_start_time!;
-    const timeMatch = timeStr.match(/(\d+):(\d+)\s*(AM|PM)/i);
-    if (timeMatch) {
-      let hours = parseInt(timeMatch[1]);
-      const mins = parseInt(timeMatch[2]);
-      const period = timeMatch[3].toUpperCase();
-      if (period === "PM" && hours !== 12) hours += 12;
-      if (period === "AM" && hours === 12) hours = 0;
-      const sessionDateTime = parseSessionDateTimeET(dateStr, hours, mins);
-      const hoursUntil = (sessionDateTime.getTime() - Date.now()) / (1000 * 60 * 60);
-      isLateCancel = hoursUntil >= 0 && hoursUntil < 48;
-    }
+    isLateCancel = isLateAction(reg.booked_date, reg.booked_start_time, reg.created_at);
   }
 
   // Full camp: block individual-day cancellation — must cancel all days together
@@ -260,21 +270,8 @@ export async function PUT(
     );
   }
 
-  // Check if original OR new session is within 48 hours → late reschedule fee applies
-  function isWithin48Hours(dateStr: string, timeStr: string): boolean {
-    const timeMatch = timeStr.match(/(\d+):(\d+)\s*(AM|PM)/i);
-    if (!timeMatch) return false;
-    let hours = parseInt(timeMatch[1]);
-    const mins = parseInt(timeMatch[2]);
-    const period = timeMatch[3].toUpperCase();
-    if (period === "PM" && hours !== 12) hours += 12;
-    if (period === "AM" && hours === 12) hours = 0;
-    const dt = parseSessionDateTimeET(dateStr, hours, mins);
-    const hoursUntil = (dt.getTime() - Date.now()) / (1000 * 60 * 60);
-    return hoursUntil >= 0 && hoursUntil < 48;
-  }
-
-  const isLateReschedule = !!(reg.booked_date && reg.booked_start_time && isWithin48Hours(reg.booked_date, reg.booked_start_time));
+  // Check if original session is within 24h (with grace period) → late reschedule fee applies
+  const isLateReschedule = !!(reg.booked_date && reg.booked_start_time && isLateAction(reg.booked_date, reg.booked_start_time, reg.created_at));
 
   // Cancel old booking
   await cancelRegistration(token);

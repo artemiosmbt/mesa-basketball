@@ -1837,7 +1837,7 @@ export default function Home() {
             </div>
             <p className="mt-4 text-center text-xs text-brown-500">
               Sessions expire at the end of the calendar month — unused sessions do not carry over.
-              Cancellations &amp; reschedules within 48 hours incur a $75 fee (50% of the standard private rate).
+              Cancellations &amp; reschedules within 24 hours incur a $75 fee (50% of the standard private rate).
             </p>
           </div>
 
