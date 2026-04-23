@@ -94,6 +94,11 @@ export default function LandingNav() {
               <circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none" />
             </svg>
           </a>
+          {userEmail === ADMIN_EMAIL && (
+            <Link href="/admin" className="md:hidden text-xs font-semibold text-mesa-accent bg-mesa-accent/10 border border-mesa-accent/30 px-2.5 py-1.5 rounded-lg">
+              Admin
+            </Link>
+          )}
           <button
             className="md:hidden text-brown-600 hover:text-mesa-dark p-1"
             onClick={() => setMobileMenuOpen((o) => !o)}
