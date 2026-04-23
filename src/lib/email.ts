@@ -141,9 +141,9 @@ export async function sendRegistrationNotification(data: {
     const { date, startTime, endTime, location } = data.calendarEvent;
     const loc = LOCATION_MAP[location]?.name || location;
     const title = data.type === "camp" ? "Mesa Basketball Training — Camp" : data.type === "weekly" ? "Mesa Basketball Training — Group Session" : "Mesa Basketball Training — Private Session";
-    const url = buildGoogleCalendarUrl(date, startTime, endTime, loc, title);
-    if (!url) return "";
-    return `<p style="margin-top: 12px;"><a href="${url}" target="_blank" style="display: inline-block; background: #1a73e8; color: #ffffff; padding: 8px 16px; border-radius: 6px; text-decoration: none; font-size: 13px; font-weight: bold;">Add to Google Calendar</a></p>`;
+    const params = new URLSearchParams({ date, start: startTime, end: endTime, location: loc, title });
+    const icsUrl = `${BASE_URL}/api/ics?${params.toString()}`;
+    return `<p style="margin-top: 12px;"><a href="${icsUrl}" style="display: inline-block; background: #5c3d2e; color: #ffffff; padding: 8px 16px; border-radius: 6px; text-decoration: none; font-size: 13px; font-weight: bold;">Add to Calendar</a></p>`;
   })();
 
   const referralSection = data.referralCode

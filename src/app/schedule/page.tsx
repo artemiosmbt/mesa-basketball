@@ -2385,22 +2385,22 @@ export default function Home() {
               <div className="mt-6 rounded-lg bg-green-900/50 p-4 text-center">
                 <p className="text-lg font-semibold text-green-400">{submitResult.message}</p>
                 {calendarSessions.length > 0 && (
-                  <div className="mt-3 flex flex-wrap justify-center gap-2">
+                  <div className="mt-3 flex flex-col items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => downloadICS(calendarSessions)}
+                      className="inline-flex items-center rounded bg-brown-700 px-4 py-2 text-sm text-white hover:bg-brown-600 transition"
+                    >
+                      Add to Calendar
+                    </button>
                     <a
                       href={buildGoogleCalUrl(calendarSessions[0])}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center rounded border border-green-700/60 px-3 py-1.5 text-xs text-green-400 hover:bg-green-900/60 transition"
+                      className="text-xs text-brown-500 hover:text-brown-400 transition"
                     >
-                      Add to Google Calendar
+                      Open in Google Calendar instead
                     </a>
-                    <button
-                      type="button"
-                      onClick={() => downloadICS(calendarSessions)}
-                      className="inline-flex items-center rounded border border-green-700/60 px-3 py-1.5 text-xs text-green-400 hover:bg-green-900/60 transition"
-                    >
-                      Download .ics (Apple / Outlook)
-                    </button>
                   </div>
                 )}
                 <button onClick={closeModal} className="mt-4 rounded bg-brown-700 px-4 py-2 text-sm hover:bg-brown-600">
