@@ -227,7 +227,13 @@ export default function ManageBooking({
       }
     }
 
-    return result.filter((w) => w.endMins - w.startMins >= 60);
+    const now = new Date();
+    return result.filter((w) => {
+      if (w.endMins - w.startMins < 60) return false;
+      const [year, month, day] = w.date.split("-").map(Number);
+      const windowStart = new Date(year, month - 1, day, Math.floor(w.startMins / 60), w.startMins % 60);
+      return windowStart > now;
+    });
   }, [privateSlots, bookedSlots]);
 
   async function loadSchedule() {
