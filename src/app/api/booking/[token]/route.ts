@@ -47,7 +47,7 @@ function isLateAction(dateStr: string, timeStr: string, createdAt: string): bool
   if (hoursUntil < 0 || hoursUntil >= 24) return false;
   // Within 24h — check grace: 30 min from booking time, capped at session start
   const graceEnd = Math.min(
-    new Date(createdAt).getTime() + 30 * 60 * 1000,
+    new Date(createdAt).getTime() + 15 * 60 * 1000,
     sessionStart.getTime()
   );
   return now >= graceEnd;

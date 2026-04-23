@@ -150,7 +150,7 @@ export default function ManageBooking({
     const sessionDateTime = new Date(booking.bookedDate);
     sessionDateTime.setHours(hours, mins, 0, 0);
     const graceEnd = Math.min(
-      new Date(booking.createdAt).getTime() + 30 * 60 * 1000,
+      new Date(booking.createdAt).getTime() + 15 * 60 * 1000,
       sessionDateTime.getTime()
     );
     return Date.now() < graceEnd;
