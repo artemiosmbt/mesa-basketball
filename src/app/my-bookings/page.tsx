@@ -243,8 +243,17 @@ export default function MyBookings() {
           function renderCard(b: BookingRecord, isPast = false) {
             const isConfirmed = b.status === "confirmed";
             const isCancelled = b.status === "cancelled";
-            return (
-              <div key={b.id} className={`rounded-2xl bg-brown-900 p-5 ${isCancelled ? "opacity-55" : ""}`}>
+            const isClickable = isConfirmed && !isPast;
+
+            const typeLabel =
+              b.type === "group-private" ? "Group Private"
+              : b.type === "private" ? "Private"
+              : b.type === "group" ? "Group"
+              : b.type === "camp" ? "Camp"
+              : b.type;
+
+            const inner = (
+              <>
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <p className="font-medium text-white">
@@ -255,12 +264,7 @@ export default function MyBookings() {
                         <span className="text-brown-500">Players:</span> {b.kids}
                       </p>
                       <p className="text-brown-400">
-                        <span className="text-brown-500">Type:</span>{" "}
-                        {b.type === "group-private" ? "Group Private"
-                          : b.type === "private" ? "Private"
-                          : b.type === "group" ? "Group"
-                          : b.type === "camp" ? "Camp"
-                          : b.type}
+                        <span className="text-brown-500">Type:</span> {typeLabel}
                       </p>
                       <p className="text-brown-500 text-xs">
                         Registered{" "}
@@ -280,15 +284,26 @@ export default function MyBookings() {
                     )}
                   </div>
                 </div>
-                {isConfirmed && !isPast && (
-                  <div className="mt-3 border-t border-brown-800 pt-3">
-                    <a href={`/booking/${b.manageToken}`} className="inline-flex items-center gap-1 text-sm font-medium text-mesa-accent hover:text-yellow-300">
-                      Manage Booking &rarr;
-                    </a>
-                  </div>
+                {isClickable && (
+                  <p className="mt-4 text-sm font-medium text-mesa-accent">
+                    Manage Booking &rarr;
+                  </p>
                 )}
-              </div>
+              </>
             );
+
+            const sharedClass = `rounded-2xl border p-5 transition ${
+              isCancelled
+                ? "bg-brown-900/50 border-brown-800 opacity-55"
+                : isClickable
+                ? "bg-brown-900 border-brown-700 hover:border-mesa-accent/60 hover:bg-brown-800/70 cursor-pointer"
+                : "bg-brown-900 border-brown-700"
+            }`;
+
+            if (isClickable) {
+              return <a key={b.id} href={`/booking/${b.manageToken}`} className={sharedClass}>{inner}</a>;
+            }
+            return <div key={b.id} className={sharedClass}>{inner}</div>;
           }
 
           return (
