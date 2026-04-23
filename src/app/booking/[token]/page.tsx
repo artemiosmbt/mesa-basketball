@@ -513,6 +513,11 @@ export default function ManageBooking({
                         weekday: "long",
                         timeZone: "UTC",
                       });
+                      const dateLabel = d.toLocaleDateString("en-US", {
+                        month: "long",
+                        day: "numeric",
+                        timeZone: "UTC",
+                      });
                       const isSelected = selectedWindow === wi;
                       const totalAvailable = w.endMins - w.startMins;
 
@@ -544,7 +549,7 @@ export default function ManageBooking({
                           }`}
                         >
                           <p className="font-medium">
-                            {dayName}, {w.date}
+                            {dayName}, {dateLabel}
                           </p>
                           <p className="text-sm text-brown-400">
                             {w.location} &bull; {w.startLabel} - {w.endLabel} ({totalAvailable} min)
@@ -661,7 +666,8 @@ export default function ManageBooking({
                         if (!w) return null;
                         const d = new Date(w.date);
                         const day = d.toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" });
-                        return `${day}, ${w.date} ${formatTimeFromMins(selectedStart)}-${formatTimeFromMins(selectedStart + selectedDuration)}`;
+                        const dateStr = d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+                        return `${day}, ${dateStr} ${formatTimeFromMins(selectedStart)}-${formatTimeFromMins(selectedStart + selectedDuration)}`;
                       })()}
                     </div>
                     <button
