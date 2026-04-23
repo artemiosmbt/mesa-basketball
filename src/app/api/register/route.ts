@@ -32,10 +32,17 @@ import {
   findReferrerInfoByCode,
   generateUniqueReferralCode,
   checkGroupSessionCapacity,
+  checkDuplicateRegistration,
   getActivePackage,
   setPackageSessions,
   countConfirmedPrivateSessions,
 } from "@/lib/supabase";
+
+function formatReadableDate(dateStr: string): string {
+  const [year, month, day] = dateStr.split("-").map(Number);
+  const d = new Date(year, month - 1, day);
+  return d.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -102,6 +109,21 @@ export async function POST(req: NextRequest) {
         const fullDates = fullSessions.map((s: { date: string }) => s.date).join(", ");
         return NextResponse.json(
           { error: `The following sessions are full: ${fullDates}. Please deselect them and try again.` },
+          { status: 400 }
+        );
+      }
+
+      // Check for duplicate registrations
+      const duplicateChecks = await Promise.all(
+        weeklySessions.map((s: { date: string; startTime: string }) =>
+          checkDuplicateRegistration(email, s.date, s.startTime)
+        )
+      );
+      const duplicateSessions = weeklySessions.filter((_: unknown, i: number) => duplicateChecks[i]);
+      if (duplicateSessions.length > 0) {
+        const dupDates = duplicateSessions.map((s: { date: string }) => formatReadableDate(s.date)).join(", ");
+        return NextResponse.json(
+          { error: `This email is already registered for the following session${duplicateSessions.length > 1 ? "s" : ""}: ${dupDates}. Please deselect ${duplicateSessions.length > 1 ? "them" : "it"} and try again.` },
           { status: 400 }
         );
       }
@@ -196,6 +218,21 @@ export async function POST(req: NextRequest) {
             campReferrer = info;
           }
         }
+      }
+
+      // Check for duplicate camp day registrations
+      const campDuplicateChecks = await Promise.all(
+        campSessions.map((s: { date: string; startTime: string }) =>
+          checkDuplicateRegistration(email, s.date, s.startTime)
+        )
+      );
+      const duplicateCampDays = campSessions.filter((_: unknown, i: number) => campDuplicateChecks[i]);
+      if (duplicateCampDays.length > 0) {
+        const dupDates = duplicateCampDays.map((s: { date: string }) => formatReadableDate(s.date)).join(", ");
+        return NextResponse.json(
+          { error: `This email is already registered for the following camp day${duplicateCampDays.length > 1 ? "s" : ""}: ${dupDates}. Please deselect ${duplicateCampDays.length > 1 ? "them" : "it"} and try again.` },
+          { status: 400 }
+        );
       }
 
       // Parse total price string (e.g. "$290" or "$290 (Early Bird)") to a number

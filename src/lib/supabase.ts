@@ -587,3 +587,19 @@ export async function checkGroupSessionCapacity(
   return { available: enrolled < maxSpots, enrolled };
 }
 
+export async function checkDuplicateRegistration(
+  email: string,
+  date: string,
+  startTime: string
+): Promise<boolean> {
+  const supabase = getSupabase();
+  const { count, error } = await supabase
+    .from("registrations")
+    .select("*", { count: "exact", head: true })
+    .eq("email", email)
+    .eq("booked_date", date)
+    .eq("booked_start_time", startTime)
+    .eq("status", "confirmed");
+  return !error && (count ?? 0) > 0;
+}
+
