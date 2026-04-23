@@ -165,6 +165,7 @@ export async function POST(req: NextRequest) {
         totalParticipants: totalParticipants || 1,
         referralCode,
         referredBy: weeklyReferrer?.name,
+        calendarEvent: weeklySessions[0] ? { date: weeklySessions[0].date, startTime: weeklySessions[0].startTime, endTime: weeklySessions[0].endTime, location: weeklySessions[0].location } : undefined,
       });
 
       if (weeklyReferrer) {
@@ -284,6 +285,7 @@ export async function POST(req: NextRequest) {
         totalParticipants: totalParticipants || 1,
         referralCode,
         referredBy: campReferrer?.name,
+        calendarEvent: { date: firstSession.date, startTime: firstSession.startTime, endTime: firstSession.endTime || firstSession.startTime, location: firstSession.location },
       });
 
       if (campReferrer) {
@@ -411,6 +413,7 @@ export async function POST(req: NextRequest) {
         packageType,
         referralCode,
         referredBy: privateReferrer?.name,
+        calendarEvent: bookedDate && bookedStartTime ? { date: bookedDate, startTime: bookedStartTime, endTime: bookedEndTime || bookedStartTime, location: bookedLocation || "" } : undefined,
       });
 
       if (smsConsent && !emailOnly) {

@@ -399,6 +399,69 @@ function MiniCalendar({
   );
 }
 
+// ── Add to Calendar helpers ──────────────────────────────────────────────────
+
+type CalSession = { date: string; startTime: string; endTime: string; location: string; title: string };
+
+function calDateStr(dateStr: string): string {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr.replace(/-/g, "");
+  const withYear = /\d{4}/.test(dateStr) ? dateStr : `${dateStr}, ${new Date().getFullYear()}`;
+  const d = new Date(withYear);
+  if (!isNaN(d.getTime())) {
+    return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
+  }
+  return "";
+}
+
+function calTimeStr(timeStr: string): string {
+  if (!timeStr) return "000000";
+  const m = timeStr.match(/(\d+)(?::(\d+))?\s*(am|pm)?/i);
+  if (!m) return "000000";
+  let h = parseInt(m[1]);
+  const min = parseInt(m[2] || "0");
+  const period = (m[3] || "").toLowerCase();
+  if (period === "pm" && h !== 12) h += 12;
+  if (period === "am" && h === 12) h = 0;
+  return `${String(h).padStart(2, "0")}${String(min).padStart(2, "0")}00`;
+}
+
+function buildGoogleCalUrl(s: CalSession): string {
+  const d = calDateStr(s.date);
+  const start = calTimeStr(s.startTime);
+  const end = calTimeStr(s.endTime);
+  return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(s.title)}&dates=${d}T${start}/${d}T${end}&ctz=America%2FNew_York&location=${encodeURIComponent(s.location)}&details=${encodeURIComponent("Mesa Basketball Training")}`;
+}
+
+function downloadICS(sessions: CalSession[]) {
+  const events = sessions.map((s, i) => {
+    const d = calDateStr(s.date);
+    const start = calTimeStr(s.startTime);
+    const end = calTimeStr(s.endTime);
+    return [
+      "BEGIN:VEVENT",
+      `UID:mesa-${d}-${start}-${i}@mesabasketballtraining.com`,
+      `DTSTART;TZID=America/New_York:${d}T${start}`,
+      `DTEND;TZID=America/New_York:${d}T${end}`,
+      `SUMMARY:${s.title}`,
+      `LOCATION:${s.location}`,
+      "DESCRIPTION:Mesa Basketball Training",
+      "END:VEVENT",
+    ].join("\r\n");
+  }).join("\r\n");
+  const ics = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Mesa Basketball Training//EN", "CALSCALE:GREGORIAN", "METHOD:PUBLISH", events, "END:VCALENDAR"].join("\r\n");
+  const blob = new Blob([ics], { type: "text/calendar;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "mesa-basketball.ics";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default function Home() {
   const [schedule, setSchedule] = useState<WeeklySession[]>([]);
   const [camps, setCamps] = useState<Camp[]>([]);
@@ -478,6 +541,7 @@ export default function Home() {
   const [pkgMonth, setPkgMonth] = useState("");
   const [pkgSubmitting, setPkgSubmitting] = useState(false);
   const [pkgResult, setPkgResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [calendarSessions, setCalendarSessions] = useState<CalSession[]>([]);
   const [showReferralInfo, setShowReferralInfo] = useState(false);
 
   useEffect(() => {
@@ -758,6 +822,7 @@ export default function Home() {
 
   function closeModal() {
     setModal((m) => ({ ...m, open: false }));
+    setCalendarSessions([]);
   }
 
   function addKid() {
@@ -818,6 +883,10 @@ export default function Home() {
           setSubmitting(false);
           return;
         }
+        setCalendarSessions((modal.selectedGroupSessions || []).map((s) => ({
+          date: s.date, startTime: s.startTime, endTime: s.endTime, location: s.location,
+          title: `Mesa Basketball — ${s.group}`,
+        })));
         setSubmitResult({
           success: true,
           message: `${modal.selectedGroupSessions.length} sessions booked! A confirmation email has been sent to ${email}.`,
@@ -872,6 +941,10 @@ export default function Home() {
             setSubmitting(false);
             return;
           }
+          setCalendarSessions(campSessions.map((s) => ({
+            date: s.date, startTime: s.startTime, endTime: s.endTime || s.startTime, location: s.location,
+            title: `Mesa Basketball — ${camp.name}`,
+          })));
           setSubmitResult({
             success: true,
             message: `Camp registration confirmed for ${selectedDaysArr.length} day${selectedDaysArr.length !== 1 ? "s" : ""}! A confirmation email has been sent to ${email}.`,
@@ -958,6 +1031,10 @@ export default function Home() {
         });
       }
 
+      setCalendarSessions(datesToBook.filter((b) => b.date && b.startTime).map((b) => ({
+        date: b.date!, startTime: b.startTime!, endTime: b.endTime || b.startTime!, location: b.location || "",
+        title: "Mesa Basketball — Private Session",
+      })));
       setSubmitResult({
         success: true,
         message: datesToBook.length > 1
@@ -2307,6 +2384,25 @@ export default function Home() {
             {submitResult?.success ? (
               <div className="mt-6 rounded-lg bg-green-900/50 p-4 text-center">
                 <p className="text-lg font-semibold text-green-400">{submitResult.message}</p>
+                {calendarSessions.length > 0 && (
+                  <div className="mt-3 flex flex-wrap justify-center gap-2">
+                    <a
+                      href={buildGoogleCalUrl(calendarSessions[0])}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center rounded border border-green-700/60 px-3 py-1.5 text-xs text-green-400 hover:bg-green-900/60 transition"
+                    >
+                      Add to Google Calendar
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => downloadICS(calendarSessions)}
+                      className="inline-flex items-center rounded border border-green-700/60 px-3 py-1.5 text-xs text-green-400 hover:bg-green-900/60 transition"
+                    >
+                      Download .ics (Apple / Outlook)
+                    </button>
+                  </div>
+                )}
                 <button onClick={closeModal} className="mt-4 rounded bg-brown-700 px-4 py-2 text-sm hover:bg-brown-600">
                   Close
                 </button>
