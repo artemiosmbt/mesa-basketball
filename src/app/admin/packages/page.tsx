@@ -47,6 +47,7 @@ export default function PackagesPage() {
   const [packages, setPackages] = useState<Package[]>([]);
   const [token, setToken] = useState<string | null>(null);
   const [toggling, setToggling] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [monthFilter, setMonthFilter] = useState("all");
 
@@ -77,6 +78,19 @@ export default function PackagesPage() {
     });
     setPackages((prev) => prev.map((p) => (p.id === pkg.id ? { ...p, is_paid: newVal } : p)));
     setToggling(null);
+  }
+
+  async function deletePackage(id: string) {
+    if (!token) return;
+    if (!confirm("Permanently delete this package? This cannot be undone.")) return;
+    setDeleting(id);
+    await fetch("/api/admin/packages", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ id }),
+    });
+    setPackages((prev) => prev.filter((p) => p.id !== id));
+    setDeleting(null);
   }
 
   const allMonths = useMemo(() => {
@@ -173,6 +187,15 @@ export default function PackagesPage() {
               {toggling === pkg.id ? "..." : pkg.is_paid ? "Paid ✓" : "Unpaid"}
             </button>
           </div>
+        </div>
+        <div className="border-t border-brown-800 pt-2">
+          <button
+            onClick={() => deletePackage(pkg.id)}
+            disabled={deleting === pkg.id}
+            className="text-xs text-brown-600 hover:text-red-500 transition disabled:opacity-50"
+          >
+            {deleting === pkg.id ? "Deleting..." : "Delete"}
+          </button>
         </div>
       </div>
     );
@@ -368,17 +391,26 @@ export default function PackagesPage() {
                         </span>
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
-                        <button
-                          onClick={() => togglePaid(pkg)}
-                          disabled={toggling === pkg.id}
-                          className={`rounded-full px-3 py-1 text-xs font-semibold transition disabled:opacity-50 ${
-                            pkg.is_paid
-                              ? "bg-green-900/50 text-green-400 hover:bg-green-900/70"
-                              : "bg-red-900/40 text-red-400 hover:bg-red-900/60"
-                          }`}
-                        >
-                          {toggling === pkg.id ? "..." : pkg.is_paid ? "Paid ✓" : "Unpaid"}
-                        </button>
+                        <div className="flex items-center gap-3">
+                          <button
+                            onClick={() => togglePaid(pkg)}
+                            disabled={toggling === pkg.id}
+                            className={`rounded-full px-3 py-1 text-xs font-semibold transition disabled:opacity-50 ${
+                              pkg.is_paid
+                                ? "bg-green-900/50 text-green-400 hover:bg-green-900/70"
+                                : "bg-red-900/40 text-red-400 hover:bg-red-900/60"
+                            }`}
+                          >
+                            {toggling === pkg.id ? "..." : pkg.is_paid ? "Paid ✓" : "Unpaid"}
+                          </button>
+                          <button
+                            onClick={() => deletePackage(pkg.id)}
+                            disabled={deleting === pkg.id}
+                            className="text-xs text-brown-600 hover:text-red-500 transition disabled:opacity-50"
+                          >
+                            {deleting === pkg.id ? "..." : "Delete"}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
