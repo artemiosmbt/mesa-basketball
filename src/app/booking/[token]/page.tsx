@@ -134,6 +134,7 @@ export default function ManageBooking({
   const [showPlayerConfirm, setShowPlayerConfirm] = useState(false);
   const [savingPlayers, setSavingPlayers] = useState(false);
   const [playerSaveError, setPlayerSaveError] = useState("");
+  const [playerSaveSuccess, setPlayerSaveSuccess] = useState(false);
   const [playerLateResult, setPlayerLateResult] = useState<{ isLate: boolean; lateFeeDue?: number } | null>(null);
 
   // Schedule data for rescheduling
@@ -313,6 +314,7 @@ export default function ManageBooking({
     setNewPlayerGrade("");
     setNewPlayerGender("");
     setPlayerSaveError("");
+    setPlayerSaveSuccess(false);
     setShowPlayerConfirm(false);
     setPlayerLateResult(null);
   }
@@ -330,7 +332,11 @@ export default function ManageBooking({
       setBooking((prev) => prev ? { ...prev, kids: data.newKids } : null);
       setShowEditPlayers(false);
       setShowPlayerConfirm(false);
-      if (data.isLate && data.lateFeeDue) setPlayerLateResult({ isLate: true, lateFeeDue: data.lateFeeDue });
+      if (data.isLate && data.lateFeeDue) {
+        setPlayerLateResult({ isLate: true, lateFeeDue: data.lateFeeDue });
+      } else {
+        setPlayerSaveSuccess(true);
+      }
     } else {
       setPlayerSaveError(data.error || "Failed to update players");
       setShowPlayerConfirm(false);
@@ -483,7 +489,7 @@ export default function ManageBooking({
                 <p className="mt-4 rounded-lg bg-yellow-900/30 px-4 py-2 text-sm text-yellow-400">
                   {booking.isFullCamp
                     ? "This camp is within 24 hours. Canceling the entire camp will result in a 50% charge of the total camp fee."
-                    : "This session is within 24 hours. Rescheduling or canceling will result in a 50% charge of the session fee."}
+                    : "This session is within 24 hours. Rescheduling, canceling, or removing players will result in a late fee per our cancellation policy."}
                 </p>
               )}
 
@@ -574,11 +580,20 @@ export default function ManageBooking({
                     </div>
                   )}
 
-                  {/* Late fee notice after player update */}
-                  {playerLateResult?.isLate && playerLateResult.lateFeeDue && (
-                    <div className="mt-4 rounded-lg border border-yellow-700 bg-yellow-900/20 px-4 py-3 text-sm text-yellow-400">
-                      ⚠️ Player removed within 24 hours — a late fee of <strong>${playerLateResult.lateFeeDue}</strong> is still due. Please pay via Venmo, Zelle, or cash.
-                    </div>
+                  {/* Feedback after player update — only in the main (no-mode) view */}
+                  {!showCancelConfirm && !showReschedule && !showEditPlayers && (
+                    <>
+                      {playerSaveSuccess && (
+                        <p className="mt-4 rounded-lg bg-green-900/30 px-4 py-2 text-sm text-green-400">
+                          Player list updated successfully.
+                        </p>
+                      )}
+                      {playerLateResult?.isLate && playerLateResult.lateFeeDue && (
+                        <div className="mt-4 rounded-lg border border-yellow-700 bg-yellow-900/20 px-4 py-3 text-sm text-yellow-400">
+                          ⚠️ Player removed within 24 hours — a late fee of <strong>${playerLateResult.lateFeeDue}</strong> is still due. Please pay via Venmo, Zelle, or cash.
+                        </div>
+                      )}
+                    </>
                   )}
 
                   {/* Edit Players */}
