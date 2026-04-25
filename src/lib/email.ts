@@ -4,9 +4,13 @@ const ARTEMI_EMAIL = "artemios@mesabasketballtraining.com";
 const FROM_EMAIL = "Mesa Basketball <noreply@mesabasketballtraining.com>";
 const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || "https://mesa-basketball-h8lk.vercel.app";
 
-const VENMO_LINK = `<a href="https://venmo.com/u/Artemios-Gavalas" target="_blank" style="color: #008CFF; font-weight: bold;">Venmo (@Artemios-Gavalas)</a>`;
-const ZELLE_LINK = `Zelle (artemios@mesabasketballtraining.com)`;
-const PAYMENT_OPTIONS = `${ZELLE_LINK}, ${VENMO_LINK}, or Cash`;
+const VENMO_LINK = `<a href="https://venmo.com/u/Artemios-Gavalas" target="_blank" style="color: #008CFF; font-weight: bold;">@Artemios-Gavalas</a>`;
+const PAYMENT_OPTIONS = `Zelle (artemios@mesabasketballtraining.com), Venmo (${VENMO_LINK}), or Cash`;
+const PAYMENT_LINES = `<p style="margin: 10px 0 0 0; color: #ffffff; font-size: 14px; line-height: 1.8;">
+  Zelle: artemios@mesabasketballtraining.com<br/>
+  Venmo: ${VENMO_LINK}<br/>
+  Cash
+</p>`;
 
 const LOCATION_MAP: Record<string, { name: string; url: string }> = {
   "St. Pauls": { name: "St. Paul's Cathedral", url: "https://share.google/kVGkfSgr6SaShDWF7" },
@@ -261,7 +265,7 @@ export async function sendCancellationNotification(data: {
     ? `<div style="background: #7c1d1d; border-left: 4px solid #ef4444; border-radius: 6px; padding: 14px 16px; margin: 16px 0;">
         <p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #ffffff;">⚠️ Late Fee</p>
         <p style="margin: 0; color: #ffffff; font-size: 14px;">This cancellation was made within 24 hours of the session. Per our policy, a <strong>50% fee of $${lateFee}</strong> is still due.</p>
-        <p style="margin: 8px 0 0 0; color: #ffffff; font-size: 14px;">Please pay via ${PAYMENT_OPTIONS}.</p>
+        ${PAYMENT_LINES}
       </div>`
     : "";
 
@@ -486,7 +490,7 @@ export async function sendPlayerUpdateNotification(data: {
     ? `<div style="background:#7c1d1d;border-left:4px solid #ef4444;border-radius:6px;padding:14px 16px;margin:16px 0;">
         <p style="margin:0 0 6px 0;font-size:15px;font-weight:bold;color:#fff;">⚠️ Late Removal — Fee Applies</p>
         <p style="margin:0;color:#fff;font-size:14px;">This player was removed within 24 hours of the session. Per our policy${data.lateFeeDue ? `, a fee of <strong>$${data.lateFeeDue}</strong> is still due` : ", a late cancellation fee still applies"}.</p>
-        <p style="margin:8px 0 0 0;color:#fff;font-size:14px;">Please pay via ${PAYMENT_OPTIONS}.</p>
+        ${PAYMENT_LINES}
       </div>`
     : "";
 
@@ -551,7 +555,7 @@ export async function sendRescheduleNotification(data: {
     ? `<div style="background: #7c1d1d; border-left: 4px solid #ef4444; border-radius: 6px; padding: 14px 16px; margin: 16px 0;">
         <p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #ffffff;">⚠️ Late Fee</p>
         <p style="margin: 0; color: #ffffff; font-size: 14px;">This reschedule was made within 24 hours of the session. Per our policy, a <strong>50% fee${data.lateFeeAmount ? ` of $${data.lateFeeAmount}` : ""}</strong> is still due.</p>
-        <p style="margin: 8px 0 0 0; color: #ffffff; font-size: 14px;">Please pay via ${PAYMENT_OPTIONS}.</p>
+        ${PAYMENT_LINES}
       </div>`
     : "";
 
@@ -581,7 +585,7 @@ export async function sendRescheduleNotification(data: {
       <p>Your session has been rescheduled.</p>
       <p><strong>Old Session:</strong> ${formatSessionDetailsForEmail(data.oldSessionDetails)}</p>
       <p><strong>New Session:</strong> ${formatSessionDetailsForEmail(data.newSessionDetails)}</p>
-      ${data.isLateReschedule ? `<div style="background: #7c1d1d; border-left: 4px solid #ef4444; border-radius: 6px; padding: 14px 16px; margin: 16px 0;"><p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #ffffff;">⚠️ Late Fee</p><p style="margin: 0; color: #ffffff; font-size: 14px;">This reschedule was made within 24 hours of the session. Per our policy, a <strong>50% fee${data.lateFeeAmount ? ` of $${data.lateFeeAmount}` : ""}</strong> is still due.</p><p style="margin: 8px 0 0 0; color: #ffffff; font-size: 14px;">Please pay via ${PAYMENT_OPTIONS}.</p></div>` : ""}
+      ${data.isLateReschedule ? `<div style="background: #7c1d1d; border-left: 4px solid #ef4444; border-radius: 6px; padding: 14px 16px; margin: 16px 0;"><p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #ffffff;">⚠️ Late Fee</p><p style="margin: 0; color: #ffffff; font-size: 14px;">This reschedule was made within 24 hours of the session. Per our policy, a <strong>50% fee${data.lateFeeAmount ? ` of $${data.lateFeeAmount}` : ""}</strong> is still due.</p>${PAYMENT_LINES}</div>` : ""}
       <p><a href="${BASE_URL}/my-bookings" style="color: #d4af37; font-weight: bold;">View My Bookings</a> — Manage all your sessions</p>
       <br/>
       <p>Questions? Contact Artemios at (631) 599-1280 or email <a href="mailto:artemios@mesabasketballtraining.com">artemios@mesabasketballtraining.com</a>.</p>
