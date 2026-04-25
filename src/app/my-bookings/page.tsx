@@ -13,7 +13,9 @@ function formatSessionDetails(details: string, bookedDate?: string | null): stri
   let result = details;
 
   if (bookedDate) {
-    const d = new Date(bookedDate + "T12:00:00");
+    const d = /^\d{4}-\d{2}-\d{2}$/.test(bookedDate)
+      ? new Date(bookedDate + "T12:00:00")
+      : new Date(bookedDate + " 12:00:00");
     const dayName = d.toLocaleDateString("en-US", { weekday: "long" });
     const dateStr = d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
     // Try ISO format (YYYY-MM-DD) in the details string first
@@ -21,7 +23,6 @@ function formatSessionDetails(details: string, bookedDate?: string | null): stri
     if (isoMatch) {
       result = result.replace(isoMatch[0], `${dayName}, ${dateStr}`);
     } else if (result.includes(dateStr)) {
-      // Non-ISO date (e.g. "April 25, 2026") stored directly in session_details
       result = result.replace(dateStr, `${dayName}, ${dateStr}`);
     }
   }
