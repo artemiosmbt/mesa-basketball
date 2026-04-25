@@ -13,23 +13,34 @@ const LOCATION_LINKS: Record<string, { name: string; url: string }> = {
   "Cherry Valley Sports": { name: "Cherry Valley Sports", url: "https://share.google/YKRoCTFuLP33bpSUZ" },
 };
 
+function parseDateForDisplay(dateStr: string): Date {
+  // ISO format (YYYY-MM-DD) needs T12:00:00 appended to avoid UTC midnight off-by-one
+  // All other formats (e.g. "April 25, 2026", "4/25/2026") parse fine with a space suffix
+  return /^\d{4}-\d{2}-\d{2}$/.test(dateStr)
+    ? new Date(dateStr + "T12:00:00")
+    : new Date(dateStr + " 12:00:00");
+}
+
 function fmtDate(dateStr: string): string {
-  return new Date(dateStr + "T12:00:00").toLocaleDateString("en-US", {
+  return parseDateForDisplay(dateStr).toLocaleDateString("en-US", {
     weekday: "long", month: "long", day: "numeric", year: "numeric",
   });
 }
 
 function fmtDateShort(dateStr: string): string {
-  return new Date(dateStr + "T12:00:00").toLocaleDateString("en-US", {
+  return parseDateForDisplay(dateStr).toLocaleDateString("en-US", {
     weekday: "short", month: "short", day: "numeric", year: "numeric",
   });
 }
 
 function injectDayIntoDetails(details: string, bookedDate?: string | null): string {
   if (!bookedDate) return details;
-  const match = details.match(/\d{4}-\d{2}-\d{2}/);
-  if (!match) return details;
-  return details.replace(match[0], fmtDate(bookedDate));
+  // ISO format (YYYY-MM-DD) — used in supabase-stored session details
+  const isoMatch = details.match(/\d{4}-\d{2}-\d{2}/);
+  if (isoMatch) return details.replace(isoMatch[0], fmtDate(bookedDate));
+  // Non-ISO (e.g. "April 25, 2026") — direct replace of the raw date string
+  if (details.includes(bookedDate)) return details.replace(bookedDate, fmtDate(bookedDate));
+  return details;
 }
 
 function LocationLink({ location, className }: { location: string; className?: string }) {
