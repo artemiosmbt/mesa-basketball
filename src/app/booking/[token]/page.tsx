@@ -1041,14 +1041,10 @@ export default function ManageBooking({
                         {uniqueGroups.map(groupName => {
                           const groupSessions = futureSessions.filter(s => s.group === groupName);
                           const isGroupSelected = selectedGroupName === groupName;
-                          const firstSession = groupSessions[0];
                           return (
                             <div key={groupName} className={`rounded-lg border p-4 transition ${isGroupSelected ? "border-mesa-accent bg-mesa-accent/10" : "border-brown-700 bg-brown-800/50"}`}>
                               <button onClick={() => { setSelectedGroupName(isGroupSelected ? "" : groupName); setSelectedGroupDate(""); }} className="w-full text-left">
                                 <p className="font-medium text-white">{groupName}</p>
-                                {firstSession && (
-                                  <p className="mt-0.5 text-sm text-brown-400">{firstSession.startTime}–{firstSession.endTime} · {firstSession.location} · ${firstSession.price}/player</p>
-                                )}
                               </button>
                               {isGroupSelected && (
                                 <div className="mt-3 space-y-2">
@@ -1062,9 +1058,12 @@ export default function ManageBooking({
                                       <button key={s.date} disabled={isFull} onClick={() => setSelectedGroupDate(isDateSelected ? "" : s.date)}
                                         className={`w-full rounded border p-3 text-left transition ${isDateSelected ? "border-mesa-accent bg-mesa-accent/20" : isFull ? "cursor-not-allowed border-brown-800 bg-brown-900/50 opacity-50" : "border-brown-700 bg-brown-800 hover:border-brown-500"}`}>
                                         <p className="text-sm font-medium text-white">{fmtDate(s.date)}</p>
-                                        <p className={`mt-0.5 text-xs ${isFull ? "text-red-400" : spotsLeft <= 3 ? "text-yellow-400" : "text-brown-400"}`}>
-                                          {isFull ? "Full" : `${spotsLeft} spot${spotsLeft !== 1 ? "s" : ""} left`}
-                                        </p>
+                                        <p className="mt-0.5 text-xs text-brown-400">{s.startTime}–{s.endTime} · {s.location}</p>
+                                        {(isFull || spotsLeft <= 3) && (
+                                          <p className={`mt-0.5 text-xs ${isFull ? "text-red-400" : "text-yellow-400"}`}>
+                                            {isFull ? "Full" : `${spotsLeft} spot${spotsLeft !== 1 ? "s" : ""} left`}
+                                          </p>
+                                        )}
                                       </button>
                                     );
                                   })}
