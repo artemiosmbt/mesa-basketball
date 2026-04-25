@@ -691,9 +691,21 @@ export default function ManageBooking({
                               className="w-full rounded border border-brown-700 bg-brown-900 px-3 py-2 text-sm text-white"
                             >
                               <option value="">Grade *</option>
-                              {["K","1","2","3","4","5","6","7","8","9","10","11","12","College / Pro"].map((g) => (
-                                <option key={g} value={g}>{g === "College / Pro" ? g : `Grade ${g}`}</option>
-                              ))}
+                              <option value="K">Kindergarten</option>
+                              <option value="1">1st Grade</option>
+                              <option value="2">2nd Grade</option>
+                              <option value="3">3rd Grade</option>
+                              <option value="4">4th Grade</option>
+                              <option value="5">5th Grade</option>
+                              <option value="6">6th Grade</option>
+                              <option value="7">7th Grade</option>
+                              <option value="8">8th Grade</option>
+                              <option value="9">9th Grade</option>
+                              <option value="10">10th Grade</option>
+                              <option value="11">11th Grade</option>
+                              <option value="12">12th Grade</option>
+                              <option value="College +">College / Pro</option>
+                              <option value="Adult">Adult</option>
                             </select>
                             <select
                               value={newPlayerGender}
