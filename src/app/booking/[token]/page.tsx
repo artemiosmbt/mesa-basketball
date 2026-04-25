@@ -185,7 +185,7 @@ export default function ManageBooking({
     return hoursUntil >= 0 && hoursUntil < 24;
   }, [booking]);
 
-  // True when within the 30-min grace period after booking (capped at session start)
+  // True when within the 15-min grace period after booking (capped at session start)
   const withinGracePeriod = useMemo(() => {
     if (!within24Hours || !booking?.bookedDate || !booking?.bookedStartTime || !booking?.createdAt) return false;
     const timeMatch = booking.bookedStartTime.match(/(\d+):(\d+)\s*(AM|PM)/i);

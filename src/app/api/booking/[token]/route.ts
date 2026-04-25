@@ -35,7 +35,7 @@ function parseSessionDateTimeET(dateStr: string, hoursET: number, minsET: number
 }
 
 // Returns true if this action is a late cancel/reschedule:
-// session is within 24h AND the 30-min grace period (from booking time, capped at session start) has expired.
+// session is within 24h AND the 15-min grace period (from booking time, capped at session start) has expired.
 function isLateAction(dateStr: string, timeStr: string, createdAt: string): boolean {
   const timeMatch = timeStr.match(/(\d+):(\d+)\s*(AM|PM)/i);
   if (!timeMatch) return false;
@@ -48,7 +48,7 @@ function isLateAction(dateStr: string, timeStr: string, createdAt: string): bool
   const now = Date.now();
   const hoursUntil = (sessionStart.getTime() - now) / (1000 * 60 * 60);
   if (hoursUntil < 0 || hoursUntil >= 24) return false;
-  // Within 24h — check grace: 30 min from booking time, capped at session start
+  // Within 24h — check grace: 15 min from booking time, capped at session start
   const graceEnd = Math.min(
     new Date(createdAt).getTime() + 15 * 60 * 1000,
     sessionStart.getTime()
@@ -127,7 +127,7 @@ export async function DELETE(
     }
   }
 
-  // Check 24-hour policy with 30-min grace period
+  // Check 24-hour policy with 15-min grace period
   let isLateCancel = false;
   if (reg.booked_date && reg.booked_start_time) {
     isLateCancel = isLateAction(reg.booked_date, reg.booked_start_time, reg.created_at);
