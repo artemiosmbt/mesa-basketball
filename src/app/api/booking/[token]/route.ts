@@ -14,6 +14,7 @@ import {
   sendRescheduleNotification,
 } from "@/lib/email";
 import {
+  addPrivateSessionToCalendar,
   deletePrivateSessionFromCalendar,
   upsertGroupSessionCalendarEvent,
 } from "@/lib/calendar";
@@ -273,17 +274,41 @@ export async function PUT(
   // Check if original session is within 24h (with grace period) → late reschedule fee applies
   const isLateReschedule = !!(reg.booked_date && reg.booked_start_time && isLateAction(reg.booked_date, reg.booked_start_time, reg.created_at));
 
-  // Cancel old booking
+  // Cancel old booking first so group enrollment counts reflect the cancellation
   await cancelRegistration(token);
 
-  // Create new booking
+  // Sync calendar for the old booking
+  if (reg.booked_date && reg.booked_start_time) {
+    const wasPrivate = reg.type === "private" || reg.type === "group-private";
+    try {
+      if (wasPrivate) {
+        await deletePrivateSessionFromCalendar({ email: reg.email, bookedDate: reg.booked_date });
+      } else {
+        const sessionLabel = reg.session_details.split(" — ")[0] || "Group Session";
+        await upsertGroupSessionCalendarEvent({
+          sessionType: reg.type as "weekly" | "camp",
+          sessionLabel,
+          bookedDate: reg.booked_date,
+          bookedStartTime: reg.booked_start_time,
+          bookedEndTime: reg.booked_end_time || reg.booked_start_time,
+          bookedLocation: reg.booked_location || "",
+          kidsJustRegistered: reg.kids,
+          participantsJustRegistered: reg.total_participants || 1,
+        });
+      }
+    } catch (err) {
+      console.error("Calendar sync error (reschedule old):", err);
+    }
+  }
+
+  // Create new booking — always "private" since reschedule picks a private slot
   const newSessionDetails = `Private Session — ${bookedDate} ${bookedStartTime}-${bookedEndTime} at ${bookedLocation}`;
   const { manageToken: newToken } = await addRegistration({
     parentName: reg.parent_name,
     email: reg.email,
     phone: reg.phone,
     kids: reg.kids,
-    type: reg.type,
+    type: "private",
     sessionDetails: newSessionDetails,
     totalParticipants: reg.total_participants,
     bookedDate,
@@ -291,6 +316,22 @@ export async function PUT(
     bookedEndTime,
     bookedLocation,
   });
+
+  // Sync calendar for the new private session
+  try {
+    await addPrivateSessionToCalendar({
+      parentName: reg.parent_name,
+      email: reg.email,
+      phone: reg.phone,
+      kids: reg.kids,
+      bookedDate,
+      bookedStartTime,
+      bookedEndTime,
+      bookedLocation,
+    });
+  } catch (err) {
+    console.error("Calendar sync error (reschedule new):", err);
+  }
 
   const lateFeeAmount = reg.session_price && isLateReschedule ? Math.round(reg.session_price * 0.5) : undefined;
 
