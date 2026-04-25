@@ -481,8 +481,13 @@ export default function ManageBooking({
             <>
               <div className="mt-4 space-y-2">
                 <p><span className="text-brown-400">Session:</span> {formatSessionDetails(booking.sessionDetails, booking.bookedDate)}</p>
-                <p><span className="text-brown-400">Players:</span> {booking.kids}</p>
-                <p><span className="text-brown-400">Type:</span> {booking.type === "group-private" ? "Group Private" : "Private"}</p>
+                <p><span className="text-brown-400">Players:</span> {parseKids(booking.kids).map(playerName).join(", ")}</p>
+                <p><span className="text-brown-400">Type:</span> {
+                  booking.type === "group-private" ? "Group Private"
+                  : booking.type === "weekly" ? "Group Session"
+                  : booking.type === "camp" ? "Camp"
+                  : "Private"
+                }</p>
               </div>
 
               {within24Hours && !withinGracePeriod && (
