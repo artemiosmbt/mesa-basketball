@@ -334,7 +334,7 @@ export async function PATCH(
     const oldGroupPrice = reg.session_price ?? oldCount * 50;
     const newGroupPrice = newCount * 50;
     if (newGroupPrice !== oldGroupPrice) {
-      if (isLate && removedPlayers.length > 0) lateFeeDue = removedPlayers.length * 50;
+      if (isLate && removedPlayers.length > 0) lateFeeDue = removedPlayers.length * 25;
       newPrice = newGroupPrice;
       priceChanged = true;
     }
