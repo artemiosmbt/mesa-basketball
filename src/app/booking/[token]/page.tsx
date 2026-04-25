@@ -65,6 +65,28 @@ interface TimeWindow {
   endLabel: string;
 }
 
+function parseKids(kidsStr: string): string[] {
+  if (!kidsStr.trim()) return [];
+  if (kidsStr.includes("(")) {
+    return kidsStr.split("), ").map((p, i, arr) =>
+      i < arr.length - 1 ? p + ")" : p
+    ).filter((s) => s.trim());
+  }
+  return kidsStr.split(",").map((s) => s.trim()).filter(Boolean);
+}
+
+function playerName(playerStr: string): string {
+  const idx = playerStr.indexOf(" (");
+  return idx > -1 ? playerStr.substring(0, idx).trim() : playerStr.trim();
+}
+
+function buildPlayerString(name: string, grade: string, gender: string): string {
+  const parts: string[] = [];
+  if (grade) parts.push(`Grade: ${grade}`);
+  if (gender) parts.push(`Gender: ${gender}`);
+  return parts.length > 0 ? `${name.trim()} (${parts.join(", ")})` : name.trim();
+}
+
 function parseTime(t: string): number {
   const match = t.match(/(\d+):(\d+)\s*(AM|PM)/i);
   if (!match) return 0;
@@ -101,6 +123,18 @@ export default function ManageBooking({
   const [rescheduling, setRescheduling] = useState(false);
   const [rescheduled, setRescheduled] = useState(false);
   const [isLateReschedule, setIsLateReschedule] = useState(false);
+
+  // Player editing state
+  const [showEditPlayers, setShowEditPlayers] = useState(false);
+  const [editedPlayers, setEditedPlayers] = useState<string[]>([]);
+  const [showAddPlayer, setShowAddPlayer] = useState(false);
+  const [newPlayerName, setNewPlayerName] = useState("");
+  const [newPlayerGrade, setNewPlayerGrade] = useState("");
+  const [newPlayerGender, setNewPlayerGender] = useState("");
+  const [showPlayerConfirm, setShowPlayerConfirm] = useState(false);
+  const [savingPlayers, setSavingPlayers] = useState(false);
+  const [playerSaveError, setPlayerSaveError] = useState("");
+  const [playerLateResult, setPlayerLateResult] = useState<{ isLate: boolean; lateFeeDue?: number } | null>(null);
 
   // Schedule data for rescheduling
   const [privateSlots, setPrivateSlots] = useState<
@@ -269,6 +303,40 @@ export default function ManageBooking({
       return windowStart > now;
     });
   }, [privateSlots, bookedSlots]);
+
+  function openEditPlayers() {
+    if (!booking) return;
+    setEditedPlayers(parseKids(booking.kids));
+    setShowEditPlayers(true);
+    setShowAddPlayer(false);
+    setNewPlayerName("");
+    setNewPlayerGrade("");
+    setNewPlayerGender("");
+    setPlayerSaveError("");
+    setShowPlayerConfirm(false);
+    setPlayerLateResult(null);
+  }
+
+  async function handleSavePlayers() {
+    setSavingPlayers(true);
+    setPlayerSaveError("");
+    const res = await fetch(`/api/booking/${token}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ players: editedPlayers }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      setBooking((prev) => prev ? { ...prev, kids: data.newKids } : null);
+      setShowEditPlayers(false);
+      setShowPlayerConfirm(false);
+      if (data.isLate && data.lateFeeDue) setPlayerLateResult({ isLate: true, lateFeeDue: data.lateFeeDue });
+    } else {
+      setPlayerSaveError(data.error || "Failed to update players");
+      setShowPlayerConfirm(false);
+    }
+    setSavingPlayers(false);
+  }
 
   async function loadSchedule() {
     const res = await fetch("/api/schedule");
@@ -478,9 +546,9 @@ export default function ManageBooking({
                 </>
               ) : !sessionPassed ? (
                 <>
-                  {/* Drop-in or non-camp — normal cancel/reschedule */}
-                  {!showCancelConfirm && !showReschedule && (
-                    <div className="mt-6 flex gap-3">
+                  {/* Drop-in or non-camp — normal cancel/reschedule/edit-players */}
+                  {!showCancelConfirm && !showReschedule && !showEditPlayers && (
+                    <div className="mt-6 flex flex-wrap gap-3">
                       <button
                         onClick={() => setShowCancelConfirm(true)}
                         className="rounded border border-red-700 px-4 py-2 text-sm text-red-400 hover:bg-red-900/30"
@@ -489,17 +557,175 @@ export default function ManageBooking({
                       </button>
                       {booking.type !== "camp" && (
                         <button
-                          onClick={() => {
-                            setShowReschedule(true);
-                            loadSchedule();
-                          }}
+                          onClick={() => { setShowReschedule(true); loadSchedule(); }}
                           className="rounded bg-mesa-accent px-4 py-2 text-sm font-semibold text-white hover:bg-yellow-600"
                         >
                           Reschedule
                         </button>
                       )}
+                      {booking.type !== "camp" && (
+                        <button
+                          onClick={openEditPlayers}
+                          className="rounded border border-brown-600 px-4 py-2 text-sm text-brown-300 hover:bg-brown-800"
+                        >
+                          Edit Players
+                        </button>
+                      )}
                     </div>
                   )}
+
+                  {/* Late fee notice after player update */}
+                  {playerLateResult?.isLate && playerLateResult.lateFeeDue && (
+                    <div className="mt-4 rounded-lg border border-yellow-700 bg-yellow-900/20 px-4 py-3 text-sm text-yellow-400">
+                      ⚠️ Player removed within 24 hours — a late fee of <strong>${playerLateResult.lateFeeDue}</strong> is still due. Please pay via Venmo, Zelle, or cash.
+                    </div>
+                  )}
+
+                  {/* Edit Players */}
+                  {showEditPlayers && (() => {
+                    const originalPlayers = parseKids(booking.kids);
+                    const removed = originalPlayers.filter((op) => !editedPlayers.includes(op)).map(playerName);
+                    const hasChanges = JSON.stringify(editedPlayers) !== JSON.stringify(originalPlayers);
+                    return (
+                      <div className="mt-6">
+                        <h2 className="text-lg font-semibold mb-3">Edit Players</h2>
+
+                        <div className="space-y-2">
+                          {editedPlayers.map((player, i) => (
+                            <div key={i} className="flex items-center justify-between rounded-lg border border-brown-700 bg-brown-800/50 px-4 py-3">
+                              <span className="text-white text-sm">{playerName(player)}</span>
+                              <button
+                                onClick={() => setEditedPlayers((prev) => prev.filter((_, j) => j !== i))}
+                                disabled={editedPlayers.length <= 1}
+                                className="text-sm text-red-400 hover:text-red-300 disabled:text-brown-600 disabled:cursor-not-allowed"
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+
+                        {editedPlayers.length <= 1 && (
+                          <p className="mt-2 text-xs text-brown-500">Add another player before you can remove the last one.</p>
+                        )}
+
+                        {/* Add player form */}
+                        {!showAddPlayer ? (
+                          <button
+                            onClick={() => setShowAddPlayer(true)}
+                            className="mt-3 text-sm text-mesa-accent hover:text-yellow-300"
+                          >
+                            + Add a player
+                          </button>
+                        ) : (
+                          <div className="mt-3 space-y-3 rounded-lg border border-brown-700 bg-brown-800/50 p-4">
+                            <p className="text-sm font-medium text-brown-300">New Player</p>
+                            <input
+                              type="text"
+                              placeholder="Full name *"
+                              value={newPlayerName}
+                              onChange={(e) => setNewPlayerName(e.target.value)}
+                              className="w-full rounded border border-brown-700 bg-brown-900 px-3 py-2 text-sm text-white placeholder-brown-600"
+                            />
+                            <select
+                              value={newPlayerGrade}
+                              onChange={(e) => setNewPlayerGrade(e.target.value)}
+                              className="w-full rounded border border-brown-700 bg-brown-900 px-3 py-2 text-sm text-white"
+                            >
+                              <option value="">Grade (optional)</option>
+                              {["K","1","2","3","4","5","6","7","8","9","10","11","12"].map((g) => (
+                                <option key={g} value={g}>Grade {g}</option>
+                              ))}
+                            </select>
+                            <select
+                              value={newPlayerGender}
+                              onChange={(e) => setNewPlayerGender(e.target.value)}
+                              className="w-full rounded border border-brown-700 bg-brown-900 px-3 py-2 text-sm text-white"
+                            >
+                              <option value="">Gender (optional)</option>
+                              <option value="Male">Male</option>
+                              <option value="Female">Female</option>
+                            </select>
+                            <div className="flex gap-2">
+                              <button
+                                disabled={!newPlayerName.trim()}
+                                onClick={() => {
+                                  const p = buildPlayerString(newPlayerName, newPlayerGrade, newPlayerGender);
+                                  setEditedPlayers((prev) => [...prev, p]);
+                                  setNewPlayerName("");
+                                  setNewPlayerGrade("");
+                                  setNewPlayerGender("");
+                                  setShowAddPlayer(false);
+                                }}
+                                className="rounded bg-mesa-accent px-4 py-2 text-sm font-semibold text-white hover:bg-yellow-600 disabled:opacity-50"
+                              >
+                                Add
+                              </button>
+                              <button
+                                onClick={() => { setShowAddPlayer(false); setNewPlayerName(""); setNewPlayerGrade(""); setNewPlayerGender(""); }}
+                                className="rounded bg-brown-700 px-4 py-2 text-sm text-brown-300 hover:bg-brown-600"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {within24Hours && !withinGracePeriod && removed.length > 0 && (
+                          <p className="mt-3 rounded-lg bg-yellow-900/30 px-4 py-2 text-sm text-yellow-400">
+                            This session is within 24 hours. Removing a player will incur a late cancellation fee.
+                          </p>
+                        )}
+
+                        {playerSaveError && (
+                          <p className="mt-2 text-sm text-red-400">{playerSaveError}</p>
+                        )}
+
+                        <div className="mt-4 flex gap-3">
+                          <button
+                            onClick={() => setShowPlayerConfirm(true)}
+                            disabled={!hasChanges || savingPlayers}
+                            className="rounded bg-mesa-accent px-4 py-2 text-sm font-semibold text-white hover:bg-yellow-600 disabled:opacity-50"
+                          >
+                            Save Changes
+                          </button>
+                          <button
+                            onClick={() => { setShowEditPlayers(false); setShowAddPlayer(false); }}
+                            className="rounded bg-brown-700 px-4 py-2 text-sm text-brown-300 hover:bg-brown-600"
+                          >
+                            Go Back
+                          </button>
+                        </div>
+
+                        {showPlayerConfirm && (
+                          <div className="mt-4 rounded-lg border border-brown-700 bg-brown-800/50 p-4">
+                            <p className="text-sm text-brown-300">
+                              {removed.length > 0
+                                ? `Remove ${removed.join(", ")} from this booking?`
+                                : "Save changes to your player list?"}
+                              {within24Hours && !withinGracePeriod && removed.length > 0
+                                ? " A late cancellation fee will apply." : ""}
+                            </p>
+                            <div className="mt-3 flex gap-3">
+                              <button
+                                onClick={handleSavePlayers}
+                                disabled={savingPlayers}
+                                className="rounded bg-mesa-accent px-4 py-2 text-sm font-semibold text-white hover:bg-yellow-600 disabled:opacity-50"
+                              >
+                                {savingPlayers ? "Saving..." : "Confirm"}
+                              </button>
+                              <button
+                                onClick={() => setShowPlayerConfirm(false)}
+                                className="rounded bg-brown-700 px-4 py-2 text-sm text-brown-300 hover:bg-brown-600"
+                              >
+                                Go Back
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   {/* Cancel Confirmation */}
                   {showCancelConfirm && (

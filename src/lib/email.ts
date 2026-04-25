@@ -461,6 +461,81 @@ export async function sendPackageReminder(data: {
   });
 }
 
+export async function sendPlayerUpdateNotification(data: {
+  parentName: string;
+  email: string;
+  sessionDetails: string;
+  removedPlayers: string[];
+  addedPlayers: string[];
+  newKids: string;
+  sessionType: string;
+  isLate: boolean;
+  lateFeeDue?: number;
+  oldPrice: number | null;
+  newPrice: number | null;
+  priceChanged: boolean;
+}) {
+  const resend = getResend();
+
+  const removedList = data.removedPlayers.length > 0
+    ? `<p><strong>Removed:</strong> ${data.removedPlayers.join(", ")}</p>` : "";
+  const addedList = data.addedPlayers.length > 0
+    ? `<p><strong>Added:</strong> ${data.addedPlayers.join(", ")}</p>` : "";
+
+  const lateBlock = data.isLate && data.removedPlayers.length > 0
+    ? `<div style="background:#7c1d1d;border-left:4px solid #ef4444;border-radius:6px;padding:14px 16px;margin:16px 0;">
+        <p style="margin:0 0 6px 0;font-size:15px;font-weight:bold;color:#fff;">⚠️ Late Removal — Fee Applies</p>
+        <p style="margin:0;color:#fff;font-size:14px;">This player was removed within 24 hours of the session. Per our policy${data.lateFeeDue ? `, a fee of <strong>$${data.lateFeeDue}</strong> is still due` : ", a late cancellation fee still applies"}.</p>
+        <p style="margin:8px 0 0 0;color:#fff;font-size:14px;">Please pay via ${PAYMENT_OPTIONS}.</p>
+      </div>`
+    : "";
+
+  const priceBlock = data.priceChanged && data.newPrice !== null
+    ? `<p style="background:#162d5a;padding:12px;border-radius:8px;color:#fff;">
+        <strong style="color:#d4af37;">Updated Session Rate: $${data.newPrice}</strong>
+        ${data.isLate && (data.sessionType === "private" || data.sessionType === "group-private")
+          ? `<br/><span style="font-size:13px;opacity:0.85;">Because this change was made within 24 hours, only half the price difference was applied.</span>`
+          : ""}
+      </p>`
+    : "";
+
+  await resend.emails.send({
+    from: FROM_EMAIL,
+    to: ARTEMI_EMAIL,
+    subject: `Player Update${data.isLate && data.removedPlayers.length > 0 ? " ⚠️ LATE" : ""}: ${data.parentName}`,
+    html: `
+      <h2>Player List Updated</h2>
+      <p><strong>Parent:</strong> ${data.parentName}</p>
+      <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails)}</p>
+      ${removedList}${addedList}
+      <p><strong>Current Players:</strong> ${data.newKids}</p>
+      ${data.priceChanged ? `<p><strong>Price:</strong> $${data.oldPrice ?? "—"} → $${data.newPrice ?? "—"}</p>` : ""}
+      ${data.isLate && data.removedPlayers.length > 0 ? `<p style="color:#ef4444;"><strong>⚠️ Late removal${data.lateFeeDue ? ` — $${data.lateFeeDue} fee due` : ""}</strong></p>` : ""}
+    `,
+  });
+
+  await resend.emails.send({
+    from: FROM_EMAIL,
+    to: data.email,
+    replyTo: ARTEMI_EMAIL,
+    subject: `Player List Updated — Mesa Basketball Training`,
+    html: `
+      <h2>Player List Updated</h2>
+      <p>Hi ${data.parentName},</p>
+      <p>Your player list for the following session has been updated:</p>
+      <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails)}</p>
+      ${removedList}${addedList}
+      <p><strong>Current Players:</strong> ${data.newKids}</p>
+      ${priceBlock}
+      ${lateBlock}
+      <p><a href="${BASE_URL}/my-bookings" style="color:#d4af37;font-weight:bold;">View My Bookings</a></p>
+      <br/>
+      <p>Questions? Contact Artemios at (631) 599-1280 or email <a href="mailto:artemios@mesabasketballtraining.com">artemios@mesabasketballtraining.com</a>.</p>
+      <p>— Mesa Basketball Training</p>
+    `,
+  });
+}
+
 export async function sendRescheduleNotification(data: {
   parentName: string;
   email: string;

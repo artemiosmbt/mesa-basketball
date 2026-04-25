@@ -115,6 +115,23 @@ export async function getRegistrationsByEmail(
   return (data || []) as Registration[];
 }
 
+export async function updateRegistrationPlayers(
+  token: string,
+  kids: string,
+  totalParticipants: number,
+  sessionPrice: number | null
+): Promise<boolean> {
+  const supabase = getSupabase();
+  const update: Record<string, unknown> = { kids, total_participants: totalParticipants };
+  if (sessionPrice !== null) update.session_price = sessionPrice;
+  const { error } = await supabase
+    .from("registrations")
+    .update(update)
+    .eq("manage_token", token)
+    .eq("status", "confirmed");
+  return !error;
+}
+
 export async function cancelRegistration(token: string, isLateCancel = false): Promise<boolean> {
   const supabase = getSupabase();
   const { error } = await supabase

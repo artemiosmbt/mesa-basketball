@@ -8,10 +8,12 @@ import {
   getActivePackage,
   setPackageSessions,
   countConfirmedPrivateSessions,
+  updateRegistrationPlayers,
 } from "@/lib/supabase";
 import {
   sendCancellationNotification,
   sendRescheduleNotification,
+  sendPlayerUpdateNotification,
 } from "@/lib/email";
 import {
   addPrivateSessionToCalendar,
@@ -242,6 +244,125 @@ export async function DELETE(
   }
 
   return NextResponse.json({ success: true, isLateCancel });
+}
+
+// Helpers for PATCH
+function parseKidsList(kidsStr: string): string[] {
+  if (!kidsStr.trim()) return [];
+  if (kidsStr.includes("(")) {
+    return kidsStr.split("), ").map((p, i, arr) =>
+      i < arr.length - 1 ? p + ")" : p
+    ).filter((s) => s.trim());
+  }
+  return kidsStr.split(",").map((s) => s.trim()).filter(Boolean);
+}
+
+function parseMins(t: string): number {
+  const m = t.match(/(\d+):(\d+)\s*(AM|PM)/i);
+  if (!m) return 0;
+  let h = parseInt(m[1]);
+  const min = parseInt(m[2]);
+  const period = m[3].toUpperCase();
+  if (period === "PM" && h !== 12) h += 12;
+  if (period === "AM" && h === 12) h = 0;
+  return h * 60 + min;
+}
+
+function calcPrivatePrice(durationMins: number, kidCount: number): number {
+  return Math.round((kidCount >= 4 ? 250 : 150) * (durationMins / 60) * 100) / 100;
+}
+
+function playerLabel(playerStr: string): string {
+  const idx = playerStr.indexOf(" (");
+  return idx > -1 ? playerStr.substring(0, idx).trim() : playerStr.trim();
+}
+
+// PATCH — update player list
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ token: string }> }
+) {
+  const { token } = await params;
+  const reg = await getRegistrationByToken(token);
+  if (!reg) return NextResponse.json({ error: "Booking not found" }, { status: 404 });
+  if (reg.status !== "confirmed") return NextResponse.json({ error: "Booking is not active" }, { status: 400 });
+  if (reg.type === "camp") return NextResponse.json({ error: "Player edits are not available for camp bookings" }, { status: 400 });
+
+  const body = await req.json();
+  const { players } = body as { players: string[] };
+
+  if (!Array.isArray(players) || players.filter((p) => p.trim()).length === 0) {
+    return NextResponse.json({ error: "At least one player is required" }, { status: 400 });
+  }
+
+  const newPlayers = players.filter((p) => p.trim());
+  const oldPlayers = parseKidsList(reg.kids);
+  const newKidsStr = newPlayers.join(", ");
+  const newCount = newPlayers.length;
+  const oldCount = oldPlayers.length;
+
+  const removedPlayers = oldPlayers.filter((op) => !newPlayers.includes(op)).map(playerLabel);
+  const addedPlayers = newPlayers.filter((np) => !oldPlayers.includes(np)).map(playerLabel);
+
+  const isLate = !!(reg.booked_date && reg.booked_start_time &&
+    isLateAction(reg.booked_date, reg.booked_start_time, reg.created_at));
+
+  // Price calculation
+  let newPrice: number | null = reg.session_price;
+  let lateFeeDue: number | undefined;
+  let priceChanged = false;
+  const isPrivate = reg.type === "private" || reg.type === "group-private";
+
+  if (isPrivate && reg.booked_start_time && reg.booked_end_time) {
+    const duration = Math.max(60, parseMins(reg.booked_end_time) - parseMins(reg.booked_start_time));
+    const oldTierHigh = oldCount >= 4;
+    const newTierHigh = newCount >= 4;
+    if (oldTierHigh !== newTierHigh) {
+      const lowPrice = calcPrivatePrice(duration, 1);
+      const highPrice = calcPrivatePrice(duration, 4);
+      if (!newTierHigh) {
+        // 4+ → 1-3: dropping tier
+        newPrice = isLate ? Math.round((lowPrice + highPrice) / 2) : Math.round(lowPrice);
+        if (isLate) lateFeeDue = Math.round(newPrice - lowPrice);
+      } else {
+        // 1-3 → 4+: gaining tier (no fee)
+        newPrice = Math.round(highPrice);
+      }
+      priceChanged = true;
+    }
+  } else if (reg.type === "weekly") {
+    const oldGroupPrice = reg.session_price ?? oldCount * 50;
+    const newGroupPrice = newCount * 50;
+    if (newGroupPrice !== oldGroupPrice) {
+      if (isLate && removedPlayers.length > 0) lateFeeDue = removedPlayers.length * 50;
+      newPrice = newGroupPrice;
+      priceChanged = true;
+    }
+  }
+
+  const ok = await updateRegistrationPlayers(token, newKidsStr, newCount, newPrice);
+  if (!ok) return NextResponse.json({ error: "Failed to update players" }, { status: 500 });
+
+  try {
+    await sendPlayerUpdateNotification({
+      parentName: reg.parent_name,
+      email: reg.email,
+      sessionDetails: reg.session_details,
+      removedPlayers,
+      addedPlayers,
+      newKids: newKidsStr,
+      sessionType: reg.type,
+      isLate,
+      lateFeeDue,
+      oldPrice: reg.session_price,
+      newPrice,
+      priceChanged,
+    });
+  } catch (err) {
+    console.error("Player update email error:", err);
+  }
+
+  return NextResponse.json({ success: true, newKids: newKidsStr, newPrice, isLate, lateFeeDue });
 }
 
 // PUT — reschedule booking
