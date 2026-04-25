@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, use } from "react";
+import { useState, useEffect, useMemo, use, useRef } from "react";
 
 const LOCATION_LINKS: Record<string, { name: string; url: string }> = {
   "St. Pauls": { name: "St. Paul's Cathedral", url: "https://share.google/kVGkfSgr6SaShDWF7" },
@@ -80,8 +80,40 @@ function playerName(playerStr: string): string {
   return idx > -1 ? playerStr.substring(0, idx).trim() : playerStr.trim();
 }
 
-function buildPlayerString(name: string, grade: string, gender: string): string {
+function parseDob(dob: string): [string, string, string] {
+  const p = dob.split("/");
+  return [p[0] || "", p[1] || "", p[2] || ""];
+}
+function buildDob(mm: string, dd: string, yyyy: string): string {
+  if (!mm && !dd && !yyyy) return "";
+  if (!dd && !yyyy) return mm;
+  if (!yyyy) return `${mm}/${dd}`;
+  return `${mm}/${dd}/${yyyy}`;
+}
+function DobInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [mm, dd, yyyy] = parseDob(value);
+  const ddRef = useRef<HTMLInputElement>(null);
+  const yyyyRef = useRef<HTMLInputElement>(null);
+  return (
+    <div className="flex items-center w-full rounded border border-brown-700 bg-brown-900 text-sm text-white focus-within:border-mesa-accent pl-3">
+      <input type="text" inputMode="numeric" maxLength={2} placeholder="MM" value={mm}
+        onChange={e => { const v = e.target.value.replace(/\D/g, "").slice(0, 2); onChange(buildDob(v, dd, yyyy)); if (v.length === 2) ddRef.current?.focus(); }}
+        className="w-10 bg-transparent pr-1 py-2 text-center placeholder-brown-600 focus:outline-none" />
+      <span className="text-brown-500 select-none">/</span>
+      <input ref={ddRef} type="text" inputMode="numeric" maxLength={2} placeholder="DD" value={dd}
+        onChange={e => { const v = e.target.value.replace(/\D/g, "").slice(0, 2); onChange(buildDob(mm, v, yyyy)); if (v.length === 2) yyyyRef.current?.focus(); }}
+        className="w-10 bg-transparent px-1 py-2 text-center placeholder-brown-600 focus:outline-none" />
+      <span className="text-brown-500 select-none">/</span>
+      <input ref={yyyyRef} type="text" inputMode="numeric" maxLength={4} placeholder="YYYY" value={yyyy}
+        onChange={e => { const v = e.target.value.replace(/\D/g, "").slice(0, 4); onChange(buildDob(mm, dd, v)); }}
+        className="w-16 bg-transparent px-1 py-2 text-center placeholder-brown-600 focus:outline-none" />
+    </div>
+  );
+}
+
+function buildPlayerString(name: string, dob: string, grade: string, gender: string): string {
   const parts: string[] = [];
+  if (dob) parts.push(`DOB: ${dob}`);
   if (grade) parts.push(`Grade: ${grade}`);
   if (gender) parts.push(`Gender: ${gender}`);
   return parts.length > 0 ? `${name.trim()} (${parts.join(", ")})` : name.trim();
@@ -129,6 +161,7 @@ export default function ManageBooking({
   const [editedPlayers, setEditedPlayers] = useState<string[]>([]);
   const [showAddPlayer, setShowAddPlayer] = useState(false);
   const [newPlayerName, setNewPlayerName] = useState("");
+  const [newPlayerDob, setNewPlayerDob] = useState("");
   const [newPlayerGrade, setNewPlayerGrade] = useState("");
   const [newPlayerGender, setNewPlayerGender] = useState("");
   const [showPlayerConfirm, setShowPlayerConfirm] = useState(false);
@@ -311,6 +344,7 @@ export default function ManageBooking({
     setShowEditPlayers(true);
     setShowAddPlayer(false);
     setNewPlayerName("");
+    setNewPlayerDob("");
     setNewPlayerGrade("");
     setNewPlayerGender("");
     setPlayerSaveError("");
@@ -647,14 +681,18 @@ export default function ManageBooking({
                               onChange={(e) => setNewPlayerName(e.target.value)}
                               className="w-full rounded border border-brown-700 bg-brown-900 px-3 py-2 text-sm text-white placeholder-brown-600"
                             />
+                            <div>
+                              <label className="mb-1 block text-xs text-brown-400">Date of Birth *</label>
+                              <DobInput value={newPlayerDob} onChange={setNewPlayerDob} />
+                            </div>
                             <select
                               value={newPlayerGrade}
                               onChange={(e) => setNewPlayerGrade(e.target.value)}
                               className="w-full rounded border border-brown-700 bg-brown-900 px-3 py-2 text-sm text-white"
                             >
-                              <option value="">Grade (optional)</option>
-                              {["K","1","2","3","4","5","6","7","8","9","10","11","12"].map((g) => (
-                                <option key={g} value={g}>Grade {g}</option>
+                              <option value="">Grade *</option>
+                              {["K","1","2","3","4","5","6","7","8","9","10","11","12","College / Pro"].map((g) => (
+                                <option key={g} value={g}>{g === "College / Pro" ? g : `Grade ${g}`}</option>
                               ))}
                             </select>
                             <select
@@ -662,17 +700,18 @@ export default function ManageBooking({
                               onChange={(e) => setNewPlayerGender(e.target.value)}
                               className="w-full rounded border border-brown-700 bg-brown-900 px-3 py-2 text-sm text-white"
                             >
-                              <option value="">Gender (optional)</option>
+                              <option value="">Gender *</option>
                               <option value="Male">Male</option>
                               <option value="Female">Female</option>
                             </select>
                             <div className="flex gap-2">
                               <button
-                                disabled={!newPlayerName.trim()}
+                                disabled={!newPlayerName.trim() || newPlayerDob.length < 8 || !newPlayerGrade || !newPlayerGender}
                                 onClick={() => {
-                                  const p = buildPlayerString(newPlayerName, newPlayerGrade, newPlayerGender);
+                                  const p = buildPlayerString(newPlayerName, newPlayerDob, newPlayerGrade, newPlayerGender);
                                   setEditedPlayers((prev) => [...prev, p]);
                                   setNewPlayerName("");
+                                  setNewPlayerDob("");
                                   setNewPlayerGrade("");
                                   setNewPlayerGender("");
                                   setShowAddPlayer(false);
@@ -682,7 +721,7 @@ export default function ManageBooking({
                                 Add
                               </button>
                               <button
-                                onClick={() => { setShowAddPlayer(false); setNewPlayerName(""); setNewPlayerGrade(""); setNewPlayerGender(""); }}
+                                onClick={() => { setShowAddPlayer(false); setNewPlayerName(""); setNewPlayerDob(""); setNewPlayerGrade(""); setNewPlayerGender(""); }}
                                 className="rounded bg-brown-700 px-4 py-2 text-sm text-brown-300 hover:bg-brown-600"
                               >
                                 Cancel
