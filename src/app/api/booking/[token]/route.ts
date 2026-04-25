@@ -383,7 +383,7 @@ export async function PUT(
   }
 
   const body = await req.json();
-  const { bookedDate, bookedStartTime, bookedEndTime, bookedLocation } = body;
+  const { bookedDate, bookedStartTime, bookedEndTime, bookedLocation, kids: bodyKids, sessionType: bodySessionType, sessionGroup } = body;
 
   if (!bookedDate || !bookedStartTime || !bookedEndTime || !bookedLocation) {
     return NextResponse.json(
@@ -391,6 +391,14 @@ export async function PUT(
       { status: 400 }
     );
   }
+
+  // Use updated kids from client if provided, otherwise keep originals
+  const kidsToUse = typeof bodyKids === "string" && bodyKids.trim() ? bodyKids : reg.kids;
+  const kidCount = kidsToUse ? parseKidsList(kidsToUse).length : (reg.total_participants || 1);
+  const newType: "private" | "weekly" = bodySessionType === "weekly" ? "weekly" : "private";
+  const newSessionDetails = newType === "weekly" && sessionGroup
+    ? `${sessionGroup} — ${bookedDate} ${bookedStartTime}-${bookedEndTime} at ${bookedLocation}`
+    : `Private Session — ${bookedDate} ${bookedStartTime}-${bookedEndTime} at ${bookedLocation}`;
 
   // Check if original session is within 24h (with grace period) → late reschedule fee applies
   const isLateReschedule = !!(reg.booked_date && reg.booked_start_time && isLateAction(reg.booked_date, reg.booked_start_time, reg.created_at));
@@ -422,34 +430,46 @@ export async function PUT(
     }
   }
 
-  // Create new booking — always "private" since reschedule picks a private slot
-  const newSessionDetails = `Private Session — ${bookedDate} ${bookedStartTime}-${bookedEndTime} at ${bookedLocation}`;
+  // Create new booking with updated type, kids, and session details
   const { manageToken: newToken } = await addRegistration({
     parentName: reg.parent_name,
     email: reg.email,
     phone: reg.phone,
-    kids: reg.kids,
-    type: "private",
+    kids: kidsToUse,
+    type: newType,
     sessionDetails: newSessionDetails,
-    totalParticipants: reg.total_participants,
+    totalParticipants: kidCount,
     bookedDate,
     bookedStartTime,
     bookedEndTime,
     bookedLocation,
   });
 
-  // Sync calendar for the new private session
+  // Sync calendar for the new booking
   try {
-    await addPrivateSessionToCalendar({
-      parentName: reg.parent_name,
-      email: reg.email,
-      phone: reg.phone,
-      kids: reg.kids,
-      bookedDate,
-      bookedStartTime,
-      bookedEndTime,
-      bookedLocation,
-    });
+    if (newType === "private") {
+      await addPrivateSessionToCalendar({
+        parentName: reg.parent_name,
+        email: reg.email,
+        phone: reg.phone,
+        kids: kidsToUse,
+        bookedDate,
+        bookedStartTime,
+        bookedEndTime,
+        bookedLocation,
+      });
+    } else {
+      await upsertGroupSessionCalendarEvent({
+        sessionType: "weekly",
+        sessionLabel: sessionGroup || "Group Session",
+        bookedDate,
+        bookedStartTime,
+        bookedEndTime: bookedEndTime || bookedStartTime,
+        bookedLocation: bookedLocation || "",
+        kidsJustRegistered: kidsToUse,
+        participantsJustRegistered: kidCount,
+      });
+    }
   } catch (err) {
     console.error("Calendar sync error (reschedule new):", err);
   }

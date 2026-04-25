@@ -22,9 +22,7 @@ function formatSessionDetails(details: string, bookedDate?: string | null): stri
   let result = details;
 
   if (bookedDate) {
-    const d = /^\d{4}-\d{2}-\d{2}$/.test(bookedDate)
-      ? new Date(bookedDate + "T12:00:00")
-      : new Date(bookedDate + " 12:00:00");
+    const d = parseDateSafe(bookedDate);
     const dayName = d.toLocaleDateString("en-US", { weekday: "long" });
     const dateStr = d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
     const isoMatch = result.match(/\d{4}-\d{2}-\d{2}/);
@@ -114,6 +112,18 @@ function DobInput({ value, onChange }: { value: string; onChange: (v: string) =>
   );
 }
 
+function parseDateSafe(dateStr: string): Date {
+  return /^\d{4}-\d{2}-\d{2}$/.test(dateStr)
+    ? new Date(dateStr + "T12:00:00")
+    : new Date(dateStr + " 12:00:00");
+}
+
+function fmtDate(dateStr: string): string {
+  return parseDateSafe(dateStr).toLocaleDateString("en-US", {
+    weekday: "long", month: "long", day: "numeric", year: "numeric",
+  });
+}
+
 function buildPlayerString(name: string, dob: string, grade: string, gender: string): string {
   const parts: string[] = [];
   if (dob) parts.push(`DOB: ${dob}`);
@@ -180,13 +190,22 @@ export default function ManageBooking({
   const [bookedSlots, setBookedSlots] = useState<
     { date: string; startTime: string; endTime: string; location: string }[]
   >([]);
+  const [weeklySessions, setWeeklySessions] = useState<
+    { group: string; date: string; startTime: string; endTime: string; location: string; maxSpots: number; price: number }[]
+  >([]);
+  const [groupEnrollment, setGroupEnrollment] = useState<Record<string, number>>({});
 
   // Reschedule selection
+  const [rescheduleType, setRescheduleType] = useState<"private" | "weekly">("private");
   const [selectedWindow, setSelectedWindow] = useState<number>(-1);
   const [selectedStart, setSelectedStart] = useState<number>(0);
   const [selectedDuration, setSelectedDuration] = useState<number>(60);
   const [upsellExtra, setUpsellExtra] = useState(0);
   const [hideUpsell, setHideUpsell] = useState(false);
+  const [selectedGroupName, setSelectedGroupName] = useState("");
+  const [selectedGroupDate, setSelectedGroupDate] = useState("");
+  const [rescheduleKids, setRescheduleKids] = useState<string[]>([]);
+  const [showRescheduleAddPlayer, setShowRescheduleAddPlayer] = useState(false);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -386,6 +405,8 @@ export default function ManageBooking({
     const data = await res.json();
     setPrivateSlots(data.privateSlots || []);
     setBookedSlots(data.bookedSlots || []);
+    setWeeklySessions(data.weeklySchedule || []);
+    setGroupEnrollment(data.groupEnrollment || {});
   }
 
   async function handleCancel() {
@@ -402,20 +423,41 @@ export default function ManageBooking({
   }
 
   async function handleReschedule() {
-    if (selectedWindow < 0) return;
-    const window = timeWindows[selectedWindow];
-    const endMins = selectedStart + selectedDuration + upsellExtra;
-
     setRescheduling(true);
+    const kidsStr = rescheduleKids.join(", ");
+    let body: Record<string, unknown>;
+
+    if (rescheduleType === "private") {
+      if (selectedWindow < 0) { setRescheduling(false); return; }
+      const w = timeWindows[selectedWindow];
+      const endMins = selectedStart + selectedDuration + upsellExtra;
+      body = {
+        bookedDate: w.date,
+        bookedStartTime: formatTimeFromMins(selectedStart),
+        bookedEndTime: formatTimeFromMins(endMins),
+        bookedLocation: w.location,
+        kids: kidsStr,
+        sessionType: "private",
+      };
+    } else {
+      if (!selectedGroupName || !selectedGroupDate) { setRescheduling(false); return; }
+      const session = weeklySessions.find(s => s.group === selectedGroupName && s.date === selectedGroupDate);
+      if (!session) { setRescheduling(false); return; }
+      body = {
+        bookedDate: session.date,
+        bookedStartTime: session.startTime,
+        bookedEndTime: session.endTime,
+        bookedLocation: session.location,
+        kids: kidsStr,
+        sessionType: "weekly",
+        sessionGroup: session.group,
+      };
+    }
+
     const res = await fetch(`/api/booking/${token}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        bookedDate: window.date,
-        bookedStartTime: formatTimeFromMins(selectedStart),
-        bookedEndTime: formatTimeFromMins(endMins),
-        bookedLocation: window.location,
-      }),
+      body: JSON.stringify(body),
     });
     const data = await res.json();
     if (data.success) {
@@ -605,7 +647,17 @@ export default function ManageBooking({
                       </button>
                       {booking.type !== "camp" && (
                         <button
-                          onClick={() => { setShowReschedule(true); loadSchedule(); }}
+                          onClick={() => {
+                            const defaultType = booking.type === "weekly" ? "weekly" : "private";
+                            setRescheduleType(defaultType);
+                            setRescheduleKids(parseKids(booking.kids));
+                            setSelectedGroupName("");
+                            setSelectedGroupDate("");
+                            setShowRescheduleAddPlayer(false);
+                            setNewPlayerName(""); setNewPlayerDob(""); setNewPlayerGrade(""); setNewPlayerGender("");
+                            setShowReschedule(true);
+                            loadSchedule();
+                          }}
                           className="rounded bg-mesa-accent px-4 py-2 text-sm font-semibold text-white hover:bg-yellow-600"
                         >
                           Reschedule
@@ -834,154 +886,248 @@ export default function ManageBooking({
                 <div className="mt-6">
                   <h2 className="text-lg font-semibold">Pick a New Time</h2>
 
-                  {timeWindows.length === 0 && (
-                    <p className="mt-4 text-sm text-brown-500">
-                      No available slots right now. Contact Artemios directly.
-                    </p>
-                  )}
-
-                  <div className="mt-4 space-y-3">
-                    {timeWindows.map((w, wi) => {
-                      const d = new Date(w.date);
-                      const dayName = d.toLocaleDateString("en-US", {
-                        weekday: "long",
-                        timeZone: "UTC",
-                      });
-                      const dateLabel = d.toLocaleDateString("en-US", {
-                        month: "long",
-                        day: "numeric",
-                        timeZone: "UTC",
-                      });
-                      const isSelected = selectedWindow === wi;
-                      const totalAvailable = w.endMins - w.startMins;
-
-                      // Start options (15-min increments, must leave room for 60 min)
-                      const startOptions: number[] = [];
-                      for (let t = w.startMins; t <= w.endMins - 60; t += 15) {
-                        startOptions.push(t);
-                      }
-                      // Duration options
-                      const effectiveStart = isSelected ? selectedStart : w.startMins;
-                      const durOptions: number[] = [];
-                      for (let d = 60; d <= w.endMins - effectiveStart; d += 15) {
-                        durOptions.push(d);
-                      }
-
-                      return (
-                        <button
-                          key={wi}
-                          onClick={() => {
-                            setSelectedWindow(wi);
-                            setSelectedStart(w.startMins);
-                            setSelectedDuration(Math.min(60, totalAvailable));
-                            setUpsellExtra(0);
-                          }}
-                          className={`block w-full rounded-lg border p-4 text-left transition ${
-                            isSelected
-                              ? "border-mesa-accent bg-mesa-accent/10"
-                              : "border-brown-700 bg-brown-800/50 hover:border-brown-500"
-                          }`}
-                        >
-                          <p className="font-medium">
-                            {dayName}, {dateLabel}
-                          </p>
-                          <p className="text-sm text-brown-400">
-                            {w.location} &bull; {w.startLabel} - {w.endLabel} ({totalAvailable} min)
-                          </p>
-
-                          {isSelected && (
-                            <div
-                              className="mt-3 flex flex-wrap items-end gap-3"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <div>
-                                <label className="mb-1 block text-xs text-brown-400">Start</label>
-                                <select
-                                  value={selectedStart}
-                                  onChange={(e) => {
-                                    const v = parseInt(e.target.value);
-                                    setSelectedStart(v);
-                                    const maxDur = w.endMins - v;
-                                    if (selectedDuration > maxDur) setSelectedDuration(Math.max(60, maxDur));
-                                  }}
-                                  className="rounded border border-brown-700 bg-brown-800 px-2 py-1 text-sm text-white"
-                                >
-                                  {startOptions.map((t) => (
-                                    <option key={t} value={t}>{formatTimeFromMins(t)}</option>
-                                  ))}
-                                </select>
-                              </div>
-                              <div>
-                                <label className="mb-1 block text-xs text-brown-400">Duration</label>
-                                <select
-                                  value={selectedDuration}
-                                  onChange={(e) => setSelectedDuration(parseInt(e.target.value))}
-                                  className="rounded border border-brown-700 bg-brown-800 px-2 py-1 text-sm text-white"
-                                >
-                                  {durOptions.map((d) => (
-                                    <option key={d} value={d}>{d} min</option>
-                                  ))}
-                                </select>
-                              </div>
-                              <p className="text-sm text-brown-300">
-                                {formatTimeFromMins(selectedStart)} - {formatTimeFromMins(selectedStart + selectedDuration)}
-                              </p>
-                            </div>
-                          )}
-                        </button>
-                      );
-                    })}
+                  {/* Private / Group toggle */}
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      onClick={() => { setRescheduleType("private"); setSelectedGroupName(""); setSelectedGroupDate(""); }}
+                      className={`rounded px-4 py-2 text-sm font-semibold transition ${rescheduleType === "private" ? "bg-mesa-accent text-white" : "bg-brown-800 text-brown-300 hover:bg-brown-700"}`}
+                    >
+                      Private
+                    </button>
+                    <button
+                      onClick={() => { setRescheduleType("weekly"); setSelectedWindow(-1); setSelectedStart(0); setSelectedDuration(60); setUpsellExtra(0); }}
+                      className={`rounded px-4 py-2 text-sm font-semibold transition ${rescheduleType === "weekly" ? "bg-mesa-accent text-white" : "bg-brown-800 text-brown-300 hover:bg-brown-700"}`}
+                    >
+                      Group
+                    </button>
                   </div>
 
-                  {/* Upsell prompt */}
-                  {selectedWindow >= 0 && !hideUpsell && (() => {
-                    const w = timeWindows[selectedWindow];
-                    if (!w) return null;
-                    const totalAvail = w.endMins - w.startMins;
-                    const remaining = w.endMins - (selectedStart + selectedDuration);
-                    if (selectedDuration > 60 || totalAvail > 120 || remaining <= 0) return null;
-                    const extras = [15, 30].filter((e) => e <= remaining);
-                    if (extras.length === 0) return null;
-                    if (upsellExtra > 0) {
-                      return (
-                        <div className="mt-4 flex items-center justify-between rounded-lg bg-green-900/20 px-4 py-2">
-                          <p className="text-sm text-green-400">+{upsellExtra} min added at 50% off</p>
-                          <button type="button" onClick={() => setUpsellExtra(0)} className="text-xs text-brown-500 hover:text-red-400">Remove</button>
-                        </div>
-                      );
+                  {/* ── PRIVATE ── */}
+                  {rescheduleType === "private" && (
+                    <>
+                      {timeWindows.length === 0 && (
+                        <p className="mt-4 text-sm text-brown-500">No available slots right now. Contact Artemios directly.</p>
+                      )}
+
+                      <div className="mt-4 space-y-3">
+                        {timeWindows.map((w, wi) => {
+                          const d = parseDateSafe(w.date);
+                          const dayName = d.toLocaleDateString("en-US", { weekday: "long" });
+                          const dateLabel = d.toLocaleDateString("en-US", { month: "long", day: "numeric" });
+                          const isSelected = selectedWindow === wi;
+                          const totalAvailable = w.endMins - w.startMins;
+                          const startOptions: number[] = [];
+                          for (let t = w.startMins; t <= w.endMins - 60; t += 15) startOptions.push(t);
+                          const effectiveStart = isSelected ? selectedStart : w.startMins;
+                          const durOptions: number[] = [];
+                          for (let dur = 60; dur <= w.endMins - effectiveStart; dur += 15) durOptions.push(dur);
+
+                          return (
+                            <button
+                              key={wi}
+                              onClick={() => { setSelectedWindow(wi); setSelectedStart(w.startMins); setSelectedDuration(Math.min(60, totalAvailable)); setUpsellExtra(0); }}
+                              className={`block w-full rounded-lg border p-4 text-left transition ${isSelected ? "border-mesa-accent bg-mesa-accent/10" : "border-brown-700 bg-brown-800/50 hover:border-brown-500"}`}
+                            >
+                              <p className="font-medium">{dayName}, {dateLabel}</p>
+                              <p className="text-sm text-brown-400">{w.location} &bull; {w.startLabel} - {w.endLabel} ({totalAvailable} min)</p>
+                              {isSelected && (
+                                <div className="mt-3 flex flex-wrap items-end gap-3" onClick={(e) => e.stopPropagation()}>
+                                  <div>
+                                    <label className="mb-1 block text-xs text-brown-400">Start</label>
+                                    <select value={selectedStart} onChange={(e) => { const v = parseInt(e.target.value); setSelectedStart(v); const maxDur = w.endMins - v; if (selectedDuration > maxDur) setSelectedDuration(Math.max(60, maxDur)); }} className="rounded border border-brown-700 bg-brown-800 px-2 py-1 text-sm text-white">
+                                      {startOptions.map((t) => <option key={t} value={t}>{formatTimeFromMins(t)}</option>)}
+                                    </select>
+                                  </div>
+                                  <div>
+                                    <label className="mb-1 block text-xs text-brown-400">Duration</label>
+                                    <select value={selectedDuration} onChange={(e) => setSelectedDuration(parseInt(e.target.value))} className="rounded border border-brown-700 bg-brown-800 px-2 py-1 text-sm text-white">
+                                      {durOptions.map((dur) => <option key={dur} value={dur}>{dur} min</option>)}
+                                    </select>
+                                  </div>
+                                  <p className="text-sm text-brown-300">{formatTimeFromMins(selectedStart)} - {formatTimeFromMins(selectedStart + selectedDuration)}</p>
+                                </div>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Upsell prompt */}
+                      {selectedWindow >= 0 && !hideUpsell && (() => {
+                        const w = timeWindows[selectedWindow];
+                        if (!w) return null;
+                        const totalAvail = w.endMins - w.startMins;
+                        const remaining = w.endMins - (selectedStart + selectedDuration);
+                        if (selectedDuration > 60 || totalAvail > 120 || remaining <= 0) return null;
+                        const extras = [15, 30].filter((e) => e <= remaining);
+                        if (extras.length === 0) return null;
+                        if (upsellExtra > 0) {
+                          return (
+                            <div className="mt-4 flex items-center justify-between rounded-lg bg-green-900/20 px-4 py-2">
+                              <p className="text-sm text-green-400">+{upsellExtra} min added at 50% off</p>
+                              <button type="button" onClick={() => setUpsellExtra(0)} className="text-xs text-brown-500 hover:text-red-400">Remove</button>
+                            </div>
+                          );
+                        }
+                        return (
+                          <div className="mt-4 rounded-lg border border-green-800/50 bg-green-900/20 p-4">
+                            <p className="text-sm font-semibold text-green-400">Extend your session?</p>
+                            <p className="mt-1 text-xs text-brown-300">Add extra time at half price. More reps, more progress — same session.</p>
+                            <div className="mt-3 flex flex-wrap gap-2">
+                              {extras.map((extra) => {
+                                const cost = getPrivatePrice(extra, 1) * 0.5;
+                                return <button key={extra} type="button" onClick={() => setUpsellExtra(extra)} className="rounded bg-green-800/40 px-3 py-2 text-sm text-green-300 hover:bg-green-800/60">+{extra} min (+{formatPrice(cost)})</button>;
+                              })}
+                              <button type="button" onClick={() => { setHideUpsell(true); localStorage.setItem("mesa_hide_upsell", "true"); }} className="text-xs text-brown-500 hover:text-brown-400 self-center ml-2">Don&apos;t show this again</button>
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                      {/* Player editor — appears when a slot is selected */}
+                      {selectedWindow >= 0 && (() => {
+                        return (
+                          <div className="mt-6 rounded-lg border border-brown-700 bg-brown-800/30 p-4">
+                            <h3 className="mb-3 text-sm font-semibold text-brown-300">Players</h3>
+                            <div className="space-y-2">
+                              {rescheduleKids.map((player, i) => (
+                                <div key={i} className="flex items-center justify-between rounded border border-brown-700 bg-brown-800 px-3 py-2">
+                                  <span className="text-sm text-white">{playerName(player)}</span>
+                                  <button onClick={() => setRescheduleKids((prev) => prev.filter((_, j) => j !== i))} disabled={rescheduleKids.length <= 1} className="text-xs text-red-400 hover:text-red-300 disabled:cursor-not-allowed disabled:text-brown-600">Remove</button>
+                                </div>
+                              ))}
+                            </div>
+                            {!showRescheduleAddPlayer ? (
+                              <button onClick={() => { setShowRescheduleAddPlayer(true); setNewPlayerName(""); setNewPlayerDob(""); setNewPlayerGrade(""); setNewPlayerGender(""); }} className="mt-3 text-sm text-mesa-accent hover:text-yellow-300">+ Add a player</button>
+                            ) : (
+                              <div className="mt-3 space-y-3 rounded-lg border border-brown-700 bg-brown-800/50 p-4">
+                                <p className="text-sm font-medium text-brown-300">New Player</p>
+                                <input type="text" placeholder="Full name *" value={newPlayerName} onChange={(e) => setNewPlayerName(e.target.value)} className="w-full rounded border border-brown-700 bg-brown-900 px-3 py-2 text-sm text-white placeholder-brown-600" />
+                                <div><label className="mb-1 block text-xs text-brown-400">Date of Birth *</label><DobInput value={newPlayerDob} onChange={setNewPlayerDob} /></div>
+                                <select value={newPlayerGrade} onChange={(e) => setNewPlayerGrade(e.target.value)} className="w-full rounded border border-brown-700 bg-brown-900 px-3 py-2 text-sm text-white">
+                                  <option value="">Grade *</option>
+                                  <option value="K">Kindergarten</option>
+                                  <option value="1">1st Grade</option><option value="2">2nd Grade</option><option value="3">3rd Grade</option><option value="4">4th Grade</option><option value="5">5th Grade</option><option value="6">6th Grade</option><option value="7">7th Grade</option><option value="8">8th Grade</option><option value="9">9th Grade</option><option value="10">10th Grade</option><option value="11">11th Grade</option><option value="12">12th Grade</option>
+                                  <option value="College +">College / Pro</option>
+                                  <option value="Adult">Adult</option>
+                                </select>
+                                <select value={newPlayerGender} onChange={(e) => setNewPlayerGender(e.target.value)} className="w-full rounded border border-brown-700 bg-brown-900 px-3 py-2 text-sm text-white">
+                                  <option value="">Gender *</option>
+                                  <option value="Male">Male</option>
+                                  <option value="Female">Female</option>
+                                </select>
+                                <div className="flex gap-2">
+                                  <button disabled={!newPlayerName.trim() || newPlayerDob.length < 8 || !newPlayerGrade || !newPlayerGender} onClick={() => { const p = buildPlayerString(newPlayerName, newPlayerDob, newPlayerGrade, newPlayerGender); setRescheduleKids((prev) => [...prev, p]); setShowRescheduleAddPlayer(false); setNewPlayerName(""); setNewPlayerDob(""); setNewPlayerGrade(""); setNewPlayerGender(""); }} className="rounded bg-mesa-accent px-4 py-2 text-sm font-semibold text-white hover:bg-yellow-600 disabled:opacity-50">Add</button>
+                                  <button onClick={() => setShowRescheduleAddPlayer(false)} className="rounded bg-brown-700 px-4 py-2 text-sm text-brown-300 hover:bg-brown-600">Cancel</button>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </>
+                  )}
+
+                  {/* ── GROUP ── */}
+                  {rescheduleType === "weekly" && (() => {
+                    const today = new Date(); today.setHours(0, 0, 0, 0);
+                    const futureSessions = weeklySessions.filter(s => { const d = parseDateSafe(s.date); d.setHours(0, 0, 0, 0); return d >= today; });
+                    const uniqueGroups = [...new Set(futureSessions.map(s => s.group))];
+                    if (uniqueGroups.length === 0) {
+                      return <p className="mt-4 text-sm text-brown-500">No group sessions available right now. Contact Artemios directly.</p>;
                     }
                     return (
-                      <div className="mt-4 rounded-lg border border-green-800/50 bg-green-900/20 p-4">
-                        <p className="text-sm font-semibold text-green-400">Extend your session?</p>
-                        <p className="mt-1 text-xs text-brown-300">Add extra time at half price. More reps, more progress — same session.</p>
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {extras.map((extra) => {
-                            const cost = getPrivatePrice(extra, 1) * 0.5;
-                            return (
-                              <button key={extra} type="button" onClick={() => setUpsellExtra(extra)} className="rounded bg-green-800/40 px-3 py-2 text-sm text-green-300 hover:bg-green-800/60">
-                                +{extra} min (+{formatPrice(cost)})
+                      <div className="mt-4 space-y-3">
+                        {uniqueGroups.map(groupName => {
+                          const groupSessions = futureSessions.filter(s => s.group === groupName);
+                          const isGroupSelected = selectedGroupName === groupName;
+                          const firstSession = groupSessions[0];
+                          return (
+                            <div key={groupName} className={`rounded-lg border p-4 transition ${isGroupSelected ? "border-mesa-accent bg-mesa-accent/10" : "border-brown-700 bg-brown-800/50"}`}>
+                              <button onClick={() => { setSelectedGroupName(isGroupSelected ? "" : groupName); setSelectedGroupDate(""); }} className="w-full text-left">
+                                <p className="font-medium text-white">{groupName}</p>
+                                {firstSession && (
+                                  <p className="mt-0.5 text-sm text-brown-400">{firstSession.startTime}–{firstSession.endTime} · {firstSession.location} · ${firstSession.price}/player</p>
+                                )}
                               </button>
-                            );
-                          })}
-                          <button type="button" onClick={() => { setHideUpsell(true); localStorage.setItem("mesa_hide_upsell", "true"); }} className="text-xs text-brown-500 hover:text-brown-400 self-center ml-2">
-                            Don&apos;t show this again
-                          </button>
-                        </div>
+                              {isGroupSelected && (
+                                <div className="mt-3 space-y-2">
+                                  {groupSessions.map(s => {
+                                    const key = `${s.date}|${s.startTime}`;
+                                    const enrolled = groupEnrollment[key] || 0;
+                                    const spotsLeft = s.maxSpots - enrolled;
+                                    const isFull = spotsLeft <= 0;
+                                    const isDateSelected = selectedGroupDate === s.date;
+                                    return (
+                                      <button key={s.date} disabled={isFull} onClick={() => setSelectedGroupDate(isDateSelected ? "" : s.date)}
+                                        className={`w-full rounded border p-3 text-left transition ${isDateSelected ? "border-mesa-accent bg-mesa-accent/20" : isFull ? "cursor-not-allowed border-brown-800 bg-brown-900/50 opacity-50" : "border-brown-700 bg-brown-800 hover:border-brown-500"}`}>
+                                        <p className="text-sm font-medium text-white">{fmtDate(s.date)}</p>
+                                        <p className={`mt-0.5 text-xs ${isFull ? "text-red-400" : spotsLeft <= 3 ? "text-yellow-400" : "text-brown-400"}`}>
+                                          {isFull ? "Full" : `${spotsLeft} spot${spotsLeft !== 1 ? "s" : ""} left`}
+                                        </p>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     );
                   })()}
 
-                  {/* Bottom buttons (for short lists) */}
-                  <div className="mt-4 flex gap-3">
+                  {/* Player editor — group: shown when a date is selected */}
+                  {rescheduleType === "weekly" && selectedGroupDate && (
+                    <div className="mt-6 rounded-lg border border-brown-700 bg-brown-800/30 p-4">
+                      <h3 className="mb-3 text-sm font-semibold text-brown-300">Players</h3>
+                      <div className="space-y-2">
+                        {rescheduleKids.map((player, i) => (
+                          <div key={i} className="flex items-center justify-between rounded border border-brown-700 bg-brown-800 px-3 py-2">
+                            <span className="text-sm text-white">{playerName(player)}</span>
+                            <button onClick={() => setRescheduleKids((prev) => prev.filter((_, j) => j !== i))} disabled={rescheduleKids.length <= 1} className="text-xs text-red-400 hover:text-red-300 disabled:cursor-not-allowed disabled:text-brown-600">Remove</button>
+                          </div>
+                        ))}
+                      </div>
+                      {!showRescheduleAddPlayer ? (
+                        <button onClick={() => { setShowRescheduleAddPlayer(true); setNewPlayerName(""); setNewPlayerDob(""); setNewPlayerGrade(""); setNewPlayerGender(""); }} className="mt-3 text-sm text-mesa-accent hover:text-yellow-300">+ Add a player</button>
+                      ) : (
+                        <div className="mt-3 space-y-3 rounded-lg border border-brown-700 bg-brown-800/50 p-4">
+                          <p className="text-sm font-medium text-brown-300">New Player</p>
+                          <input type="text" placeholder="Full name *" value={newPlayerName} onChange={(e) => setNewPlayerName(e.target.value)} className="w-full rounded border border-brown-700 bg-brown-900 px-3 py-2 text-sm text-white placeholder-brown-600" />
+                          <div><label className="mb-1 block text-xs text-brown-400">Date of Birth *</label><DobInput value={newPlayerDob} onChange={setNewPlayerDob} /></div>
+                          <select value={newPlayerGrade} onChange={(e) => setNewPlayerGrade(e.target.value)} className="w-full rounded border border-brown-700 bg-brown-900 px-3 py-2 text-sm text-white">
+                            <option value="">Grade *</option>
+                            <option value="K">Kindergarten</option>
+                            <option value="1">1st Grade</option><option value="2">2nd Grade</option><option value="3">3rd Grade</option><option value="4">4th Grade</option><option value="5">5th Grade</option><option value="6">6th Grade</option><option value="7">7th Grade</option><option value="8">8th Grade</option><option value="9">9th Grade</option><option value="10">10th Grade</option><option value="11">11th Grade</option><option value="12">12th Grade</option>
+                            <option value="College +">College / Pro</option>
+                            <option value="Adult">Adult</option>
+                          </select>
+                          <select value={newPlayerGender} onChange={(e) => setNewPlayerGender(e.target.value)} className="w-full rounded border border-brown-700 bg-brown-900 px-3 py-2 text-sm text-white">
+                            <option value="">Gender *</option>
+                            <option value="Male">Male</option>
+                            <option value="Female">Female</option>
+                          </select>
+                          <div className="flex gap-2">
+                            <button disabled={!newPlayerName.trim() || newPlayerDob.length < 8 || !newPlayerGrade || !newPlayerGender} onClick={() => { const p = buildPlayerString(newPlayerName, newPlayerDob, newPlayerGrade, newPlayerGender); setRescheduleKids((prev) => [...prev, p]); setShowRescheduleAddPlayer(false); setNewPlayerName(""); setNewPlayerDob(""); setNewPlayerGrade(""); setNewPlayerGender(""); }} className="rounded bg-mesa-accent px-4 py-2 text-sm font-semibold text-white hover:bg-yellow-600 disabled:opacity-50">Add</button>
+                            <button onClick={() => setShowRescheduleAddPlayer(false)} className="rounded bg-brown-700 px-4 py-2 text-sm text-brown-300 hover:bg-brown-600">Cancel</button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Bottom buttons */}
+                  <div className="mt-6 flex gap-3">
                     <button
                       onClick={handleReschedule}
-                      disabled={rescheduling || selectedWindow < 0}
+                      disabled={rescheduling || (rescheduleType === "private" ? selectedWindow < 0 : !selectedGroupDate)}
                       className="rounded bg-mesa-accent px-4 py-2 text-sm font-semibold text-white hover:bg-yellow-600 disabled:opacity-50"
                     >
                       {rescheduling ? "Rescheduling..." : "Confirm Reschedule"}
                     </button>
                     <button
-                      onClick={() => { setShowReschedule(false); setSelectedWindow(-1); setSelectedStart(0); setSelectedDuration(60); setUpsellExtra(0); }}
+                      onClick={() => { setShowReschedule(false); setSelectedWindow(-1); setSelectedStart(0); setSelectedDuration(60); setUpsellExtra(0); setSelectedGroupName(""); setSelectedGroupDate(""); }}
                       className="rounded bg-brown-700 px-4 py-2 text-sm text-brown-300 hover:bg-brown-600"
                     >
                       Go Back
@@ -990,17 +1136,17 @@ export default function ManageBooking({
                 </div>
               )}
 
-              {/* Sticky bottom bar when rescheduling with a slot selected */}
-              {showReschedule && selectedWindow >= 0 && (
+              {/* Sticky bottom bar — private mode only */}
+              {showReschedule && rescheduleType === "private" && selectedWindow >= 0 && (
                 <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-brown-700 bg-brown-900 px-6 py-3 shadow-2xl">
                   <div className="mx-auto flex max-w-lg items-center justify-between">
                     <div className="text-sm text-brown-300">
                       {(() => {
                         const w = timeWindows[selectedWindow];
                         if (!w) return null;
-                        const d = new Date(w.date);
-                        const day = d.toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" });
-                        const dateStr = d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+                        const d = parseDateSafe(w.date);
+                        const day = d.toLocaleDateString("en-US", { weekday: "short" });
+                        const dateStr = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
                         return `${day}, ${dateStr} ${formatTimeFromMins(selectedStart)}-${formatTimeFromMins(selectedStart + selectedDuration)}`;
                       })()}
                     </div>
