@@ -9,13 +9,26 @@ const LOCATION_NAMES: Record<string, string> = {
   "Cherry Valley": "Cherry Valley Sports",
 };
 
-function formatSessionDetails(details: string): string {
-  for (const [key, name] of Object.entries(LOCATION_NAMES)) {
-    if (details.includes(key)) {
-      return details.replace(key, name);
+function formatSessionDetails(details: string, bookedDate?: string | null): string {
+  let result = details;
+
+  // Inject day of week before the YYYY-MM-DD date in the string
+  if (bookedDate) {
+    const match = result.match(/\d{4}-\d{2}-\d{2}/);
+    if (match) {
+      const d = new Date(bookedDate + "T12:00:00");
+      const dayName = d.toLocaleDateString("en-US", { weekday: "long" });
+      const dateStr = d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+      result = result.replace(match[0], `${dayName}, ${dateStr}`);
     }
   }
-  return details;
+
+  for (const [key, name] of Object.entries(LOCATION_NAMES)) {
+    if (result.includes(key)) {
+      return result.replace(key, name);
+    }
+  }
+  return result;
 }
 
 interface BookingRecord {
@@ -257,7 +270,7 @@ export default function MyBookings() {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <p className="font-medium text-white">
-                      {formatSessionDetails(b.sessionDetails)}
+                      {formatSessionDetails(b.sessionDetails, b.bookedDate)}
                     </p>
                     <div className="mt-2 space-y-1 text-sm">
                       <p className="text-brown-400">
