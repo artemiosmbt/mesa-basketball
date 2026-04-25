@@ -13,6 +13,25 @@ const LOCATION_LINKS: Record<string, { name: string; url: string }> = {
   "Cherry Valley Sports": { name: "Cherry Valley Sports", url: "https://share.google/YKRoCTFuLP33bpSUZ" },
 };
 
+function fmtDate(dateStr: string): string {
+  return new Date(dateStr + "T12:00:00").toLocaleDateString("en-US", {
+    weekday: "long", month: "long", day: "numeric", year: "numeric",
+  });
+}
+
+function fmtDateShort(dateStr: string): string {
+  return new Date(dateStr + "T12:00:00").toLocaleDateString("en-US", {
+    weekday: "short", month: "short", day: "numeric", year: "numeric",
+  });
+}
+
+function injectDayIntoDetails(details: string, bookedDate?: string | null): string {
+  if (!bookedDate) return details;
+  const match = details.match(/\d{4}-\d{2}-\d{2}/);
+  if (!match) return details;
+  return details.replace(match[0], fmtDate(bookedDate));
+}
+
 function LocationLink({ location, className }: { location: string; className?: string }) {
   const link = LOCATION_LINKS[location];
   if (link) {
@@ -2304,7 +2323,7 @@ export default function Home() {
                 &times;
               </button>
             </div>
-            <p className="mt-1 text-sm text-brown-400">{modal.sessionDetails}</p>
+            <p className="mt-1 text-sm text-brown-400">{injectDayIntoDetails(modal.sessionDetails, modal.bookedDate)}</p>
 
             {/* Camp day selector */}
             {modal.type === "camp" && !submitResult?.success && (() => {
@@ -2339,7 +2358,7 @@ export default function Home() {
                             }}
                             className="h-4 w-4 rounded accent-mesa-accent"
                           />
-                          <span className="text-sm text-white flex-1">{day}</span>
+                          <span className="text-sm text-white flex-1">{fmtDate(day)}</span>
                           <span className={`text-xs font-medium ${dayFull ? "text-red-400" : "text-yellow-400"}`}>
                             {dayFull ? "Full" : spotsLeft <= 3 ? `${spotsLeft} spot${spotsLeft !== 1 ? "s" : ""} left` : ""}
                           </span>
@@ -2376,11 +2395,9 @@ export default function Home() {
                 <p className="text-xs font-semibold text-brown-300 mb-2">Selected dates:</p>
                 <div className="space-y-1">
                   {modal.selectedGroupSessions.map((s, i) => {
-                    const d = new Date(s.date);
-                    const dayName = d.toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" });
                     return (
                       <p key={i} className="text-xs text-brown-400">
-                        {dayName}, {s.date} &bull; {s.startTime}-{s.endTime} &bull; {s.location}
+                        {fmtDateShort(s.date)} &bull; {s.startTime}-{s.endTime} &bull; {s.location}
                       </p>
                     );
                   })}
@@ -2646,8 +2663,6 @@ export default function Home() {
                     </label>
                     <div className="space-y-2 rounded-lg border border-brown-700 bg-brown-800/50 p-3">
                       {(showAllRecurring ? recurringWeeks : recurringWeeks.slice(0, 3)).map((week, wi) => {
-                        const d = new Date(week.date);
-                        const dayName = d.toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" });
                         const diffLocation = week.location !== modal.bookedLocation;
                         return (
                           <label key={wi} className="flex items-center gap-2 text-sm cursor-pointer">
@@ -2664,7 +2679,7 @@ export default function Home() {
                               className="rounded border-brown-600 accent-mesa-accent"
                             />
                             <span className="text-brown-300">
-                              {dayName}, {week.date}{" "}
+                              {fmtDate(week.date)}{" "}
                               <span className={diffLocation ? "text-mesa-accent font-medium" : "text-brown-500"}>
                                 ({week.location})
                               </span>
