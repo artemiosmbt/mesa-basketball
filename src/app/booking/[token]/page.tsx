@@ -927,7 +927,7 @@ export default function ManageBooking({
                       {rescheduling ? "Rescheduling..." : "Confirm Reschedule"}
                     </button>
                     <button
-                      onClick={() => setShowReschedule(false)}
+                      onClick={() => { setShowReschedule(false); setSelectedWindow(-1); setSelectedStart(0); setSelectedDuration(60); setUpsellExtra(0); }}
                       className="rounded bg-brown-700 px-4 py-2 text-sm text-brown-300 hover:bg-brown-600"
                     >
                       Go Back

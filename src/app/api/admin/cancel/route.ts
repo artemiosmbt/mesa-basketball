@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { ADMIN_EMAIL } from "@/lib/auth";
 import { deletePrivateSessionFromCalendar, upsertGroupSessionCalendarEvent } from "@/lib/calendar";
+import { sendCancellationNotification } from "@/lib/email";
 
 async function verifyAdmin(req: NextRequest) {
   const token = req.headers.get("authorization")?.replace("Bearer ", "");
@@ -30,7 +31,7 @@ export async function POST(req: NextRequest) {
   // Fetch registration details before cancelling so we can sync the calendar
   const { data: reg } = await supabase
     .from("registrations")
-    .select("type, email, booked_date, booked_start_time, booked_end_time, booked_location, kids, session_details, total_participants")
+    .select("type, email, parent_name, booked_date, booked_start_time, booked_end_time, booked_location, kids, session_details, total_participants")
     .eq("id", id)
     .single();
 
@@ -63,6 +64,21 @@ export async function POST(req: NextRequest) {
       }
     } catch (err) {
       console.error("Calendar sync error (admin cancel):", err);
+    }
+  }
+
+  // Notify parent of admin-initiated cancellation (no late fee)
+  if (reg?.email && reg?.parent_name) {
+    try {
+      await sendCancellationNotification({
+        parentName: reg.parent_name,
+        email: reg.email,
+        sessionDetails: reg.session_details || "",
+        sessionType: reg.type,
+        isLateCancel: false,
+      });
+    } catch (err) {
+      console.error("Email notification error (admin cancel):", err);
     }
   }
 

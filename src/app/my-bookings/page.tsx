@@ -261,7 +261,7 @@ export default function MyBookings() {
             const typeLabel =
               b.type === "group-private" ? "Group Private"
               : b.type === "private" ? "Private"
-              : b.type === "group" ? "Group"
+              : b.type === "weekly" ? "Group Session"
               : b.type === "camp" ? "Camp"
               : b.type;
 
