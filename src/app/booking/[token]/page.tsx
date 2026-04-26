@@ -1159,6 +1159,36 @@ export default function ManageBooking({
                   ))}
                 </div>
 
+                {/* Price summary — private only */}
+                {w && (() => {
+                  const kidCount = reschedulePlayers.length;
+                  const totalMins = selectedDuration + upsellExtra;
+                  const price = getPrivatePrice(totalMins, kidCount);
+                  const isGroupRate = kidCount >= 4;
+                  return (
+                    <div className={`rounded-lg px-4 py-3 text-sm ${isGroupRate ? "border border-yellow-700/50 bg-yellow-900/20" : "bg-brown-800/50"}`}>
+                      <div className="flex items-center justify-between">
+                        <span className={isGroupRate ? "text-yellow-300 font-semibold" : "text-brown-300"}>
+                          {isGroupRate ? "Group rate applies (4+ players)" : "Session price"}
+                        </span>
+                        <span className={`font-bold ${isGroupRate ? "text-yellow-300" : "text-mesa-accent"}`}>
+                          {formatPrice(price)}
+                        </span>
+                      </div>
+                      {isGroupRate && (
+                        <p className="mt-1 text-xs text-yellow-400/80">
+                          Rate changed from $150/hr to $250/hr — {kidCount} players · {totalMins} min
+                        </p>
+                      )}
+                      {!isGroupRate && (
+                        <p className="mt-0.5 text-xs text-brown-500">
+                          $150/hr · {kidCount} player{kidCount !== 1 ? "s" : ""} · {totalMins} min
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
+
                 {error && <p className="text-sm text-red-400">{error}</p>}
 
                 <button
