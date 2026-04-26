@@ -70,6 +70,7 @@ export async function GET(
     id: reg.id,
     parentName: reg.parent_name,
     email: reg.email,
+    phone: reg.phone ?? "",
     kids: reg.kids,
     type: reg.type,
     sessionDetails: reg.session_details,

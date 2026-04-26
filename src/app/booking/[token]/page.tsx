@@ -45,6 +45,7 @@ interface Booking {
   id: string;
   parentName: string;
   email: string;
+  phone: string;
   kids: string;
   type: string;
   sessionDetails: string;
@@ -79,6 +80,20 @@ function parseKids(kidsStr: string): string[] {
 function playerName(playerStr: string): string {
   const idx = playerStr.indexOf(" (");
   return idx > -1 ? playerStr.substring(0, idx).trim() : playerStr.trim();
+}
+
+function parsePlayerStr(str: string): { name: string; dob: string; grade: string; gender: string } {
+  const parenIdx = str.indexOf(" (");
+  const name = parenIdx > -1 ? str.substring(0, parenIdx).trim() : str.trim();
+  const dobMatch = str.match(/DOB:\s*([^,)]+)/);
+  const gradeMatch = str.match(/Grade:\s*([^,)]+)/);
+  const genderMatch = str.match(/Gender:\s*([^,)]+)/);
+  return {
+    name,
+    dob: dobMatch ? dobMatch[1].trim() : "",
+    grade: gradeMatch ? gradeMatch[1].trim() : "",
+    gender: genderMatch ? genderMatch[1].trim() : "",
+  };
 }
 
 function parseDob(dob: string): [string, string, string] {
@@ -204,8 +219,11 @@ export default function ManageBooking({
   const [hideUpsell, setHideUpsell] = useState(false);
   const [selectedGroupName, setSelectedGroupName] = useState("");
   const [selectedGroupDate, setSelectedGroupDate] = useState("");
-  const [rescheduleKids, setRescheduleKids] = useState<string[]>([]);
-  const [showRescheduleAddPlayer, setShowRescheduleAddPlayer] = useState(false);
+  const [reschedulePlayers, setReschedulePlayers] = useState<{ name: string; dob: string; grade: string; gender: string }[]>([]);
+  const [showRescheduleForm, setShowRescheduleForm] = useState(false);
+  const [rescheduleFormParentName, setRescheduleFormParentName] = useState("");
+  const [rescheduleFormEmail, setRescheduleFormEmail] = useState("");
+  const [rescheduleFormPhone, setRescheduleFormPhone] = useState("");
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -424,7 +442,7 @@ export default function ManageBooking({
 
   async function handleReschedule() {
     setRescheduling(true);
-    const kidsStr = rescheduleKids.join(", ");
+    const kidsStr = reschedulePlayers.map(p => buildPlayerString(p.name, p.dob, p.grade, p.gender)).join(", ");
     let body: Record<string, unknown>;
 
     if (rescheduleType === "private") {
@@ -438,6 +456,8 @@ export default function ManageBooking({
         bookedLocation: w.location,
         kids: kidsStr,
         sessionType: "private",
+        parentName: rescheduleFormParentName,
+        phone: rescheduleFormPhone,
       };
     } else {
       if (!selectedGroupName || !selectedGroupDate) { setRescheduling(false); return; }
@@ -451,6 +471,8 @@ export default function ManageBooking({
         kids: kidsStr,
         sessionType: "weekly",
         sessionGroup: session.group,
+        parentName: rescheduleFormParentName,
+        phone: rescheduleFormPhone,
       };
     }
 
@@ -650,11 +672,14 @@ export default function ManageBooking({
                           onClick={() => {
                             const defaultType = booking.type === "weekly" ? "weekly" : "private";
                             setRescheduleType(defaultType);
-                            setRescheduleKids(parseKids(booking.kids));
+                            setReschedulePlayers(parseKids(booking.kids).map(parsePlayerStr));
+                            setRescheduleFormParentName(booking.parentName);
+                            setRescheduleFormEmail(booking.email);
+                            setRescheduleFormPhone(booking.phone);
+                            setSelectedWindow(-1);
                             setSelectedGroupName("");
                             setSelectedGroupDate("");
-                            setShowRescheduleAddPlayer(false);
-                            setNewPlayerName(""); setNewPlayerDob(""); setNewPlayerGrade(""); setNewPlayerGender("");
+                            setShowRescheduleForm(false);
                             setShowReschedule(true);
                             loadSchedule();
                           }}
@@ -908,123 +933,30 @@ export default function ManageBooking({
                       {timeWindows.length === 0 && (
                         <p className="mt-4 text-sm text-brown-500">No available slots right now. Contact Artemios directly.</p>
                       )}
-
                       <div className="mt-4 space-y-3">
                         {timeWindows.map((w, wi) => {
                           const d = parseDateSafe(w.date);
                           const dayName = d.toLocaleDateString("en-US", { weekday: "long" });
                           const dateLabel = d.toLocaleDateString("en-US", { month: "long", day: "numeric" });
-                          const isSelected = selectedWindow === wi;
                           const totalAvailable = w.endMins - w.startMins;
-                          const startOptions: number[] = [];
-                          for (let t = w.startMins; t <= w.endMins - 60; t += 15) startOptions.push(t);
-                          const effectiveStart = isSelected ? selectedStart : w.startMins;
-                          const durOptions: number[] = [];
-                          for (let dur = 60; dur <= w.endMins - effectiveStart; dur += 15) durOptions.push(dur);
-
                           return (
                             <button
                               key={wi}
-                              onClick={() => { setSelectedWindow(wi); setSelectedStart(w.startMins); setSelectedDuration(Math.min(60, totalAvailable)); setUpsellExtra(0); }}
-                              className={`block w-full rounded-lg border p-4 text-left transition ${isSelected ? "border-mesa-accent bg-mesa-accent/10" : "border-brown-700 bg-brown-800/50 hover:border-brown-500"}`}
+                              onClick={() => {
+                                setSelectedWindow(wi);
+                                setSelectedStart(w.startMins);
+                                setSelectedDuration(Math.min(60, totalAvailable));
+                                setUpsellExtra(0);
+                                setShowRescheduleForm(true);
+                              }}
+                              className="block w-full rounded-lg border border-brown-700 bg-brown-800/50 p-4 text-left transition hover:border-brown-500"
                             >
                               <p className="font-medium">{dayName}, {dateLabel}</p>
-                              <p className="text-sm text-brown-400">{w.location} &bull; {w.startLabel} - {w.endLabel} ({totalAvailable} min)</p>
-                              {isSelected && (
-                                <div className="mt-3 flex flex-wrap items-end gap-3" onClick={(e) => e.stopPropagation()}>
-                                  <div>
-                                    <label className="mb-1 block text-xs text-brown-400">Start</label>
-                                    <select value={selectedStart} onChange={(e) => { const v = parseInt(e.target.value); setSelectedStart(v); const maxDur = w.endMins - v; if (selectedDuration > maxDur) setSelectedDuration(Math.max(60, maxDur)); }} className="rounded border border-brown-700 bg-brown-800 px-2 py-1 text-sm text-white">
-                                      {startOptions.map((t) => <option key={t} value={t}>{formatTimeFromMins(t)}</option>)}
-                                    </select>
-                                  </div>
-                                  <div>
-                                    <label className="mb-1 block text-xs text-brown-400">Duration</label>
-                                    <select value={selectedDuration} onChange={(e) => setSelectedDuration(parseInt(e.target.value))} className="rounded border border-brown-700 bg-brown-800 px-2 py-1 text-sm text-white">
-                                      {durOptions.map((dur) => <option key={dur} value={dur}>{dur} min</option>)}
-                                    </select>
-                                  </div>
-                                  <p className="text-sm text-brown-300">{formatTimeFromMins(selectedStart)} - {formatTimeFromMins(selectedStart + selectedDuration)}</p>
-                                </div>
-                              )}
+                              <p className="text-sm text-brown-400">{w.location} &bull; {w.startLabel} – {w.endLabel} ({totalAvailable} min available)</p>
                             </button>
                           );
                         })}
                       </div>
-
-                      {/* Upsell prompt */}
-                      {selectedWindow >= 0 && !hideUpsell && (() => {
-                        const w = timeWindows[selectedWindow];
-                        if (!w) return null;
-                        const totalAvail = w.endMins - w.startMins;
-                        const remaining = w.endMins - (selectedStart + selectedDuration);
-                        if (selectedDuration > 60 || totalAvail > 120 || remaining <= 0) return null;
-                        const extras = [15, 30].filter((e) => e <= remaining);
-                        if (extras.length === 0) return null;
-                        if (upsellExtra > 0) {
-                          return (
-                            <div className="mt-4 flex items-center justify-between rounded-lg bg-green-900/20 px-4 py-2">
-                              <p className="text-sm text-green-400">+{upsellExtra} min added at 50% off</p>
-                              <button type="button" onClick={() => setUpsellExtra(0)} className="text-xs text-brown-500 hover:text-red-400">Remove</button>
-                            </div>
-                          );
-                        }
-                        return (
-                          <div className="mt-4 rounded-lg border border-green-800/50 bg-green-900/20 p-4">
-                            <p className="text-sm font-semibold text-green-400">Extend your session?</p>
-                            <p className="mt-1 text-xs text-brown-300">Add extra time at half price. More reps, more progress — same session.</p>
-                            <div className="mt-3 flex flex-wrap gap-2">
-                              {extras.map((extra) => {
-                                const cost = getPrivatePrice(extra, 1) * 0.5;
-                                return <button key={extra} type="button" onClick={() => setUpsellExtra(extra)} className="rounded bg-green-800/40 px-3 py-2 text-sm text-green-300 hover:bg-green-800/60">+{extra} min (+{formatPrice(cost)})</button>;
-                              })}
-                              <button type="button" onClick={() => { setHideUpsell(true); localStorage.setItem("mesa_hide_upsell", "true"); }} className="text-xs text-brown-500 hover:text-brown-400 self-center ml-2">Don&apos;t show this again</button>
-                            </div>
-                          </div>
-                        );
-                      })()}
-
-                      {/* Player editor — appears when a slot is selected */}
-                      {selectedWindow >= 0 && (() => {
-                        return (
-                          <div className="mt-6 rounded-lg border border-brown-700 bg-brown-800/30 p-4">
-                            <h3 className="mb-3 text-sm font-semibold text-brown-300">Players</h3>
-                            <div className="space-y-2">
-                              {rescheduleKids.map((player, i) => (
-                                <div key={i} className="flex items-center justify-between rounded border border-brown-700 bg-brown-800 px-3 py-2">
-                                  <span className="text-sm text-white">{playerName(player)}</span>
-                                  <button onClick={() => setRescheduleKids((prev) => prev.filter((_, j) => j !== i))} disabled={rescheduleKids.length <= 1} className="text-xs text-red-400 hover:text-red-300 disabled:cursor-not-allowed disabled:text-brown-600">Remove</button>
-                                </div>
-                              ))}
-                            </div>
-                            {!showRescheduleAddPlayer ? (
-                              <button onClick={() => { setShowRescheduleAddPlayer(true); setNewPlayerName(""); setNewPlayerDob(""); setNewPlayerGrade(""); setNewPlayerGender(""); }} className="mt-3 text-sm text-mesa-accent hover:text-yellow-300">+ Add a player</button>
-                            ) : (
-                              <div className="mt-3 space-y-3 rounded-lg border border-brown-700 bg-brown-800/50 p-4">
-                                <p className="text-sm font-medium text-brown-300">New Player</p>
-                                <input type="text" placeholder="Full name *" value={newPlayerName} onChange={(e) => setNewPlayerName(e.target.value)} className="w-full rounded border border-brown-700 bg-brown-900 px-3 py-2 text-sm text-white placeholder-brown-600" />
-                                <div><label className="mb-1 block text-xs text-brown-400">Date of Birth *</label><DobInput value={newPlayerDob} onChange={setNewPlayerDob} /></div>
-                                <select value={newPlayerGrade} onChange={(e) => setNewPlayerGrade(e.target.value)} className="w-full rounded border border-brown-700 bg-brown-900 px-3 py-2 text-sm text-white">
-                                  <option value="">Grade *</option>
-                                  <option value="K">Kindergarten</option>
-                                  <option value="1">1st Grade</option><option value="2">2nd Grade</option><option value="3">3rd Grade</option><option value="4">4th Grade</option><option value="5">5th Grade</option><option value="6">6th Grade</option><option value="7">7th Grade</option><option value="8">8th Grade</option><option value="9">9th Grade</option><option value="10">10th Grade</option><option value="11">11th Grade</option><option value="12">12th Grade</option>
-                                  <option value="College +">College / Pro</option>
-                                  <option value="Adult">Adult</option>
-                                </select>
-                                <select value={newPlayerGender} onChange={(e) => setNewPlayerGender(e.target.value)} className="w-full rounded border border-brown-700 bg-brown-900 px-3 py-2 text-sm text-white">
-                                  <option value="">Gender *</option>
-                                  <option value="Male">Male</option>
-                                  <option value="Female">Female</option>
-                                </select>
-                                <div className="flex gap-2">
-                                  <button disabled={!newPlayerName.trim() || newPlayerDob.length < 8 || !newPlayerGrade || !newPlayerGender} onClick={() => { const p = buildPlayerString(newPlayerName, newPlayerDob, newPlayerGrade, newPlayerGender); setRescheduleKids((prev) => [...prev, p]); setShowRescheduleAddPlayer(false); setNewPlayerName(""); setNewPlayerDob(""); setNewPlayerGrade(""); setNewPlayerGender(""); }} className="rounded bg-mesa-accent px-4 py-2 text-sm font-semibold text-white hover:bg-yellow-600 disabled:opacity-50">Add</button>
-                                  <button onClick={() => setShowRescheduleAddPlayer(false)} className="rounded bg-brown-700 px-4 py-2 text-sm text-brown-300 hover:bg-brown-600">Cancel</button>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })()}
                     </>
                   )}
 
@@ -1053,10 +985,10 @@ export default function ManageBooking({
                                     const enrolled = groupEnrollment[key] || 0;
                                     const spotsLeft = s.maxSpots - enrolled;
                                     const isFull = spotsLeft <= 0;
-                                    const isDateSelected = selectedGroupDate === s.date;
                                     return (
-                                      <button key={s.date} disabled={isFull} onClick={() => setSelectedGroupDate(isDateSelected ? "" : s.date)}
-                                        className={`w-full rounded border p-3 text-left transition ${isDateSelected ? "border-mesa-accent bg-mesa-accent/20" : isFull ? "cursor-not-allowed border-brown-800 bg-brown-900/50 opacity-50" : "border-brown-700 bg-brown-800 hover:border-brown-500"}`}>
+                                      <button key={s.date} disabled={isFull}
+                                        onClick={() => { setSelectedGroupDate(s.date); setShowRescheduleForm(true); }}
+                                        className={`w-full rounded border p-3 text-left transition ${isFull ? "cursor-not-allowed border-brown-800 bg-brown-900/50 opacity-50" : "border-brown-700 bg-brown-800 hover:border-brown-500"}`}>
                                         <p className="text-sm font-medium text-white">{fmtDate(s.date)}</p>
                                         <p className="mt-0.5 text-xs text-brown-400">{s.startTime}–{s.endTime} · {s.location}</p>
                                         {(isFull || spotsLeft <= 3) && (
@@ -1076,85 +1008,12 @@ export default function ManageBooking({
                     );
                   })()}
 
-                  {/* Player editor — group: shown when a date is selected */}
-                  {rescheduleType === "weekly" && selectedGroupDate && (
-                    <div className="mt-6 rounded-lg border border-brown-700 bg-brown-800/30 p-4">
-                      <h3 className="mb-3 text-sm font-semibold text-brown-300">Players</h3>
-                      <div className="space-y-2">
-                        {rescheduleKids.map((player, i) => (
-                          <div key={i} className="flex items-center justify-between rounded border border-brown-700 bg-brown-800 px-3 py-2">
-                            <span className="text-sm text-white">{playerName(player)}</span>
-                            <button onClick={() => setRescheduleKids((prev) => prev.filter((_, j) => j !== i))} disabled={rescheduleKids.length <= 1} className="text-xs text-red-400 hover:text-red-300 disabled:cursor-not-allowed disabled:text-brown-600">Remove</button>
-                          </div>
-                        ))}
-                      </div>
-                      {!showRescheduleAddPlayer ? (
-                        <button onClick={() => { setShowRescheduleAddPlayer(true); setNewPlayerName(""); setNewPlayerDob(""); setNewPlayerGrade(""); setNewPlayerGender(""); }} className="mt-3 text-sm text-mesa-accent hover:text-yellow-300">+ Add a player</button>
-                      ) : (
-                        <div className="mt-3 space-y-3 rounded-lg border border-brown-700 bg-brown-800/50 p-4">
-                          <p className="text-sm font-medium text-brown-300">New Player</p>
-                          <input type="text" placeholder="Full name *" value={newPlayerName} onChange={(e) => setNewPlayerName(e.target.value)} className="w-full rounded border border-brown-700 bg-brown-900 px-3 py-2 text-sm text-white placeholder-brown-600" />
-                          <div><label className="mb-1 block text-xs text-brown-400">Date of Birth *</label><DobInput value={newPlayerDob} onChange={setNewPlayerDob} /></div>
-                          <select value={newPlayerGrade} onChange={(e) => setNewPlayerGrade(e.target.value)} className="w-full rounded border border-brown-700 bg-brown-900 px-3 py-2 text-sm text-white">
-                            <option value="">Grade *</option>
-                            <option value="K">Kindergarten</option>
-                            <option value="1">1st Grade</option><option value="2">2nd Grade</option><option value="3">3rd Grade</option><option value="4">4th Grade</option><option value="5">5th Grade</option><option value="6">6th Grade</option><option value="7">7th Grade</option><option value="8">8th Grade</option><option value="9">9th Grade</option><option value="10">10th Grade</option><option value="11">11th Grade</option><option value="12">12th Grade</option>
-                            <option value="College +">College / Pro</option>
-                            <option value="Adult">Adult</option>
-                          </select>
-                          <select value={newPlayerGender} onChange={(e) => setNewPlayerGender(e.target.value)} className="w-full rounded border border-brown-700 bg-brown-900 px-3 py-2 text-sm text-white">
-                            <option value="">Gender *</option>
-                            <option value="Male">Male</option>
-                            <option value="Female">Female</option>
-                          </select>
-                          <div className="flex gap-2">
-                            <button disabled={!newPlayerName.trim() || newPlayerDob.length < 8 || !newPlayerGrade || !newPlayerGender} onClick={() => { const p = buildPlayerString(newPlayerName, newPlayerDob, newPlayerGrade, newPlayerGender); setRescheduleKids((prev) => [...prev, p]); setShowRescheduleAddPlayer(false); setNewPlayerName(""); setNewPlayerDob(""); setNewPlayerGrade(""); setNewPlayerGender(""); }} className="rounded bg-mesa-accent px-4 py-2 text-sm font-semibold text-white hover:bg-yellow-600 disabled:opacity-50">Add</button>
-                            <button onClick={() => setShowRescheduleAddPlayer(false)} className="rounded bg-brown-700 px-4 py-2 text-sm text-brown-300 hover:bg-brown-600">Cancel</button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Bottom buttons */}
-                  <div className="mt-6 flex gap-3">
-                    <button
-                      onClick={handleReschedule}
-                      disabled={rescheduling || (rescheduleType === "private" ? selectedWindow < 0 : !selectedGroupDate)}
-                      className="rounded bg-mesa-accent px-4 py-2 text-sm font-semibold text-white hover:bg-yellow-600 disabled:opacity-50"
-                    >
-                      {rescheduling ? "Rescheduling..." : "Confirm Reschedule"}
-                    </button>
+                  <div className="mt-6">
                     <button
                       onClick={() => { setShowReschedule(false); setSelectedWindow(-1); setSelectedStart(0); setSelectedDuration(60); setUpsellExtra(0); setSelectedGroupName(""); setSelectedGroupDate(""); }}
                       className="rounded bg-brown-700 px-4 py-2 text-sm text-brown-300 hover:bg-brown-600"
                     >
                       Go Back
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Sticky bottom bar — private mode only */}
-              {showReschedule && rescheduleType === "private" && selectedWindow >= 0 && (
-                <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-brown-700 bg-brown-900 px-6 py-3 shadow-2xl">
-                  <div className="mx-auto flex max-w-lg items-center justify-between">
-                    <div className="text-sm text-brown-300">
-                      {(() => {
-                        const w = timeWindows[selectedWindow];
-                        if (!w) return null;
-                        const d = parseDateSafe(w.date);
-                        const day = d.toLocaleDateString("en-US", { weekday: "short" });
-                        const dateStr = d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-                        return `${day}, ${dateStr} ${formatTimeFromMins(selectedStart)}-${formatTimeFromMins(selectedStart + selectedDuration)}`;
-                      })()}
-                    </div>
-                    <button
-                      onClick={handleReschedule}
-                      disabled={rescheduling}
-                      className="rounded bg-mesa-accent px-5 py-2 text-sm font-semibold text-white hover:bg-yellow-600 disabled:opacity-50"
-                    >
-                      {rescheduling ? "Rescheduling..." : "Confirm Reschedule"}
                     </button>
                   </div>
                 </div>
@@ -1165,6 +1024,159 @@ export default function ManageBooking({
           {error && <p className="mt-4 text-sm text-red-400">{error}</p>}
         </div>
       </div>
+
+      {/* Reschedule registration form modal */}
+      {showRescheduleForm && (() => {
+        const w = rescheduleType === "private" ? timeWindows[selectedWindow] : null;
+        const groupSession = rescheduleType === "weekly"
+          ? weeklySessions.find(s => s.group === selectedGroupName && s.date === selectedGroupDate)
+          : null;
+
+        const startOptions: number[] = w ? (() => { const opts: number[] = []; for (let t = w.startMins; t <= w.endMins - 60; t += 15) opts.push(t); return opts; })() : [];
+        const durOptions: number[] = w ? (() => { const opts: number[] = []; for (let dur = 60; dur <= w.endMins - selectedStart; dur += 15) opts.push(dur); return opts; })() : [];
+
+        const upsellExtras = w && !hideUpsell && upsellExtra === 0 ? (() => {
+          const remaining = w.endMins - (selectedStart + selectedDuration);
+          const totalAvail = w.endMins - w.startMins;
+          if (selectedDuration > 60 || totalAvail > 120 || remaining <= 0) return [];
+          return [15, 30].filter(e => e <= remaining);
+        })() : [];
+
+        const sessionLabel = w
+          ? `${parseDateSafe(w.date).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })} · ${w.location}`
+          : groupSession
+          ? `${fmtDate(groupSession.date)} · ${groupSession.startTime}–${groupSession.endTime} · ${groupSession.location}`
+          : "";
+
+        const canSubmit = rescheduleFormParentName.trim() &&
+          reschedulePlayers.every(p => p.name.trim() && p.dob.length >= 8 && p.grade && p.gender);
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/70 p-4 overflow-y-auto">
+            <div className="w-full max-w-lg rounded-2xl bg-brown-900 p-6 shadow-2xl my-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xl font-bold">Reschedule Session</h3>
+                <button onClick={() => setShowRescheduleForm(false)} className="text-2xl text-brown-400 hover:text-white">&times;</button>
+              </div>
+              <p className="mt-1 text-sm text-brown-400">{sessionLabel}</p>
+
+              <div className="mt-4 space-y-4">
+                {/* Time picker — private only */}
+                {w && (
+                  <div className="rounded-lg border border-brown-700 bg-brown-800/50 p-4">
+                    <p className="mb-3 text-sm font-medium text-brown-300">Select your time</p>
+                    <div className="flex flex-wrap items-end gap-3">
+                      <div>
+                        <label className="mb-1 block text-xs text-brown-400">Start</label>
+                        <select value={selectedStart} onChange={e => { const v = parseInt(e.target.value); setSelectedStart(v); if (selectedDuration > w.endMins - v) setSelectedDuration(Math.max(60, w.endMins - v)); }} className="rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-sm text-white focus:border-mesa-accent focus:outline-none">
+                          {startOptions.map(t => <option key={t} value={t}>{formatTimeFromMins(t)}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs text-brown-400">Duration</label>
+                        <select value={selectedDuration} onChange={e => setSelectedDuration(parseInt(e.target.value))} className="rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-sm text-white focus:border-mesa-accent focus:outline-none">
+                          {durOptions.map(dur => <option key={dur} value={dur}>{dur} min</option>)}
+                        </select>
+                      </div>
+                      <p className="text-sm text-brown-300 pb-2">{formatTimeFromMins(selectedStart)} – {formatTimeFromMins(selectedStart + selectedDuration + upsellExtra)}</p>
+                    </div>
+
+                    {upsellExtra > 0 && (
+                      <div className="mt-3 flex items-center justify-between rounded-lg bg-green-900/20 px-3 py-2">
+                        <p className="text-sm text-green-400">+{upsellExtra} min added at 50% off</p>
+                        <button type="button" onClick={() => setUpsellExtra(0)} className="text-xs text-brown-500 hover:text-red-400">Remove</button>
+                      </div>
+                    )}
+
+                    {upsellExtras.length > 0 && (
+                      <div className="mt-3 rounded-lg border border-green-800/50 bg-green-900/20 p-3">
+                        <p className="text-sm font-semibold text-green-400">Extend your session?</p>
+                        <p className="mt-1 text-xs text-brown-300">Add extra time at half price.</p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {upsellExtras.map(extra => {
+                            const cost = getPrivatePrice(extra, 1) * 0.5;
+                            return <button key={extra} type="button" onClick={() => setUpsellExtra(extra)} className="rounded bg-green-800/40 px-3 py-2 text-sm text-green-300 hover:bg-green-800/60">+{extra} min (+{formatPrice(cost)})</button>;
+                          })}
+                          <button type="button" onClick={() => { setHideUpsell(true); localStorage.setItem("mesa_hide_upsell", "true"); }} className="text-xs text-brown-500 hover:text-brown-400 self-center ml-2">Don&apos;t show this again</button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Parent info */}
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-brown-300">Parent / Guardian Name</label>
+                  <input type="text" required value={rescheduleFormParentName} onChange={e => setRescheduleFormParentName(e.target.value)} className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none" />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-brown-300">Email</label>
+                    <input type="email" value={rescheduleFormEmail} readOnly className="w-full rounded-lg border border-brown-700 bg-brown-800/50 px-3 py-2 text-brown-400 focus:outline-none cursor-not-allowed" />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-brown-300">Phone</label>
+                    <input type="tel" value={rescheduleFormPhone} onChange={e => setRescheduleFormPhone(e.target.value)} className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none" />
+                  </div>
+                </div>
+
+                {/* Players */}
+                <div>
+                  <div className="mb-2 flex items-center justify-between">
+                    <label className="text-sm font-medium text-brown-300">Player(s)</label>
+                    <button type="button" onClick={() => setReschedulePlayers(prev => [...prev, { name: "", dob: "", grade: "", gender: "" }])} className="text-sm text-mesa-accent hover:text-yellow-300">+ Add another player</button>
+                  </div>
+                  {reschedulePlayers.map((player, i) => (
+                    <div key={i} className={`flex flex-col gap-2 pb-3 ${i > 0 ? "border-t border-brown-700 pt-3" : ""}`}>
+                      <div className="flex gap-2 items-center">
+                        <input type="text" placeholder="Player's Name" required value={player.name} onChange={e => setReschedulePlayers(prev => prev.map((p, j) => j === i ? { ...p, name: e.target.value } : p))} className="flex-1 rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none" />
+                        {reschedulePlayers.length > 1 && (
+                          <button type="button" onClick={() => setReschedulePlayers(prev => prev.filter((_, j) => j !== i))} className="text-brown-500 hover:text-red-400 text-xl leading-none">&times;</button>
+                        )}
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs text-brown-300">Date of Birth</label>
+                        <DobInput value={player.dob} onChange={v => setReschedulePlayers(prev => prev.map((p, j) => j === i ? { ...p, dob: v } : p))} />
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="mb-1 block text-xs text-brown-300">Grade</label>
+                          <select required value={player.grade} onChange={e => setReschedulePlayers(prev => prev.map((p, j) => j === i ? { ...p, grade: e.target.value } : p))} className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white text-sm focus:border-mesa-accent focus:outline-none">
+                            <option value="">Select grade...</option>
+                            <option value="K">Kindergarten</option>
+                            <option value="1">1st Grade</option><option value="2">2nd Grade</option><option value="3">3rd Grade</option><option value="4">4th Grade</option><option value="5">5th Grade</option><option value="6">6th Grade</option><option value="7">7th Grade</option><option value="8">8th Grade</option><option value="9">9th Grade</option><option value="10">10th Grade</option><option value="11">11th Grade</option><option value="12">12th Grade</option>
+                            <option value="College +">College / Pro</option>
+                            <option value="Adult">Adult</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs text-brown-300">Gender</label>
+                          <select required value={player.gender} onChange={e => setReschedulePlayers(prev => prev.map((p, j) => j === i ? { ...p, gender: e.target.value } : p))} className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white text-sm focus:border-mesa-accent focus:outline-none">
+                            <option value="">Select...</option>
+                            <option value="Male">Male</option>
+                            <option value="Female">Female</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {error && <p className="text-sm text-red-400">{error}</p>}
+
+                <button
+                  type="button"
+                  onClick={handleReschedule}
+                  disabled={rescheduling || !canSubmit}
+                  className="w-full rounded-lg bg-mesa-accent py-3 font-semibold text-white transition hover:bg-yellow-600 disabled:opacity-50"
+                >
+                  {rescheduling ? "Rescheduling..." : "Confirm Reschedule"}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
