@@ -384,7 +384,7 @@ export async function PUT(
   }
 
   const body = await req.json();
-  const { bookedDate, bookedStartTime, bookedEndTime, bookedLocation, kids: bodyKids, sessionType: bodySessionType, sessionGroup } = body;
+  const { bookedDate, bookedStartTime, bookedEndTime, bookedLocation, kids: bodyKids, sessionType: bodySessionType, sessionGroup, parentName: bodyParentName, phone: bodyPhone } = body;
 
   if (!bookedDate || !bookedStartTime || !bookedEndTime || !bookedLocation) {
     return NextResponse.json(
@@ -431,11 +431,14 @@ export async function PUT(
     }
   }
 
+  const newParentName = typeof bodyParentName === "string" && bodyParentName.trim() ? bodyParentName.trim() : reg.parent_name;
+  const newPhone = typeof bodyPhone === "string" && bodyPhone.trim() ? bodyPhone.trim() : reg.phone;
+
   // Create new booking with updated type, kids, and session details
   const { manageToken: newToken } = await addRegistration({
-    parentName: reg.parent_name,
+    parentName: newParentName,
     email: reg.email,
-    phone: reg.phone,
+    phone: newPhone,
     kids: kidsToUse,
     type: newType,
     sessionDetails: newSessionDetails,
@@ -450,9 +453,9 @@ export async function PUT(
   try {
     if (newType === "private") {
       await addPrivateSessionToCalendar({
-        parentName: reg.parent_name,
+        parentName: newParentName,
         email: reg.email,
-        phone: reg.phone,
+        phone: newPhone,
         kids: kidsToUse,
         bookedDate,
         bookedStartTime,
@@ -478,7 +481,7 @@ export async function PUT(
   const lateFeeAmount = reg.session_price && isLateReschedule ? Math.round(reg.session_price * 0.5) : undefined;
 
   await sendRescheduleNotification({
-    parentName: reg.parent_name,
+    parentName: newParentName,
     email: reg.email,
     oldSessionDetails: reg.session_details,
     newSessionDetails,
