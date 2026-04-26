@@ -1037,8 +1037,7 @@ export default function ManageBooking({
 
         const upsellExtras = w && !hideUpsell && upsellExtra === 0 ? (() => {
           const remaining = w.endMins - (selectedStart + selectedDuration);
-          const totalAvail = w.endMins - w.startMins;
-          if (selectedDuration > 60 || totalAvail > 120 || remaining <= 0) return [];
+          if (remaining <= 0 || remaining >= 60) return [];
           return [15, 30].filter(e => e <= remaining);
         })() : [];
 
@@ -1109,15 +1108,13 @@ export default function ManageBooking({
                   <label className="mb-1 block text-sm font-medium text-brown-300">Parent / Guardian Name</label>
                   <input type="text" required value={rescheduleFormParentName} onChange={e => setRescheduleFormParentName(e.target.value)} className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none" />
                 </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="mb-1 block text-sm font-medium text-brown-300">Email</label>
-                    <input type="email" value={rescheduleFormEmail} readOnly className="w-full rounded-lg border border-brown-700 bg-brown-800/50 px-3 py-2 text-brown-400 focus:outline-none cursor-not-allowed" />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-sm font-medium text-brown-300">Phone</label>
-                    <input type="tel" value={rescheduleFormPhone} onChange={e => setRescheduleFormPhone(e.target.value)} className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none" />
-                  </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-brown-300">Email</label>
+                  <input type="email" value={rescheduleFormEmail} readOnly className="w-full rounded-lg border border-brown-700 bg-brown-800/50 px-3 py-2 text-brown-400 focus:outline-none cursor-not-allowed" />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-brown-300">Phone</label>
+                  <input type="tel" value={rescheduleFormPhone} onChange={e => setRescheduleFormPhone(e.target.value)} className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none" />
                 </div>
 
                 {/* Players */}
