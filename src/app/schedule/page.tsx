@@ -2615,6 +2615,22 @@ export default function Home() {
                   </div>
                 )}
 
+                {/* Group session price summary */}
+                {modal.type === "weekly" && (modal.weeklyTotalPrice || 0) > 0 && (
+                  <div className="rounded-lg bg-brown-800/50 px-4 py-3 text-sm">
+                    <div className="flex items-center justify-between">
+                      <span className="text-brown-300">Session total</span>
+                      <span className="font-bold text-mesa-accent">${(modal.weeklyTotalPrice || 0) * kids.length}</span>
+                    </div>
+                    <p className="mt-0.5 text-xs text-brown-500">
+                      ${modal.weeklyTotalPrice}/player · {kids.length} player{kids.length !== 1 ? "s" : ""}
+                      {(modal.weeklySavings || 0) > 0 && (
+                        <span className="ml-1 text-green-400"> — you save ${(modal.weeklySavings || 0) * kids.length}!</span>
+                      )}
+                    </p>
+                  </div>
+                )}
+
                 {/* Upsell prompt */}
                 {upsellOptions.length > 0 && upsellExtra === 0 && (
                   <div className="rounded-lg border border-green-800/50 bg-green-900/20 p-4">
