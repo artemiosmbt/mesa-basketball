@@ -1741,7 +1741,7 @@ export default function Home() {
       {/* Photo divider before camps */}
       <div className="relative h-64 md:h-[26rem] overflow-hidden">
         <Image
-          src="/photos/grid5.jpg"
+          src="/photos/grid14.jpg"
           alt="Basketball group training"
           fill
           className="object-cover object-center"
