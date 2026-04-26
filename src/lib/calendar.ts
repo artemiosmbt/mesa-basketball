@@ -158,8 +158,10 @@ async function findExistingEvent(
   tag: string
 ): Promise<{ id: string; description: string } | null> {
   const isoDate = normalizeDate(date);
-  const timeMin = encodeURIComponent(`${isoDate}T00:00:00Z`);
-  const timeMax = encodeURIComponent(`${isoDate}T23:59:59Z`);
+  // Use ET-aware bounds: midnight EST (-05:00) → 11:59 PM EDT (-04:00)
+  // so evening sessions (e.g. 8 PM ET = midnight UTC) are never missed.
+  const timeMin = encodeURIComponent(`${isoDate}T00:00:00-05:00`);
+  const timeMax = encodeURIComponent(`${isoDate}T23:59:59-04:00`);
   const url =
     `${CALENDAR_BASE}/${encodeURIComponent(calendarId)}/events` +
     `?timeMin=${timeMin}&timeMax=${timeMax}&singleEvents=true&maxResults=50`;
@@ -193,8 +195,8 @@ async function findMesaEventsAtTime(
   startTime: string
 ): Promise<Array<{ id: string }>> {
   const isoDate = normalizeDate(date);
-  const timeMin = encodeURIComponent(`${isoDate}T00:00:00Z`);
-  const timeMax = encodeURIComponent(`${isoDate}T23:59:59Z`);
+  const timeMin = encodeURIComponent(`${isoDate}T00:00:00-05:00`);
+  const timeMax = encodeURIComponent(`${isoDate}T23:59:59-04:00`);
   const url =
     `${CALENDAR_BASE}/${encodeURIComponent(calendarId)}/events` +
     `?timeMin=${timeMin}&timeMax=${timeMax}&singleEvents=true&maxResults=50`;
