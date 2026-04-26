@@ -1744,7 +1744,8 @@ export default function Home() {
           src="/photos/grid14.jpg"
           alt="Basketball group training"
           fill
-          className="object-cover object-top"
+          className="object-cover"
+          style={{ objectPosition: "center 25%" }}
         />
         <div className="absolute inset-0 bg-gradient-to-r from-mesa-dark/85 via-mesa-dark/50 to-mesa-dark/85" />
         <div className="absolute inset-0 flex items-center justify-center">
