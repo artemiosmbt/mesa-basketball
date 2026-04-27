@@ -274,6 +274,7 @@ export default function AdminPage() {
   const [token, setToken] = useState<string | null>(null);
   const [selectedClient, setSelectedClient] = useState<string | null>(null);
   const [upcomingView, setUpcomingView] = useState<"list" | "calendar">("list");
+  const [pastView, setPastView] = useState<"list" | "calendar">("list");
 
   useEffect(() => {
     authClient.auth.getSession().then(({ data: { session } }) => {
@@ -731,21 +732,54 @@ export default function AdminPage() {
         {/* Past */}
         {tab === "past" && (
           <>
-            <p className="text-xs text-brown-500 mb-3">{displayedPast.length} session{displayedPast.length !== 1 ? "s" : ""}</p>
-            <div className="md:hidden space-y-3">
-              {displayedPast.length === 0 && <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-8 text-center text-brown-500 text-sm">No past sessions.</div>}
-              {displayedPast.map((r) => <RegCard key={r.id} r={r} isPast />)}
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-xs text-brown-500">{displayedPast.length} session{displayedPast.length !== 1 ? "s" : ""}</p>
+              <div className="flex rounded-lg border border-brown-700 overflow-hidden">
+                <button
+                  onClick={() => setPastView("list")}
+                  className={`px-3 py-1.5 text-xs font-medium transition ${pastView === "list" ? "bg-mesa-accent text-white" : "bg-brown-900 text-brown-400 hover:text-white"}`}
+                >
+                  ≡ List
+                </button>
+                <button
+                  onClick={() => setPastView("calendar")}
+                  className={`px-3 py-1.5 text-xs font-medium transition border-l border-brown-700 ${pastView === "calendar" ? "bg-mesa-accent text-white" : "bg-brown-900 text-brown-400 hover:text-white"}`}
+                >
+                  ▦ Calendar
+                </button>
+              </div>
             </div>
-            <div className="hidden md:block rounded-xl border border-brown-700 overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-brown-900/60 text-xs uppercase tracking-wider text-brown-400">
-                  <tr>
-                    <th className="px-4 py-3 text-left">Registered</th><th className="px-4 py-3 text-left">Parent</th><th className="px-4 py-3 text-left">Email</th><th className="px-4 py-3 text-left">Phone</th><th className="px-4 py-3 text-left">Athletes</th><th className="px-4 py-3 text-left">Type</th><th className="px-4 py-3 text-left">Session</th><th className="px-4 py-3 text-left">Status</th><th className="px-4 py-3 text-left">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-brown-800"><RegTableRows list={displayedPast} isPast /></tbody>
-              </table>
-            </div>
+
+            {pastView === "calendar" ? (
+              <div className="rounded-xl border border-brown-700 bg-brown-900/20 p-4">
+                <CalendarView
+                  list={displayedPast}
+                  cancelRegistration={cancelRegistration}
+                  markNoShow={markNoShow}
+                  cancelling={cancelling}
+                  noShowing={noShowing}
+                  noShowConfirm={noShowConfirm}
+                  setNoShowConfirm={setNoShowConfirm}
+                />
+              </div>
+            ) : (
+              <>
+                <div className="md:hidden space-y-3">
+                  {displayedPast.length === 0 && <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-8 text-center text-brown-500 text-sm">No past sessions.</div>}
+                  {displayedPast.map((r) => <RegCard key={r.id} r={r} isPast />)}
+                </div>
+                <div className="hidden md:block rounded-xl border border-brown-700 overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-brown-900/60 text-xs uppercase tracking-wider text-brown-400">
+                      <tr>
+                        <th className="px-4 py-3 text-left">Registered</th><th className="px-4 py-3 text-left">Parent</th><th className="px-4 py-3 text-left">Email</th><th className="px-4 py-3 text-left">Phone</th><th className="px-4 py-3 text-left">Athletes</th><th className="px-4 py-3 text-left">Type</th><th className="px-4 py-3 text-left">Session</th><th className="px-4 py-3 text-left">Status</th><th className="px-4 py-3 text-left">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-brown-800"><RegTableRows list={displayedPast} isPast /></tbody>
+                  </table>
+                </div>
+              </>
+            )}
           </>
         )}
 
