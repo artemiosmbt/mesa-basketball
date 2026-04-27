@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, Fragment } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { authClient, ADMIN_EMAIL } from "@/lib/auth";
@@ -71,6 +71,27 @@ function toDateKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+function formatDateHeader(d: string | null): string {
+  if (!d) return "No Date";
+  const date = new Date(d);
+  if (isNaN(date.getTime())) return d;
+  return date.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+}
+
+function groupByDate(list: Registration[]): { key: string; label: string; sessions: Registration[] }[] {
+  const groups: { key: string; label: string; sessions: Registration[] }[] = [];
+  for (const r of list) {
+    const key = r.booked_date ?? "__none__";
+    const last = groups[groups.length - 1];
+    if (!last || last.key !== key) {
+      groups.push({ key, label: formatDateHeader(r.booked_date), sessions: [r] });
+    } else {
+      last.sessions.push(r);
+    }
+  }
+  return groups;
+}
+
 interface CalendarViewProps {
   list: Registration[];
   cancelRegistration: (id: string) => Promise<void>;
@@ -83,10 +104,6 @@ interface CalendarViewProps {
 
 function CalendarView({ list, cancelRegistration, markNoShow, cancelling, noShowing, noShowConfirm, setNoShowConfirm }: CalendarViewProps) {
   const [currentMonth, setCurrentMonth] = useState(() => {
-    if (list.length > 0 && list[0].booked_date) {
-      const d = new Date(list[0].booked_date);
-      if (!isNaN(d.getTime())) return new Date(d.getFullYear(), d.getMonth(), 1);
-    }
     const n = new Date();
     return new Date(n.getFullYear(), n.getMonth(), 1);
   });
@@ -191,7 +208,7 @@ function CalendarView({ list, cancelRegistration, markNoShow, cancelling, noShow
                 <div className="mt-1 space-y-0.5">
                   {sessions.slice(0, 2).map((s, i) => (
                     <div key={i} className={`rounded text-[9px] px-1 py-0.5 truncate leading-tight ${typePill(s.type)}`}>
-                      {s.parent_name.split(" ")[0]}
+                      {s.parent_name}
                     </div>
                   ))}
                   {sessions.length > 2 && <div className="text-[9px] text-brown-500">+{sessions.length - 2}</div>}
@@ -677,18 +694,31 @@ export default function AdminPage() {
         {tab === "upcoming" && (
           <>
             <p className="text-xs text-brown-500 mb-3">{displayedUpcoming.length} session{displayedUpcoming.length !== 1 ? "s" : ""}</p>
-            <div className="md:hidden space-y-3">
+            {/* Mobile */}
+            <div className="md:hidden space-y-4">
               {displayedUpcoming.length === 0 && <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-8 text-center text-brown-500 text-sm">No upcoming sessions.</div>}
-              {displayedUpcoming.map((r) => <RegCard key={r.id} r={r} />)}
+              {groupByDate(displayedUpcoming).map(({ key, label, sessions }) => (
+                <div key={key}>
+                  <div className="text-xs font-semibold text-mesa-accent border-b border-brown-700 pb-1.5 mb-2">{label}</div>
+                  <div className="space-y-3">{sessions.map((r) => <RegCard key={r.id} r={r} />)}</div>
+                </div>
+              ))}
             </div>
+            {/* Desktop */}
             <div className="hidden md:block rounded-xl border border-brown-700 overflow-hidden">
               <table className="w-full text-sm">
                 <thead className="bg-brown-900/60 text-xs uppercase tracking-wider text-brown-400">
-                  <tr>
-                    <th className="px-4 py-3 text-left">Registered</th><th className="px-4 py-3 text-left">Parent</th><th className="px-4 py-3 text-left">Email</th><th className="px-4 py-3 text-left">Phone</th><th className="px-4 py-3 text-left">Athletes</th><th className="px-4 py-3 text-left">Type</th><th className="px-4 py-3 text-left">Session</th><th className="px-4 py-3 text-left">Status</th><th className="px-4 py-3 text-left">Action</th>
-                  </tr>
+                  <tr><th className="px-4 py-3 text-left">Registered</th><th className="px-4 py-3 text-left">Parent</th><th className="px-4 py-3 text-left">Email</th><th className="px-4 py-3 text-left">Phone</th><th className="px-4 py-3 text-left">Athletes</th><th className="px-4 py-3 text-left">Type</th><th className="px-4 py-3 text-left">Session</th><th className="px-4 py-3 text-left">Status</th><th className="px-4 py-3 text-left">Action</th></tr>
                 </thead>
-                <tbody className="divide-y divide-brown-800"><RegTableRows list={displayedUpcoming} /></tbody>
+                <tbody>
+                  {displayedUpcoming.length === 0 && <tr><td colSpan={9} className="px-4 py-8 text-center text-brown-500">No upcoming sessions.</td></tr>}
+                  {groupByDate(displayedUpcoming).map(({ key, label, sessions }) => (
+                    <Fragment key={key}>
+                      <tr><td colSpan={9} className="px-4 py-2 bg-brown-900/70 border-t-2 border-brown-600 text-xs font-semibold text-mesa-accent">{label}</td></tr>
+                      <RegTableRows list={sessions} />
+                    </Fragment>
+                  ))}
+                </tbody>
               </table>
             </div>
           </>
@@ -698,18 +728,31 @@ export default function AdminPage() {
         {tab === "past" && (
           <>
             <p className="text-xs text-brown-500 mb-3">{displayedPast.length} session{displayedPast.length !== 1 ? "s" : ""}</p>
-            <div className="md:hidden space-y-3">
+            {/* Mobile */}
+            <div className="md:hidden space-y-4">
               {displayedPast.length === 0 && <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-8 text-center text-brown-500 text-sm">No past sessions.</div>}
-              {displayedPast.map((r) => <RegCard key={r.id} r={r} isPast />)}
+              {groupByDate(displayedPast).map(({ key, label, sessions }) => (
+                <div key={key}>
+                  <div className="text-xs font-semibold text-mesa-accent border-b border-brown-700 pb-1.5 mb-2">{label}</div>
+                  <div className="space-y-3">{sessions.map((r) => <RegCard key={r.id} r={r} isPast />)}</div>
+                </div>
+              ))}
             </div>
+            {/* Desktop */}
             <div className="hidden md:block rounded-xl border border-brown-700 overflow-hidden">
               <table className="w-full text-sm">
                 <thead className="bg-brown-900/60 text-xs uppercase tracking-wider text-brown-400">
-                  <tr>
-                    <th className="px-4 py-3 text-left">Registered</th><th className="px-4 py-3 text-left">Parent</th><th className="px-4 py-3 text-left">Email</th><th className="px-4 py-3 text-left">Phone</th><th className="px-4 py-3 text-left">Athletes</th><th className="px-4 py-3 text-left">Type</th><th className="px-4 py-3 text-left">Session</th><th className="px-4 py-3 text-left">Status</th><th className="px-4 py-3 text-left">Action</th>
-                  </tr>
+                  <tr><th className="px-4 py-3 text-left">Registered</th><th className="px-4 py-3 text-left">Parent</th><th className="px-4 py-3 text-left">Email</th><th className="px-4 py-3 text-left">Phone</th><th className="px-4 py-3 text-left">Athletes</th><th className="px-4 py-3 text-left">Type</th><th className="px-4 py-3 text-left">Session</th><th className="px-4 py-3 text-left">Status</th><th className="px-4 py-3 text-left">Action</th></tr>
                 </thead>
-                <tbody className="divide-y divide-brown-800"><RegTableRows list={displayedPast} isPast /></tbody>
+                <tbody>
+                  {displayedPast.length === 0 && <tr><td colSpan={9} className="px-4 py-8 text-center text-brown-500">No past sessions.</td></tr>}
+                  {groupByDate(displayedPast).map(({ key, label, sessions }) => (
+                    <Fragment key={key}>
+                      <tr><td colSpan={9} className="px-4 py-2 bg-brown-900/70 border-t-2 border-brown-600 text-xs font-semibold text-mesa-accent">{label}</td></tr>
+                      <RegTableRows list={sessions} isPast />
+                    </Fragment>
+                  ))}
+                </tbody>
               </table>
             </div>
           </>
