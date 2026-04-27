@@ -698,34 +698,54 @@ export default function AdminPage() {
         {/* Upcoming */}
         {tab === "upcoming" && (
           <>
-            <p className="text-xs text-brown-500 mb-3">{displayedUpcoming.length} session{displayedUpcoming.length !== 1 ? "s" : ""}</p>
-            {/* Mobile */}
-            <div className="md:hidden space-y-4">
-              {displayedUpcoming.length === 0 && <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-8 text-center text-brown-500 text-sm">No upcoming sessions.</div>}
-              {groupByDate(displayedUpcoming).map(({ key, label, sessions }) => (
-                <div key={key}>
-                  <div className="text-xs font-semibold text-mesa-accent border-b border-brown-700 pb-1.5 mb-2">{label}</div>
-                  <div className="space-y-3">{sessions.map((r) => <RegCard key={r.id} r={r} />)}</div>
-                </div>
-              ))}
-            </div>
-            {/* Desktop */}
-            <div className="hidden md:block rounded-xl border border-brown-700 overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-brown-900/60 text-xs uppercase tracking-wider text-brown-400">
-                  <tr><th className="px-4 py-3 text-left">Registered</th><th className="px-4 py-3 text-left">Parent</th><th className="px-4 py-3 text-left">Email</th><th className="px-4 py-3 text-left">Phone</th><th className="px-4 py-3 text-left">Athletes</th><th className="px-4 py-3 text-left">Type</th><th className="px-4 py-3 text-left">Session</th><th className="px-4 py-3 text-left">Status</th><th className="px-4 py-3 text-left">Action</th></tr>
-                </thead>
-                <tbody>
-                  {displayedUpcoming.length === 0 && <tr><td colSpan={9} className="px-4 py-8 text-center text-brown-500">No upcoming sessions.</td></tr>}
-                  {groupByDate(displayedUpcoming).map(({ key, label, sessions }) => (
-                    <Fragment key={key}>
-                      <tr><td colSpan={9} className="px-4 py-2 bg-brown-900/70 border-t-2 border-brown-600 text-xs font-semibold text-mesa-accent">{label}</td></tr>
-                      <RegTableRows list={sessions} />
-                    </Fragment>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            {(() => {
+              const todayKey = toDateKey(new Date());
+              const todayLabel = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+              const todaySessions = displayedUpcoming.filter(r => r.booked_date && toDateKey(new Date(r.booked_date)) === todayKey);
+              const futureSessions = displayedUpcoming.filter(r => !r.booked_date || toDateKey(new Date(r.booked_date)) !== todayKey);
+              return (
+                <>
+                  <p className="text-xs text-brown-500 mb-3">{displayedUpcoming.length} session{displayedUpcoming.length !== 1 ? "s" : ""}</p>
+                  {/* Mobile */}
+                  <div className="md:hidden space-y-4">
+                    <div>
+                      <div className="text-xs font-semibold text-mesa-accent border-b border-brown-700 pb-1.5 mb-2">Today — {todayLabel}</div>
+                      {todaySessions.length === 0
+                        ? <p className="text-xs text-brown-500 italic py-1">No sessions scheduled for today.</p>
+                        : <div className="space-y-3">{todaySessions.map((r) => <RegCard key={r.id} r={r} />)}</div>
+                      }
+                    </div>
+                    {groupByDate(futureSessions).map(({ key, label, sessions }) => (
+                      <div key={key}>
+                        <div className="text-xs font-semibold text-mesa-accent border-b border-brown-700 pb-1.5 mb-2">{label}</div>
+                        <div className="space-y-3">{sessions.map((r) => <RegCard key={r.id} r={r} />)}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {/* Desktop */}
+                  <div className="hidden md:block rounded-xl border border-brown-700 overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead className="bg-brown-900/60 text-xs uppercase tracking-wider text-brown-400">
+                        <tr><th className="px-4 py-3 text-left">Registered</th><th className="px-4 py-3 text-left">Parent</th><th className="px-4 py-3 text-left">Email</th><th className="px-4 py-3 text-left">Phone</th><th className="px-4 py-3 text-left">Athletes</th><th className="px-4 py-3 text-left">Type</th><th className="px-4 py-3 text-left">Session</th><th className="px-4 py-3 text-left">Status</th><th className="px-4 py-3 text-left">Action</th></tr>
+                      </thead>
+                      <tbody>
+                        <tr><td colSpan={9} className="px-4 py-2 bg-brown-900/70 text-xs font-semibold text-mesa-accent">Today — {todayLabel}</td></tr>
+                        {todaySessions.length === 0
+                          ? <tr><td colSpan={9} className="px-4 py-3 text-xs text-brown-500 italic">No sessions scheduled for today.</td></tr>
+                          : <RegTableRows list={todaySessions} />
+                        }
+                        {groupByDate(futureSessions).map(({ key, label, sessions }) => (
+                          <Fragment key={key}>
+                            <tr><td colSpan={9} className="px-4 py-2 bg-brown-900/70 border-t-2 border-brown-600 text-xs font-semibold text-mesa-accent">{label}</td></tr>
+                            <RegTableRows list={sessions} />
+                          </Fragment>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              );
+            })()}
           </>
         )}
 
