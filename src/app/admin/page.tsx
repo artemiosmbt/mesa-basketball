@@ -67,6 +67,196 @@ function sessionText(details: string) {
   return details ? details.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "").split("\n")[0] : "—";
 }
 
+function toDateKey(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+interface CalendarViewProps {
+  list: Registration[];
+  cancelRegistration: (id: string) => Promise<void>;
+  markNoShow: (id: string) => Promise<void>;
+  cancelling: string | null;
+  noShowing: string | null;
+  noShowConfirm: string | null;
+  setNoShowConfirm: (id: string | null) => void;
+}
+
+function CalendarView({ list, cancelRegistration, markNoShow, cancelling, noShowing, noShowConfirm, setNoShowConfirm }: CalendarViewProps) {
+  const [currentMonth, setCurrentMonth] = useState(() => {
+    if (list.length > 0 && list[0].booked_date) {
+      const d = new Date(list[0].booked_date + "T12:00:00");
+      return new Date(d.getFullYear(), d.getMonth(), 1);
+    }
+    const n = new Date();
+    return new Date(n.getFullYear(), n.getMonth(), 1);
+  });
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
+
+  const sessionsByDay = useMemo(() => {
+    const map = new Map<string, Registration[]>();
+    for (const r of list) {
+      if (!r.booked_date) continue;
+      const key = r.booked_date.slice(0, 10);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(r);
+    }
+    return map;
+  }, [list]);
+
+  const days = useMemo(() => {
+    const year = currentMonth.getFullYear();
+    const month = currentMonth.getMonth();
+    const firstDow = new Date(year, month, 1).getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const cells: { dateKey: string; day: number; isCurrentMonth: boolean }[] = [];
+
+    for (let i = firstDow - 1; i >= 0; i--) {
+      const d = new Date(year, month, -i);
+      cells.push({ dateKey: toDateKey(d), day: d.getDate(), isCurrentMonth: false });
+    }
+    for (let d = 1; d <= daysInMonth; d++) {
+      cells.push({ dateKey: toDateKey(new Date(year, month, d)), day: d, isCurrentMonth: true });
+    }
+    let trail = 1;
+    while (cells.length < 42) {
+      const d = new Date(year, month + 1, trail++);
+      cells.push({ dateKey: toDateKey(d), day: d.getDate(), isCurrentMonth: false });
+    }
+    return cells;
+  }, [currentMonth]);
+
+  const today = new Date();
+  const todayKey = toDateKey(today);
+  const monthLabel = currentMonth.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  const selectedSessions = selectedDay ? (sessionsByDay.get(selectedDay) ?? []) : [];
+
+  function typePill(type: string) {
+    switch (type) {
+      case "private": return "bg-mesa-accent/30 text-mesa-accent";
+      case "weekly": return "bg-blue-900/60 text-blue-300";
+      case "camp": return "bg-purple-900/60 text-purple-300";
+      case "group-private": return "bg-green-900/60 text-green-300";
+      default: return "bg-brown-800 text-brown-300";
+    }
+  }
+
+  function prevMonth() {
+    setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1));
+    setSelectedDay(null);
+  }
+  function nextMonth() {
+    setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1));
+    setSelectedDay(null);
+  }
+
+  return (
+    <div>
+      {/* Month nav */}
+      <div className="flex items-center justify-between mb-4">
+        <button onClick={prevMonth} className="px-3 py-1.5 rounded-lg text-sm text-brown-400 hover:text-white hover:bg-brown-800 transition">← Prev</button>
+        <span className="font-semibold text-white">{monthLabel}</span>
+        <button onClick={nextMonth} className="px-3 py-1.5 rounded-lg text-sm text-brown-400 hover:text-white hover:bg-brown-800 transition">Next →</button>
+      </div>
+
+      {/* Day-of-week headers */}
+      <div className="grid grid-cols-7 mb-1">
+        {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
+          <div key={d} className="text-center text-xs text-brown-500 py-1 font-medium">{d}</div>
+        ))}
+      </div>
+
+      {/* Grid */}
+      <div className="grid grid-cols-7 gap-1">
+        {days.map(({ dateKey, day, isCurrentMonth }) => {
+          const sessions = sessionsByDay.get(dateKey) ?? [];
+          const isToday = dateKey === todayKey;
+          const isSelected = dateKey === selectedDay;
+          return (
+            <button
+              key={dateKey}
+              disabled={sessions.length === 0}
+              onClick={() => setSelectedDay(isSelected ? null : dateKey)}
+              className={`min-h-[60px] rounded-lg p-1.5 text-left transition ${!isCurrentMonth ? "opacity-25" : ""} ${
+                isSelected ? "bg-mesa-accent/20 border border-mesa-accent" :
+                sessions.length > 0 ? "bg-brown-800/60 border border-brown-700 hover:border-mesa-accent/60 cursor-pointer" :
+                "bg-brown-900/20 border border-brown-800/40 cursor-default"
+              }`}
+            >
+              <span className={`text-xs font-medium leading-none ${isToday ? "text-mesa-accent font-bold" : isCurrentMonth ? "text-white" : "text-brown-600"}`}>
+                {day}
+              </span>
+              {sessions.length > 0 && (
+                <div className="mt-1 space-y-0.5">
+                  {sessions.slice(0, 2).map((s, i) => (
+                    <div key={i} className={`rounded text-[9px] px-1 py-0.5 truncate leading-tight ${typePill(s.type)}`}>
+                      {s.parent_name.split(" ")[0]}
+                    </div>
+                  ))}
+                  {sessions.length > 2 && <div className="text-[9px] text-brown-500">+{sessions.length - 2}</div>}
+                </div>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Selected day detail */}
+      {selectedDay && selectedSessions.length > 0 && (
+        <div className="mt-5 border-t border-brown-700 pt-4">
+          <h3 className="text-sm font-semibold text-white mb-3">
+            {new Date(selectedDay + "T12:00:00").toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}
+            <span className="ml-2 text-mesa-accent font-normal">{selectedSessions.length} session{selectedSessions.length !== 1 ? "s" : ""}</span>
+          </h3>
+          <div className="space-y-2">
+            {selectedSessions.map((r) => (
+              <div key={r.id} className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mb-1">
+                      <span className="font-medium text-sm">{r.parent_name}</span>
+                      <span className={`rounded-full px-2 py-0.5 text-xs ${typePill(r.type)}`}>{TYPE_LABELS[r.type] || r.type}</span>
+                    </div>
+                    <div className="text-xs text-brown-300">{athleteNames(r.kids || "")}</div>
+                    <div className="text-xs text-brown-500 mt-0.5">{r.email} · {r.phone}</div>
+                    <div className="text-xs text-brown-400 mt-1 leading-relaxed whitespace-pre-line">
+                      {r.session_details ? r.session_details.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim() : "—"}
+                    </div>
+                  </div>
+                  <div className="shrink-0 flex flex-col items-end gap-2">
+                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${r.status === "confirmed" ? "bg-green-900/40 text-green-400" : r.status === "no_show" ? "bg-orange-900/40 text-orange-400" : "bg-red-900/40 text-red-400"}`}>
+                      {r.status === "no_show" ? "no show" : r.status}
+                    </span>
+                    {r.status === "confirmed" && (
+                      <div className="flex gap-2">
+                        <button onClick={() => cancelRegistration(r.id)} disabled={cancelling === r.id} className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50">
+                          {cancelling === r.id ? "..." : "Cancel"}
+                        </button>
+                        {noShowConfirm !== r.id ? (
+                          <button onClick={() => setNoShowConfirm(r.id)} disabled={noShowing === r.id} className="text-xs text-orange-400 hover:text-orange-300 transition disabled:opacity-50">
+                            No Show
+                          </button>
+                        ) : (
+                          <div className="flex items-center gap-1">
+                            <span className="text-xs text-orange-300 font-semibold">Sure?</span>
+                            <button onClick={() => markNoShow(r.id)} disabled={noShowing === r.id} className="text-xs text-orange-400 hover:text-orange-300 font-semibold transition disabled:opacity-50">
+                              {noShowing === r.id ? "..." : "Yes"}
+                            </button>
+                            <button onClick={() => setNoShowConfirm(null)} className="text-xs text-brown-500 hover:text-brown-300 transition">No</button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function AdminPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -81,6 +271,7 @@ export default function AdminPage() {
   const [noShowing, setNoShowing] = useState<string | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [selectedClient, setSelectedClient] = useState<string | null>(null);
+  const [upcomingView, setUpcomingView] = useState<"list" | "calendar">("list");
 
   useEffect(() => {
     authClient.auth.getSession().then(({ data: { session } }) => {
@@ -484,21 +675,54 @@ export default function AdminPage() {
         {/* Upcoming */}
         {tab === "upcoming" && (
           <>
-            <p className="text-xs text-brown-500 mb-3">{displayedUpcoming.length} session{displayedUpcoming.length !== 1 ? "s" : ""}</p>
-            <div className="md:hidden space-y-3">
-              {displayedUpcoming.length === 0 && <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-8 text-center text-brown-500 text-sm">No upcoming sessions.</div>}
-              {displayedUpcoming.map((r) => <RegCard key={r.id} r={r} />)}
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-xs text-brown-500">{displayedUpcoming.length} session{displayedUpcoming.length !== 1 ? "s" : ""}</p>
+              <div className="flex rounded-lg border border-brown-700 overflow-hidden">
+                <button
+                  onClick={() => setUpcomingView("list")}
+                  className={`px-3 py-1.5 text-xs font-medium transition ${upcomingView === "list" ? "bg-mesa-accent text-white" : "bg-brown-900 text-brown-400 hover:text-white"}`}
+                >
+                  ≡ List
+                </button>
+                <button
+                  onClick={() => setUpcomingView("calendar")}
+                  className={`px-3 py-1.5 text-xs font-medium transition border-l border-brown-700 ${upcomingView === "calendar" ? "bg-mesa-accent text-white" : "bg-brown-900 text-brown-400 hover:text-white"}`}
+                >
+                  ▦ Calendar
+                </button>
+              </div>
             </div>
-            <div className="hidden md:block rounded-xl border border-brown-700 overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-brown-900/60 text-xs uppercase tracking-wider text-brown-400">
-                  <tr>
-                    <th className="px-4 py-3 text-left">Registered</th><th className="px-4 py-3 text-left">Parent</th><th className="px-4 py-3 text-left">Email</th><th className="px-4 py-3 text-left">Phone</th><th className="px-4 py-3 text-left">Athletes</th><th className="px-4 py-3 text-left">Type</th><th className="px-4 py-3 text-left">Session</th><th className="px-4 py-3 text-left">Status</th><th className="px-4 py-3 text-left">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-brown-800"><RegTableRows list={displayedUpcoming} /></tbody>
-              </table>
-            </div>
+
+            {upcomingView === "calendar" ? (
+              <div className="rounded-xl border border-brown-700 bg-brown-900/20 p-4">
+                <CalendarView
+                  list={displayedUpcoming}
+                  cancelRegistration={cancelRegistration}
+                  markNoShow={markNoShow}
+                  cancelling={cancelling}
+                  noShowing={noShowing}
+                  noShowConfirm={noShowConfirm}
+                  setNoShowConfirm={setNoShowConfirm}
+                />
+              </div>
+            ) : (
+              <>
+                <div className="md:hidden space-y-3">
+                  {displayedUpcoming.length === 0 && <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-8 text-center text-brown-500 text-sm">No upcoming sessions.</div>}
+                  {displayedUpcoming.map((r) => <RegCard key={r.id} r={r} />)}
+                </div>
+                <div className="hidden md:block rounded-xl border border-brown-700 overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-brown-900/60 text-xs uppercase tracking-wider text-brown-400">
+                      <tr>
+                        <th className="px-4 py-3 text-left">Registered</th><th className="px-4 py-3 text-left">Parent</th><th className="px-4 py-3 text-left">Email</th><th className="px-4 py-3 text-left">Phone</th><th className="px-4 py-3 text-left">Athletes</th><th className="px-4 py-3 text-left">Type</th><th className="px-4 py-3 text-left">Session</th><th className="px-4 py-3 text-left">Status</th><th className="px-4 py-3 text-left">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-brown-800"><RegTableRows list={displayedUpcoming} /></tbody>
+                  </table>
+                </div>
+              </>
+            )}
           </>
         )}
 
