@@ -84,8 +84,8 @@ interface CalendarViewProps {
 function CalendarView({ list, cancelRegistration, markNoShow, cancelling, noShowing, noShowConfirm, setNoShowConfirm }: CalendarViewProps) {
   const [currentMonth, setCurrentMonth] = useState(() => {
     if (list.length > 0 && list[0].booked_date) {
-      const d = new Date(list[0].booked_date + "T12:00:00");
-      return new Date(d.getFullYear(), d.getMonth(), 1);
+      const d = new Date(list[0].booked_date.slice(0, 10) + "T12:00:00");
+      if (!isNaN(d.getTime())) return new Date(d.getFullYear(), d.getMonth(), 1);
     }
     const n = new Date();
     return new Date(n.getFullYear(), n.getMonth(), 1);
