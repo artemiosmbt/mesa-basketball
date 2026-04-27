@@ -787,7 +787,7 @@ export default function AdminPage() {
         {tab === "calendar" && (
           <div className="rounded-xl border border-brown-700 bg-brown-900/20 p-4">
             <CalendarView
-              list={[...upcoming, ...past]}
+              list={[...upcoming, ...past.filter(r => r.status !== "cancelled")]}
               cancelRegistration={cancelRegistration}
               markNoShow={markNoShow}
               cancelling={cancelling}
