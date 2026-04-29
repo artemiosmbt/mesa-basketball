@@ -45,11 +45,12 @@ function sessionLabel(r: Registration) {
 
 function daysAway(dateStr: string | null): { label: string; cls: string } | null {
   if (!dateStr) return null;
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return null;
   const today = new Date();
-  const todayMidnight = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
-  const sessionMidnight = new Date(dateStr + "T00:00:00Z").getTime();
-  if (isNaN(sessionMidnight)) return null;
-  const diff = Math.round((sessionMidnight - todayMidnight) / 86400000);
+  const sessionDay = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  const todayDay = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+  const diff = Math.round((sessionDay - todayDay) / 86400000);
   if (diff === 0) return { label: "today", cls: "bg-green-900/40 text-green-400" };
   if (diff === 1) return { label: "tomorrow", cls: "bg-blue-900/40 text-blue-400" };
   if (diff === -1) return { label: "yesterday", cls: "bg-orange-900/40 text-orange-400" };
@@ -227,7 +228,7 @@ export default function PaymentsPage() {
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                       <span className="font-medium text-sm">{r.parent_name}</span>
-                      <span className="rounded-full bg-yellow-400 px-2 py-0.5 text-xs font-semibold text-blue-800 shrink-0">{TYPE_LABELS[r.type] || r.type}</span>
+                      <span className="rounded-full bg-amber-400 px-2 py-0.5 text-xs font-semibold text-blue-900 shrink-0">{TYPE_LABELS[r.type] || r.type}</span>
                       {da && <span className={`rounded-full px-2 py-0.5 text-xs font-medium shrink-0 ${da.cls}`}>{da.label}</span>}
                     </div>
                     {r.kids && <div className="text-xs text-white mt-0.5 truncate">{r.kids.split(",").map((k) => k.split("(")[0].trim()).filter(Boolean).join(", ")}</div>}
@@ -312,7 +313,7 @@ export default function PaymentsPage() {
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                       <span className="font-medium text-sm">{r.parent_name}</span>
-                      <span className="rounded-full bg-yellow-400 px-2 py-0.5 text-xs font-semibold text-blue-800 shrink-0">{TYPE_LABELS[r.type] || r.type}</span>
+                      <span className="rounded-full bg-amber-400 px-2 py-0.5 text-xs font-semibold text-blue-900 shrink-0">{TYPE_LABELS[r.type] || r.type}</span>
                       {da && <span className={`rounded-full px-2 py-0.5 text-xs font-medium shrink-0 ${da.cls}`}>{da.label}</span>}
                     </div>
                     {r.kids && <div className="text-xs text-white mt-0.5 truncate">{r.kids.split(",").map((k) => k.split("(")[0].trim()).filter(Boolean).join(", ")}</div>}
