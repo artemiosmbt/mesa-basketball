@@ -13,6 +13,7 @@ const ALL_GRADES = [
   { value: "7", label: "7th Grade" }, { value: "8", label: "8th Grade" },
   { value: "9", label: "9th Grade" }, { value: "10", label: "10th Grade" },
   { value: "11", label: "11th Grade" }, { value: "12", label: "12th Grade" },
+  { value: "Other", label: "Other" },
   { value: "College +", label: "College / Pro" },
   { value: "Adult", label: "Adult" },
 ];

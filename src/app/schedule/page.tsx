@@ -1260,10 +1260,11 @@ export default function Home() {
     { value: "7", label: "7th Grade" }, { value: "8", label: "8th Grade" },
     { value: "9", label: "9th Grade" }, { value: "10", label: "10th Grade" },
     { value: "11", label: "11th Grade" }, { value: "12", label: "12th Grade" },
+    { value: "Other", label: "Other" },
     { value: "College +", label: "College / Pro" },
     { value: "Adult", label: "Adult" },
   ];
-  const GRADE_ORDER = ["K","1","2","3","4","5","6","7","8","9","10","11","12","College +","Adult"];
+  const GRADE_ORDER = ["K","1","2","3","4","5","6","7","8","9","10","11","12","Other","College +","Adult"];
 
   function getGradesForGroup(groupName: string) {
     const match = groupName.match(/Grades?\s+(K|\d+)[–\-](\d+|College\s*\+?)/i);
@@ -1274,8 +1275,14 @@ export default function Home() {
     const si = GRADE_ORDER.indexOf(start);
     const ei = GRADE_ORDER.indexOf(endVal);
     if (si === -1 || ei === -1) return ALL_GRADES;
-    const allowed = new Set(GRADE_ORDER.slice(si, ei + 1));
-    return ALL_GRADES.filter((g) => allowed.has(g.value));
+    const hsGrades = new Set(["9", "10", "11", "12"]);
+    const rangeGrades = new Set(GRADE_ORDER.slice(si, ei + 1));
+    const allowed = new Set([...rangeGrades].filter((g) => g !== "Other"));
+    const filtered = ALL_GRADES.filter((g) => allowed.has(g.value));
+    if ([...rangeGrades].some((g) => hsGrades.has(g))) {
+      return [...filtered, { value: "Other", label: "Other" }];
+    }
+    return filtered;
   }
 
   function getGroupSessionKey(s: WeeklySession): string {
@@ -2897,6 +2904,7 @@ export default function Home() {
                           <option value="10">10th Grade</option>
                           <option value="11">11th Grade</option>
                           <option value="12">12th Grade</option>
+                          <option value="Other">Other</option>
                           <option value="College +">College / Pro</option>
                           <option value="Adult">Adult</option>
                         </select>
