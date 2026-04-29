@@ -43,6 +43,20 @@ function sessionLabel(r: Registration) {
     : "—";
 }
 
+function daysAway(dateStr: string | null): { label: string; cls: string } | null {
+  if (!dateStr) return null;
+  const today = new Date();
+  const todayMidnight = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+  const sessionMidnight = new Date(dateStr + "T00:00:00Z").getTime();
+  if (isNaN(sessionMidnight)) return null;
+  const diff = Math.round((sessionMidnight - todayMidnight) / 86400000);
+  if (diff === 0) return { label: "today", cls: "bg-green-900/40 text-green-400" };
+  if (diff === 1) return { label: "tomorrow", cls: "bg-blue-900/40 text-blue-400" };
+  if (diff === -1) return { label: "yesterday", cls: "bg-orange-900/40 text-orange-400" };
+  if (diff > 0) return { label: `in ${diff} days`, cls: "bg-blue-900/40 text-blue-400" };
+  return { label: `${Math.abs(diff)} days ago`, cls: "bg-orange-900/40 text-orange-400" };
+}
+
 export default function PaymentsPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -206,12 +220,15 @@ export default function PaymentsPage() {
             <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-6 py-8 text-center text-brown-500 text-sm">Everyone is paid up.</div>
           ) : (
             <div className="space-y-2">
-              {unpaid.map((r) => (
+              {unpaid.map((r) => {
+                const da = daysAway(r.booked_date);
+                return (
                 <div key={r.id} className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-3 flex items-center justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                       <span className="font-medium text-sm">{r.parent_name}</span>
-                      <span className="rounded-full bg-brown-800 px-2 py-0.5 text-xs text-mesa-accent shrink-0">{TYPE_LABELS[r.type] || r.type}</span>
+                      <span className="rounded-full bg-yellow-400 px-2 py-0.5 text-xs font-semibold text-blue-800 shrink-0">{TYPE_LABELS[r.type] || r.type}</span>
+                      {da && <span className={`rounded-full px-2 py-0.5 text-xs font-medium shrink-0 ${da.cls}`}>{da.label}</span>}
                     </div>
                     {r.kids && <div className="text-xs text-white mt-0.5 truncate">{r.kids.split(",").map((k) => k.split("(")[0].trim()).filter(Boolean).join(", ")}</div>}
                     <div className="text-xs text-brown-400 mt-0.5 truncate">{sessionLabel(r)}</div>
@@ -229,7 +246,8 @@ export default function PaymentsPage() {
                     {togglingPaid === r.id ? "…" : "✓"}
                   </button>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -287,12 +305,15 @@ export default function PaymentsPage() {
             <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-6 py-8 text-center text-brown-500 text-sm">No paid registrations yet.</div>
           ) : (
             <div className="space-y-2">
-              {(showAllPaid ? paid : paid.slice(0, 3)).map((r) => (
+              {(showAllPaid ? paid : paid.slice(0, 3)).map((r) => {
+                const da = daysAway(r.booked_date);
+                return (
                 <div key={r.id} className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-3 flex items-center justify-between gap-3 opacity-60">
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                       <span className="font-medium text-sm">{r.parent_name}</span>
-                      <span className="rounded-full bg-brown-800 px-2 py-0.5 text-xs text-mesa-accent shrink-0">{TYPE_LABELS[r.type] || r.type}</span>
+                      <span className="rounded-full bg-yellow-400 px-2 py-0.5 text-xs font-semibold text-blue-800 shrink-0">{TYPE_LABELS[r.type] || r.type}</span>
+                      {da && <span className={`rounded-full px-2 py-0.5 text-xs font-medium shrink-0 ${da.cls}`}>{da.label}</span>}
                     </div>
                     {r.kids && <div className="text-xs text-white mt-0.5 truncate">{r.kids.split(",").map((k) => k.split("(")[0].trim()).filter(Boolean).join(", ")}</div>}
                     <div className="text-xs text-brown-400 mt-0.5 truncate">{sessionLabel(r)}</div>
@@ -307,7 +328,8 @@ export default function PaymentsPage() {
                     {togglingPaid === r.id ? "…" : "✓"}
                   </button>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
           {paid.length > 3 && (

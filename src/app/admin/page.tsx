@@ -67,6 +67,20 @@ function sessionText(details: string) {
   return details ? details.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "").split("\n")[0] : "—";
 }
 
+function daysAway(dateStr: string | null): { label: string; cls: string } | null {
+  if (!dateStr) return null;
+  const today = new Date();
+  const todayMidnight = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+  const sessionMidnight = new Date(dateStr + "T00:00:00Z").getTime();
+  if (isNaN(sessionMidnight)) return null;
+  const diff = Math.round((sessionMidnight - todayMidnight) / 86400000);
+  if (diff === 0) return { label: "today", cls: "bg-green-900/40 text-green-400" };
+  if (diff === 1) return { label: "tomorrow", cls: "bg-blue-900/40 text-blue-400" };
+  if (diff === -1) return { label: "yesterday", cls: "bg-orange-900/40 text-orange-400" };
+  if (diff > 0) return { label: `in ${diff} days`, cls: "bg-blue-900/40 text-blue-400" };
+  return { label: `${Math.abs(diff)} days ago`, cls: "bg-orange-900/40 text-orange-400" };
+}
+
 function toDateKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
@@ -431,7 +445,8 @@ export default function AdminPage() {
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
               <span className="font-medium text-sm">{r.parent_name}</span>
-              <span className="rounded-full bg-brown-800 px-2 py-0.5 text-xs text-mesa-accent">{TYPE_LABELS[r.type] || r.type}</span>
+              <span className="rounded-full bg-yellow-400 px-2 py-0.5 text-xs font-semibold text-blue-800">{TYPE_LABELS[r.type] || r.type}</span>
+              {(() => { const da = daysAway(r.booked_date); return da ? <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${da.cls}`}>{da.label}</span> : null; })()}
               <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${r.status === "confirmed" ? "bg-green-900/40 text-green-400" : r.status === "no_show" ? "bg-orange-900/40 text-orange-400" : "bg-red-900/40 text-red-400"}`}>
                 {r.status === "no_show" ? "no show" : r.status}
               </span>
@@ -528,7 +543,10 @@ export default function AdminPage() {
             <td className="px-4 py-3 text-brown-300 text-xs whitespace-nowrap">{r.phone}</td>
             <td className="px-4 py-3 text-brown-300 text-xs">{athleteNames(r.kids || "")}</td>
             <td className="px-4 py-3 whitespace-nowrap">
-              <span className="rounded-full bg-brown-800 px-2 py-0.5 text-xs text-mesa-accent">{TYPE_LABELS[r.type] || r.type}</span>
+              <div className="flex flex-wrap gap-1">
+                <span className="rounded-full bg-yellow-400 px-2 py-0.5 text-xs font-semibold text-blue-800">{TYPE_LABELS[r.type] || r.type}</span>
+                {(() => { const da = daysAway(r.booked_date); return da ? <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${da.cls}`}>{da.label}</span> : null; })()}
+              </div>
             </td>
             <td className="px-4 py-3 text-brown-400 text-xs max-w-[240px]">
               <div className="whitespace-pre-line leading-relaxed">{r.session_details ? r.session_details.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim() : "—"}</div>
