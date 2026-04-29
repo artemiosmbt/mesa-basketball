@@ -92,11 +92,30 @@ export default function PaymentsPage() {
     setSettlingFee(null);
   }
 
-  const todayMs = new Date().setHours(0, 0, 0, 0);
   function dateMs(d: string | null) {
     if (!d) return 0;
     const parsed = new Date(d);
     return isNaN(parsed.getTime()) ? 0 : parsed.setHours(0, 0, 0, 0);
+  }
+
+  function sessionDateTimeMs(r: Registration): number {
+    if (!r.booked_date) return 0;
+    const timeStr = r.booked_start_time || "00:00";
+    const ampm = timeStr.match(/(\d+):(\d+)\s*(AM|PM)/i);
+    let hours = 0, minutes = 0;
+    if (ampm) {
+      hours = parseInt(ampm[1]);
+      minutes = parseInt(ampm[2]);
+      if (ampm[3].toUpperCase() === "PM" && hours !== 12) hours += 12;
+      if (ampm[3].toUpperCase() === "AM" && hours === 12) hours = 0;
+    } else {
+      const hm = timeStr.match(/(\d+):(\d+)/);
+      if (hm) { hours = parseInt(hm[1]); minutes = parseInt(hm[2]); }
+    }
+    const date = new Date(r.booked_date);
+    if (isNaN(date.getTime())) return 0;
+    date.setHours(hours, minutes, 0, 0);
+    return date.getTime();
   }
 
   const unpaid = useMemo(() =>
@@ -105,11 +124,12 @@ export default function PaymentsPage() {
       .sort((a, b) => dateMs(a.booked_date) - dateMs(b.booked_date)),
   [registrations]);
 
-  const paid = useMemo(() =>
-    registrations
-      .filter((r) => r.status === "confirmed" && r.is_paid && dateMs(r.booked_date) > todayMs)
-      .sort((a, b) => dateMs(a.booked_date) - dateMs(b.booked_date)),
-  [registrations, todayMs]);
+  const paid = useMemo(() => {
+    const now = Date.now();
+    return registrations
+      .filter((r) => r.status === "confirmed" && r.is_paid && sessionDateTimeMs(r) + 24 * 3600 * 1000 > now)
+      .sort((a, b) => sessionDateTimeMs(a) - sessionDateTimeMs(b));
+  }, [registrations]);
 
   const cancelFees = useMemo(() =>
     registrations.filter((r) => r.is_late_cancel && r.session_price && !r.cancel_fee_settled),
