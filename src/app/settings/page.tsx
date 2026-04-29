@@ -25,6 +25,12 @@ interface Kid {
 }
 
 // Convert YYYY-MM-DD (old date input format) → MM/DD/YYYY
+function splitName(full: string): { first: string; last: string } {
+  const parts = full.trim().split(/\s+/);
+  if (parts.length <= 1) return { first: parts[0] || "", last: "" };
+  return { first: parts.slice(0, -1).join(" "), last: parts[parts.length - 1] };
+}
+
 function normalizeDob(dob: string): string {
   const iso = dob.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (iso) return `${iso[2]}/${iso[3]}/${iso[1]}`;
@@ -69,7 +75,9 @@ export default function SettingsPage() {
   const [error, setError] = useState("");
   const [userEmail, setUserEmail] = useState("");
 
-  const [parentName, setParentName] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const parentName = [firstName.trim(), lastName.trim()].filter(Boolean).join(" ");
   const [phone, setPhone] = useState("");
   const [kids, setKids] = useState<Kid[]>([{ name: "", dob: "", grade: "" }]);
   const [marketingEmails, setMarketingEmails] = useState(true);
@@ -92,7 +100,9 @@ export default function SettingsPage() {
       });
       if (res.ok) {
         const data = await res.json();
-        if (data.parent_name) setParentName(data.parent_name);
+        const nameSplit = splitName(data.parent_name || "");
+        if (nameSplit.first) setFirstName(nameSplit.first);
+        if (nameSplit.last) setLastName(nameSplit.last);
         if (data.phone) setPhone(data.phone);
         if (data.kids && Array.isArray(data.kids) && data.kids.length > 0) {
           setKids(data.kids.map((k: Kid) => ({ ...k, dob: normalizeDob(k.dob) })));
@@ -196,13 +206,22 @@ export default function SettingsPage() {
               <label className="block text-xs font-semibold uppercase tracking-widest text-brown-400 mb-1.5">
                 Parent / Guardian Name
               </label>
-              <input
-                type="text"
-                value={parentName}
-                onChange={(e) => setParentName(e.target.value)}
-                className="w-full rounded-lg border border-brown-700 bg-brown-800/60 px-4 py-2.5 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
-                placeholder="Full name"
-              />
+              <div className="grid grid-cols-2 gap-2">
+                <input
+                  type="text"
+                  value={firstName}
+                  onChange={(e) => setFirstName(e.target.value)}
+                  className="w-full rounded-lg border border-brown-700 bg-brown-800/60 px-4 py-2.5 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
+                  placeholder="First name"
+                />
+                <input
+                  type="text"
+                  value={lastName}
+                  onChange={(e) => setLastName(e.target.value)}
+                  className="w-full rounded-lg border border-brown-700 bg-brown-800/60 px-4 py-2.5 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
+                  placeholder="Last name"
+                />
+              </div>
             </div>
 
             <div>

@@ -5,6 +5,12 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { authClient } from "@/lib/auth";
 
+function splitName(full: string): { first: string; last: string } {
+  const parts = full.trim().split(/\s+/);
+  if (parts.length <= 1) return { first: parts[0] || "", last: "" };
+  return { first: parts.slice(0, -1).join(" "), last: parts[parts.length - 1] };
+}
+
 function parseDob(dob: string): [string, string, string] {
   const p = dob.split("/");
   return [p[0] || "", p[1] || "", p[2] || ""];
@@ -51,7 +57,9 @@ const ALL_GRADES = [
 ];
 
 export default function SignupPage() {
-  const [parentName, setParentName] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const parentName = [firstName.trim(), lastName.trim()].filter(Boolean).join(" ");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
@@ -183,15 +191,26 @@ export default function SignupPage() {
           {error && <p className="text-red-400 text-sm text-center">{error}</p>}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="sm:col-span-2">
-              <label className="block text-xs font-semibold uppercase tracking-widest text-brown-400 mb-1.5">Parent / Guardian Name</label>
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-widest text-brown-400 mb-1.5">First Name</label>
               <input
                 type="text"
-                value={parentName}
-                onChange={(e) => setParentName(e.target.value)}
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
                 required
                 className="w-full rounded-lg border border-brown-700 bg-brown-800/60 px-4 py-2.5 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
-                placeholder="Full name"
+                placeholder="First name"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-widest text-brown-400 mb-1.5">Last Name</label>
+              <input
+                type="text"
+                value={lastName}
+                onChange={(e) => setLastName(e.target.value)}
+                required
+                className="w-full rounded-lg border border-brown-700 bg-brown-800/60 px-4 py-2.5 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
+                placeholder="Last name"
               />
             </div>
             <div>

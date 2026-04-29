@@ -83,6 +83,12 @@ interface Camp {
 }
 
 // Early bird ends March 31, 2026 end of day Eastern (April 1 04:00 UTC)
+function splitName(full: string): { first: string; last: string } {
+  const parts = full.trim().split(/\s+/);
+  if (parts.length <= 1) return { first: parts[0] || "", last: "" };
+  return { first: parts.slice(0, -1).join(" "), last: parts[parts.length - 1] };
+}
+
 function normalizeDob(dob: string): string {
   const iso = dob.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (iso) return `${iso[2]}/${iso[3]}/${iso[1]}`;
@@ -524,7 +530,9 @@ export default function Home() {
   });
 
   // Form state
-  const [parentName, setParentName] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const parentName = [firstName.trim(), lastName.trim()].filter(Boolean).join(" ");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [smsConsent, setSmsConsent] = useState(false);
@@ -565,7 +573,9 @@ export default function Home() {
 
   // Package enrollment state
   const [pkgModal, setPkgModal] = useState<{ open: boolean; packageType: 4 | 8 | null }>({ open: false, packageType: null });
-  const [pkgName, setPkgName] = useState("");
+  const [pkgFirstName, setPkgFirstName] = useState("");
+  const [pkgLastName, setPkgLastName] = useState("");
+  const pkgName = [pkgFirstName.trim(), pkgLastName.trim()].filter(Boolean).join(" ");
   const [pkgEmail, setPkgEmail] = useState("");
   const [pkgPhone, setPkgPhone] = useState("");
   const [pkgMonth, setPkgMonth] = useState("");
@@ -603,7 +613,7 @@ export default function Home() {
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [authPrompt, setAuthPrompt] = useState(false);
   const [pendingGroupOpen, setPendingGroupOpen] = useState(false);
-  const profileRef = useRef<{ parentName: string; phone: string; kids: { name: string; dob: string; grade: string; gender: string }[] } | null>(null);
+  const profileRef = useRef<{ firstName: string; lastName: string; phone: string; kids: { name: string; dob: string; grade: string; gender: string }[] } | null>(null);
   const pendingBookingRef = useRef<{
     kind: "modal"; type: BookingType; sessionIndex: number; details: string;
   } | {
@@ -651,7 +661,9 @@ export default function Home() {
       })
         .then((r) => r.json())
         .then((profile) => {
-          if (profile.parent_name) setParentName(profile.parent_name);
+          const nameSplit = splitName(profile.parent_name || "");
+          if (nameSplit.first) setFirstName(nameSplit.first);
+          if (nameSplit.last) setLastName(nameSplit.last);
           if (profile.email) setEmail(profile.email);
           if (profile.phone) setPhone(profile.phone);
           const normalizedKids = profile.kids?.length
@@ -659,7 +671,8 @@ export default function Home() {
             : [{ name: "", dob: "", grade: "", gender: "" }];
           if (profile.kids?.length) setKids(normalizedKids);
           profileRef.current = {
-            parentName: profile.parent_name || "",
+            firstName: nameSplit.first,
+            lastName: nameSplit.last,
             phone: profile.phone || "",
             kids: normalizedKids,
           };
@@ -816,7 +829,8 @@ export default function Home() {
       remainingAfterSelection: window.endMins - endMins,
     });
     setSubmitResult(null);
-    setParentName(profileRef.current?.parentName ?? "");
+    setFirstName(profileRef.current?.firstName ?? "");
+    setLastName(profileRef.current?.lastName ?? "");
     setPhone(profileRef.current?.phone ?? "");
     setSmsConsent(false);
     setShowAllRecurring(false);
@@ -830,7 +844,8 @@ export default function Home() {
     if (!userEmail) { showAuthPrompt({ kind: "modal", type, sessionIndex, details }); return; }
     setModal({ open: true, type, sessionIndex, sessionDetails: details });
     setSubmitResult(null);
-    setParentName(profileRef.current?.parentName ?? "");
+    setFirstName(profileRef.current?.firstName ?? "");
+    setLastName(profileRef.current?.lastName ?? "");
     setPhone(profileRef.current?.phone ?? "");
     setSmsConsent(false);
     setShowAllRecurring(false);
@@ -1092,8 +1107,8 @@ export default function Home() {
     e.preventDefault();
 
     // Explicit validation — browser native required is unreliable across devices
-    if (!parentName.trim() || !email.trim() || !phone.trim()) {
-      setSubmitResult({ success: false, message: "Please fill in your name, email, and phone number." });
+    if (!firstName.trim() || !lastName.trim() || !email.trim() || !phone.trim()) {
+      setSubmitResult({ success: false, message: "Please fill in your first name, last name, email, and phone number." });
       return;
     }
     for (let i = 0; i < kids.length; i++) {
@@ -1441,7 +1456,8 @@ export default function Home() {
       weeklySavings: groupPricing.savings,
     });
     setSubmitResult(null);
-    setParentName(profileRef.current?.parentName ?? "");
+    setFirstName(profileRef.current?.firstName ?? "");
+    setLastName(profileRef.current?.lastName ?? "");
     setPhone(profileRef.current?.phone ?? "");
     setSmsConsent(false);
     setShowAllRecurring(false);
@@ -1960,7 +1976,7 @@ export default function Home() {
                   <p className="text-xs text-brown-400">$118.75 per session</p>
                 </div>
                 <button
-                  onClick={() => { if (!userEmail) { setAuthPrompt(true); return; } setPkgModal({ open: true, packageType: 4 }); setPkgName(""); setPkgEmail(""); setPkgPhone(""); setPkgMonth(pkgMonthOptions[0]?.value || ""); setPkgResult(null); setKids([{ name: "", dob: "", grade: "", gender: "" }]); setReferralCode(""); }}
+                  onClick={() => { if (!userEmail) { setAuthPrompt(true); return; } setPkgModal({ open: true, packageType: 4 }); setPkgFirstName(""); setPkgLastName(""); setPkgEmail(""); setPkgPhone(""); setPkgMonth(pkgMonthOptions[0]?.value || ""); setPkgResult(null); setKids([{ name: "", dob: "", grade: "", gender: "" }]); setReferralCode(""); }}
                   className="mt-4 w-full rounded-lg bg-mesa-accent px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-yellow-600"
                 >
                   Enroll — 4 Sessions
@@ -1977,7 +1993,7 @@ export default function Home() {
                   <p className="text-xs text-brown-400">$112.50 per session</p>
                 </div>
                 <button
-                  onClick={() => { if (!userEmail) { setAuthPrompt(true); return; } setPkgModal({ open: true, packageType: 8 }); setPkgName(""); setPkgEmail(""); setPkgPhone(""); setPkgMonth(pkgMonthOptions[0]?.value || ""); setPkgResult(null); setKids([{ name: "", dob: "", grade: "", gender: "" }]); setReferralCode(""); }}
+                  onClick={() => { if (!userEmail) { setAuthPrompt(true); return; } setPkgModal({ open: true, packageType: 8 }); setPkgFirstName(""); setPkgLastName(""); setPkgEmail(""); setPkgPhone(""); setPkgMonth(pkgMonthOptions[0]?.value || ""); setPkgResult(null); setKids([{ name: "", dob: "", grade: "", gender: "" }]); setReferralCode(""); }}
                   className="mt-4 w-full rounded-lg bg-mesa-accent px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-yellow-600"
                 >
                   Enroll — 8 Sessions
@@ -2472,13 +2488,24 @@ export default function Home() {
               <form onSubmit={handleSubmit} className="mt-4 space-y-4">
                 <div>
                   <label className="mb-1 block text-sm font-medium text-brown-300">Parent / Guardian Name</label>
-                  <input
-                    type="text"
-                    required
-                    value={parentName}
-                    onChange={(e) => setParentName(e.target.value)}
-                    className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
-                  />
+                  <div className="grid grid-cols-2 gap-2">
+                    <input
+                      type="text"
+                      required
+                      placeholder="First name"
+                      value={firstName}
+                      onChange={(e) => setFirstName(e.target.value)}
+                      className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
+                    />
+                    <input
+                      type="text"
+                      required
+                      placeholder="Last name"
+                      value={lastName}
+                      onChange={(e) => setLastName(e.target.value)}
+                      className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
+                    />
+                  </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
@@ -2835,7 +2862,10 @@ export default function Home() {
               <form onSubmit={handlePackageSubmit} className="mt-4 space-y-4">
                 <div>
                   <label className="mb-1 block text-sm font-medium text-brown-300">Your Name</label>
-                  <input type="text" required value={pkgName} onChange={e => setPkgName(e.target.value)} className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none" />
+                  <div className="grid grid-cols-2 gap-2">
+                    <input type="text" required placeholder="First name" value={pkgFirstName} onChange={e => setPkgFirstName(e.target.value)} className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none" />
+                    <input type="text" required placeholder="Last name" value={pkgLastName} onChange={e => setPkgLastName(e.target.value)} className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none" />
+                  </div>
                 </div>
                 <div>
                   <label className="mb-1 block text-sm font-medium text-brown-300">Email</label>
