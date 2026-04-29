@@ -1266,6 +1266,16 @@ export default function Home() {
   const GRADE_ORDER = ["K","1","2","3","4","5","6","7","8","9","10","11","12","College +","Adult"];
 
   function getGradesForGroup(groupName: string) {
+    // "Grade 5 & Below" → K through that grade
+    const belowMatch = groupName.match(/Grade\s+(\d+)\s*&\s*Below/i);
+    if (belowMatch) {
+      const ei = GRADE_ORDER.indexOf(belowMatch[1]);
+      if (ei !== -1) {
+        const filtered = ALL_GRADES.filter((g) => GRADE_ORDER.indexOf(g.value) <= ei);
+        return [...filtered, { value: "Other", label: "Other" }];
+      }
+    }
+    // "Grades X-Y" range
     const match = groupName.match(/Grades?\s+(K|\d+)[–\-](\d+|College\s*\+?)/i);
     if (!match) return ALL_GRADES;
     const start = match[1].toUpperCase();
