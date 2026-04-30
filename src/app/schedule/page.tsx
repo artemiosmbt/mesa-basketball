@@ -613,7 +613,7 @@ export default function Home() {
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [authPrompt, setAuthPrompt] = useState(false);
   const [pendingGroupOpen, setPendingGroupOpen] = useState(false);
-  const profileRef = useRef<{ firstName: string; lastName: string; phone: string; kids: { name: string; dob: string; grade: string; gender: string }[] } | null>(null);
+  const profileRef = useRef<{ firstName: string; lastName: string; phone: string; smsConsent: boolean; kids: { name: string; dob: string; grade: string; gender: string }[] } | null>(null);
   const pendingBookingRef = useRef<{
     kind: "modal"; type: BookingType; sessionIndex: number; details: string;
   } | {
@@ -670,10 +670,12 @@ export default function Home() {
             ? profile.kids.map((k: { name: string; dob: string; grade: string; gender?: string }) => ({ gender: "", ...k, dob: normalizeDob(k.dob) }))
             : [{ name: "", dob: "", grade: "", gender: "" }];
           if (profile.kids?.length) setKids(normalizedKids);
+          if (profile.sms_consent) setSmsConsent(true);
           profileRef.current = {
             firstName: nameSplit.first,
             lastName: nameSplit.last,
             phone: profile.phone || "",
+            smsConsent: !!profile.sms_consent,
             kids: normalizedKids,
           };
         });
@@ -832,7 +834,7 @@ export default function Home() {
     setFirstName(profileRef.current?.firstName ?? "");
     setLastName(profileRef.current?.lastName ?? "");
     setPhone(profileRef.current?.phone ?? "");
-    setSmsConsent(false);
+    setSmsConsent(profileRef.current?.smsConsent ?? false);
     setShowAllRecurring(false);
     setKids(profileRef.current?.kids ?? [{ name: "", dob: "", grade: "", gender: "" }]);
     setIsGroupRate(false);
@@ -847,7 +849,7 @@ export default function Home() {
     setFirstName(profileRef.current?.firstName ?? "");
     setLastName(profileRef.current?.lastName ?? "");
     setPhone(profileRef.current?.phone ?? "");
-    setSmsConsent(false);
+    setSmsConsent(profileRef.current?.smsConsent ?? false);
     setShowAllRecurring(false);
     setKids(profileRef.current?.kids ?? [{ name: "", dob: "", grade: "", gender: "" }]);
     setIsGroupRate(false);
@@ -1459,7 +1461,7 @@ export default function Home() {
     setFirstName(profileRef.current?.firstName ?? "");
     setLastName(profileRef.current?.lastName ?? "");
     setPhone(profileRef.current?.phone ?? "");
-    setSmsConsent(false);
+    setSmsConsent(profileRef.current?.smsConsent ?? false);
     setShowAllRecurring(false);
     setKids(profileRef.current?.kids ?? [{ name: "", dob: "", grade: "", gender: "" }]);
     setIsGroupRate(false);
