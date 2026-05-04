@@ -81,12 +81,12 @@ export default function LandingPage() {
             <div className="absolute inset-x-0 bottom-0 h-1/5 bg-gradient-to-t from-mesa-dark to-transparent" />
             {/* All content overlaid */}
             <div className="absolute inset-0 flex flex-col items-center justify-center px-6 text-center gap-0">
-              <p className="mb-3 text-xs font-semibold uppercase tracking-widest text-mesa-accent drop-shadow">
+              <h1 className="mb-3 text-xs font-semibold uppercase tracking-widest text-mesa-accent drop-shadow">
                 Long Island&apos;s Elite Basketball Training
-              </p>
-              <h1 className="font-[family-name:var(--font-fira-cond)] text-5xl font-black tracking-wide leading-none drop-shadow-lg">
-                TRAIN WITH<br />PURPOSE.
               </h1>
+              <p className="font-[family-name:var(--font-fira-cond)] text-5xl font-black tracking-wide leading-none drop-shadow-lg">
+                TRAIN WITH<br />PURPOSE.
+              </p>
               <p className="mt-10 max-w-xs text-brown-200 text-sm leading-relaxed drop-shadow">
                 Elite development for all levels — led by former D1 point guard and international athlete <span className="text-white font-semibold">Artemios Gavalas</span>.
               </p>
@@ -113,12 +113,12 @@ export default function LandingPage() {
           </div>
           <div className="relative mx-auto max-w-6xl px-6 py-36 w-full">
             <div className="flex flex-col items-center text-center">
-              <p className="mb-4 text-sm font-semibold uppercase tracking-widest text-mesa-accent">
+              <h1 className="mb-4 text-sm font-semibold uppercase tracking-widest text-mesa-accent">
                 Long Island&apos;s Elite Basketball Training
-              </p>
-              <h1 className="font-[family-name:var(--font-fira-cond)] text-8xl font-black tracking-wide leading-none">
-                TRAIN WITH<br />PURPOSE.
               </h1>
+              <p className="font-[family-name:var(--font-fira-cond)] text-8xl font-black tracking-wide leading-none">
+                TRAIN WITH<br />PURPOSE.
+              </p>
               <p className="mt-6 max-w-xl text-brown-300 text-lg leading-relaxed">
                 Elite development for all levels — led by former D1 point guard and international athlete <span className="text-white font-semibold">Artemios Gavalas</span>.
               </p>
