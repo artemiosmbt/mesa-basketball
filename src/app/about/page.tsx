@@ -4,11 +4,14 @@ import Image from "next/image";
 import LandingNav from "../LandingNav";
 
 export const metadata: Metadata = {
-  title: "About Artemios Gavalas | Mesa Basketball Training",
+  title: "Artemios Gavalas | Mesa Basketball Training",
   description:
-    "Meet Artemios Gavalas — former Division I point guard and international professional basketball player, now bringing elite coaching to Long Island youth and adults.",
+    "Artemios Gavalas — former Division I point guard at St. John's University and Butler University, international professional basketball player, and founder of Mesa Basketball Training on Long Island.",
   keywords: [
     "Artemios Gavalas",
+    "Artemios Gavalas basketball",
+    "Artemios Gavalas trainer",
+    "Artemios Gavalas Long Island",
     "basketball coach Long Island",
     "D1 basketball trainer",
     "professional basketball trainer Long Island",
@@ -16,16 +19,44 @@ export const metadata: Metadata = {
     "Mesa Basketball Training about",
   ],
   openGraph: {
-    title: "About Artemios Gavalas | Mesa Basketball Training",
-    description: "Former D1 point guard and international professional player. Now training the next generation on Long Island.",
+    title: "Artemios Gavalas | Mesa Basketball Training",
+    description: "Former D1 point guard at St. John's and Butler University, international professional player, and founder of Mesa Basketball Training on Long Island.",
     url: "https://www.mesabasketballtraining.com/about",
     images: [{ url: "/og-image.jpg", width: 1200, height: 630 }],
   },
 };
 
+const personJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "Person",
+  "name": "Artemios Gavalas",
+  "url": "https://www.mesabasketballtraining.com/about",
+  "image": "https://www.mesabasketballtraining.com/headshot.jpg",
+  "jobTitle": "Basketball Trainer & Founder",
+  "description": "Former Division I point guard at St. John's University and Butler University, international professional basketball player in Greece, and founder of Mesa Basketball Training on Long Island.",
+  "worksFor": {
+    "@type": "Organization",
+    "name": "Mesa Basketball Training",
+    "url": "https://www.mesabasketballtraining.com"
+  },
+  "alumniOf": [
+    { "@type": "CollegeOrUniversity", "name": "St. John's University" },
+    { "@type": "CollegeOrUniversity", "name": "Butler University" }
+  ],
+  "sameAs": [
+    "https://www.instagram.com/artemigavalas",
+    "https://www.instagram.com/mesabasketballtraining",
+    "https://www.mesabasketballtraining.com"
+  ]
+};
+
 export default function AboutPage() {
   return (
     <div className="min-h-screen bg-mesa-dark text-white">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(personJsonLd) }}
+      />
       {/* Nav */}
       <LandingNav />
 
