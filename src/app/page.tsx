@@ -26,7 +26,7 @@ const jsonLd = {
   "name": "Mesa Basketball Training",
   "description": "Elite basketball training on Long Island for youth and adults. Group sessions, private lessons, and mini camps led by former D1 and international professional player Artemios Gavalas.",
   "url": "https://www.mesabasketballtraining.com",
-  "telephone": "",
+  "telephone": "+16315991280",
   "email": "mesabasketballtraining@gmail.com",
   "founder": {
     "@type": "Person",
