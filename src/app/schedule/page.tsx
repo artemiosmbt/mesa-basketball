@@ -2438,7 +2438,7 @@ export default function Home() {
                   {modal.selectedGroupSessions.map((s, i) => {
                     return (
                       <p key={i} className="text-xs text-brown-400">
-                        {fmtDateShort(s.date)} &bull; {s.startTime}-{s.endTime} &bull; {s.location}
+                        {fmtDateShort(s.date)} &bull; {s.startTime}-{s.endTime} &bull; <LocationLink location={s.location} />
                       </p>
                     );
                   })}

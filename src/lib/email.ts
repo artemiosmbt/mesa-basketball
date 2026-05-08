@@ -24,7 +24,7 @@ function formatSessionDetailsForEmail(details: string): string {
   let result = details;
   for (const [key, { name, url }] of Object.entries(LOCATION_MAP)) {
     if (result.includes(key)) {
-      result = result.replace(key, `<a href="${url}" style="color: #d4af37;">${name}</a>`);
+      result = result.replaceAll(key, `<a href="${url}" style="color: #d4af37;">${name}</a>`);
       break;
     }
   }
