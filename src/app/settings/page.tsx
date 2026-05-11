@@ -346,6 +346,11 @@ export default function SettingsPage() {
                 <p className="text-xs text-brown-400 mt-0.5 leading-relaxed">
                   Receive text message reminders about upcoming sessions. Reply STOP at any time to opt out.
                 </p>
+                {smsConsent && (
+                  <p className="text-xs text-yellow-500/80 mt-1 leading-relaxed">
+                    If you previously opted out by replying STOP, text START to our number to re-enable delivery.
+                  </p>
+                )}
               </div>
             </label>
 
