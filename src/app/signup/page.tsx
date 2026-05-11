@@ -65,7 +65,7 @@ export default function SignupPage() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [kids, setKids] = useState([{ name: "", dob: "", grade: "", gender: "" }]);
-  const [smsConsent, setSmsConsent] = useState(false);
+  const [smsConsent, setSmsConsent] = useState(true);
   const [marketingEmails, setMarketingEmails] = useState(true);
   const [videoConsent, setVideoConsent] = useState(true);
   const [error, setError] = useState("");
