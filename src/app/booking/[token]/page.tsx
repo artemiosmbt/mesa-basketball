@@ -6,6 +6,8 @@ const LOCATION_LINKS: Record<string, { name: string; url: string }> = {
   "St. Pauls": { name: "St. Paul's Cathedral", url: "https://share.google/kVGkfSgr6SaShDWF7" },
   "St. Paul's": { name: "St. Paul's Cathedral", url: "https://share.google/kVGkfSgr6SaShDWF7" },
   "Cherry Valley": { name: "Cherry Valley Sports", url: "https://share.google/YKRoCTFuLP33bpSUZ" },
+  "Holy Resurrection": { name: "Holy Resurrection Brookville", url: "https://www.google.com/search?q=holy+resurrection+brookville" },
+  "Holy Resurrection Brookville": { name: "Holy Resurrection Brookville", url: "https://www.google.com/search?q=holy+resurrection+brookville" },
 };
 
 function getPrivatePrice(durationMin: number, kidCount: number): number {

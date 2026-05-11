@@ -7,6 +7,8 @@ const LOCATION_NAMES: Record<string, string> = {
   "St. Pauls": "St. Paul's Cathedral",
   "St. Paul's": "St. Paul's Cathedral",
   "Cherry Valley": "Cherry Valley Sports",
+  "Holy Resurrection": "Holy Resurrection Brookville",
+  "Holy Resurrection Brookville": "Holy Resurrection Brookville",
 };
 
 function formatSessionDetails(details: string, bookedDate?: string | null): string {
