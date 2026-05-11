@@ -535,7 +535,7 @@ export default function Home() {
   const parentName = [firstName.trim(), lastName.trim()].filter(Boolean).join(" ");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
-  const [smsConsent, setSmsConsent] = useState(true);
+  const [smsConsent, setSmsConsent] = useState(false);
   const [kids, setKids] = useState([{ name: "", dob: "", grade: "", gender: "" }]);
   const [showGenderWarning, setShowGenderWarning] = useState(false);
   const [isGroupRate, setIsGroupRate] = useState(false);
@@ -834,7 +834,7 @@ export default function Home() {
     setFirstName(profileRef.current?.firstName ?? "");
     setLastName(profileRef.current?.lastName ?? "");
     setPhone(profileRef.current?.phone ?? "");
-    setSmsConsent(profileRef.current?.smsConsent ?? true);
+    setSmsConsent(profileRef.current?.smsConsent ?? false);
     setShowAllRecurring(false);
     setKids(profileRef.current?.kids ?? [{ name: "", dob: "", grade: "", gender: "" }]);
     setIsGroupRate(false);
@@ -849,7 +849,7 @@ export default function Home() {
     setFirstName(profileRef.current?.firstName ?? "");
     setLastName(profileRef.current?.lastName ?? "");
     setPhone(profileRef.current?.phone ?? "");
-    setSmsConsent(profileRef.current?.smsConsent ?? true);
+    setSmsConsent(profileRef.current?.smsConsent ?? false);
     setShowAllRecurring(false);
     setKids(profileRef.current?.kids ?? [{ name: "", dob: "", grade: "", gender: "" }]);
     setIsGroupRate(false);
@@ -1461,7 +1461,7 @@ export default function Home() {
     setFirstName(profileRef.current?.firstName ?? "");
     setLastName(profileRef.current?.lastName ?? "");
     setPhone(profileRef.current?.phone ?? "");
-    setSmsConsent(profileRef.current?.smsConsent ?? true);
+    setSmsConsent(profileRef.current?.smsConsent ?? false);
     setShowAllRecurring(false);
     setKids(profileRef.current?.kids ?? [{ name: "", dob: "", grade: "", gender: "" }]);
     setIsGroupRate(false);
