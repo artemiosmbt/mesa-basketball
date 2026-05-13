@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { ADMIN_EMAIL } from "@/lib/auth";
 import { deletePrivateSessionFromCalendar, upsertGroupSessionCalendarEvent } from "@/lib/calendar";
 import { sendCancellationNotification } from "@/lib/email";
+import { getCurrentSheetLocation } from "@/lib/sheets";
 
 async function verifyAdmin(req: NextRequest) {
   const token = req.headers.get("authorization")?.replace("Bearer ", "");
@@ -70,10 +71,19 @@ export async function POST(req: NextRequest) {
   // Notify parent of admin-initiated cancellation (no late fee)
   if (reg?.email && reg?.parent_name) {
     try {
+      let sessionDetails = reg.session_details || "";
+      let bookedLocation = reg.booked_location || "";
+      if (reg.booked_date && reg.booked_start_time) {
+        const sheetLocation = await getCurrentSheetLocation(reg.booked_date, reg.booked_start_time).catch(() => null);
+        if (sheetLocation && sheetLocation !== bookedLocation) {
+          if (bookedLocation) sessionDetails = sessionDetails.replaceAll(bookedLocation, sheetLocation);
+          bookedLocation = sheetLocation;
+        }
+      }
       await sendCancellationNotification({
         parentName: reg.parent_name,
         email: reg.email,
-        sessionDetails: reg.session_details || "",
+        sessionDetails,
         sessionType: reg.type,
         isLateCancel: false,
       });

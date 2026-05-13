@@ -112,3 +112,15 @@ export async function getPrivateSlots(): Promise<PrivateSlot[]> {
     available: (row[4] || "").toUpperCase() === "TRUE",
   }));
 }
+
+// Returns the current location for a session from Google Sheets, or null if not found / unchanged.
+export async function getCurrentSheetLocation(date: string, startTime: string): Promise<string | null> {
+  const [weeklySessions, privateSlots] = await Promise.all([
+    getWeeklySchedule().catch(() => []),
+    getPrivateSlots().catch(() => []),
+  ]);
+  for (const s of [...weeklySessions, ...privateSlots]) {
+    if (s.date === date && s.startTime === startTime) return s.location;
+  }
+  return null;
+}

@@ -15,6 +15,7 @@ import {
   sendRescheduleNotification,
   sendPlayerUpdateNotification,
 } from "@/lib/email";
+import { getCurrentSheetLocation } from "@/lib/sheets";
 import {
   addPrivateSessionToCalendar,
   deletePrivateSessionFromCalendar,
@@ -66,6 +67,17 @@ export async function GET(
   if (!reg) {
     return NextResponse.json({ error: "Booking not found" }, { status: 404 });
   }
+
+  let sessionDetails = reg.session_details;
+  let bookedLocation = reg.booked_location;
+  if (reg.booked_date && reg.booked_start_time) {
+    const sheetLocation = await getCurrentSheetLocation(reg.booked_date, reg.booked_start_time).catch(() => null);
+    if (sheetLocation && sheetLocation !== bookedLocation) {
+      if (bookedLocation && sessionDetails) sessionDetails = sessionDetails.replaceAll(bookedLocation, sheetLocation);
+      bookedLocation = sheetLocation;
+    }
+  }
+
   return NextResponse.json({
     id: reg.id,
     parentName: reg.parent_name,
@@ -73,11 +85,11 @@ export async function GET(
     phone: reg.phone ?? "",
     kids: reg.kids,
     type: reg.type,
-    sessionDetails: reg.session_details,
+    sessionDetails,
     bookedDate: reg.booked_date,
     bookedStartTime: reg.booked_start_time,
     bookedEndTime: reg.booked_end_time,
-    bookedLocation: reg.booked_location,
+    bookedLocation,
     status: reg.status,
     createdAt: reg.created_at,
     isFullCamp: reg.is_full_camp ?? false,
@@ -207,10 +219,20 @@ export async function DELETE(
 
   const lateFeeAmount = reg.session_price && isLateCancel ? Math.round(reg.session_price * 0.5) : undefined;
 
+  let cancelSessionDetails = reg.session_details;
+  let cancelLocation = reg.booked_location || "";
+  if (reg.booked_date && reg.booked_start_time) {
+    const sheetLocation = await getCurrentSheetLocation(reg.booked_date, reg.booked_start_time).catch(() => null);
+    if (sheetLocation && sheetLocation !== cancelLocation) {
+      if (cancelLocation) cancelSessionDetails = cancelSessionDetails.replaceAll(cancelLocation, sheetLocation);
+      cancelLocation = sheetLocation;
+    }
+  }
+
   await sendCancellationNotification({
     parentName: reg.parent_name,
     email: reg.email,
-    sessionDetails: reg.session_details,
+    sessionDetails: cancelSessionDetails,
     sessionType: reg.type,
     isLateCancel,
     lateFeeAmount,
