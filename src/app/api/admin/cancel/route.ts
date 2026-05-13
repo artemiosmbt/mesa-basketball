@@ -4,6 +4,7 @@ import { ADMIN_EMAIL } from "@/lib/auth";
 import { deletePrivateSessionFromCalendar, upsertGroupSessionCalendarEvent } from "@/lib/calendar";
 import { sendCancellationNotification } from "@/lib/email";
 import { getCurrentSheetLocation } from "@/lib/sheets";
+import { sendSMS, sendAdminSMS } from "@/lib/sms";
 
 async function verifyAdmin(req: NextRequest) {
   const token = req.headers.get("authorization")?.replace("Bearer ", "");
@@ -32,7 +33,7 @@ export async function POST(req: NextRequest) {
   // Fetch registration details before cancelling so we can sync the calendar
   const { data: reg } = await supabase
     .from("registrations")
-    .select("type, email, parent_name, booked_date, booked_start_time, booked_end_time, booked_location, kids, session_details, total_participants")
+    .select("type, email, parent_name, booked_date, booked_start_time, booked_end_time, booked_location, kids, session_details, total_participants, phone, sms_consent")
     .eq("id", id)
     .single();
 
@@ -87,8 +88,12 @@ export async function POST(req: NextRequest) {
         sessionType: reg.type,
         isLateCancel: false,
       });
+      if (reg.sms_consent && reg.phone) {
+        await sendSMS(reg.phone, `Mesa Basketball: Your session has been cancelled by your trainer. Questions? Reply here. Reply STOP to opt out.`);
+      }
+      await sendAdminSMS(`CANCELLED: ${reg.parent_name} — ${sessionDetails}`);
     } catch (err) {
-      console.error("Email notification error (admin cancel):", err);
+      console.error("Email/SMS notification error (admin cancel):", err);
     }
   }
 

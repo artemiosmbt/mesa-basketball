@@ -16,6 +16,7 @@ import {
   sendPlayerUpdateNotification,
 } from "@/lib/email";
 import { getCurrentSheetLocation } from "@/lib/sheets";
+import { sendSMS, sendAdminSMS } from "@/lib/sms";
 import {
   addPrivateSessionToCalendar,
   deletePrivateSessionFromCalendar,
@@ -238,6 +239,12 @@ export async function DELETE(
     lateFeeAmount,
   });
 
+  if (reg.sms_consent && reg.phone) {
+    const lateNote = isLateCancel ? " A late cancellation fee applies." : "";
+    await sendSMS(reg.phone, `Mesa Basketball: Your session has been cancelled.${lateNote} Reply STOP to opt out.`);
+  }
+  await sendAdminSMS(`CANCELLED: ${reg.parent_name} — ${cancelSessionDetails}${isLateCancel ? " (late)" : ""}`);
+
   // Sync calendar after cancellation
   if (reg.booked_date && reg.booked_start_time) {
     const isPrivate = reg.type === "private" || reg.type === "group-private";
@@ -381,8 +388,13 @@ export async function PATCH(
       newPrice,
       priceChanged,
     });
+    const changeNote = [
+      addedPlayers.length > 0 ? `Added: ${addedPlayers.join(", ")}` : "",
+      removedPlayers.length > 0 ? `Removed: ${removedPlayers.join(", ")}` : "",
+    ].filter(Boolean).join(" | ");
+    await sendAdminSMS(`PLAYERS UPDATED: ${reg.parent_name} — ${changeNote || "no change"} | ${reg.session_details}`);
   } catch (err) {
-    console.error("Player update email error:", err);
+    console.error("Player update email/SMS error:", err);
   }
 
   return NextResponse.json({ success: true, newKids: newKidsStr, newPrice, isLate, lateFeeDue });
@@ -511,6 +523,12 @@ export async function PUT(
     isLateReschedule: !!isLateReschedule,
     lateFeeAmount,
   });
+
+  if (reg.sms_consent && reg.phone) {
+    const lateNote = isLateReschedule ? " A late reschedule fee applies." : "";
+    await sendSMS(reg.phone, `Mesa Basketball: Session rescheduled to ${bookedDate} at ${bookedStartTime} (${bookedLocation}).${lateNote} Manage: mesabasketballtraining.com/booking/${newToken}. Reply STOP to opt out.`);
+  }
+  await sendAdminSMS(`RESCHEDULED: ${newParentName} — from: ${reg.session_details} → to: ${newSessionDetails}`);
 
   return NextResponse.json({ success: true, newToken, isLateReschedule: !!isLateReschedule });
 }

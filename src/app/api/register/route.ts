@@ -1,27 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sendRegistrationNotification, sendReferralCreditNotification } from "@/lib/email";
 import { addPrivateSessionToCalendar, upsertGroupSessionCalendarEvent } from "@/lib/calendar";
-import twilio from "twilio";
-
-function formatPhone(phone: string): string {
-  const digits = phone.replace(/\D/g, "");
-  if (digits.length === 10) return `+1${digits}`;
-  if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
-  return `+${digits}`;
-}
-
-async function sendConfirmationSMS(phone: string, message: string) {
-  try {
-    const accountSid = process.env.TWILIO_ACCOUNT_SID;
-    const authToken = process.env.TWILIO_AUTH_TOKEN;
-    const from = process.env.TWILIO_PHONE_NUMBER;
-    if (!accountSid || !authToken || !from) return;
-    const client = twilio(accountSid, authToken);
-    await client.messages.create({ body: message, from, to: formatPhone(phone) });
-  } catch (err) {
-    console.error("SMS confirmation failed:", err);
-  }
-}
+import { sendSMS, sendAdminSMS } from "@/lib/sms";
 import {
   addRegistrationWithRewards,
   isNewClient,
@@ -174,8 +154,9 @@ export async function POST(req: NextRequest) {
       }
 
       if (smsConsent) {
-        await sendConfirmationSMS(phone, `Mesa Basketball: You're registered for ${weeklySessions.length} group session${weeklySessions.length !== 1 ? "s" : ""}! Check your email for details. Reply STOP to opt out.`);
+        await sendSMS(phone, `Mesa Basketball: You're registered for ${weeklySessions.length} group session${weeklySessions.length !== 1 ? "s" : ""}! Check your email for details. Reply STOP to opt out.`);
       }
+      await sendAdminSMS(`NEW BOOKING: ${parentName} — ${weeklySessions.length} group session${weeklySessions.length !== 1 ? "s" : ""} starting ${weeklySessions[0]?.date || ""}`);
 
       // Update Google Calendar for each weekly session
       for (const session of weeklySessions) {
@@ -295,8 +276,9 @@ export async function POST(req: NextRequest) {
 
       if (smsConsent) {
         const priceText = campTotalPrice ? ` Total: ${campTotalPrice}.` : "";
-        await sendConfirmationSMS(phone, `Mesa Basketball: Camp registration confirmed for ${campSessions.length} day${campSessions.length !== 1 ? "s" : ""}!${priceText} Check your email for details. Reply STOP to opt out.`);
+        await sendSMS(phone, `Mesa Basketball: Camp registration confirmed for ${campSessions.length} day${campSessions.length !== 1 ? "s" : ""}!${priceText} Check your email for details. Reply STOP to opt out.`);
       }
+      await sendAdminSMS(`NEW BOOKING: ${parentName} — ${campSessions.length} camp day${campSessions.length !== 1 ? "s" : ""} starting ${firstSession?.date || ""}`);
 
       // Update Google Calendar for each camp day
       for (const session of campSessions) {
@@ -418,7 +400,10 @@ export async function POST(req: NextRequest) {
 
       if (smsConsent && !emailOnly) {
         const typeLabel = isPrivateType ? "private session" : "session";
-        await sendConfirmationSMS(phone, `Mesa Basketball: Your ${typeLabel} is confirmed! Check your email for details. Reply STOP to opt out.`);
+        await sendSMS(phone, `Mesa Basketball: Your ${typeLabel} is confirmed! Check your email for details. Reply STOP to opt out.`);
+      }
+      if (!emailOnly) {
+        await sendAdminSMS(`NEW BOOKING: ${parentName} — ${sessionDetails.replace(/<br\/>/g, " | ").replace(/<[^>]+>/g, "")}`);
       }
     }
 

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { ADMIN_EMAIL } from "@/lib/auth";
 import { sendNoShowNotification } from "@/lib/email";
+import { sendSMS, sendAdminSMS } from "@/lib/sms";
 
 async function verifyAdmin(req: NextRequest) {
   const token = req.headers.get("authorization")?.replace("Bearer ", "");
@@ -36,7 +37,7 @@ export async function POST(req: NextRequest) {
 
   const { data: reg } = await supabase
     .from("registrations")
-    .select("parent_name, email, session_details, type, session_price")
+    .select("parent_name, email, session_details, type, session_price, phone, sms_consent")
     .eq("id", id)
     .single();
 
@@ -58,6 +59,11 @@ export async function POST(req: NextRequest) {
     sessionType: reg.type,
     feeAmount,
   });
+
+  if (reg.sms_consent && reg.phone) {
+    await sendSMS(reg.phone, `Mesa Basketball: You were marked as a no-show for today's session. The full session fee of $${feeAmount} is due. Reply here with any questions. Reply STOP to opt out.`);
+  }
+  await sendAdminSMS(`NO-SHOW: ${reg.parent_name} — ${reg.session_details} | Fee: $${feeAmount}`);
 
   return NextResponse.json({ ok: true, feeAmount });
 }

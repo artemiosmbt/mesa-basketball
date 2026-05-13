@@ -32,6 +32,7 @@ export interface Registration {
   is_free: boolean;
   session_price: number | null;
   is_full_camp: boolean;
+  sms_consent?: boolean;
 }
 
 export async function addRegistration(data: {
