@@ -1,5 +1,10 @@
 import twilio from "twilio";
 
+export function formatDateWithDay(dateStr: string): string {
+  const d = new Date(dateStr + "T12:00:00");
+  return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+}
+
 function formatPhone(phone: string): string {
   const digits = phone.replace(/\D/g, "");
   if (digits.length === 10) return `+1${digits}`;

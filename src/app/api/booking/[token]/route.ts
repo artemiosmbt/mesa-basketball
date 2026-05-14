@@ -16,7 +16,7 @@ import {
   sendPlayerUpdateNotification,
 } from "@/lib/email";
 import { getCurrentSheetLocation } from "@/lib/sheets";
-import { sendSMS, sendAdminSMS } from "@/lib/sms";
+import { sendSMS, sendAdminSMS, formatDateWithDay } from "@/lib/sms";
 import {
   addPrivateSessionToCalendar,
   deletePrivateSessionFromCalendar,
@@ -240,8 +240,11 @@ export async function DELETE(
   });
 
   if (reg.sms_consent && reg.phone) {
-    const lateNote = isLateCancel ? " A late cancellation fee applies." : "";
-    await sendSMS(reg.phone, `Mesa Basketball: Your session has been cancelled.${lateNote} Reply STOP to opt out.`);
+    const sessionLine = reg.booked_date && reg.booked_start_time
+      ? `\n${formatDateWithDay(reg.booked_date)} | ${reg.booked_start_time}${reg.booked_end_time ? `-${reg.booked_end_time}` : ""}${cancelLocation ? ` | ${cancelLocation}` : ""}`
+      : "";
+    const lateNote = isLateCancel ? "\nA late cancellation fee applies." : "";
+    await sendSMS(reg.phone, `Mesa Basketball: Session cancelled.${sessionLine}${lateNote}\nmesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
   }
   await sendAdminSMS(`CANCELLED: ${reg.parent_name} — ${cancelSessionDetails}${isLateCancel ? " (late)" : ""}`);
 
@@ -525,8 +528,8 @@ export async function PUT(
   });
 
   if (reg.sms_consent && reg.phone) {
-    const lateNote = isLateReschedule ? " A late reschedule fee applies." : "";
-    await sendSMS(reg.phone, `Mesa Basketball: Session rescheduled to ${bookedDate} at ${bookedStartTime} (${bookedLocation}).${lateNote} Manage: mesabasketballtraining.com/booking/${newToken}. Reply STOP to opt out.`);
+    const lateNote = isLateReschedule ? "\nA late reschedule fee applies." : "";
+    await sendSMS(reg.phone, `Mesa Basketball: Session rescheduled!\n${formatDateWithDay(bookedDate)} | ${bookedStartTime}-${bookedEndTime} | ${bookedLocation}${lateNote}\nManage: mesabasketballtraining.com/booking/${newToken}\nReply STOP to opt out.`);
   }
   await sendAdminSMS(`RESCHEDULED: ${newParentName} — from: ${reg.session_details} → to: ${newSessionDetails}`);
 

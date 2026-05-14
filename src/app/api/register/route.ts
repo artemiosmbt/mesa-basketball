@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sendRegistrationNotification, sendReferralCreditNotification } from "@/lib/email";
 import { addPrivateSessionToCalendar, upsertGroupSessionCalendarEvent } from "@/lib/calendar";
-import { sendSMS, sendAdminSMS } from "@/lib/sms";
+import { sendSMS, sendAdminSMS, formatDateWithDay } from "@/lib/sms";
 import {
   addRegistrationWithRewards,
   isNewClient,
@@ -154,9 +154,18 @@ export async function POST(req: NextRequest) {
       }
 
       if (smsConsent) {
-        await sendSMS(phone, `Mesa Basketball: You're registered for ${weeklySessions.length} group session${weeklySessions.length !== 1 ? "s" : ""}! Check your email for details. Reply STOP to opt out.`);
+        const sessionLines = weeklySessions.map((s: { date: string; startTime: string; endTime: string; location: string }) =>
+          `${formatDateWithDay(s.date)} | ${s.startTime}-${s.endTime} | ${s.location}`
+        ).join("\n");
+        const count = weeklySessions.length;
+        await sendSMS(phone, `Mesa Basketball: ${count === 1 ? "Session" : `${count} sessions`} confirmed!\n${sessionLines}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
       }
-      await sendAdminSMS(`NEW BOOKING: ${parentName} — ${weeklySessions.length} group session${weeklySessions.length !== 1 ? "s" : ""} starting ${weeklySessions[0]?.date || ""}`);
+      {
+        const adminLines = weeklySessions.map((s: { date: string; startTime: string; endTime: string; location: string }) =>
+          `${formatDateWithDay(s.date)} | ${s.startTime}-${s.endTime} | ${s.location}`
+        ).join("\n");
+        await sendAdminSMS(`NEW BOOKING: ${parentName}\n${weeklySessions.length} group session${weeklySessions.length !== 1 ? "s" : ""}:\n${adminLines}\nPlayers: ${kids}`);
+      }
 
       // Update Google Calendar for each weekly session
       for (const session of weeklySessions) {
@@ -275,10 +284,18 @@ export async function POST(req: NextRequest) {
       }
 
       if (smsConsent) {
+        const campDayLines = campSessions.map((s: { date: string; startTime: string; endTime?: string; location: string }) =>
+          `${formatDateWithDay(s.date)} | ${s.startTime}${s.endTime ? `-${s.endTime}` : ""} | ${s.location}`
+        ).join("\n");
         const priceText = campTotalPrice ? ` Total: ${campTotalPrice}.` : "";
-        await sendSMS(phone, `Mesa Basketball: Camp registration confirmed for ${campSessions.length} day${campSessions.length !== 1 ? "s" : ""}!${priceText} Check your email for details. Reply STOP to opt out.`);
+        await sendSMS(phone, `Mesa Basketball: Camp confirmed (${campSessions.length} day${campSessions.length !== 1 ? "s" : ""})!${priceText}\n${campDayLines}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
       }
-      await sendAdminSMS(`NEW BOOKING: ${parentName} — ${campSessions.length} camp day${campSessions.length !== 1 ? "s" : ""} starting ${firstSession?.date || ""}`);
+      {
+        const adminCampLines = campSessions.map((s: { date: string; startTime: string; endTime?: string; location: string }) =>
+          `${formatDateWithDay(s.date)} | ${s.startTime}${s.endTime ? `-${s.endTime}` : ""} | ${s.location}`
+        ).join("\n");
+        await sendAdminSMS(`NEW BOOKING: ${parentName}\n${campSessions.length} camp day${campSessions.length !== 1 ? "s" : ""}:\n${adminCampLines}\nPlayers: ${kids}`);
+      }
 
       // Update Google Calendar for each camp day
       for (const session of campSessions) {
@@ -400,10 +417,14 @@ export async function POST(req: NextRequest) {
 
       if (smsConsent && !emailOnly) {
         const typeLabel = isPrivateType ? "private session" : "session";
-        await sendSMS(phone, `Mesa Basketball: Your ${typeLabel} is confirmed! Check your email for details. Reply STOP to opt out.`);
+        const dateLine = bookedDate ? `\n${formatDateWithDay(bookedDate)} | ${bookedStartTime}${bookedEndTime ? `-${bookedEndTime}` : ""}${bookedLocation ? ` | ${bookedLocation}` : ""}` : "";
+        await sendSMS(phone, `Mesa Basketball: Your ${typeLabel} is confirmed!${dateLine}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
       }
       if (!emailOnly) {
-        await sendAdminSMS(`NEW BOOKING: ${parentName} — ${sessionDetails.replace(/<br\/>/g, " | ").replace(/<[^>]+>/g, "")}`);
+        const adminDateLine = bookedDate
+          ? `${formatDateWithDay(bookedDate)} | ${bookedStartTime}${bookedEndTime ? `-${bookedEndTime}` : ""}${bookedLocation ? ` | ${bookedLocation}` : ""}`
+          : sessionDetails.replace(/<br\/>/g, " | ").replace(/<[^>]+>/g, "");
+        await sendAdminSMS(`NEW BOOKING: ${parentName}\n${adminDateLine}\nPlayers: ${kids}`);
       }
     }
 
