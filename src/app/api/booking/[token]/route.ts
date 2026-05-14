@@ -16,7 +16,7 @@ import {
   sendPlayerUpdateNotification,
 } from "@/lib/email";
 import { getCurrentSheetLocation } from "@/lib/sheets";
-import { sendSMS, sendAdminSMS, formatDateWithDay } from "@/lib/sms";
+import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import {
   addPrivateSessionToCalendar,
   deletePrivateSessionFromCalendar,
@@ -241,12 +241,12 @@ export async function DELETE(
 
   if (reg.sms_consent && reg.phone) {
     const sessionLine = reg.booked_date && reg.booked_start_time
-      ? `\n${formatDateWithDay(reg.booked_date)} | ${reg.booked_start_time}${reg.booked_end_time ? `-${reg.booked_end_time}` : ""}${cancelLocation ? ` | ${cancelLocation}` : ""}`
+      ? `\n${formatDateWithDay(reg.booked_date)} | ${reg.booked_start_time}${reg.booked_end_time ? `-${reg.booked_end_time}` : ""}${cancelLocation ? `\nLocation: ${resolveLocationName(cancelLocation)}` : ""}`
       : "";
     const lateNote = isLateCancel ? "\nA late cancellation fee applies." : "";
-    await sendSMS(reg.phone, `Mesa Basketball: Session cancelled.${sessionLine}${lateNote}\nmesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
+    await sendSMS(reg.phone, `Mesa Basketball: Session cancelled.${sessionLine}\nAthlete: ${reg.kids}${lateNote}\nmesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
   }
-  await sendAdminSMS(`CANCELLED: ${reg.parent_name} — ${cancelSessionDetails}${isLateCancel ? " (late)" : ""}`);
+  await sendAdminSMS(`CANCELLED: ${reg.parent_name}\n${cancelSessionDetails}${isLateCancel ? " (late)" : ""}\nPlayers: ${reg.kids}`);
 
   // Sync calendar after cancellation
   if (reg.booked_date && reg.booked_start_time) {
@@ -529,9 +529,9 @@ export async function PUT(
 
   if (reg.sms_consent && reg.phone) {
     const lateNote = isLateReschedule ? "\nA late reschedule fee applies." : "";
-    await sendSMS(reg.phone, `Mesa Basketball: Session rescheduled!\n${formatDateWithDay(bookedDate)} | ${bookedStartTime}-${bookedEndTime} | ${bookedLocation}${lateNote}\nManage: mesabasketballtraining.com/booking/${newToken}\nReply STOP to opt out.`);
+    await sendSMS(reg.phone, `Mesa Basketball: Session rescheduled!\n${formatDateWithDay(bookedDate)} | ${bookedStartTime}-${bookedEndTime}\nLocation: ${resolveLocationName(bookedLocation)}\nAthlete: ${kidsToUse}${lateNote}\nManage: mesabasketballtraining.com/booking/${newToken}\nReply STOP to opt out.`);
   }
-  await sendAdminSMS(`RESCHEDULED: ${newParentName} — from: ${reg.session_details} → to: ${newSessionDetails}`);
+  await sendAdminSMS(`RESCHEDULED: ${newParentName}\nFrom: ${reg.session_details}\nTo: ${newSessionDetails}\nPlayers: ${kidsToUse}`);
 
   return NextResponse.json({ success: true, newToken, isLateReschedule: !!isLateReschedule });
 }

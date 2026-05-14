@@ -1,7 +1,24 @@
 import twilio from "twilio";
 
+const FULL_LOCATION_NAMES: Record<string, string> = {
+  "St. Pauls": "St. Paul's Cathedral",
+  "St. Paul's": "St. Paul's Cathedral",
+  "St. Paul's Cathedral": "St. Paul's Cathedral",
+  "Cherry Valley": "Cherry Valley Sports",
+  "Cherry Valley Sports": "Cherry Valley Sports",
+  "Holy Resurrection": "Holy Resurrection Brookville",
+  "Holy Resurrection Brookville": "Holy Resurrection Brookville",
+};
+
+export function resolveLocationName(location: string): string {
+  return FULL_LOCATION_NAMES[location] ?? location;
+}
+
 export function formatDateWithDay(dateStr: string): string {
-  const d = new Date(dateStr + "T12:00:00");
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(dateStr)
+    ? new Date(dateStr + "T12:00:00")
+    : new Date(dateStr + " 12:00:00");
+  if (isNaN(d.getTime())) return dateStr;
   return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 }
 
