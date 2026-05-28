@@ -542,6 +542,74 @@ export async function sendPlayerUpdateNotification(data: {
   });
 }
 
+export async function sendTimeChangeNotification(data: {
+  parentName: string;
+  email: string;
+  kids: string;
+  date: string;
+  sessionLabel: string;
+  oldStartTime: string;
+  oldEndTime: string;
+  newStartTime: string;
+  newEndTime: string;
+  location: string;
+}) {
+  const resend = getResend();
+
+  const formattedDate = new Date(data.date + "T12:00:00").toLocaleDateString("en-US", {
+    weekday: "long", month: "long", day: "numeric", year: "numeric",
+  });
+
+  const locEntry = LOCATION_MAP[data.location];
+  const locDisplay = locEntry
+    ? `<a href="${locEntry.url}" style="color: #d4af37;">${locEntry.name}</a>`
+    : data.location;
+
+  const result = await resend.emails.send({
+    from: FROM_EMAIL,
+    to: data.email,
+    replyTo: ARTEMI_EMAIL,
+    subject: `Session Time Update — Mesa Basketball Training`,
+    html: `
+      <h2>Session Time Update</h2>
+      <p>Hi ${data.parentName},</p>
+      <p>Your upcoming group session time has changed. Everything else stays the same.</p>
+      <table style="border-collapse: collapse; width: 100%; margin: 16px 0; border-radius: 8px; overflow: hidden;">
+        <tr>
+          <td style="padding: 10px 14px; background: #1e1e1e; color: #9ca3af; font-size: 13px; width: 110px;">Date</td>
+          <td style="padding: 10px 14px; background: #1e1e1e; color: #ffffff; font-weight: bold;">${formattedDate}</td>
+        </tr>
+        <tr>
+          <td style="padding: 10px 14px; background: #161616; color: #9ca3af; font-size: 13px;">Session</td>
+          <td style="padding: 10px 14px; background: #161616; color: #ffffff;">${data.sessionLabel}</td>
+        </tr>
+        <tr>
+          <td style="padding: 10px 14px; background: #1e1e1e; color: #9ca3af; font-size: 13px;">Old Time</td>
+          <td style="padding: 10px 14px; background: #1e1e1e; color: #f87171; text-decoration: line-through;">${data.oldStartTime}–${data.oldEndTime}</td>
+        </tr>
+        <tr>
+          <td style="padding: 10px 14px; background: #161616; color: #9ca3af; font-size: 13px;">New Time</td>
+          <td style="padding: 10px 14px; background: #161616; color: #4ade80; font-weight: bold; font-size: 15px;">${data.newStartTime}–${data.newEndTime}</td>
+        </tr>
+        <tr>
+          <td style="padding: 10px 14px; background: #1e1e1e; color: #9ca3af; font-size: 13px;">Location</td>
+          <td style="padding: 10px 14px; background: #1e1e1e; color: #ffffff;">${locDisplay}</td>
+        </tr>
+        <tr>
+          <td style="padding: 10px 14px; background: #161616; color: #9ca3af; font-size: 13px;">Athletes</td>
+          <td style="padding: 10px 14px; background: #161616; color: #ffffff;">${data.kids}</td>
+        </tr>
+      </table>
+      <p>We apologize for any inconvenience. Please update your calendar to reflect the new time.</p>
+      <p><a href="${BASE_URL}/my-bookings" style="color: #d4af37; font-weight: bold;">View My Bookings</a></p>
+      <br/>
+      <p>Questions? Contact Artemios at (631) 599-1280 or email <a href="mailto:artemios@mesabasketballtraining.com">artemios@mesabasketballtraining.com</a>.</p>
+      <p>— Mesa Basketball Training</p>
+    `,
+  });
+  if (result.error) console.error("Time change email error for", data.email, result.error);
+}
+
 export async function sendRescheduleNotification(data: {
   parentName: string;
   email: string;

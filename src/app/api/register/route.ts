@@ -135,36 +135,38 @@ export async function POST(req: NextRequest) {
         ? `<p><strong>Total:</strong> $${weeklyTotalPrice}</p>`
         : "";
 
-      await sendRegistrationNotification({
-        parentName,
-        email,
-        phone,
-        kids,
-        type: "weekly",
-        sessionDetails: `Group Session${weeklySessions.length !== 1 ? "s" : ""} (${weeklySessions.length} ${weeklySessions.length !== 1 ? "dates" : "date"}):<br/>${allSessionsList}${priceNote ? "<br/>" + priceNote : ""}`,
-        totalParticipants: totalParticipants || 1,
-        referralCode,
-        referredBy: weeklyReferrer?.name,
-        calendarEvent: weeklySessions[0] ? { date: weeklySessions[0].date, startTime: weeklySessions[0].startTime, endTime: weeklySessions[0].endTime, location: weeklySessions[0].location } : undefined,
-      });
+      try {
+        await sendRegistrationNotification({
+          parentName,
+          email,
+          phone,
+          kids,
+          type: "weekly",
+          sessionDetails: `Group Session${weeklySessions.length !== 1 ? "s" : ""} (${weeklySessions.length} ${weeklySessions.length !== 1 ? "dates" : "date"}):<br/>${allSessionsList}${priceNote ? "<br/>" + priceNote : ""}`,
+          totalParticipants: totalParticipants || 1,
+          referralCode,
+          referredBy: weeklyReferrer?.name,
+          calendarEvent: weeklySessions[0] ? { date: weeklySessions[0].date, startTime: weeklySessions[0].startTime, endTime: weeklySessions[0].endTime, location: weeklySessions[0].location } : undefined,
+        });
 
-      if (weeklyReferrer) {
-        await addReferralCredit(weeklyReferrer.email);
-        await sendReferralCreditNotification({ referrerName: weeklyReferrer.name, referrerEmail: weeklyReferrer.email, newClientName: parentName });
-      }
+        if (weeklyReferrer) {
+          await addReferralCredit(weeklyReferrer.email);
+          await sendReferralCreditNotification({ referrerName: weeklyReferrer.name, referrerEmail: weeklyReferrer.email, newClientName: parentName });
+        }
 
-      if (smsConsent) {
-        const sessionLines = weeklySessions.map((s: { date: string; startTime: string; endTime: string; location: string }) =>
-          `${formatDateWithDay(s.date)} | ${s.startTime}-${s.endTime}\nLocation: ${resolveLocationName(s.location)}`
-        ).join("\n");
-        const count = weeklySessions.length;
-        await sendSMS(phone, `Mesa Basketball: ${count === 1 ? "Session" : `${count} sessions`} confirmed!\n${sessionLines}\nAthlete: ${kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
-      }
-      {
+        if (smsConsent) {
+          const sessionLines = weeklySessions.map((s: { date: string; startTime: string; endTime: string; location: string }) =>
+            `${formatDateWithDay(s.date)} | ${s.startTime}-${s.endTime}\nLocation: ${resolveLocationName(s.location)}`
+          ).join("\n");
+          const count = weeklySessions.length;
+          await sendSMS(phone, `Mesa Basketball: ${count === 1 ? "Session" : `${count} sessions`} confirmed!\n${sessionLines}\nAthlete: ${kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
+        }
         const adminLines = weeklySessions.map((s: { date: string; startTime: string; endTime: string; location: string }) =>
           `${formatDateWithDay(s.date)} | ${s.startTime}-${s.endTime}\nLocation: ${resolveLocationName(s.location)}`
         ).join("\n");
         await sendAdminSMS(`NEW BOOKING: ${parentName}\n${weeklySessions.length} group session${weeklySessions.length !== 1 ? "s" : ""}:\n${adminLines}\nPlayers: ${kids}`);
+      } catch (notifyErr) {
+        console.error("Weekly booking notifications failed (booking was saved):", notifyErr);
       }
 
       // Update Google Calendar for each weekly session
@@ -265,36 +267,38 @@ export async function POST(req: NextRequest) {
       const priceNote = campTotalPrice ? `<br/><strong>Total:</strong> ${campTotalPrice}` : "";
       const firstSession = campSessions[0];
 
-      await sendRegistrationNotification({
-        parentName,
-        email,
-        phone,
-        kids,
-        type: "camp",
-        sessionDetails: `${firstSession.campName}${firstSession.gradeGroup ? ` — ${firstSession.gradeGroup}` : ""}<br/>Days registered (${campSessions.length}):<br/>${daysList}${priceNote}`,
-        totalParticipants: totalParticipants || 1,
-        referralCode,
-        referredBy: campReferrer?.name,
-        calendarEvent: { date: firstSession.date, startTime: firstSession.startTime, endTime: firstSession.endTime || firstSession.startTime, location: firstSession.location },
-      });
+      try {
+        await sendRegistrationNotification({
+          parentName,
+          email,
+          phone,
+          kids,
+          type: "camp",
+          sessionDetails: `${firstSession.campName}${firstSession.gradeGroup ? ` — ${firstSession.gradeGroup}` : ""}<br/>Days registered (${campSessions.length}):<br/>${daysList}${priceNote}`,
+          totalParticipants: totalParticipants || 1,
+          referralCode,
+          referredBy: campReferrer?.name,
+          calendarEvent: { date: firstSession.date, startTime: firstSession.startTime, endTime: firstSession.endTime || firstSession.startTime, location: firstSession.location },
+        });
 
-      if (campReferrer) {
-        await addReferralCredit(campReferrer.email);
-        await sendReferralCreditNotification({ referrerName: campReferrer.name, referrerEmail: campReferrer.email, newClientName: parentName });
-      }
+        if (campReferrer) {
+          await addReferralCredit(campReferrer.email);
+          await sendReferralCreditNotification({ referrerName: campReferrer.name, referrerEmail: campReferrer.email, newClientName: parentName });
+        }
 
-      if (smsConsent) {
-        const campDayLines = campSessions.map((s: { date: string; startTime: string; endTime?: string; location: string }) =>
-          `${formatDateWithDay(s.date)} | ${s.startTime}${s.endTime ? `-${s.endTime}` : ""}\nLocation: ${resolveLocationName(s.location)}`
-        ).join("\n");
-        const priceText = campTotalPrice ? ` Total: ${campTotalPrice}.` : "";
-        await sendSMS(phone, `Mesa Basketball: Camp confirmed (${campSessions.length} day${campSessions.length !== 1 ? "s" : ""})!${priceText}\n${campDayLines}\nAthlete: ${kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
-      }
-      {
+        if (smsConsent) {
+          const campDayLines = campSessions.map((s: { date: string; startTime: string; endTime?: string; location: string }) =>
+            `${formatDateWithDay(s.date)} | ${s.startTime}${s.endTime ? `-${s.endTime}` : ""}\nLocation: ${resolveLocationName(s.location)}`
+          ).join("\n");
+          const priceText = campTotalPrice ? ` Total: ${campTotalPrice}.` : "";
+          await sendSMS(phone, `Mesa Basketball: Camp confirmed (${campSessions.length} day${campSessions.length !== 1 ? "s" : ""})!${priceText}\n${campDayLines}\nAthlete: ${kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
+        }
         const adminCampLines = campSessions.map((s: { date: string; startTime: string; endTime?: string; location: string }) =>
           `${formatDateWithDay(s.date)} | ${s.startTime}${s.endTime ? `-${s.endTime}` : ""}\nLocation: ${resolveLocationName(s.location)}`
         ).join("\n");
         await sendAdminSMS(`NEW BOOKING: ${parentName}\n${campSessions.length} camp day${campSessions.length !== 1 ? "s" : ""}:\n${adminCampLines}\nPlayers: ${kids}`);
+      } catch (notifyErr) {
+        console.error("Camp booking notifications failed (booking was saved):", notifyErr);
       }
 
       // Update Google Calendar for each camp day
@@ -397,36 +401,40 @@ export async function POST(req: NextRequest) {
 
     // Send emails (unless this registration should skip email)
     if (!skipEmail) {
-      await sendRegistrationNotification({
-        parentName,
-        email,
-        phone,
-        kids,
-        type,
-        sessionDetails,
-        totalParticipants: totalParticipants || 1,
-        manageToken,
-        isFree,
-        isFirstTime,
-        packageSessionsRemaining,
-        packageType,
-        referralCode,
-        referredBy: privateReferrer?.name,
-        calendarEvent: bookedDate && bookedStartTime ? { date: bookedDate, startTime: bookedStartTime, endTime: bookedEndTime || bookedStartTime, location: bookedLocation || "" } : undefined,
-      });
+      try {
+        await sendRegistrationNotification({
+          parentName,
+          email,
+          phone,
+          kids,
+          type,
+          sessionDetails,
+          totalParticipants: totalParticipants || 1,
+          manageToken,
+          isFree,
+          isFirstTime,
+          packageSessionsRemaining,
+          packageType,
+          referralCode,
+          referredBy: privateReferrer?.name,
+          calendarEvent: bookedDate && bookedStartTime ? { date: bookedDate, startTime: bookedStartTime, endTime: bookedEndTime || bookedStartTime, location: bookedLocation || "" } : undefined,
+        });
 
-      if (smsConsent && !emailOnly) {
-        const typeLabel = isPrivateType ? "private session" : "session";
-        const dateLine = bookedDate
-          ? `\n${formatDateWithDay(bookedDate)} | ${bookedStartTime}${bookedEndTime ? `-${bookedEndTime}` : ""}${bookedLocation ? `\nLocation: ${resolveLocationName(bookedLocation)}` : ""}`
-          : "";
-        await sendSMS(phone, `Mesa Basketball: Your ${typeLabel} is confirmed!${dateLine}\nAthlete: ${kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
-      }
-      if (!emailOnly) {
-        const adminDateLine = bookedDate
-          ? `${formatDateWithDay(bookedDate)} | ${bookedStartTime}${bookedEndTime ? `-${bookedEndTime}` : ""}${bookedLocation ? `\nLocation: ${resolveLocationName(bookedLocation)}` : ""}`
-          : sessionDetails.replace(/<br\/>/g, " | ").replace(/<[^>]+>/g, "");
-        await sendAdminSMS(`NEW BOOKING: ${parentName}\n${adminDateLine}\nPlayers: ${kids}`);
+        if (smsConsent && !emailOnly) {
+          const typeLabel = isPrivateType ? "private session" : "session";
+          const dateLine = bookedDate
+            ? `\n${formatDateWithDay(bookedDate)} | ${bookedStartTime}${bookedEndTime ? `-${bookedEndTime}` : ""}${bookedLocation ? `\nLocation: ${resolveLocationName(bookedLocation)}` : ""}`
+            : "";
+          await sendSMS(phone, `Mesa Basketball: Your ${typeLabel} is confirmed!${dateLine}\nAthlete: ${kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
+        }
+        if (!emailOnly) {
+          const adminDateLine = bookedDate
+            ? `${formatDateWithDay(bookedDate)} | ${bookedStartTime}${bookedEndTime ? `-${bookedEndTime}` : ""}${bookedLocation ? `\nLocation: ${resolveLocationName(bookedLocation)}` : ""}`
+            : sessionDetails.replace(/<br\/>/g, " | ").replace(/<[^>]+>/g, "");
+          await sendAdminSMS(`NEW BOOKING: ${parentName}\n${adminDateLine}\nPlayers: ${kids}`);
+        }
+      } catch (notifyErr) {
+        console.error("Private booking notifications failed (booking was saved):", notifyErr);
       }
     }
 

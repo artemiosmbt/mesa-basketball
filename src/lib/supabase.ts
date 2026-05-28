@@ -605,6 +605,22 @@ export async function checkGroupSessionCapacity(
   return { available: enrolled < maxSpots, enrolled };
 }
 
+export async function getRegistrantsBySession(
+  date: string,
+  startTime: string
+): Promise<Registration[]> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("registrations")
+    .select("*")
+    .eq("booked_date", date)
+    .eq("booked_start_time", startTime)
+    .eq("status", "confirmed")
+    .eq("type", "weekly");
+  if (error) throw error;
+  return (data || []) as Registration[];
+}
+
 export async function checkDuplicateRegistration(
   email: string,
   date: string,

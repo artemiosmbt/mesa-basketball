@@ -306,6 +306,9 @@ export default function AdminPage() {
   const [token, setToken] = useState<string | null>(null);
   const [selectedClient, setSelectedClient] = useState<string | null>(null);
 
+  // Time Change state
+  const [tcResult, setTcResult] = useState<{ changesFound: { session: string; oldTime: string; newTime: string; count: number }[]; totalEmailsSent: number; totalSmsSent: number } | null>(null);
+
   useEffect(() => {
     authClient.auth.getSession().then(({ data: { session } }) => {
       if (!session || session.user.email !== ADMIN_EMAIL) {
@@ -313,19 +316,27 @@ export default function AdminPage() {
         return;
       }
       setToken(session.access_token);
-      fetch("/api/admin/data", {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      })
-        .then((r) => r.json())
-        .then((data) => {
-          setRegistrations(data.registrations || []);
-          const map: Record<string, boolean> = {};
-          for (const p of (data.profiles || [])) {
-            if (p.email) map[p.email] = p.video_consent ?? true;
-          }
-          setVideoConsentMap(map);
-        })
-        .finally(() => setLoading(false));
+
+      // Load registrations and auto-sync time changes in parallel
+      Promise.all([
+        fetch("/api/admin/data", {
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        }).then((r) => r.json()),
+        fetch("/api/admin/sync-time-changes", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        }).then((r) => r.json()).catch(() => null),
+      ]).then(([adminData, syncResult]) => {
+        setRegistrations(adminData.registrations || []);
+        const map: Record<string, boolean> = {};
+        for (const p of (adminData.profiles || [])) {
+          if (p.email) map[p.email] = p.video_consent ?? true;
+        }
+        setVideoConsentMap(map);
+        if (syncResult?.changesFound?.length > 0) {
+          setTcResult(syncResult);
+        }
+      }).finally(() => setLoading(false));
     });
   }, [router]);
 
@@ -676,6 +687,21 @@ export default function AdminPage() {
           ))}
         </div>
 
+        {/* Time Change Sync — auto-runs on load, button is manual re-run */}
+        {tcResult && tcResult.changesFound.length > 0 && (
+          <div className="mb-6 rounded-xl border border-green-800 bg-green-950/40 px-4 py-3 flex flex-wrap items-center gap-3">
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-green-300">Time change detected and handled</p>
+              <div className="text-xs text-green-400/80 mt-0.5 space-y-0.5">
+                {tcResult.changesFound.map((c, i) => (
+                  <p key={i}>{c.session}: {c.oldTime} → {c.newTime} — {c.count} registrant{c.count !== 1 ? "s" : ""} notified</p>
+                ))}
+              </div>
+            </div>
+            <span className="text-xs text-green-500 shrink-0">{tcResult.totalEmailsSent} email{tcResult.totalEmailsSent !== 1 ? "s" : ""}, {tcResult.totalSmsSent} SMS sent</span>
+          </div>
+        )}
+
         {/* Tabs */}
         <div className="flex flex-wrap gap-2 mb-6">
           {(["upcoming", "past", "calendar", "clients"] as const).map((t) => (
@@ -860,6 +886,7 @@ export default function AdminPage() {
             </div>
           </>
         )}
+
       </div>
       </div>
     </div>
