@@ -80,9 +80,12 @@ export async function GET(req: NextRequest) {
       continue;
     }
 
-    // Filter to those where time or location no longer matches the sheet
+    // Filter to those where time (start or end) or location no longer matches the sheet
     const stale = (allRegs || []).filter(
-      (r) => r.booked_start_time !== session.startTime || r.booked_location !== session.location
+      (r) =>
+        r.booked_start_time !== session.startTime ||
+        r.booked_end_time !== session.endTime ||
+        r.booked_location !== session.location
     );
 
     if (stale.length === 0) continue;
@@ -96,7 +99,7 @@ export async function GET(req: NextRequest) {
     changesDetected.push(changeDesc);
 
     for (const r of stale) {
-      const timeChanged = r.booked_start_time !== session.startTime;
+      const timeChanged = r.booked_start_time !== session.startTime || r.booked_end_time !== session.endTime;
       const locationChanged = r.booked_location !== session.location;
       const changeType: "time" | "location" | "both" =
         timeChanged && locationChanged ? "both" : timeChanged ? "time" : "location";

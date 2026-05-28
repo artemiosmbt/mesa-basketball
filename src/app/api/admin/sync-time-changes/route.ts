@@ -85,7 +85,10 @@ export async function POST(req: NextRequest) {
     if (error) continue;
 
     const stale = (allRegs || []).filter(
-      (r) => r.booked_start_time !== session.startTime || r.booked_location !== session.location
+      (r) =>
+        r.booked_start_time !== session.startTime ||
+        r.booked_end_time !== session.endTime ||
+        r.booked_location !== session.location
     );
 
     if (stale.length === 0) continue;
@@ -101,7 +104,7 @@ export async function POST(req: NextRequest) {
     });
 
     for (const r of stale) {
-      const timeChanged = r.booked_start_time !== session.startTime;
+      const timeChanged = r.booked_start_time !== session.startTime || r.booked_end_time !== session.endTime;
       const locationChanged = r.booked_location !== session.location;
       const changeType: "time" | "location" | "both" =
         timeChanged && locationChanged ? "both" : timeChanged ? "time" : "location";
