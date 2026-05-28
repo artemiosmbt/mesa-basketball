@@ -51,7 +51,7 @@ function isLateAction(dateStr: string, timeStr: string, createdAt: string, admin
   const now = Date.now();
   const hoursUntil = (sessionStart.getTime() - now) / (1000 * 60 * 60);
   if (hoursUntil < 0 || hoursUntil >= 24) return false;
-  // Waive fee if admin changed the session within 24h of its start time
+  // Waive fee if admin changed the session within 48h of its start time
   if (adminChangeAt) {
     const hoursFromChangeTo = (sessionStart.getTime() - new Date(adminChangeAt).getTime()) / (1000 * 60 * 60);
     if (hoursFromChangeTo <= 48) return false;
