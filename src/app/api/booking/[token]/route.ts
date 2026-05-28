@@ -38,7 +38,8 @@ function parseSessionDateTimeET(dateStr: string, hoursET: number, minsET: number
 
 // Returns true if this action is a late cancel/reschedule:
 // session is within 24h AND the 15-min grace period (from booking time, capped at session start) has expired.
-function isLateAction(dateStr: string, timeStr: string, createdAt: string): boolean {
+// Fee is waived if admin made a last-minute change (within 24h of session) — not the client's fault.
+function isLateAction(dateStr: string, timeStr: string, createdAt: string, adminChangeAt?: string | null): boolean {
   const timeMatch = timeStr.match(/(\d+):(\d+)\s*(AM|PM)/i);
   if (!timeMatch) return false;
   let hours = parseInt(timeMatch[1]);
@@ -50,6 +51,11 @@ function isLateAction(dateStr: string, timeStr: string, createdAt: string): bool
   const now = Date.now();
   const hoursUntil = (sessionStart.getTime() - now) / (1000 * 60 * 60);
   if (hoursUntil < 0 || hoursUntil >= 24) return false;
+  // Waive fee if admin changed the session within 24h of its start time
+  if (adminChangeAt) {
+    const hoursFromChangeTo = (sessionStart.getTime() - new Date(adminChangeAt).getTime()) / (1000 * 60 * 60);
+    if (hoursFromChangeTo <= 24) return false;
+  }
   // Within 24h — check grace: 15 min from booking time, capped at session start
   const graceEnd = Math.min(
     new Date(createdAt).getTime() + 15 * 60 * 1000,
@@ -144,7 +150,7 @@ export async function DELETE(
   // Check 24-hour policy with 15-min grace period
   let isLateCancel = false;
   if (reg.booked_date && reg.booked_start_time) {
-    isLateCancel = isLateAction(reg.booked_date, reg.booked_start_time, reg.created_at);
+    isLateCancel = isLateAction(reg.booked_date, reg.booked_start_time, reg.created_at, reg.admin_change_at);
   }
 
   // Full camp: block individual-day cancellation — must cancel all days together
@@ -338,7 +344,7 @@ export async function PATCH(
   const addedPlayers = newPlayers.filter((np) => !oldPlayers.includes(np)).map(playerLabel);
 
   const isLate = !!(reg.booked_date && reg.booked_start_time &&
-    isLateAction(reg.booked_date, reg.booked_start_time, reg.created_at));
+    isLateAction(reg.booked_date, reg.booked_start_time, reg.created_at, reg.admin_change_at));
 
   // Price calculation
   let newPrice: number | null = reg.session_price;
@@ -439,7 +445,7 @@ export async function PUT(
     : `Private Session — ${bookedDate} ${bookedStartTime}-${bookedEndTime} at ${bookedLocation}`;
 
   // Check if original session is within 24h (with grace period) → late reschedule fee applies
-  const isLateReschedule = !!(reg.booked_date && reg.booked_start_time && isLateAction(reg.booked_date, reg.booked_start_time, reg.created_at));
+  const isLateReschedule = !!(reg.booked_date && reg.booked_start_time && isLateAction(reg.booked_date, reg.booked_start_time, reg.created_at, reg.admin_change_at));
 
   // Cancel old booking first so group enrollment counts reflect the cancellation
   await cancelRegistration(token);

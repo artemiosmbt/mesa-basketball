@@ -33,6 +33,7 @@ export interface Registration {
   session_price: number | null;
   is_full_camp: boolean;
   sms_consent?: boolean;
+  admin_change_at?: string | null;
 }
 
 export async function addRegistration(data: {

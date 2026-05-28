@@ -127,6 +127,7 @@ export async function GET(req: NextRequest) {
           booked_end_time: session.endTime,
           ...(locationChanged ? { booked_location: session.location } : {}),
           session_details: newDetails,
+          admin_change_at: new Date().toISOString(),
         })
         .eq("id", r.id);
 
