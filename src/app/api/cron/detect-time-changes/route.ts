@@ -92,11 +92,15 @@ export async function GET(req: NextRequest) {
 
     const firstOldStart: string = stale[0].booked_start_time;
     const firstOldEnd: string = stale[0].booked_end_time || firstOldStart;
+    const firstOldLocation: string = stale[0].booked_location || "";
     const timeChangedAny = stale.some((r) => r.booked_start_time !== session.startTime || r.booked_end_time !== session.endTime);
     const locationChangedAny = stale.some((r) => r.booked_location !== session.location);
     let changeDesc = `${session.date} "${session.group}"`;
     if (timeChangedAny) changeDesc += `: ${firstOldStart}-${firstOldEnd} → ${session.startTime}-${session.endTime}`;
-    if (locationChangedAny) changeDesc += timeChangedAny ? `, location changed` : `: location changed`;
+    if (locationChangedAny) {
+      const locChangeStr = `${resolveLocationName(firstOldLocation)} → ${resolveLocationName(session.location)}`;
+      changeDesc += timeChangedAny ? `, location: ${locChangeStr}` : `: ${locChangeStr}`;
+    }
     changesDetected.push(changeDesc);
 
     for (const r of stale) {
@@ -157,12 +161,13 @@ export async function GET(req: NextRequest) {
         const dateStr = formatDateWithDay(session.date);
         const locName = resolveLocationName(session.location);
         let smsBody: string;
+        const oldLocName = resolveLocationName(rOldLocation);
         if (changeType === "both") {
-          smsBody = `TIME & LOCATION CHANGE\nMesa Basketball: ${session.group} on ${dateStr}\nNew time: ${session.startTime}-${session.endTime}\nNew location: ${locName}\nQuestions? (631) 599-1280. Reply STOP to opt out.`;
+          smsBody = `TIME & LOCATION CHANGE\nMesa Basketball: ${session.group} on ${dateStr}\nTime: ${rOldStart}-${rOldEnd} → ${session.startTime}-${session.endTime}\nLocation: ${oldLocName} → ${locName}\nQuestions? (631) 599-1280. Reply STOP to opt out.`;
         } else if (changeType === "time") {
-          smsBody = `TIME CHANGE\nMesa Basketball: ${session.group} on ${dateStr}\nNew time: ${session.startTime}-${session.endTime} (was ${rOldStart}-${rOldEnd})\nLocation: ${locName}\nQuestions? (631) 599-1280. Reply STOP to opt out.`;
+          smsBody = `TIME CHANGE\nMesa Basketball: ${session.group} on ${dateStr}\nTime: ${rOldStart}-${rOldEnd} → ${session.startTime}-${session.endTime}\nLocation: ${locName}\nQuestions? (631) 599-1280. Reply STOP to opt out.`;
         } else {
-          smsBody = `LOCATION CHANGE\nMesa Basketball: ${session.group} on ${dateStr}\nNew location: ${locName}\nTime: ${session.startTime}-${session.endTime}\nQuestions? (631) 599-1280. Reply STOP to opt out.`;
+          smsBody = `LOCATION CHANGE\nMesa Basketball: ${session.group} on ${dateStr}\nLocation: ${oldLocName} → ${locName}\nTime: ${session.startTime}-${session.endTime}\nQuestions? (631) 599-1280. Reply STOP to opt out.`;
         }
         try {
           await sendSMS(r.phone, smsBody);
