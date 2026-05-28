@@ -54,7 +54,7 @@ function isLateAction(dateStr: string, timeStr: string, createdAt: string, admin
   // Waive fee if admin changed the session within 24h of its start time
   if (adminChangeAt) {
     const hoursFromChangeTo = (sessionStart.getTime() - new Date(adminChangeAt).getTime()) / (1000 * 60 * 60);
-    if (hoursFromChangeTo <= 24) return false;
+    if (hoursFromChangeTo <= 48) return false;
   }
   // Within 24h — check grace: 15 min from booking time, capped at session start
   const graceEnd = Math.min(
