@@ -4,6 +4,39 @@ import { getWeeklySchedule } from "@/lib/sheets";
 import { sendTimeChangeNotification } from "@/lib/email";
 import { sendSMS, sendAdminSMS, formatDateWithDay } from "@/lib/sms";
 
+function sessionIsUpcoming(dateStr: string, startTimeStr: string): boolean {
+  try {
+    const now = new Date();
+    const etParts = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/New_York",
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", hour12: false,
+    }).formatToParts(now);
+    const getP = (t: string) => etParts.find((p) => p.type === t)?.value ?? "0";
+    const todayISO = `${getP("year")}-${getP("month")}-${getP("day")}`;
+    const nowMinutes = parseInt(getP("hour")) * 60 + parseInt(getP("minute"));
+
+    const sd = new Date(dateStr);
+    if (isNaN(sd.getTime())) return true;
+    const sessionISO = `${sd.getFullYear()}-${String(sd.getMonth() + 1).padStart(2, "0")}-${String(sd.getDate()).padStart(2, "0")}`;
+
+    if (sessionISO > todayISO) return true;
+    if (sessionISO < todayISO) return false;
+
+    // Same day — only notify if session hasn't started yet
+    const match = startTimeStr.match(/(\d+):(\d+)\s*(AM|PM)/i);
+    if (!match) return true;
+    let h = parseInt(match[1]);
+    const m = parseInt(match[2]);
+    const ampm = match[3].toUpperCase();
+    if (ampm === "PM" && h !== 12) h += 12;
+    if (ampm === "AM" && h === 12) h = 0;
+    return h * 60 + m > nowMinutes;
+  } catch {
+    return true;
+  }
+}
+
 export async function GET(req: NextRequest) {
   const authHeader = req.headers.get("authorization");
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
@@ -15,9 +48,6 @@ export async function GET(req: NextRequest) {
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
 
-  // Only check upcoming sessions
-  const today = new Date().toISOString().split("T")[0];
-
   let sessions;
   try {
     sessions = await getWeeklySchedule();
@@ -27,7 +57,7 @@ export async function GET(req: NextRequest) {
   }
 
   const upcoming = sessions.filter(
-    (s) => s.date >= today && s.startTime && s.group
+    (s) => sessionIsUpcoming(s.date, s.startTime) && s.startTime && s.group
   );
 
   const changesDetected: string[] = [];
