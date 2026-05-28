@@ -57,10 +57,13 @@ function parseCSV(text: string): string[][] {
   });
 }
 
-export async function getWeeklySchedule(): Promise<WeeklySession[]> {
+export async function getWeeklySchedule(options?: { noCache?: boolean }): Promise<WeeklySession[]> {
   const url = process.env.SHEET_CSV_WEEKLY_SCHEDULE;
   if (!url) return [];
-  const res = await fetch(url, { next: { revalidate: 60 } });
+  const fetchOptions = options?.noCache
+    ? { cache: "no-store" as const }
+    : { next: { revalidate: 60 } };
+  const res = await fetch(url, fetchOptions);
   const rows = parseCSV(await res.text());
   // Skip header row
   return rows.slice(1).map((row) => ({

@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
 
   let sessions;
   try {
-    sessions = await getWeeklySchedule();
+    sessions = await getWeeklySchedule({ noCache: true });
   } catch (err) {
     console.error("sync-time-changes: failed to fetch schedule", err);
     return NextResponse.json({ error: "Could not load schedule from Google Sheets." }, { status: 500 });

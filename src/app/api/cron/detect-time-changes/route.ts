@@ -50,7 +50,7 @@ export async function GET(req: NextRequest) {
 
   let sessions;
   try {
-    sessions = await getWeeklySchedule();
+    sessions = await getWeeklySchedule({ noCache: true });
   } catch (err) {
     console.error("detect-time-changes: failed to fetch schedule", err);
     return NextResponse.json({ error: "Failed to fetch schedule" }, { status: 500 });
