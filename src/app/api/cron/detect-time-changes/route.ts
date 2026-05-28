@@ -91,11 +91,12 @@ export async function GET(req: NextRequest) {
     if (stale.length === 0) continue;
 
     const firstOldStart: string = stale[0].booked_start_time;
-    const timeChangedAny = stale.some((r) => r.booked_start_time !== session.startTime);
+    const firstOldEnd: string = stale[0].booked_end_time || firstOldStart;
+    const timeChangedAny = stale.some((r) => r.booked_start_time !== session.startTime || r.booked_end_time !== session.endTime);
     const locationChangedAny = stale.some((r) => r.booked_location !== session.location);
     let changeDesc = `${session.date} "${session.group}"`;
-    if (timeChangedAny) changeDesc += `: ${firstOldStart} → ${session.startTime}`;
-    if (locationChangedAny) changeDesc += ` (location changed)`;
+    if (timeChangedAny) changeDesc += `: ${firstOldStart}-${firstOldEnd} → ${session.startTime}-${session.endTime}`;
+    if (locationChangedAny) changeDesc += timeChangedAny ? `, location changed` : `: location changed`;
     changesDetected.push(changeDesc);
 
     for (const r of stale) {
