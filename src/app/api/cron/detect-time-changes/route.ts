@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getWeeklySchedule } from "@/lib/sheets";
 import { sendTimeChangeNotification } from "@/lib/email";
-import { sendSMS, sendAdminSMS, formatDateWithDay } from "@/lib/sms";
+import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 
 function sessionIsUpcoming(dateStr: string, startTimeStr: string): boolean {
   try {
@@ -66,16 +66,13 @@ export async function GET(req: NextRequest) {
   let totalSmsSent = 0;
 
   for (const session of upcoming) {
-    // Find confirmed weekly registrations for this date + group where the stored
-    // start time no longer matches the sheet. The group name in session_details
-    // lets us handle multiple sessions on the same day correctly.
-    const { data: stale, error } = await supabase
+    // Get all confirmed weekly registrations for this date+group
+    const { data: allRegs, error } = await supabase
       .from("registrations")
       .select("*")
       .eq("booked_date", session.date)
       .eq("type", "weekly")
       .eq("status", "confirmed")
-      .neq("booked_start_time", session.startTime)
       .ilike("session_details", `%${session.group}%`);
 
     if (error) {
@@ -83,39 +80,53 @@ export async function GET(req: NextRequest) {
       continue;
     }
 
-    if (!stale || stale.length === 0) continue;
-
-    // Grab the old time from the first stale record (all will share it)
-    const oldStartTime: string = stale[0].booked_start_time;
-    const oldEndTime: string = stale[0].booked_end_time || oldStartTime;
-
-    changesDetected.push(
-      `${session.date} "${session.group}": ${oldStartTime} → ${session.startTime}`
+    // Filter to those where time or location no longer matches the sheet
+    const stale = (allRegs || []).filter(
+      (r) => r.booked_start_time !== session.startTime || r.booked_location !== session.location
     );
 
-    for (const r of stale) {
-      // Fix the time stored in session_details text
-      const newDetails = (r.session_details || "")
-        .replace(
-          `${r.booked_start_time}-${r.booked_end_time}`,
-          `${session.startTime}-${session.endTime}`
-        )
-        .replace(
-          `${r.booked_start_time}–${r.booked_end_time}`,
-          `${session.startTime}–${session.endTime}`
-        );
+    if (stale.length === 0) continue;
 
-      // Update the DB record — admin dashboard and My Bookings now show new time
+    const firstOldStart: string = stale[0].booked_start_time;
+    const timeChangedAny = stale.some((r) => r.booked_start_time !== session.startTime);
+    const locationChangedAny = stale.some((r) => r.booked_location !== session.location);
+    let changeDesc = `${session.date} "${session.group}"`;
+    if (timeChangedAny) changeDesc += `: ${firstOldStart} → ${session.startTime}`;
+    if (locationChangedAny) changeDesc += ` (location changed)`;
+    changesDetected.push(changeDesc);
+
+    for (const r of stale) {
+      const timeChanged = r.booked_start_time !== session.startTime;
+      const locationChanged = r.booked_location !== session.location;
+      const changeType: "time" | "location" | "both" =
+        timeChanged && locationChanged ? "both" : timeChanged ? "time" : "location";
+
+      const rOldStart: string = r.booked_start_time;
+      const rOldEnd: string = r.booked_end_time || rOldStart;
+      const rOldLocation: string = r.booked_location || "";
+
+      // Update session_details text
+      let newDetails = r.session_details || "";
+      if (timeChanged) {
+        newDetails = newDetails
+          .replace(`${rOldStart}-${rOldEnd}`, `${session.startTime}-${session.endTime}`)
+          .replace(`${rOldStart}–${rOldEnd}`, `${session.startTime}–${session.endTime}`);
+      }
+      if (locationChanged && rOldLocation) {
+        newDetails = newDetails.replace(`at ${rOldLocation}`, `at ${session.location}`);
+      }
+
       await supabase
         .from("registrations")
         .update({
           booked_start_time: session.startTime,
           booked_end_time: session.endTime,
+          ...(locationChanged ? { booked_location: session.location } : {}),
           session_details: newDetails,
         })
         .eq("id", r.id);
 
-      // Email every registrant
+      // Email
       try {
         await sendTimeChangeNotification({
           parentName: r.parent_name,
@@ -123,29 +134,36 @@ export async function GET(req: NextRequest) {
           kids: r.kids,
           date: session.date,
           sessionLabel: session.group,
-          oldStartTime,
-          oldEndTime,
+          oldStartTime: rOldStart,
+          oldEndTime: rOldEnd,
           newStartTime: session.startTime,
           newEndTime: session.endTime,
-          location: r.booked_location || session.location,
+          location: session.location,
+          changeType,
+          oldLocation: locationChanged ? rOldLocation : undefined,
         });
         totalEmailsSent++;
       } catch (err) {
-        console.error("Time change email failed for", r.email, err);
+        console.error("Change notification email failed for", r.email, err);
       }
 
-      // SMS for anyone who opted in
+      // SMS
       if (r.sms_consent) {
         const dateStr = formatDateWithDay(session.date);
-        const smsBody =
-          `Mesa Basketball: ${dateStr} time update. ${session.group}: ` +
-          `now ${session.startTime}-${session.endTime} (was ${oldStartTime}-${oldEndTime}). ` +
-          `Same location. Questions? (631) 599-1280. Reply STOP to opt out.`;
+        const locName = resolveLocationName(session.location);
+        let smsBody: string;
+        if (changeType === "both") {
+          smsBody = `TIME & LOCATION CHANGE\nMesa Basketball: ${session.group} on ${dateStr}\nNew time: ${session.startTime}-${session.endTime}\nNew location: ${locName}\nQuestions? (631) 599-1280. Reply STOP to opt out.`;
+        } else if (changeType === "time") {
+          smsBody = `TIME CHANGE\nMesa Basketball: ${session.group} on ${dateStr}\nNew time: ${session.startTime}-${session.endTime} (was ${rOldStart}-${rOldEnd})\nLocation: ${locName}\nQuestions? (631) 599-1280. Reply STOP to opt out.`;
+        } else {
+          smsBody = `LOCATION CHANGE\nMesa Basketball: ${session.group} on ${dateStr}\nNew location: ${locName}\nTime: ${session.startTime}-${session.endTime}\nQuestions? (631) 599-1280. Reply STOP to opt out.`;
+        }
         try {
           await sendSMS(r.phone, smsBody);
           totalSmsSent++;
         } catch (err) {
-          console.error("Time change SMS failed for", r.phone, err);
+          console.error("Change notification SMS failed for", r.phone, err);
         }
       }
 

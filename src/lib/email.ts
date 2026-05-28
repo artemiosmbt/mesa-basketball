@@ -553,61 +553,81 @@ export async function sendTimeChangeNotification(data: {
   newStartTime: string;
   newEndTime: string;
   location: string;
+  changeType?: "time" | "location" | "both";
+  oldLocation?: string;
 }) {
   const resend = getResend();
+  const changeType = data.changeType ?? "time";
 
-  const formattedDate = new Date(data.date + "T12:00:00").toLocaleDateString("en-US", {
-    weekday: "long", month: "long", day: "numeric", year: "numeric",
-  });
+  const dateObj = new Date(data.date);
+  const formattedDate = isNaN(dateObj.getTime())
+    ? data.date
+    : dateObj.toLocaleDateString("en-US", {
+        weekday: "long", month: "long", day: "numeric", year: "numeric",
+        timeZone: "UTC",
+      });
 
   const locEntry = LOCATION_MAP[data.location];
-  const locDisplay = locEntry
+  const newLocDisplay = locEntry
     ? `<a href="${locEntry.url}" style="color: #d4af37;">${locEntry.name}</a>`
     : data.location;
+  const oldLocEntry = data.oldLocation ? LOCATION_MAP[data.oldLocation] : undefined;
+  const oldLocText = oldLocEntry ? oldLocEntry.name : (data.oldLocation ?? data.location);
+
+  const subjectLabel =
+    changeType === "both" ? "Session Schedule Update" :
+    changeType === "location" ? "Session Location Update" :
+    "Session Time Update";
+
+  const descText =
+    changeType === "both" ? "Your upcoming group session time and location have changed." :
+    changeType === "location" ? "Your upcoming group session location has changed. The time stays the same." :
+    "Your upcoming group session time has changed. Everything else stays the same.";
+
+  const td = (bg: string, label: string, value: string, extraStyle = "") =>
+    `<tr><td style="padding:10px 14px;background:${bg};color:#9ca3af;font-size:13px;width:110px;">${label}</td><td style="padding:10px 14px;background:${bg};color:#ffffff;${extraStyle}">${value}</td></tr>`;
+
+  const rows: string[] = [
+    td("#1e1e1e", "Date", `<strong>${formattedDate}</strong>`),
+    td("#161616", "Session", data.sessionLabel),
+  ];
+
+  if (changeType !== "location") {
+    rows.push(`<tr><td style="padding:10px 14px;background:#1e1e1e;color:#9ca3af;font-size:13px;width:110px;">Old Time</td><td style="padding:10px 14px;background:#1e1e1e;color:#f87171;text-decoration:line-through;">${data.oldStartTime}–${data.oldEndTime}</td></tr>`);
+    rows.push(`<tr><td style="padding:10px 14px;background:#161616;color:#9ca3af;font-size:13px;">New Time</td><td style="padding:10px 14px;background:#161616;color:#4ade80;font-weight:bold;font-size:15px;">${data.newStartTime}–${data.newEndTime}</td></tr>`);
+  } else {
+    rows.push(td("#1e1e1e", "Time", `${data.newStartTime}–${data.newEndTime}`));
+  }
+
+  if (changeType !== "time") {
+    rows.push(`<tr><td style="padding:10px 14px;background:#1e1e1e;color:#9ca3af;font-size:13px;">Old Location</td><td style="padding:10px 14px;background:#1e1e1e;color:#f87171;text-decoration:line-through;">${oldLocText}</td></tr>`);
+    rows.push(`<tr><td style="padding:10px 14px;background:#161616;color:#9ca3af;font-size:13px;">New Location</td><td style="padding:10px 14px;background:#161616;color:#4ade80;font-weight:bold;font-size:15px;">${newLocDisplay}</td></tr>`);
+  } else {
+    rows.push(td("#1e1e1e", "Location", newLocDisplay));
+  }
+
+  rows.push(td("#161616", "Athletes", data.kids));
 
   const result = await resend.emails.send({
     from: FROM_EMAIL,
     to: data.email,
     replyTo: ARTEMI_EMAIL,
-    subject: `Session Time Update — Mesa Basketball Training`,
+    subject: `${subjectLabel} — Mesa Basketball Training`,
     html: `
-      <h2>Session Time Update</h2>
+      <h2>${subjectLabel}</h2>
       <p>Hi ${data.parentName},</p>
-      <p>Your upcoming group session time has changed. Everything else stays the same.</p>
+      <p>${descText}</p>
       <table style="border-collapse: collapse; width: 100%; margin: 16px 0; border-radius: 8px; overflow: hidden;">
-        <tr>
-          <td style="padding: 10px 14px; background: #1e1e1e; color: #9ca3af; font-size: 13px; width: 110px;">Date</td>
-          <td style="padding: 10px 14px; background: #1e1e1e; color: #ffffff; font-weight: bold;">${formattedDate}</td>
-        </tr>
-        <tr>
-          <td style="padding: 10px 14px; background: #161616; color: #9ca3af; font-size: 13px;">Session</td>
-          <td style="padding: 10px 14px; background: #161616; color: #ffffff;">${data.sessionLabel}</td>
-        </tr>
-        <tr>
-          <td style="padding: 10px 14px; background: #1e1e1e; color: #9ca3af; font-size: 13px;">Old Time</td>
-          <td style="padding: 10px 14px; background: #1e1e1e; color: #f87171; text-decoration: line-through;">${data.oldStartTime}–${data.oldEndTime}</td>
-        </tr>
-        <tr>
-          <td style="padding: 10px 14px; background: #161616; color: #9ca3af; font-size: 13px;">New Time</td>
-          <td style="padding: 10px 14px; background: #161616; color: #4ade80; font-weight: bold; font-size: 15px;">${data.newStartTime}–${data.newEndTime}</td>
-        </tr>
-        <tr>
-          <td style="padding: 10px 14px; background: #1e1e1e; color: #9ca3af; font-size: 13px;">Location</td>
-          <td style="padding: 10px 14px; background: #1e1e1e; color: #ffffff;">${locDisplay}</td>
-        </tr>
-        <tr>
-          <td style="padding: 10px 14px; background: #161616; color: #9ca3af; font-size: 13px;">Athletes</td>
-          <td style="padding: 10px 14px; background: #161616; color: #ffffff;">${data.kids}</td>
-        </tr>
+        ${rows.join("")}
       </table>
-      <p>We apologize for any inconvenience. Please update your calendar to reflect the new time.</p>
+      <p>We apologize for any inconvenience. Please update your calendar to reflect the change.</p>
       <p><a href="${BASE_URL}/my-bookings" style="color: #d4af37; font-weight: bold;">View My Bookings</a></p>
       <br/>
       <p>Questions? Contact Artemios at (631) 599-1280 or email <a href="mailto:artemios@mesabasketballtraining.com">artemios@mesabasketballtraining.com</a>.</p>
       <p>— Mesa Basketball Training</p>
     `,
   });
-  if (result.error) console.error("Time change email error for", data.email, result.error);
+  if (result.error) console.error("Change notification email error for", data.email, result.error);
 }
 
 export async function sendRescheduleNotification(data: {
