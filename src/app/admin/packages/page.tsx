@@ -48,6 +48,9 @@ export default function PackagesPage() {
   const [token, setToken] = useState<string | null>(null);
   const [toggling, setToggling] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [editingUsed, setEditingUsed] = useState<string | null>(null);
+  const [editUsedValue, setEditUsedValue] = useState(0);
+  const [savingUsed, setSavingUsed] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [monthFilter, setMonthFilter] = useState("all");
 
@@ -91,6 +94,20 @@ export default function PackagesPage() {
     });
     setPackages((prev) => prev.filter((p) => p.id !== id));
     setDeleting(null);
+  }
+
+  async function saveSessionsUsed(pkg: Package) {
+    if (!token) return;
+    const val = Math.max(0, Math.min(editUsedValue, pkg.package_type));
+    setSavingUsed(pkg.id);
+    await fetch("/api/admin/packages", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ id: pkg.id, sessions_used: val }),
+    });
+    setPackages((prev) => prev.map((p) => (p.id === pkg.id ? { ...p, sessions_used: val } : p)));
+    setEditingUsed(null);
+    setSavingUsed(null);
   }
 
   const allMonths = useMemo(() => {
@@ -163,10 +180,38 @@ export default function PackagesPage() {
           </div>
           <div>
             <p className="text-brown-500 uppercase tracking-wider mb-0.5">Sessions</p>
-            <p className="text-brown-200">
-              <span className="font-bold text-mesa-accent">{remaining}</span>
-              <span className="text-brown-500"> / {pkg.package_type} left</span>
-            </p>
+            {editingUsed === pkg.id ? (
+              <div className="flex items-center gap-1 mt-0.5">
+                <input
+                  type="number"
+                  min={0}
+                  max={pkg.package_type}
+                  value={editUsedValue}
+                  onChange={(e) => setEditUsedValue(parseInt(e.target.value) || 0)}
+                  className="w-12 rounded border border-brown-600 bg-brown-800 px-1.5 py-0.5 text-sm text-white text-center focus:border-mesa-accent focus:outline-none"
+                  autoFocus
+                />
+                <span className="text-brown-500 text-xs">used</span>
+                <button
+                  onClick={() => saveSessionsUsed(pkg)}
+                  disabled={savingUsed === pkg.id}
+                  className="text-xs text-green-400 hover:text-green-300 font-semibold disabled:opacity-50"
+                >
+                  {savingUsed === pkg.id ? "..." : "Save"}
+                </button>
+                <button onClick={() => setEditingUsed(null)} className="text-xs text-brown-500 hover:text-brown-300">✕</button>
+              </div>
+            ) : (
+              <button
+                onClick={() => { setEditingUsed(pkg.id); setEditUsedValue(pkg.sessions_used); }}
+                className="text-left hover:opacity-75 transition"
+                title="Click to edit"
+              >
+                <span className="font-bold text-mesa-accent">{remaining}</span>
+                <span className="text-brown-500"> / {pkg.package_type} left</span>
+                <span className="ml-1 text-brown-600 text-xs">✎</span>
+              </button>
+            )}
             <div className="flex gap-0.5 mt-1">
               {Array.from({ length: pkg.package_type }).map((_, i) => (
                 <div key={i} className={`h-1.5 flex-1 rounded-full ${i < pkg.sessions_used ? "bg-mesa-accent/50" : "bg-mesa-accent"}`} />
@@ -371,15 +416,35 @@ export default function PackagesPage() {
                         </div>
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
-                        <div className="text-sm">
-                          <span className="font-bold text-mesa-accent">{remaining}</span>
-                          <span className="text-brown-500 text-xs"> / {pkg.package_type} left</span>
-                        </div>
-                        <div className="flex gap-0.5 mt-1">
-                          {Array.from({ length: pkg.package_type }).map((_, i) => (
-                            <div key={i} className={`h-1.5 w-3 rounded-full ${i < pkg.sessions_used ? "bg-mesa-accent/40" : "bg-mesa-accent"}`} />
-                          ))}
-                        </div>
+                        {editingUsed === pkg.id ? (
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="number"
+                              min={0}
+                              max={pkg.package_type}
+                              value={editUsedValue}
+                              onChange={(e) => setEditUsedValue(parseInt(e.target.value) || 0)}
+                              className="w-12 rounded border border-brown-600 bg-brown-800 px-1.5 py-0.5 text-sm text-white text-center focus:border-mesa-accent focus:outline-none"
+                              autoFocus
+                            />
+                            <span className="text-brown-500 text-xs">used</span>
+                            <button onClick={() => saveSessionsUsed(pkg)} disabled={savingUsed === pkg.id} className="text-xs text-green-400 hover:text-green-300 font-semibold disabled:opacity-50">{savingUsed === pkg.id ? "..." : "Save"}</button>
+                            <button onClick={() => setEditingUsed(null)} className="text-xs text-brown-500 hover:text-brown-300">✕</button>
+                          </div>
+                        ) : (
+                          <button onClick={() => { setEditingUsed(pkg.id); setEditUsedValue(pkg.sessions_used); }} className="text-left hover:opacity-75 transition" title="Click to edit">
+                            <div className="text-sm">
+                              <span className="font-bold text-mesa-accent">{remaining}</span>
+                              <span className="text-brown-500 text-xs"> / {pkg.package_type} left</span>
+                              <span className="ml-1 text-brown-600 text-xs">✎</span>
+                            </div>
+                            <div className="flex gap-0.5 mt-1">
+                              {Array.from({ length: pkg.package_type }).map((_, i) => (
+                                <div key={i} className={`h-1.5 w-3 rounded-full ${i < pkg.sessions_used ? "bg-mesa-accent/40" : "bg-mesa-accent"}`} />
+                              ))}
+                            </div>
+                          </button>
+                        )}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
                         <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
