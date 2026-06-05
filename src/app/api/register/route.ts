@@ -153,21 +153,22 @@ export async function POST(req: NextRequest) {
           await addReferralCredit(weeklyReferrer.email);
           await sendReferralCreditNotification({ referrerName: weeklyReferrer.name, referrerEmail: weeklyReferrer.email, newClientName: parentName });
         }
+      } catch (notifyErr) {
+        console.error("Weekly booking email failed (booking was saved):", notifyErr);
+      }
 
-        if (smsConsent) {
-          const sessionLines = weeklySessions.map((s: { date: string; startTime: string; endTime: string; location: string }) =>
-            `${formatDateWithDay(s.date)} | ${s.startTime}-${s.endTime}\nLocation: ${resolveLocationName(s.location)}`
-          ).join("\n");
-          const count = weeklySessions.length;
-          await sendSMS(phone, `Mesa Basketball: ${count === 1 ? "Session" : `${count} sessions`} confirmed!\n${sessionLines}\nAthlete: ${kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
-        }
-        const adminLines = weeklySessions.map((s: { date: string; startTime: string; endTime: string; location: string }) =>
+      // SMS runs independently so it always fires even if email throws
+      if (smsConsent) {
+        const sessionLines = weeklySessions.map((s: { date: string; startTime: string; endTime: string; location: string }) =>
           `${formatDateWithDay(s.date)} | ${s.startTime}-${s.endTime}\nLocation: ${resolveLocationName(s.location)}`
         ).join("\n");
-        await sendAdminSMS(`NEW BOOKING: ${parentName}\n${weeklySessions.length} group session${weeklySessions.length !== 1 ? "s" : ""}:\n${adminLines}\nPlayers: ${kids}`);
-      } catch (notifyErr) {
-        console.error("Weekly booking notifications failed (booking was saved):", notifyErr);
+        const count = weeklySessions.length;
+        await sendSMS(phone, `Mesa Basketball: ${count === 1 ? "Session" : `${count} sessions`} confirmed!\n${sessionLines}\nAthlete: ${kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
       }
+      const adminLines = weeklySessions.map((s: { date: string; startTime: string; endTime: string; location: string }) =>
+        `${formatDateWithDay(s.date)} | ${s.startTime}-${s.endTime}\nLocation: ${resolveLocationName(s.location)}`
+      ).join("\n");
+      await sendAdminSMS(`NEW BOOKING: ${parentName}\n${weeklySessions.length} group session${weeklySessions.length !== 1 ? "s" : ""}:\n${adminLines}\nPlayers: ${kids}`);
 
       // Update Google Calendar for each weekly session
       for (const session of weeklySessions) {
@@ -285,21 +286,22 @@ export async function POST(req: NextRequest) {
           await addReferralCredit(campReferrer.email);
           await sendReferralCreditNotification({ referrerName: campReferrer.name, referrerEmail: campReferrer.email, newClientName: parentName });
         }
+      } catch (notifyErr) {
+        console.error("Camp booking email failed (booking was saved):", notifyErr);
+      }
 
-        if (smsConsent) {
-          const campDayLines = campSessions.map((s: { date: string; startTime: string; endTime?: string; location: string }) =>
-            `${formatDateWithDay(s.date)} | ${s.startTime}${s.endTime ? `-${s.endTime}` : ""}\nLocation: ${resolveLocationName(s.location)}`
-          ).join("\n");
-          const priceText = campTotalPrice ? ` Total: ${campTotalPrice}.` : "";
-          await sendSMS(phone, `Mesa Basketball: Camp confirmed (${campSessions.length} day${campSessions.length !== 1 ? "s" : ""})!${priceText}\n${campDayLines}\nAthlete: ${kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
-        }
-        const adminCampLines = campSessions.map((s: { date: string; startTime: string; endTime?: string; location: string }) =>
+      // SMS runs independently so it always fires even if email throws
+      if (smsConsent) {
+        const campDayLines = campSessions.map((s: { date: string; startTime: string; endTime?: string; location: string }) =>
           `${formatDateWithDay(s.date)} | ${s.startTime}${s.endTime ? `-${s.endTime}` : ""}\nLocation: ${resolveLocationName(s.location)}`
         ).join("\n");
-        await sendAdminSMS(`NEW BOOKING: ${parentName}\n${campSessions.length} camp day${campSessions.length !== 1 ? "s" : ""}:\n${adminCampLines}\nPlayers: ${kids}`);
-      } catch (notifyErr) {
-        console.error("Camp booking notifications failed (booking was saved):", notifyErr);
+        const priceText = campTotalPrice ? ` Total: ${campTotalPrice}.` : "";
+        await sendSMS(phone, `Mesa Basketball: Camp confirmed (${campSessions.length} day${campSessions.length !== 1 ? "s" : ""})!${priceText}\n${campDayLines}\nAthlete: ${kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
       }
+      const adminCampLines = campSessions.map((s: { date: string; startTime: string; endTime?: string; location: string }) =>
+        `${formatDateWithDay(s.date)} | ${s.startTime}${s.endTime ? `-${s.endTime}` : ""}\nLocation: ${resolveLocationName(s.location)}`
+      ).join("\n");
+      await sendAdminSMS(`NEW BOOKING: ${parentName}\n${campSessions.length} camp day${campSessions.length !== 1 ? "s" : ""}:\n${adminCampLines}\nPlayers: ${kids}`);
 
       // Update Google Calendar for each camp day
       for (const session of campSessions) {
