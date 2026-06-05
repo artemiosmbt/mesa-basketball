@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { enrollInPackage, getActivePackage } from "@/lib/supabase";
 import { sendPackageConfirmation } from "@/lib/email";
+import { sendSMS, sendAdminSMS } from "@/lib/sms";
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { parentName, email, phone, packageType, monthYear, kids, referralCode } = body;
+    const { parentName, email, phone, packageType, monthYear, kids, referralCode, smsConsent } = body;
 
     if (!parentName || !email || !phone || !packageType || !monthYear) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
@@ -29,6 +30,11 @@ export async function POST(req: NextRequest) {
     const totalPrice = packageType === 4 ? 475 : 900;
 
     await sendPackageConfirmation({ parentName, email, phone, packageType, monthYear, totalPrice, kids, referralCode });
+
+    if (smsConsent && phone) {
+      await sendSMS(phone, `Mesa Basketball: Your ${packageType}-session package is confirmed for ${monthYear}!\nBook your private sessions at mesabasketballtraining.com/schedule and we'll track them automatically.\nReply STOP to opt out.`);
+    }
+    await sendAdminSMS(`NEW PACKAGE: ${parentName}\n${packageType}-session package — ${monthYear}\nPhone: ${phone}${kids ? `\nPlayers: ${kids}` : ""}`);
 
     return NextResponse.json({ success: true, id });
   } catch (error) {

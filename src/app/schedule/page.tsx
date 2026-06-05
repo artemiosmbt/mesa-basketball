@@ -1156,6 +1156,7 @@ export default function Home() {
           monthYear: pkgMonth,
           kids: kidsStr,
           referralCode: referralCode.trim() || undefined,
+          smsConsent,
         }),
       });
       const data = await res.json();
