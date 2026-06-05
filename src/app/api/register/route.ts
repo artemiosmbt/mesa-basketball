@@ -424,23 +424,25 @@ export async function POST(req: NextRequest) {
           referralCodeUsed: submittedReferralCode || undefined,
           calendarEvent: bookedDate && bookedStartTime ? { date: bookedDate, startTime: bookedStartTime, endTime: bookedEndTime || bookedStartTime, location: bookedLocation || "" } : undefined,
         });
-
-        if (smsConsent && !emailOnly) {
-          const typeLabel = isPrivateType ? "private session" : "session";
-          const dateLine = bookedDate
-            ? `\n${formatDateWithDay(bookedDate)} | ${bookedStartTime}${bookedEndTime ? `-${bookedEndTime}` : ""}${bookedLocation ? `\nLocation: ${resolveLocationName(bookedLocation)}` : ""}`
-            : "";
-          await sendSMS(phone, `Mesa Basketball: Your ${typeLabel} is confirmed!${dateLine}\nAthlete: ${kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
-        }
-        if (!emailOnly) {
-          const adminDateLine = bookedDate
-            ? `${formatDateWithDay(bookedDate)} | ${bookedStartTime}${bookedEndTime ? `-${bookedEndTime}` : ""}${bookedLocation ? `\nLocation: ${resolveLocationName(bookedLocation)}` : ""}`
-            : sessionDetails.replace(/<br\/>/g, " | ").replace(/<[^>]+>/g, "");
-          await sendAdminSMS(`NEW BOOKING: ${parentName}\n${adminDateLine}\nPlayers: ${kids}${submittedReferralCode ? `\nRef code: ${submittedReferralCode}` : ""}`);
-        }
       } catch (notifyErr) {
-        console.error("Private booking notifications failed (booking was saved):", notifyErr);
+        console.error("Private booking email failed (booking was saved):", notifyErr);
       }
+
+      // SMS runs independently so it always fires even if email throws.
+      // Also fires for emailOnly consolidated recurring calls (no bookedDate).
+      if (smsConsent && phone) {
+        const isSingle = !!bookedDate;
+        const typeStr = isSingle ? (isPrivateType ? "private session" : "session") : "sessions";
+        const verbStr = isSingle ? "is" : "are";
+        const dateLine = isSingle
+          ? `\n${formatDateWithDay(bookedDate!)} | ${bookedStartTime}${bookedEndTime ? `-${bookedEndTime}` : ""}${bookedLocation ? `\nLocation: ${resolveLocationName(bookedLocation)}` : ""}`
+          : `\n${sessionDetails.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim()}`;
+        await sendSMS(phone, `Mesa Basketball: Your ${typeStr} ${verbStr} confirmed!${dateLine}\nAthlete: ${kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
+      }
+      const adminDateLine = bookedDate
+        ? `${formatDateWithDay(bookedDate)} | ${bookedStartTime}${bookedEndTime ? `-${bookedEndTime}` : ""}${bookedLocation ? `\nLocation: ${resolveLocationName(bookedLocation)}` : ""}`
+        : sessionDetails.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim();
+      await sendAdminSMS(`NEW BOOKING: ${parentName}\n${adminDateLine}\nPlayers: ${kids}${submittedReferralCode ? `\nRef code: ${submittedReferralCode}` : ""}`);
     }
 
     // Add to Google Calendar (private sessions only; group/camp handled above)
