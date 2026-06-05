@@ -405,6 +405,19 @@ export async function POST(req: NextRequest) {
 
     // Send emails (unless this registration should skip email)
     if (!skipEmail) {
+      // For emailOnly consolidated recurring: look up active package to get remaining count
+      let effectivePkgRemaining = packageSessionsRemaining;
+      let effectivePkgType = packageType;
+      if (emailOnly && isPrivateType) {
+        const now = new Date();
+        const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+        const activePkg = await getActivePackage(email, currentMonth).catch(() => null);
+        if (activePkg) {
+          effectivePkgRemaining = activePkg.package_type - activePkg.sessions_used;
+          effectivePkgType = activePkg.package_type;
+        }
+      }
+
       try {
         await sendRegistrationNotification({
           parentName,
@@ -417,8 +430,8 @@ export async function POST(req: NextRequest) {
           manageToken,
           isFree,
           isFirstTime,
-          packageSessionsRemaining,
-          packageType,
+          packageSessionsRemaining: effectivePkgRemaining,
+          packageType: effectivePkgType,
           referralCode,
           referredBy: privateReferrer?.name,
           referralCodeUsed: submittedReferralCode || undefined,
@@ -437,12 +450,18 @@ export async function POST(req: NextRequest) {
         const dateLine = isSingle
           ? `\n${formatDateWithDay(bookedDate!)} | ${bookedStartTime}${bookedEndTime ? `-${bookedEndTime}` : ""}${bookedLocation ? `\nLocation: ${resolveLocationName(bookedLocation)}` : ""}`
           : `\n${sessionDetails.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim()}`;
-        await sendSMS(phone, `Mesa Basketball: Your ${typeStr} ${verbStr} confirmed!${dateLine}\nAthlete: ${kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
+        const pkgNote = effectivePkgRemaining !== undefined
+          ? `\n${effectivePkgRemaining} session${effectivePkgRemaining !== 1 ? "s" : ""} remaining in your package.`
+          : "";
+        await sendSMS(phone, `Mesa Basketball: Your ${typeStr} ${verbStr} confirmed!${dateLine}${pkgNote}\nAthlete: ${kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
       }
       const adminDateLine = bookedDate
         ? `${formatDateWithDay(bookedDate)} | ${bookedStartTime}${bookedEndTime ? `-${bookedEndTime}` : ""}${bookedLocation ? `\nLocation: ${resolveLocationName(bookedLocation)}` : ""}`
         : sessionDetails.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim();
-      await sendAdminSMS(`NEW BOOKING: ${parentName}\n${adminDateLine}\nPlayers: ${kids}${submittedReferralCode ? `\nRef code: ${submittedReferralCode}` : ""}`);
+      const pkgAdminNote = effectivePkgRemaining !== undefined
+        ? `\nPkg: ${effectivePkgRemaining}/${effectivePkgType} remaining`
+        : "";
+      await sendAdminSMS(`NEW BOOKING: ${parentName}\n${adminDateLine}\nPlayers: ${kids}${pkgAdminNote}${submittedReferralCode ? `\nRef code: ${submittedReferralCode}` : ""}`);
     }
 
     // Add to Google Calendar (private sessions only; group/camp handled above)

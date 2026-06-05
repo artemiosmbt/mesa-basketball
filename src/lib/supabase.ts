@@ -521,28 +521,46 @@ export async function setPackageSessions(id: string, count: number): Promise<voi
     .eq("id", id);
 }
 
-/** Count confirmed private/group-private registrations for an email in a given month */
-export async function countConfirmedPrivateSessions(email: string, monthYear: string): Promise<number> {
+/** Count confirmed private/group-private registrations for an email in a given month.
+ *  Also falls back to matching by phone if phone is provided, in case the email
+ *  in the package differs from the email stored in registrations. */
+export async function countConfirmedPrivateSessions(email: string, monthYear: string, phone?: string): Promise<number> {
   const supabase = getSupabase();
+
+  function filterByMonth(data: { booked_date: string }[]): number {
+    return data.filter((r) => {
+      const raw = r.booked_date as string;
+      const d = /^\d{4}-\d{2}-\d{2}$/.test(raw)
+        ? new Date(raw + "T12:00:00")
+        : new Date(raw);
+      if (isNaN(d.getTime())) return false;
+      const m = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      return m === monthYear;
+    }).length;
+  }
+
+  const normalizedEmail = email.toLowerCase().trim();
   const { data, error } = await supabase
     .from("registrations")
-    .select("booked_date")
-    .eq("email", email.toLowerCase().trim())
+    .select("booked_date, email, phone")
     .eq("status", "confirmed")
     .in("type", ["private", "group-private"])
     .not("booked_date", "is", null);
 
   if (error || !data) return 0;
 
-  return data.filter((r) => {
-    const raw = r.booked_date as string;
-    const d = /^\d{4}-\d{2}-\d{2}$/.test(raw)
-      ? new Date(raw + "T12:00:00")
-      : new Date(raw);
-    if (isNaN(d.getTime())) return false;
-    const m = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-    return m === monthYear;
-  }).length;
+  // Match by email first
+  const byEmail = data.filter((r) => (r.email || "").toLowerCase().trim() === normalizedEmail);
+  if (byEmail.length > 0) return filterByMonth(byEmail);
+
+  // Fallback: match by phone (last 10 digits) if email produced no results
+  if (phone) {
+    const normalizedPhone = phone.replace(/\D/g, "").slice(-10);
+    const byPhone = data.filter((r) => (r.phone || "").replace(/\D/g, "").slice(-10) === normalizedPhone);
+    return filterByMonth(byPhone);
+  }
+
+  return 0;
 }
 
 export async function getPackagesNeedingReminder(monthYear: string): Promise<MonthlyPackage[]> {

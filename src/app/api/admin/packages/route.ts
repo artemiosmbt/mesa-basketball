@@ -33,9 +33,10 @@ export async function GET(req: NextRequest) {
 
   const packages = data || [];
 
-  // Recalculate sessions_used from actual registrations to keep counts accurate
+  // Recalculate sessions_used from actual registrations to keep counts accurate.
+  // Phone is passed as fallback in case the package email differs from the booking email.
   await Promise.all(packages.map(async (pkg) => {
-    const actual = await countConfirmedPrivateSessions(pkg.email, pkg.month_year);
+    const actual = await countConfirmedPrivateSessions(pkg.email, pkg.month_year, pkg.phone);
     const corrected = Math.min(actual, pkg.package_type);
     if (corrected !== pkg.sessions_used) {
       await setPackageSessions(pkg.id, corrected);
