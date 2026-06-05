@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { enrollInPackage, getActivePackage } from "@/lib/supabase";
+import { enrollInPackage, getActivePackage, countConfirmedPrivateSessions, setPackageSessions } from "@/lib/supabase";
 import { sendPackageConfirmation } from "@/lib/email";
 import { sendSMS, sendAdminSMS } from "@/lib/sms";
 
@@ -26,6 +26,12 @@ export async function POST(req: NextRequest) {
     }
 
     const { id } = await enrollInPackage({ email, parentName, phone, packageType, monthYear });
+
+    // Seed sessions_used from any private sessions already booked this month
+    const existingCount = await countConfirmedPrivateSessions(email, monthYear);
+    if (existingCount > 0) {
+      await setPackageSessions(id, Math.min(existingCount, packageType));
+    }
 
     const totalPrice = packageType === 4 ? 475 : 900;
 

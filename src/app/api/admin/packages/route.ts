@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { ADMIN_EMAIL } from "@/lib/auth";
+import { countConfirmedPrivateSessions, setPackageSessions } from "@/lib/supabase";
 
 async function verifyAdmin(req: NextRequest) {
   const token = req.headers.get("authorization")?.replace("Bearer ", "");
@@ -29,7 +30,20 @@ export async function GET(req: NextRequest) {
     .order("created_at", { ascending: false });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ packages: data || [] });
+
+  const packages = data || [];
+
+  // Recalculate sessions_used from actual registrations to keep counts accurate
+  await Promise.all(packages.map(async (pkg) => {
+    const actual = await countConfirmedPrivateSessions(pkg.email, pkg.month_year);
+    const corrected = Math.min(actual, pkg.package_type);
+    if (corrected !== pkg.sessions_used) {
+      await setPackageSessions(pkg.id, corrected);
+      pkg.sessions_used = corrected;
+    }
+  }));
+
+  return NextResponse.json({ packages });
 }
 
 export async function DELETE(req: NextRequest) {
