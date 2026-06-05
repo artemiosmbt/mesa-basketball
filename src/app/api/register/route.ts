@@ -146,6 +146,7 @@ export async function POST(req: NextRequest) {
           totalParticipants: totalParticipants || 1,
           referralCode,
           referredBy: weeklyReferrer?.name,
+          referralCodeUsed: submittedReferralCode || undefined,
           calendarEvent: weeklySessions[0] ? { date: weeklySessions[0].date, startTime: weeklySessions[0].startTime, endTime: weeklySessions[0].endTime, location: weeklySessions[0].location } : undefined,
         });
 
@@ -168,7 +169,7 @@ export async function POST(req: NextRequest) {
       const adminLines = weeklySessions.map((s: { date: string; startTime: string; endTime: string; location: string }) =>
         `${formatDateWithDay(s.date)} | ${s.startTime}-${s.endTime}\nLocation: ${resolveLocationName(s.location)}`
       ).join("\n");
-      await sendAdminSMS(`NEW BOOKING: ${parentName}\n${weeklySessions.length} group session${weeklySessions.length !== 1 ? "s" : ""}:\n${adminLines}\nPlayers: ${kids}`);
+      await sendAdminSMS(`NEW BOOKING: ${parentName}\n${weeklySessions.length} group session${weeklySessions.length !== 1 ? "s" : ""}:\n${adminLines}\nPlayers: ${kids}${submittedReferralCode ? `\nRef code: ${submittedReferralCode}` : ""}`);
 
       // Update Google Calendar for each weekly session
       for (const session of weeklySessions) {
@@ -279,6 +280,7 @@ export async function POST(req: NextRequest) {
           totalParticipants: totalParticipants || 1,
           referralCode,
           referredBy: campReferrer?.name,
+          referralCodeUsed: submittedReferralCode || undefined,
           calendarEvent: { date: firstSession.date, startTime: firstSession.startTime, endTime: firstSession.endTime || firstSession.startTime, location: firstSession.location },
         });
 
@@ -301,7 +303,7 @@ export async function POST(req: NextRequest) {
       const adminCampLines = campSessions.map((s: { date: string; startTime: string; endTime?: string; location: string }) =>
         `${formatDateWithDay(s.date)} | ${s.startTime}${s.endTime ? `-${s.endTime}` : ""}\nLocation: ${resolveLocationName(s.location)}`
       ).join("\n");
-      await sendAdminSMS(`NEW BOOKING: ${parentName}\n${campSessions.length} camp day${campSessions.length !== 1 ? "s" : ""}:\n${adminCampLines}\nPlayers: ${kids}`);
+      await sendAdminSMS(`NEW BOOKING: ${parentName}\n${campSessions.length} camp day${campSessions.length !== 1 ? "s" : ""}:\n${adminCampLines}\nPlayers: ${kids}${submittedReferralCode ? `\nRef code: ${submittedReferralCode}` : ""}`);
 
       // Update Google Calendar for each camp day
       for (const session of campSessions) {
@@ -419,6 +421,7 @@ export async function POST(req: NextRequest) {
           packageType,
           referralCode,
           referredBy: privateReferrer?.name,
+          referralCodeUsed: submittedReferralCode || undefined,
           calendarEvent: bookedDate && bookedStartTime ? { date: bookedDate, startTime: bookedStartTime, endTime: bookedEndTime || bookedStartTime, location: bookedLocation || "" } : undefined,
         });
 
@@ -433,7 +436,7 @@ export async function POST(req: NextRequest) {
           const adminDateLine = bookedDate
             ? `${formatDateWithDay(bookedDate)} | ${bookedStartTime}${bookedEndTime ? `-${bookedEndTime}` : ""}${bookedLocation ? `\nLocation: ${resolveLocationName(bookedLocation)}` : ""}`
             : sessionDetails.replace(/<br\/>/g, " | ").replace(/<[^>]+>/g, "");
-          await sendAdminSMS(`NEW BOOKING: ${parentName}\n${adminDateLine}\nPlayers: ${kids}`);
+          await sendAdminSMS(`NEW BOOKING: ${parentName}\n${adminDateLine}\nPlayers: ${kids}${submittedReferralCode ? `\nRef code: ${submittedReferralCode}` : ""}`);
         }
       } catch (notifyErr) {
         console.error("Private booking notifications failed (booking was saved):", notifyErr);

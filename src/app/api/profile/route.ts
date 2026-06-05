@@ -25,8 +25,13 @@ export async function GET(req: NextRequest) {
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const supabase = getSupabaseAdmin();
-  const { data } = await supabase.from("profiles").select("*").eq("id", user.id).single();
-  return NextResponse.json(data || {});
+  const [{ data }, { count: bookingCount }] = await Promise.all([
+    supabase.from("profiles").select("*").eq("id", user.id).single(),
+    supabase.from("registrations").select("*", { count: "exact", head: true })
+      .eq("email", user.email!.toLowerCase().trim())
+      .eq("status", "confirmed"),
+  ]);
+  return NextResponse.json({ ...(data || {}), is_returning_client: (bookingCount || 0) > 0 });
 }
 
 export async function POST(req: NextRequest) {

@@ -101,6 +101,7 @@ export async function sendRegistrationNotification(data: {
   packageType?: number;
   referralCode?: string;
   referredBy?: string;
+  referralCodeUsed?: string;
   calendarEvent?: { date: string; startTime: string; endTime: string; location: string; };
 }) {
   const resend = getResend();
@@ -136,6 +137,7 @@ export async function sendRegistrationNotification(data: {
       ${isPackageBooking ? `<p><strong>Package:</strong> ${data.packageType}-session monthly plan — ${data.packageSessionsRemaining} session${data.packageSessionsRemaining !== 1 ? "s" : ""} remaining after this booking</p>` : ""}
       ${data.isFree && !isPackageBooking ? `<p><strong style="color: #d4af37;">${data.isFirstTime ? "First-Time Discount" : "Referral Credit"}: 50% off applied</strong></p>` : ""}
       ${data.referredBy ? `<p><strong>Referred by:</strong> ${data.referredBy}</p>` : ""}
+      ${data.referralCodeUsed ? `<p><strong>Referral code used:</strong> ${data.referralCodeUsed}</p>` : ""}
     `,
   });
   if (adminResult.error) console.error("Resend admin email error:", adminResult.error);

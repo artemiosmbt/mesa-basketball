@@ -538,6 +538,7 @@ export default function Home() {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [smsConsent, setSmsConsent] = useState(false);
+  const [isReturningClient, setIsReturningClient] = useState(false);
   const [kids, setKids] = useState([{ name: "", dob: "", grade: "", gender: "" }]);
   const [showGenderWarning, setShowGenderWarning] = useState(false);
   const [isGroupRate, setIsGroupRate] = useState(false);
@@ -673,6 +674,7 @@ export default function Home() {
             : [{ name: "", dob: "", grade: "", gender: "" }];
           if (profile.kids?.length) setKids(normalizedKids);
           if (profile.sms_consent) setSmsConsent(true);
+          if (profile.is_returning_client) setIsReturningClient(true);
           profileRef.current = {
             firstName: nameSplit.first,
             lastName: nameSplit.last,
@@ -2617,8 +2619,8 @@ export default function Home() {
                   ))}
                 </div>
 
-                {/* Referral Code */}
-                {(modal.type === "private" || modal.type === "group-private" || modal.type === "weekly") && (
+                {/* Referral Code — only shown to first-time clients */}
+                {!isReturningClient && (modal.type === "private" || modal.type === "group-private" || modal.type === "weekly") && (
                   <div>
                     <div className="mb-1 flex items-center gap-2">
                       <label className="text-sm font-medium text-brown-300">Referral Code <span className="text-brown-500 font-normal">(optional)</span></label>
