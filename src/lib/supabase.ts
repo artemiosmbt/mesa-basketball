@@ -521,30 +521,41 @@ export async function setPackageSessions(id: string, count: number): Promise<voi
     .eq("id", id);
 }
 
-/** Count confirmed private/group-private registrations for an email.
- *  Does NOT filter by month — a package covers N sessions total regardless of
- *  which calendar month the booked dates fall in (recurring bookings often span months).
+/** Count confirmed private/group-private registrations for an email in a given month.
  *  Falls back to phone matching if email yields 0 results. */
-export async function countConfirmedPrivateSessions(email: string, _monthYear: string, phone?: string): Promise<number> {
+export async function countConfirmedPrivateSessions(email: string, monthYear: string, phone?: string): Promise<number> {
   const supabase = getSupabase();
   const normalizedEmail = email.toLowerCase().trim();
 
   const { data, error } = await supabase
     .from("registrations")
-    .select("email, phone")
+    .select("booked_date, email, phone")
     .eq("status", "confirmed")
-    .in("type", ["private", "group-private"]);
+    .in("type", ["private", "group-private"])
+    .not("booked_date", "is", null);
 
   if (error || !data) return 0;
 
+  function inMonth(rows: { booked_date: string }[]): number {
+    return rows.filter((r) => {
+      const raw = r.booked_date as string;
+      const d = /^\d{4}-\d{2}-\d{2}$/.test(raw)
+        ? new Date(raw + "T12:00:00")
+        : new Date(raw);
+      if (isNaN(d.getTime())) return false;
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}` === monthYear;
+    }).length;
+  }
+
   // Match by email first
   const byEmail = data.filter((r) => (r.email || "").toLowerCase().trim() === normalizedEmail);
-  if (byEmail.length > 0) return byEmail.length;
+  if (byEmail.length > 0) return inMonth(byEmail);
 
-  // Fallback: match by phone (last 10 digits) if email produced no results
+  // Fallback: match by phone if email yielded nothing
   if (phone) {
     const normalizedPhone = phone.replace(/\D/g, "").slice(-10);
-    return data.filter((r) => (r.phone || "").replace(/\D/g, "").slice(-10) === normalizedPhone).length;
+    const byPhone = data.filter((r) => (r.phone || "").replace(/\D/g, "").slice(-10) === normalizedPhone);
+    return inMonth(byPhone);
   }
 
   return 0;
