@@ -23,6 +23,18 @@ export async function GET(req: NextRequest) {
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
 
+  const { searchParams } = new URL(req.url);
+  const emailFilter = searchParams.get("email");
+
+  if (emailFilter) {
+    const { data: registrations } = await supabase
+      .from("registrations")
+      .select("*")
+      .ilike("email", emailFilter.trim())
+      .order("booked_date", { ascending: true });
+    return NextResponse.json({ registrations: registrations || [] });
+  }
+
   const [{ data: registrations }, { data: profiles }] = await Promise.all([
     supabase.from("registrations").select("*").order("created_at", { ascending: false }),
     supabase.from("profiles").select("email, video_consent"),

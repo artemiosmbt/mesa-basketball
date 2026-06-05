@@ -48,9 +48,9 @@ export default function PackagesPage() {
   const [token, setToken] = useState<string | null>(null);
   const [toggling, setToggling] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
-  const [editingUsed, setEditingUsed] = useState<string | null>(null);
-  const [editUsedValue, setEditUsedValue] = useState(0);
-  const [savingUsed, setSavingUsed] = useState<string | null>(null);
+  const [expandedPkg, setExpandedPkg] = useState<string | null>(null);
+  const [pkgSessionsMap, setPkgSessionsMap] = useState<Record<string, { booked_date: string | null; booked_start_time: string | null; booked_end_time: string | null; booked_location: string | null; kids: string; status: string }[]>>({});
+  const [loadingPkg, setLoadingPkg] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [monthFilter, setMonthFilter] = useState("all");
 
@@ -96,18 +96,23 @@ export default function PackagesPage() {
     setDeleting(null);
   }
 
-  async function saveSessionsUsed(pkg: Package) {
-    if (!token) return;
-    const val = Math.max(0, Math.min(editUsedValue, pkg.package_type));
-    setSavingUsed(pkg.id);
-    await fetch("/api/admin/packages", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ id: pkg.id, sessions_used: val }),
+  async function toggleExpanded(pkg: Package) {
+    if (expandedPkg === pkg.id) {
+      setExpandedPkg(null);
+      return;
+    }
+    setExpandedPkg(pkg.id);
+    if (pkgSessionsMap[pkg.id]) return; // already loaded
+    setLoadingPkg(pkg.id);
+    const res = await fetch(`/api/admin/data?email=${encodeURIComponent(pkg.email)}`, {
+      headers: { Authorization: `Bearer ${token}` },
     });
-    setPackages((prev) => prev.map((p) => (p.id === pkg.id ? { ...p, sessions_used: val } : p)));
-    setEditingUsed(null);
-    setSavingUsed(null);
+    const data = await res.json();
+    const sessions = (data.registrations || []).filter(
+      (r: { type: string }) => r.type === "private" || r.type === "group-private"
+    );
+    setPkgSessionsMap((prev) => ({ ...prev, [pkg.id]: sessions }));
+    setLoadingPkg(null);
   }
 
   const allMonths = useMemo(() => {
@@ -142,12 +147,19 @@ export default function PackagesPage() {
     const remaining = pkg.package_type - pkg.sessions_used;
     const days = daysUntilExpiry(pkg.month_year);
     const isExpired = days < 0;
+    const isExpanded = expandedPkg === pkg.id;
+    const sessions = pkgSessionsMap[pkg.id] || [];
+    const now = Date.now();
 
     return (
-      <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-4 space-y-3">
+      <div className="rounded-xl border border-brown-700 bg-brown-900/40 overflow-hidden">
+      <div className="px-4 py-4 space-y-3">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <div className="font-medium text-sm">{pkg.parent_name}</div>
+            <button onClick={() => toggleExpanded(pkg)} className="font-medium text-sm text-left hover:text-mesa-accent transition flex items-center gap-1">
+              {pkg.parent_name}
+              <span className="text-brown-600 text-xs">{isExpanded ? "▴" : "▾"}</span>
+            </button>
             <div className="text-xs text-brown-400 truncate mt-0.5">{pkg.email}</div>
             <div className="text-xs text-brown-500 mt-0.5">{pkg.phone}</div>
           </div>
@@ -180,38 +192,10 @@ export default function PackagesPage() {
           </div>
           <div>
             <p className="text-brown-500 uppercase tracking-wider mb-0.5">Sessions</p>
-            {editingUsed === pkg.id ? (
-              <div className="flex items-center gap-1 mt-0.5">
-                <input
-                  type="number"
-                  min={0}
-                  max={pkg.package_type}
-                  value={editUsedValue}
-                  onChange={(e) => setEditUsedValue(parseInt(e.target.value) || 0)}
-                  className="w-12 rounded border border-brown-600 bg-brown-800 px-1.5 py-0.5 text-sm text-white text-center focus:border-mesa-accent focus:outline-none"
-                  autoFocus
-                />
-                <span className="text-brown-500 text-xs">used</span>
-                <button
-                  onClick={() => saveSessionsUsed(pkg)}
-                  disabled={savingUsed === pkg.id}
-                  className="text-xs text-green-400 hover:text-green-300 font-semibold disabled:opacity-50"
-                >
-                  {savingUsed === pkg.id ? "..." : "Save"}
-                </button>
-                <button onClick={() => setEditingUsed(null)} className="text-xs text-brown-500 hover:text-brown-300">✕</button>
-              </div>
-            ) : (
-              <button
-                onClick={() => { setEditingUsed(pkg.id); setEditUsedValue(pkg.sessions_used); }}
-                className="text-left hover:opacity-75 transition"
-                title="Click to edit"
-              >
-                <span className="font-bold text-mesa-accent">{remaining}</span>
-                <span className="text-brown-500"> / {pkg.package_type} left</span>
-                <span className="ml-1 text-brown-600 text-xs">✎</span>
-              </button>
-            )}
+            <p className="text-brown-200">
+              <span className="font-bold text-mesa-accent">{remaining}</span>
+              <span className="text-brown-500"> / {pkg.package_type} left</span>
+            </p>
             <div className="flex gap-0.5 mt-1">
               {Array.from({ length: pkg.package_type }).map((_, i) => (
                 <div key={i} className={`h-1.5 flex-1 rounded-full ${i < pkg.sessions_used ? "bg-mesa-accent/50" : "bg-mesa-accent"}`} />
@@ -242,6 +226,31 @@ export default function PackagesPage() {
             {deleting === pkg.id ? "Deleting..." : "Delete"}
           </button>
         </div>
+      </div>
+      {/* Expanded session list */}
+      {isExpanded && (
+        <div className="border-t border-brown-700 bg-brown-950/50 px-4 py-3">
+          {loadingPkg === pkg.id ? (
+            <p className="text-xs text-brown-500">Loading sessions...</p>
+          ) : sessions.length === 0 ? (
+            <p className="text-xs text-brown-500">No private sessions found.</p>
+          ) : (
+            <div className="space-y-1.5">
+              {sessions.map((s, i) => {
+                const isPast = s.booked_date ? new Date(s.booked_date + "T23:59:00").getTime() < now : false;
+                return (
+                  <div key={i} className="flex items-center justify-between gap-3 text-xs">
+                    <span className={isPast ? "text-brown-400" : "text-white"}>{s.booked_date} {s.booked_start_time}{s.booked_end_time ? `–${s.booked_end_time}` : ""}</span>
+                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${s.status === "confirmed" && !isPast ? "bg-green-900/40 text-green-400" : s.status === "confirmed" && isPast ? "bg-brown-800 text-brown-400" : "bg-red-900/30 text-red-400"}`}>
+                      {s.status === "confirmed" ? (isPast ? "completed" : "scheduled") : s.status}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
       </div>
     );
   }
@@ -394,10 +403,17 @@ export default function PackagesPage() {
                   const remaining = pkg.package_type - pkg.sessions_used;
                   const days = daysUntilExpiry(pkg.month_year);
                   const isExpired = days < 0;
+                  const isExpanded = expandedPkg === pkg.id;
+                  const sessions = pkgSessionsMap[pkg.id] || [];
+                  const now = Date.now();
                   return (
+                    <>
                     <tr key={pkg.id} className="hover:bg-brown-900/30 transition">
                       <td className="px-4 py-3">
-                        <div className="font-medium whitespace-nowrap">{pkg.parent_name}</div>
+                        <button onClick={() => toggleExpanded(pkg)} className="font-medium whitespace-nowrap text-left hover:text-mesa-accent transition flex items-center gap-1">
+                          {pkg.parent_name}
+                          <span className="text-brown-600 text-xs">{isExpanded ? "▴" : "▾"}</span>
+                        </button>
                         <div className="text-xs text-brown-400">{pkg.email}</div>
                         <div className="text-xs text-brown-500">{pkg.phone}</div>
                       </td>
@@ -416,35 +432,15 @@ export default function PackagesPage() {
                         </div>
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
-                        {editingUsed === pkg.id ? (
-                          <div className="flex items-center gap-1">
-                            <input
-                              type="number"
-                              min={0}
-                              max={pkg.package_type}
-                              value={editUsedValue}
-                              onChange={(e) => setEditUsedValue(parseInt(e.target.value) || 0)}
-                              className="w-12 rounded border border-brown-600 bg-brown-800 px-1.5 py-0.5 text-sm text-white text-center focus:border-mesa-accent focus:outline-none"
-                              autoFocus
-                            />
-                            <span className="text-brown-500 text-xs">used</span>
-                            <button onClick={() => saveSessionsUsed(pkg)} disabled={savingUsed === pkg.id} className="text-xs text-green-400 hover:text-green-300 font-semibold disabled:opacity-50">{savingUsed === pkg.id ? "..." : "Save"}</button>
-                            <button onClick={() => setEditingUsed(null)} className="text-xs text-brown-500 hover:text-brown-300">✕</button>
-                          </div>
-                        ) : (
-                          <button onClick={() => { setEditingUsed(pkg.id); setEditUsedValue(pkg.sessions_used); }} className="text-left hover:opacity-75 transition" title="Click to edit">
-                            <div className="text-sm">
-                              <span className="font-bold text-mesa-accent">{remaining}</span>
-                              <span className="text-brown-500 text-xs"> / {pkg.package_type} left</span>
-                              <span className="ml-1 text-brown-600 text-xs">✎</span>
-                            </div>
-                            <div className="flex gap-0.5 mt-1">
-                              {Array.from({ length: pkg.package_type }).map((_, i) => (
-                                <div key={i} className={`h-1.5 w-3 rounded-full ${i < pkg.sessions_used ? "bg-mesa-accent/40" : "bg-mesa-accent"}`} />
-                              ))}
-                            </div>
-                          </button>
-                        )}
+                        <div className="text-sm">
+                          <span className="font-bold text-mesa-accent">{remaining}</span>
+                          <span className="text-brown-500 text-xs"> / {pkg.package_type} left</span>
+                        </div>
+                        <div className="flex gap-0.5 mt-1">
+                          {Array.from({ length: pkg.package_type }).map((_, i) => (
+                            <div key={i} className={`h-1.5 w-3 rounded-full ${i < pkg.sessions_used ? "bg-mesa-accent/40" : "bg-mesa-accent"}`} />
+                          ))}
+                        </div>
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
                         <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
@@ -478,6 +474,32 @@ export default function PackagesPage() {
                         </div>
                       </td>
                     </tr>
+                    {isExpanded && (
+                      <tr key={`${pkg.id}-sessions`} className="bg-brown-950/60">
+                        <td colSpan={7} className="px-6 py-3">
+                          {loadingPkg === pkg.id ? (
+                            <p className="text-xs text-brown-500">Loading sessions...</p>
+                          ) : sessions.length === 0 ? (
+                            <p className="text-xs text-brown-500">No private sessions found.</p>
+                          ) : (
+                            <div className="flex flex-wrap gap-x-6 gap-y-1.5">
+                              {sessions.map((s, i) => {
+                                const isPast = s.booked_date ? new Date(s.booked_date + "T23:59:00").getTime() < now : false;
+                                return (
+                                  <div key={i} className="flex items-center gap-2 text-xs">
+                                    <span className={isPast ? "text-brown-400" : "text-white"}>{s.booked_date} {s.booked_start_time}{s.booked_end_time ? `–${s.booked_end_time}` : ""}</span>
+                                    <span className={`rounded-full px-2 py-0.5 font-medium ${s.status === "confirmed" && !isPast ? "bg-green-900/40 text-green-400" : s.status === "confirmed" && isPast ? "bg-brown-800 text-brown-400" : "bg-red-900/30 text-red-400"}`}>
+                                      {s.status === "confirmed" ? (isPast ? "completed" : "scheduled") : s.status}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                    </>
                   );
                 })}
               </tbody>
