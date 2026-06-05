@@ -33,29 +33,18 @@ export async function GET(req: NextRequest) {
 
   const packages = data || [];
 
-  // Recalculate sessions_used and attach booked_dates found for each package (for diagnostics)
-  const normalizedPackages = await Promise.all(packages.map(async (pkg) => {
-    const { data: regs } = await supabase
-      .from("registrations")
-      .select("booked_date")
-      .eq("email", pkg.email.toLowerCase().trim())
-      .eq("status", "confirmed")
-      .in("type", ["private", "group-private"])
-      .not("booked_date", "is", null)
-      .order("booked_date", { ascending: true });
-
-    const bookedDates: string[] = (regs || []).map((r: { booked_date: string }) => r.booked_date);
-
+  // Recalculate sessions_used from actual registrations on every load.
+  // Phone is passed as fallback in case the package email differs from the booking email.
+  await Promise.all(packages.map(async (pkg) => {
     const actual = await countConfirmedPrivateSessions(pkg.email, pkg.month_year, pkg.phone);
     const corrected = Math.min(actual, pkg.package_type);
     if (corrected !== pkg.sessions_used) {
       await setPackageSessions(pkg.id, corrected);
       pkg.sessions_used = corrected;
     }
-    return { ...pkg, booked_dates: bookedDates };
   }));
 
-  return NextResponse.json({ packages: normalizedPackages });
+  return NextResponse.json({ packages });
 }
 
 export async function DELETE(req: NextRequest) {

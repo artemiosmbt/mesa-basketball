@@ -17,7 +17,6 @@ interface Package {
   reminder_sent: boolean;
   status: string;
   is_paid: boolean;
-  booked_dates?: string[];
 }
 
 function monthLabel(monthYear: string): string {
@@ -218,14 +217,6 @@ export default function PackagesPage() {
                 <div key={i} className={`h-1.5 flex-1 rounded-full ${i < pkg.sessions_used ? "bg-mesa-accent/50" : "bg-mesa-accent"}`} />
               ))}
             </div>
-            {pkg.booked_dates && pkg.booked_dates.length > 0 && (
-              <div className="mt-1 text-xs text-brown-500">
-                Found sessions: {pkg.booked_dates.join(", ")}
-              </div>
-            )}
-            {pkg.booked_dates && pkg.booked_dates.length === 0 && (
-              <div className="mt-1 text-xs text-red-500">No private sessions found for this email</div>
-            )}
           </div>
           <div>
             <p className="text-brown-500 uppercase tracking-wider mb-0.5">Payment</p>
