@@ -146,8 +146,14 @@ export default function PaymentsPage() {
       .sort((a, b) => sessionDateTimeMs(a) - sessionDateTimeMs(b));
   }, [registrations]);
 
+  function fullPriceForType(type: string): number {
+    if (type === "group-private") return 250;
+    if (type === "private") return 150;
+    return 50;
+  }
+
   const cancelFees = useMemo(() =>
-    registrations.filter((r) => r.is_late_cancel && r.session_price && !r.cancel_fee_settled),
+    registrations.filter((r) => (r.is_late_cancel || r.status === "no_show") && !r.cancel_fee_settled),
   [registrations]);
 
   if (loading) {
@@ -268,7 +274,9 @@ export default function PaymentsPage() {
           ) : (
             <div className="space-y-2">
               {cancelFees.map((r) => {
-                const fee = Math.round((r.session_price ?? 0) * 0.5);
+                const sessionPrice = r.session_price ?? fullPriceForType(r.type);
+                const isNoShow = r.status === "no_show";
+                const fee = isNoShow ? sessionPrice : Math.round(sessionPrice * 0.5);
                 const owesRefund = r.is_paid;
                 return (
                   <div key={r.id} className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-3 flex items-center justify-between gap-3">
@@ -276,6 +284,9 @@ export default function PaymentsPage() {
                       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                         <span className="font-medium text-sm">{r.parent_name}</span>
                         <span className="text-lg font-bold text-mesa-accent">${fee}</span>
+                        {isNoShow && (
+                          <span className="rounded-full bg-orange-900/40 px-2 py-0.5 text-xs font-medium text-orange-400">no show</span>
+                        )}
                         {owesRefund ? (
                           <span className="rounded-full bg-blue-900/40 px-2 py-0.5 text-xs font-medium text-blue-400">You owe refund</span>
                         ) : (
