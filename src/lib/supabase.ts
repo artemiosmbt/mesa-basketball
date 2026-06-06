@@ -198,19 +198,23 @@ export async function addReferralCredit(email: string): Promise<void> {
   const supabase = getSupabase();
   const { data } = await supabase
     .from("referral_credits")
-    .select("credits")
+    .select("credits, total_referrals")
     .eq("email", email)
     .single();
 
   if (data) {
     await supabase
       .from("referral_credits")
-      .update({ credits: (data.credits || 0) + 1, updated_at: new Date().toISOString() })
+      .update({
+        credits: (data.credits || 0) + 1,
+        total_referrals: (data.total_referrals || 0) + 1,
+        updated_at: new Date().toISOString(),
+      })
       .eq("email", email);
   } else {
     await supabase
       .from("referral_credits")
-      .insert({ email, credits: 1 });
+      .insert({ email, credits: 1, total_referrals: 1 });
   }
 }
 
