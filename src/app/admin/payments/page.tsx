@@ -149,7 +149,7 @@ export default function PaymentsPage() {
     const result = new Map<string, { withinPackage: boolean; packagePaid: boolean }>();
     const pkgMap = new Map<string, { package_type: number; is_paid: boolean }>();
     for (const pkg of packages) {
-      const key = `${pkg.email}|${pkg.month_year}`;
+      const key = `${pkg.email.toLowerCase().trim()}|${pkg.month_year}`;
       if (!pkgMap.has(key)) pkgMap.set(key, { package_type: pkg.package_type, is_paid: pkg.is_paid });
     }
     const regsByKey = new Map<string, Registration[]>();
@@ -158,7 +158,7 @@ export default function PaymentsPage() {
       if (r.status !== "confirmed") continue;
       if (!r.booked_date) continue;
       const monthYear = r.booked_date.substring(0, 7);
-      const key = `${r.email}|${monthYear}`;
+      const key = `${(r.email || "").toLowerCase().trim()}|${monthYear}`;
       if (!pkgMap.has(key)) continue;
       if (!regsByKey.has(key)) regsByKey.set(key, []);
       regsByKey.get(key)!.push(r);
