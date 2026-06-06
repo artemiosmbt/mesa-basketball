@@ -117,6 +117,7 @@ function groupByDate(list: Registration[]): { key: string; label: string; sessio
 
 interface CalendarViewProps {
   list: Registration[];
+  packageMembership: Map<string, { withinPackage: boolean; packagePaid: boolean }>;
   cancelRegistration: (id: string) => Promise<void>;
   markNoShow: (id: string) => Promise<void>;
   cancelling: string | null;
@@ -125,7 +126,7 @@ interface CalendarViewProps {
   setNoShowConfirm: (id: string | null) => void;
 }
 
-function CalendarView({ list, cancelRegistration, markNoShow, cancelling, noShowing, noShowConfirm, setNoShowConfirm }: CalendarViewProps) {
+function CalendarView({ list, packageMembership, cancelRegistration, markNoShow, cancelling, noShowing, noShowConfirm, setNoShowConfirm }: CalendarViewProps) {
   const [currentMonth, setCurrentMonth] = useState(() => {
     const n = new Date();
     return new Date(n.getFullYear(), n.getMonth(), 1);
@@ -257,6 +258,9 @@ function CalendarView({ list, cancelRegistration, markNoShow, cancelling, noShow
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mb-1">
                       <span className="font-medium text-sm">{r.parent_name}</span>
                       <span className={`rounded-full px-2 py-0.5 text-xs ${typePill(r.type)}`}>{TYPE_LABELS[r.type] || r.type}</span>
+                      {packageMembership.get(r.id)?.withinPackage && (
+                        <span className="rounded-full bg-teal-900/40 text-teal-400 px-2 py-0.5 text-xs font-medium">pkg</span>
+                      )}
                     </div>
                     <div className="text-xs text-brown-300">{athleteNames(r.kids || "")}</div>
                     <div className="text-xs text-brown-500 mt-0.5">{r.email} · {r.phone}</div>
@@ -466,7 +470,7 @@ export default function AdminPage() {
       if (!dateStr) return null;
       const d = new Date(dateStr);
       if (isNaN(d.getTime())) return null;
-      return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
     }
 
     const pkgMap = new Map<string, { package_type: number; is_paid: boolean }>();
@@ -893,6 +897,7 @@ export default function AdminPage() {
           <div className="rounded-xl border border-brown-700 bg-brown-900/20 p-4">
             <CalendarView
               list={[...upcoming, ...past.filter(r => r.status !== "cancelled")]}
+              packageMembership={packageMembership}
               cancelRegistration={cancelRegistration}
               markNoShow={markNoShow}
               cancelling={cancelling}

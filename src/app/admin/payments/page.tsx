@@ -152,7 +152,7 @@ export default function PaymentsPage() {
       if (!dateStr) return null;
       const d = new Date(dateStr);
       if (isNaN(d.getTime())) return null;
-      return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
     }
 
     const pkgMap = new Map<string, { package_type: number; is_paid: boolean }>();
@@ -386,6 +386,9 @@ export default function PaymentsPage() {
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                       <span className="font-medium text-sm">{r.parent_name}</span>
                       <span className="rounded-full bg-amber-400 px-2 py-0.5 text-xs font-semibold text-blue-900 shrink-0">{TYPE_LABELS[r.type] || r.type}</span>
+                      {packageMembership.get(r.id)?.withinPackage && (
+                        <span className="rounded-full bg-teal-900/40 text-teal-400 px-2 py-0.5 text-xs font-medium shrink-0">pkg</span>
+                      )}
                       {da && <span className={`rounded-full px-2 py-0.5 text-xs font-medium shrink-0 ${da.cls}`}>{da.label}</span>}
                     </div>
                     {r.kids && <div className="text-xs text-white mt-0.5 truncate">{r.kids.split(",").map((k) => k.split("(")[0].trim()).filter(Boolean).join(", ")}</div>}
