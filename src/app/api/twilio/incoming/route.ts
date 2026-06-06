@@ -53,5 +53,23 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Also sync to registrations so the admin dashboard reflects the opt-out
+  const { data: regs } = await supabase
+    .from("registrations")
+    .select("id, phone")
+    .not("phone", "is", null);
+
+  if (regs) {
+    const matchingIds = regs
+      .filter((r) => r.phone && r.phone.replace(/\D/g, "").slice(-10) === digitsOnly)
+      .map((r) => r.id);
+    if (matchingIds.length > 0) {
+      await supabase
+        .from("registrations")
+        .update({ sms_consent: newConsent })
+        .in("id", matchingIds);
+    }
+  }
+
   return new NextResponse(EMPTY_TWIML, { headers: { "Content-Type": "text/xml" } });
 }
