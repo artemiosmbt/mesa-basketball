@@ -459,8 +459,8 @@ export default function AdminPage() {
               <span className="font-medium text-sm">{r.parent_name}</span>
               <span className="rounded-full bg-amber-400 px-2 py-0.5 text-xs font-semibold text-blue-900">{TYPE_LABELS[r.type] || r.type}</span>
               {(() => { const da = daysAway(r.booked_date); return da ? <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${da.cls}`}>{da.label}</span> : null; })()}
-              <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${r.status === "confirmed" ? "bg-green-900/40 text-green-400" : r.status === "no_show" ? "bg-orange-900/40 text-orange-400" : "bg-red-900/40 text-red-400"}`}>
-                {r.status === "no_show" ? "no show" : r.status}
+              <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${r.status === "confirmed" && !isPast ? "bg-green-900/40 text-green-400" : r.status === "confirmed" && isPast ? "bg-brown-800 text-brown-400" : r.status === "no_show" ? "bg-orange-900/40 text-orange-400" : "bg-red-900/40 text-red-400"}`}>
+                {r.status === "confirmed" ? (isPast ? "completed" : "scheduled") : r.status === "no_show" ? "no show" : r.status}
               </span>
             </div>
             <div className="text-xs text-brown-300 mt-0.5 truncate">{athleteNames(r.kids || "")}</div>
@@ -564,8 +564,8 @@ export default function AdminPage() {
               <div className="whitespace-pre-line leading-relaxed">{r.session_details ? r.session_details.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim() : "—"}</div>
             </td>
             <td className="px-4 py-3 whitespace-nowrap">
-              <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${r.status === "confirmed" ? "bg-green-900/40 text-green-400" : r.status === "no_show" ? "bg-orange-900/40 text-orange-400" : "bg-red-900/40 text-red-400"}`}>
-                {r.status === "no_show" ? "no show" : r.status}
+              <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${r.status === "confirmed" && !isPast ? "bg-green-900/40 text-green-400" : r.status === "confirmed" && isPast ? "bg-brown-800 text-brown-400" : r.status === "no_show" ? "bg-orange-900/40 text-orange-400" : "bg-red-900/40 text-red-400"}`}>
+                {r.status === "confirmed" ? (isPast ? "completed" : "scheduled") : r.status === "no_show" ? "no show" : r.status}
               </span>
             </td>
             <td className="px-4 py-3 whitespace-nowrap">

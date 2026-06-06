@@ -292,8 +292,11 @@ export default function MyBookings() {
                     </div>
                   </div>
                   <div className="flex flex-col items-end gap-2 shrink-0">
-                    {isConfirmed && (
-                      <span className="inline-block rounded-full bg-green-900/40 px-3 py-1 text-xs font-medium text-green-400">Confirmed</span>
+                    {isConfirmed && !isPast && (
+                      <span className="inline-block rounded-full bg-green-900/40 px-3 py-1 text-xs font-medium text-green-400">Scheduled</span>
+                    )}
+                    {isConfirmed && isPast && (
+                      <span className="inline-block rounded-full bg-brown-800 px-3 py-1 text-xs font-medium text-brown-400">Completed</span>
                     )}
                     {isCancelled && (
                       <span className="inline-block rounded-full bg-red-900/40 px-3 py-1 text-xs font-medium text-red-400">Cancelled</span>
