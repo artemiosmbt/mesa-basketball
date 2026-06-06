@@ -556,6 +556,8 @@ export default function Home() {
   const [showAllGroups, setShowAllGroups] = useState<Set<string>>(new Set());
   const [upsellExtra, setUpsellExtra] = useState(0); // extra minutes accepted
   const [referralCode, setReferralCode] = useState("");
+  const [creditBalance, setCreditBalance] = useState<number | null>(null);
+  const [useReferralCredit, setUseReferralCredit] = useState(false);
 
   // Load hideUpsell from localStorage
   useEffect(() => {
@@ -563,6 +565,18 @@ export default function Home() {
       setHideUpsell(localStorage.getItem("mesa_hide_upsell") === "true");
     }
   }, []);
+
+  // Fetch referral credit balance when email is set and modal is private type
+  useEffect(() => {
+    const isPrivate = modal.type === "private" || modal.type === "group-private";
+    if (!modal.open || !isPrivate || !isReturningClient) { setCreditBalance(null); return; }
+    const trimmed = email.trim().toLowerCase();
+    if (!trimmed || !trimmed.includes("@")) { setCreditBalance(null); return; }
+    fetch(`/api/referral-credits?email=${encodeURIComponent(trimmed)}`)
+      .then((r) => r.json())
+      .then((d) => setCreditBalance(d.credits ?? 0))
+      .catch(() => setCreditBalance(0));
+  }, [email, modal.open, modal.type, isReturningClient]);
 
 
   const [recurringWeeks, setRecurringWeeks] = useState<
@@ -844,6 +858,8 @@ export default function Home() {
     setIsGroupRate(false);
     setUpsellExtra(0);
     setReferralCode("");
+    setUseReferralCredit(false);
+    setCreditBalance(null);
   }
 
   function openModal(type: BookingType, sessionIndex: number, details: string) {
@@ -859,6 +875,8 @@ export default function Home() {
     setIsGroupRate(false);
     setUpsellExtra(0);
     setReferralCode("");
+    setUseReferralCredit(false);
+    setCreditBalance(null);
     // Pre-select future days only for camps with day selection
     if (type === "camp") {
       const camp = camps[sessionIndex];
@@ -1034,7 +1052,8 @@ export default function Home() {
 
       // Register each date (skip emails for all — we'll send one consolidated email)
       const isRecurring = datesToBook.length > 1;
-      for (const booking of datesToBook) {
+      for (let bIdx = 0; bIdx < datesToBook.length; bIdx++) {
+        const booking = datesToBook[bIdx];
         await fetch("/api/register", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1054,6 +1073,7 @@ export default function Home() {
             bookedLocation: booking.location,
             skipEmail: isRecurring,
             submittedReferralCode: referralCode.trim() || undefined,
+            useReferralCredit: bIdx === 0 ? useReferralCredit : false,
           }),
         });
       }
@@ -2656,6 +2676,49 @@ export default function Home() {
                       placeholder="e.g. SMITH-MESA"
                       className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
                     />
+                  </div>
+                )}
+
+                {/* Referral Credit — shown for returning clients booking private sessions */}
+                {isReturningClient && (modal.type === "private" || modal.type === "group-private") && (
+                  <div className={`rounded-lg border px-4 py-3 transition ${creditBalance !== null && creditBalance > 0 ? "border-green-700 bg-green-900/20" : "border-brown-700 bg-brown-800/30 opacity-60"}`}>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className={`text-sm font-medium ${creditBalance !== null && creditBalance > 0 ? "text-green-300" : "text-brown-400"}`}>
+                          Referral Credit
+                        </p>
+                        <p className={`text-xs mt-0.5 ${creditBalance !== null && creditBalance > 0 ? "text-green-400" : "text-brown-600"}`}>
+                          {creditBalance === null
+                            ? "Checking..."
+                            : creditBalance === 0
+                            ? "0 credits available — refer a friend to earn one!"
+                            : `${creditBalance} credit${creditBalance !== 1 ? "s" : ""} available — use 1 for 50% off`}
+                        </p>
+                      </div>
+                      {creditBalance !== null && creditBalance > 0 && !useReferralCredit && (
+                        <button
+                          type="button"
+                          onClick={() => setUseReferralCredit(true)}
+                          className="shrink-0 rounded-lg bg-green-800 hover:bg-green-700 px-3 py-1.5 text-xs font-medium text-green-200 transition"
+                        >
+                          Use 1 Credit
+                        </button>
+                      )}
+                      {useReferralCredit && (
+                        <button
+                          type="button"
+                          onClick={() => setUseReferralCredit(false)}
+                          className="shrink-0 text-xs text-brown-400 hover:text-white transition"
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                    {useReferralCredit && (
+                      <div className="mt-2">
+                        <span className="rounded-full bg-green-900/60 px-2 py-0.5 text-xs font-medium text-green-300">✓ Credit applied — 50% off this session</span>
+                      </div>
+                    )}
                   </div>
                 )}
 

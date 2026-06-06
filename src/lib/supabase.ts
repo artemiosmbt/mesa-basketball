@@ -30,6 +30,7 @@ export interface Registration {
   manage_token: string;
   referral_code: string | null;
   is_free: boolean;
+  used_referral_credit?: boolean;
   session_price: number | null;
   is_full_camp: boolean;
   sms_consent?: boolean;
@@ -48,6 +49,8 @@ export async function addRegistration(data: {
   bookedStartTime?: string;
   bookedEndTime?: string;
   bookedLocation?: string;
+  usedReferralCredit?: boolean;
+  isFree?: boolean;
 }): Promise<{ manageToken: string }> {
   const supabase = getSupabase();
   const { data: row, error } = await supabase
@@ -64,6 +67,8 @@ export async function addRegistration(data: {
       booked_start_time: data.bookedStartTime || null,
       booked_end_time: data.bookedEndTime || null,
       booked_location: data.bookedLocation || null,
+      ...(data.usedReferralCredit ? { used_referral_credit: true } : {}),
+      ...(data.isFree ? { is_free: true } : {}),
     })
     .select("manage_token")
     .single();
@@ -407,6 +412,7 @@ export async function addRegistrationWithRewards(data: {
   bookedLocation?: string;
   referralCode: string;
   isFree: boolean;
+  usedReferralCredit?: boolean;
   smsConsent?: boolean;
   sessionPrice?: number;
   isFullCamp?: boolean;
@@ -428,6 +434,7 @@ export async function addRegistrationWithRewards(data: {
       booked_location: data.bookedLocation || null,
       referral_code: data.referralCode,
       is_free: data.isFree,
+      used_referral_credit: data.usedReferralCredit ?? false,
       sms_consent: data.smsConsent ?? false,
       session_price: data.sessionPrice ?? null,
       is_full_camp: data.isFullCamp ?? false,

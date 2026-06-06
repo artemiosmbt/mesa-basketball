@@ -9,6 +9,9 @@ import {
   setPackageSessions,
   countConfirmedPrivateSessions,
   updateRegistrationPlayers,
+  addReferralCredit,
+  getReferralCredits,
+  decrementReferralCredit,
 } from "@/lib/supabase";
 import {
   sendCancellationNotification,
@@ -100,6 +103,7 @@ export async function GET(
     status: reg.status,
     createdAt: reg.created_at,
     isFullCamp: reg.is_full_camp ?? false,
+    usedReferralCredit: reg.used_referral_credit ?? false,
   });
 }
 
@@ -199,6 +203,11 @@ export async function DELETE(
       { error: "Failed to cancel" },
       { status: 500 }
     );
+  }
+
+  // Refund referral credit if one was used for this session
+  if (reg.used_referral_credit && reg.email) {
+    await addReferralCredit(reg.email).catch(() => {});
   }
 
   // Recalculate package sessions_used after cancellation
@@ -427,7 +436,7 @@ export async function PUT(
   }
 
   const body = await req.json();
-  const { bookedDate, bookedStartTime, bookedEndTime, bookedLocation, kids: bodyKids, sessionType: bodySessionType, sessionGroup, parentName: bodyParentName, phone: bodyPhone } = body;
+  const { bookedDate, bookedStartTime, bookedEndTime, bookedLocation, kids: bodyKids, sessionType: bodySessionType, sessionGroup, parentName: bodyParentName, phone: bodyPhone, useReferralCredit } = body;
 
   if (!bookedDate || !bookedStartTime || !bookedEndTime || !bookedLocation) {
     return NextResponse.json(
@@ -449,6 +458,11 @@ export async function PUT(
 
   // Cancel old booking first so group enrollment counts reflect the cancellation
   await cancelRegistration(token);
+
+  // Refund referral credit from the old booking (always — they'll re-apply to the new one if they want)
+  if (reg.used_referral_credit && reg.email) {
+    await addReferralCredit(reg.email).catch(() => {});
+  }
 
   // Sync calendar for the old booking
   if (reg.booked_date && reg.booked_start_time) {
@@ -477,6 +491,19 @@ export async function PUT(
   const newParentName = typeof bodyParentName === "string" && bodyParentName.trim() ? bodyParentName.trim() : reg.parent_name;
   const newPhone = typeof bodyPhone === "string" && bodyPhone.trim() ? bodyPhone.trim() : reg.phone;
 
+  // Apply referral credit to rescheduled booking if client chose to use it
+  const isPrivateReschedule = newType === "private";
+  let newIsFree = false;
+  let newUsedReferralCredit = false;
+  if (useReferralCredit && isPrivateReschedule) {
+    const credits = await getReferralCredits(reg.email).catch(() => 0);
+    if (credits > 0) {
+      newIsFree = true;
+      newUsedReferralCredit = true;
+      await decrementReferralCredit(reg.email).catch(() => {});
+    }
+  }
+
   // Create new booking with updated type, kids, and session details
   const { manageToken: newToken } = await addRegistration({
     parentName: newParentName,
@@ -490,6 +517,8 @@ export async function PUT(
     bookedStartTime,
     bookedEndTime,
     bookedLocation,
+    isFree: newIsFree,
+    usedReferralCredit: newUsedReferralCredit,
   });
 
   // Sync calendar for the new booking

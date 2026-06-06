@@ -58,6 +58,7 @@ interface Booking {
   status: string;
   createdAt: string;
   isFullCamp: boolean;
+  usedReferralCredit: boolean;
 }
 
 interface TimeWindow {
@@ -227,11 +228,32 @@ export default function ManageBooking({
   const [rescheduleFormEmail, setRescheduleFormEmail] = useState("");
   const [rescheduleFormPhone, setRescheduleFormPhone] = useState("");
 
+  // Referral credit for reschedule
+  const [creditBalance, setCreditBalance] = useState<number | null>(null);
+  const [useReferralCredit, setUseReferralCredit] = useState(false);
+
   useEffect(() => {
     if (typeof window !== "undefined") {
       setHideUpsell(localStorage.getItem("mesa_hide_upsell") === "true");
     }
   }, []);
+
+  // Fetch credit balance when reschedule panel opens (for private sessions)
+  useEffect(() => {
+    const isPrivate = booking?.type === "private" || booking?.type === "group-private";
+    if (!showReschedule || !isPrivate || !booking?.email) { setCreditBalance(null); return; }
+    // Original booking's credit is refunded on reschedule, so include it in balance
+    fetch(`/api/referral-credits?email=${encodeURIComponent(booking.email.toLowerCase())}`)
+      .then((r) => r.json())
+      .then((d) => {
+        // If original booking used a credit, it will be refunded — add 1 to reflect that
+        const base = d.credits ?? 0;
+        setCreditBalance(booking.usedReferralCredit ? base + 1 : base);
+      })
+      .catch(() => setCreditBalance(0));
+    // Default to re-applying if original used a credit
+    setUseReferralCredit(booking.usedReferralCredit ?? false);
+  }, [showReschedule, booking?.email, booking?.type, booking?.usedReferralCredit]);
 
   useEffect(() => {
     fetch(`/api/booking/${token}`)
@@ -460,6 +482,7 @@ export default function ManageBooking({
         sessionType: "private",
         parentName: rescheduleFormParentName,
         phone: rescheduleFormPhone,
+        useReferralCredit,
       };
     } else {
       if (!selectedGroupName || !selectedGroupDate) { setRescheduling(false); return; }
@@ -1206,6 +1229,43 @@ export default function ManageBooking({
                     );
                   }
                 })()}
+
+                {/* Referral credit widget — private reschedule only */}
+                {rescheduleType === "private" && (
+                  <div className={`rounded-lg border px-4 py-3 transition ${creditBalance !== null && creditBalance > 0 ? "border-green-700 bg-green-900/20" : "border-brown-700 bg-brown-800/30 opacity-60"}`}>
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className={`text-sm font-medium ${creditBalance !== null && creditBalance > 0 ? "text-green-300" : "text-brown-400"}`}>
+                          Referral Credit
+                        </p>
+                        <p className={`text-xs mt-0.5 ${creditBalance !== null && creditBalance > 0 ? "text-green-400" : "text-brown-600"}`}>
+                          {creditBalance === null
+                            ? "Checking..."
+                            : creditBalance === 0
+                            ? "0 credits available — refer a friend to earn one!"
+                            : `${creditBalance} credit${creditBalance !== 1 ? "s" : ""} available — use 1 for 50% off`}
+                        </p>
+                      </div>
+                      {creditBalance !== null && creditBalance > 0 && !useReferralCredit && (
+                        <button type="button" onClick={() => setUseReferralCredit(true)}
+                          className="shrink-0 rounded-lg bg-green-800 hover:bg-green-700 px-3 py-1.5 text-xs font-medium text-green-200 transition">
+                          Use 1 Credit
+                        </button>
+                      )}
+                      {useReferralCredit && (
+                        <button type="button" onClick={() => setUseReferralCredit(false)}
+                          className="shrink-0 text-xs text-brown-400 hover:text-white transition">
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                    {useReferralCredit && (
+                      <div className="mt-2">
+                        <span className="rounded-full bg-green-900/60 px-2 py-0.5 text-xs font-medium text-green-300">✓ Credit applied — 50% off this session</span>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {error && <p className="text-sm text-red-400">{error}</p>}
 

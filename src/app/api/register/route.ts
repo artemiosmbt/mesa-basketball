@@ -44,6 +44,8 @@ export async function POST(req: NextRequest) {
       campSessions,
       campTotalPrice,
       campTotalDays,
+      // Referral credit opt-in
+      useReferralCredit,
     } = body;
 
     if (!parentName || !email || !phone || !kids || !type || !sessionDetails) {
@@ -330,6 +332,7 @@ export async function POST(req: NextRequest) {
     let manageToken: string | undefined;
     let isFree = false;
     let isFirstTime = false;
+    let usedReferralCredit = false;
     let packageSessionsRemaining: number | undefined;
     let packageType: number | undefined;
     const referralCode = await generateUniqueReferralCode(parentName, email);
@@ -351,10 +354,12 @@ export async function POST(req: NextRequest) {
         if (newClient) {
           isFree = true; // first-time 50% off
           isFirstTime = true;
-        } else {
+        } else if (useReferralCredit) {
+          // User explicitly chose to apply a credit
           const credits = await getReferralCredits(email);
           if (credits > 0) {
-            isFree = true; // referral half-off credit
+            isFree = true;
+            usedReferralCredit = true;
             await decrementReferralCredit(email);
           }
         }
@@ -374,6 +379,7 @@ export async function POST(req: NextRequest) {
         bookedLocation,
         referralCode,
         isFree,
+        usedReferralCredit,
         smsConsent: !!smsConsent,
       });
       manageToken = result.manageToken;
