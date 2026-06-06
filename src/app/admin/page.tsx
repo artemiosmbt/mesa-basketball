@@ -466,7 +466,9 @@ export default function AdminPage() {
       const key = `${pkg.email.toLowerCase().trim()}|${pkg.month_year}`;
       if (!pkgMap.has(key)) pkgMap.set(key, { package_type: pkg.package_type, is_paid: pkg.is_paid });
     }
-    console.log("[mesa] packages loaded:", packages.length, "pkgMap keys:", [...pkgMap.keys()]);
+    console.log("[mesa] pkgMap keys:", [...pkgMap.keys()].join(" | "));
+    const privateRegs = registrations.filter(r => (r.type === "private" || r.type === "group-private") && r.status === "confirmed" && !!r.booked_date);
+    console.log("[mesa] private/gp confirmed regs:", privateRegs.map(r => `${(r.email||"").toLowerCase().trim()}|${r.booked_date!.substring(0,7)} (type:${r.type})`).join(" | "));
     const regsByKey = new Map<string, Registration[]>();
     for (const r of registrations) {
       if (r.type !== "private" && r.type !== "group-private") continue;
@@ -478,7 +480,7 @@ export default function AdminPage() {
       if (!regsByKey.has(key)) regsByKey.set(key, []);
       regsByKey.get(key)!.push(r);
     }
-    console.log("[mesa] regsByKey keys:", [...regsByKey.keys()], "result size:", result.size);
+    console.log("[mesa] matched regsByKey keys:", [...regsByKey.keys()].join(" | "));
     for (const [key, regs] of regsByKey) {
       const pkg = pkgMap.get(key)!;
       const sorted = [...regs].sort((a, b) => sessionMs(a.booked_date, a.booked_start_time) - sessionMs(b.booked_date, b.booked_start_time));
