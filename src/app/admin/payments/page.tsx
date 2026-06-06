@@ -23,6 +23,14 @@ interface Registration {
   total_participants: number | null;
 }
 
+interface PackageData {
+  id: string;
+  email: string;
+  package_type: number;
+  month_year: string;
+  is_paid: boolean;
+}
+
 const TYPE_LABELS: Record<string, string> = {
   weekly: "Group",
   camp: "Camp",
@@ -62,6 +70,7 @@ export default function PaymentsPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [registrations, setRegistrations] = useState<Registration[]>([]);
+  const [packages, setPackages] = useState<PackageData[]>([]);
   const [token, setToken] = useState<string | null>(null);
   const [togglingPaid, setTogglingPaid] = useState<string | null>(null);
   const [settlingFee, setSettlingFee] = useState<string | null>(null);
@@ -78,7 +87,10 @@ export default function PaymentsPage() {
         headers: { Authorization: `Bearer ${session.access_token}` },
       })
         .then((r) => r.json())
-        .then((data) => setRegistrations(data.registrations || []))
+        .then((data) => {
+          setRegistrations(data.registrations || []);
+          setPackages(data.packages || []);
+        })
         .finally(() => setLoading(false));
     });
   }, [router]);
@@ -133,11 +145,44 @@ export default function PaymentsPage() {
     return date.getTime();
   }
 
+  const packageMembership = useMemo(() => {
+    const result = new Map<string, { withinPackage: boolean; packagePaid: boolean }>();
+    const pkgMap = new Map<string, { package_type: number; is_paid: boolean }>();
+    for (const pkg of packages) {
+      const key = `${pkg.email}|${pkg.month_year}`;
+      if (!pkgMap.has(key)) pkgMap.set(key, { package_type: pkg.package_type, is_paid: pkg.is_paid });
+    }
+    const regsByKey = new Map<string, Registration[]>();
+    for (const r of registrations) {
+      if (r.type !== "private" && r.type !== "group-private") continue;
+      if (r.status !== "confirmed") continue;
+      if (!r.booked_date) continue;
+      const monthYear = r.booked_date.substring(0, 7);
+      const key = `${r.email}|${monthYear}`;
+      if (!pkgMap.has(key)) continue;
+      if (!regsByKey.has(key)) regsByKey.set(key, []);
+      regsByKey.get(key)!.push(r);
+    }
+    for (const [key, regs] of regsByKey) {
+      const pkg = pkgMap.get(key)!;
+      const sorted = [...regs].sort((a, b) => sessionDateTimeMs(a) - sessionDateTimeMs(b));
+      for (let i = 0; i < sorted.length; i++) {
+        result.set(sorted[i].id, { withinPackage: i < pkg.package_type, packagePaid: pkg.is_paid });
+      }
+    }
+    return result;
+  }, [registrations, packages]);
+
   const unpaid = useMemo(() =>
     registrations
-      .filter((r) => r.status === "confirmed" && !r.is_paid)
+      .filter((r) => {
+        if (r.status !== "confirmed" || r.is_paid) return false;
+        const mem = packageMembership.get(r.id);
+        if (mem?.withinPackage && mem.packagePaid) return false;
+        return true;
+      })
       .sort((a, b) => dateMs(a.booked_date) - dateMs(b.booked_date)),
-  [registrations]);
+  [registrations, packageMembership]);
 
   const paid = useMemo(() => {
     const now = Date.now();
@@ -233,12 +278,16 @@ export default function PaymentsPage() {
             <div className="space-y-2">
               {unpaid.map((r) => {
                 const da = daysAway(r.booked_date);
+                const pkgMem = packageMembership.get(r.id);
                 return (
                 <div key={r.id} className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-3 flex items-center justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                       <span className="font-medium text-sm">{r.parent_name}</span>
                       <span className="rounded-full bg-amber-400 px-2 py-0.5 text-xs font-semibold text-blue-900 shrink-0">{TYPE_LABELS[r.type] || r.type}</span>
+                      {pkgMem?.withinPackage && (
+                        <span className="rounded-full bg-teal-900/40 text-teal-400 px-2 py-0.5 text-xs font-medium shrink-0">pkg</span>
+                      )}
                       {da && <span className={`rounded-full px-2 py-0.5 text-xs font-medium shrink-0 ${da.cls}`}>{da.label}</span>}
                     </div>
                     {r.kids && <div className="text-xs text-white mt-0.5 truncate">{r.kids.split(",").map((k) => k.split("(")[0].trim()).filter(Boolean).join(", ")}</div>}

@@ -20,6 +20,14 @@ interface Registration {
   session_price: number | null;
 }
 
+interface PackageData {
+  id: string;
+  email: string;
+  package_type: number;
+  month_year: string;
+  is_paid: boolean;
+}
+
 const TYPE_LABELS: Record<string, string> = {
   weekly: "Group",
   camp: "Camp",
@@ -297,6 +305,7 @@ export default function AdminPage() {
   const [registrations, setRegistrations] = useState<Registration[]>([]);
   const [videoConsentMap, setVideoConsentMap] = useState<Record<string, boolean>>({});
   const [referralCreditsMap, setReferralCreditsMap] = useState<Record<string, { available: number; total: number }>>({});
+  const [packages, setPackages] = useState<PackageData[]>([]);
   const [tab, setTab] = useState<"upcoming" | "past" | "clients" | "calendar">("upcoming");
   const [typeFilter, setTypeFilter] = useState("all");
   const [search, setSearch] = useState("");
@@ -339,6 +348,7 @@ export default function AdminPage() {
           if (rc.email) creditsMap[rc.email] = { available: rc.credits || 0, total: rc.total_referrals || 0 };
         }
         setReferralCreditsMap(creditsMap);
+        setPackages(adminData.packages || []);
         if (syncResult?.changesFound?.length > 0) {
           setTcResult(syncResult);
         }
@@ -448,6 +458,35 @@ export default function AdminPage() {
     groups: registrations.filter((r) => r.type === "weekly" && r.status === "confirmed").length,
   }), [registrations]);
 
+  // Map each registration id to whether it falls within a monthly package
+  const packageMembership = useMemo(() => {
+    const result = new Map<string, { withinPackage: boolean; packagePaid: boolean }>();
+    const pkgMap = new Map<string, { package_type: number; is_paid: boolean }>();
+    for (const pkg of packages) {
+      const key = `${pkg.email}|${pkg.month_year}`;
+      if (!pkgMap.has(key)) pkgMap.set(key, { package_type: pkg.package_type, is_paid: pkg.is_paid });
+    }
+    const regsByKey = new Map<string, Registration[]>();
+    for (const r of registrations) {
+      if (r.type !== "private" && r.type !== "group-private") continue;
+      if (r.status !== "confirmed") continue;
+      if (!r.booked_date) continue;
+      const monthYear = r.booked_date.substring(0, 7);
+      const key = `${r.email}|${monthYear}`;
+      if (!pkgMap.has(key)) continue;
+      if (!regsByKey.has(key)) regsByKey.set(key, []);
+      regsByKey.get(key)!.push(r);
+    }
+    for (const [key, regs] of regsByKey) {
+      const pkg = pkgMap.get(key)!;
+      const sorted = [...regs].sort((a, b) => sessionMs(a.booked_date, a.booked_start_time) - sessionMs(b.booked_date, b.booked_start_time));
+      for (let i = 0; i < sorted.length; i++) {
+        result.set(sorted[i].id, { withinPackage: i < pkg.package_type, packagePaid: pkg.is_paid });
+      }
+    }
+    return result;
+  }, [registrations, packages]);
+
   function RegCard({ r, showDelete = false, isPast = false }: { r: Registration; showDelete?: boolean; isPast?: boolean }) {
     const [expanded, setExpanded] = useState(false);
     const fullSession = r.session_details
@@ -465,6 +504,9 @@ export default function AdminPage() {
             <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
               <span className="font-medium text-sm">{r.parent_name}</span>
               <span className="rounded-full bg-amber-400 px-2 py-0.5 text-xs font-semibold text-blue-900">{TYPE_LABELS[r.type] || r.type}</span>
+              {packageMembership.get(r.id)?.withinPackage && (
+                <span className="rounded-full bg-teal-900/40 text-teal-400 px-2 py-0.5 text-xs font-medium">pkg</span>
+              )}
               {(() => { const da = daysAway(r.booked_date); return da ? <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${da.cls}`}>{da.label}</span> : null; })()}
               <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${r.status === "confirmed" && !isPast ? "bg-green-900/40 text-green-400" : r.status === "confirmed" && isPast ? "bg-brown-800 text-brown-400" : r.status === "no_show" ? "bg-orange-900/40 text-orange-400" : "bg-red-900/40 text-red-400"}`}>
                 {r.status === "confirmed" ? (isPast ? "completed" : "scheduled") : r.status === "no_show" ? "no show" : r.status}
@@ -564,6 +606,9 @@ export default function AdminPage() {
             <td className="px-4 py-3 whitespace-nowrap">
               <div className="flex flex-wrap gap-1">
                 <span className="rounded-full bg-amber-400 px-2 py-0.5 text-xs font-semibold text-blue-900">{TYPE_LABELS[r.type] || r.type}</span>
+                {packageMembership.get(r.id)?.withinPackage && (
+                  <span className="rounded-full bg-teal-900/40 text-teal-400 px-2 py-0.5 text-xs font-medium">pkg</span>
+                )}
                 {(() => { const da = daysAway(r.booked_date); return da ? <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${da.cls}`}>{da.label}</span> : null; })()}
               </div>
             </td>
