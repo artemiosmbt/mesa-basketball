@@ -237,7 +237,7 @@ export default function PackagesPage() {
           ) : (
             <div className="space-y-1.5">
               {sessions.map((s, i) => {
-                const isPast = s.booked_date ? new Date(s.booked_date + "T23:59:00").getTime() < now : false;
+                const isPast = s.booked_date ? Date.parse(s.booked_date) < now : false;
                 return (
                   <div key={i} className="flex items-center justify-between gap-3 text-xs">
                     <span className={isPast ? "text-brown-400" : "text-white"}>{s.booked_date} {s.booked_start_time}{s.booked_end_time ? `–${s.booked_end_time}` : ""}</span>
@@ -484,7 +484,7 @@ export default function PackagesPage() {
                           ) : (
                             <div className="flex flex-wrap gap-x-6 gap-y-1.5">
                               {sessions.map((s, i) => {
-                                const isPast = s.booked_date ? new Date(s.booked_date + "T23:59:00").getTime() < now : false;
+                                const isPast = s.booked_date ? Date.parse(s.booked_date) < now : false;
                                 return (
                                   <div key={i} className="flex items-center gap-2 text-xs">
                                     <span className={isPast ? "text-brown-400" : "text-white"}>{s.booked_date} {s.booked_start_time}{s.booked_end_time ? `–${s.booked_end_time}` : ""}</span>
