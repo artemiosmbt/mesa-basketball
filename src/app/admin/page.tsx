@@ -296,7 +296,7 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true);
   const [registrations, setRegistrations] = useState<Registration[]>([]);
   const [videoConsentMap, setVideoConsentMap] = useState<Record<string, boolean>>({});
-  const [referralCreditsMap, setReferralCreditsMap] = useState<Record<string, number>>({});
+  const [referralCreditsMap, setReferralCreditsMap] = useState<Record<string, { available: number; total: number }>>({});
   const [tab, setTab] = useState<"upcoming" | "past" | "clients" | "calendar">("upcoming");
   const [typeFilter, setTypeFilter] = useState("all");
   const [search, setSearch] = useState("");
@@ -334,9 +334,9 @@ export default function AdminPage() {
           if (p.email) map[p.email] = p.video_consent ?? true;
         }
         setVideoConsentMap(map);
-        const creditsMap: Record<string, number> = {};
+        const creditsMap: Record<string, { available: number; total: number }> = {};
         for (const rc of (adminData.referralCredits || [])) {
-          if (rc.email && rc.credits > 0) creditsMap[rc.email] = rc.credits;
+          if (rc.email) creditsMap[rc.email] = { available: rc.credits || 0, total: rc.total_referrals || 0 };
         }
         setReferralCreditsMap(creditsMap);
         if (syncResult?.changesFound?.length > 0) {
@@ -404,7 +404,7 @@ export default function AdminPage() {
 
   // Unique clients sorted by name
   const clients = useMemo(() => {
-    const map = new Map<string, { name: string; email: string; phone: string; kids: string; count: number; lastDate: number; videoConsent: boolean | null; referralCredits: number }>();
+    const map = new Map<string, { name: string; email: string; phone: string; kids: string; count: number; lastDate: number; videoConsent: boolean | null; referralsAvailable: number; referralsTotal: number }>();
     for (const r of registrations) {
       const key = r.email || r.parent_name;
       const existing = map.get(key);
@@ -414,8 +414,8 @@ export default function AdminPage() {
         if (d > existing.lastDate) existing.lastDate = d;
       } else {
         const vc = r.email && r.email in videoConsentMap ? videoConsentMap[r.email] : null;
-        const rc = r.email ? (referralCreditsMap[r.email] ?? 0) : 0;
-        map.set(key, { name: r.parent_name, email: r.email, phone: r.phone, kids: athleteNames(r.kids || ""), count: 1, lastDate: d, videoConsent: vc, referralCredits: rc });
+        const rc = r.email ? (referralCreditsMap[r.email] ?? { available: 0, total: 0 }) : { available: 0, total: 0 };
+        map.set(key, { name: r.parent_name, email: r.email, phone: r.phone, kids: athleteNames(r.kids || ""), count: 1, lastDate: d, videoConsent: vc, referralsAvailable: rc.available, referralsTotal: rc.total });
       }
     }
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
@@ -871,9 +871,9 @@ export default function AdminPage() {
                   <div className="shrink-0 text-right space-y-1">
                     <div className="text-mesa-accent font-bold text-sm">{c.count}</div>
                     <div className="text-xs text-brown-500">session{c.count !== 1 ? "s" : ""}</div>
-                    {c.referralCredits > 0 && (
+                    {c.referralsTotal > 0 && (
                       <div className="rounded-full px-2 py-0.5 text-xs font-medium bg-purple-900/40 text-purple-300">
-                        {c.referralCredits} referral credit{c.referralCredits !== 1 ? "s" : ""}
+                        {c.referralsAvailable} avail / {c.referralsTotal} total ref{c.referralsTotal !== 1 ? "s" : ""}
                       </div>
                     )}
                     {c.videoConsent !== null && (
@@ -894,10 +894,11 @@ export default function AdminPage() {
           return (
             <>
               <button onClick={() => setSelectedClient(null)} className="text-sm text-mesa-accent hover:underline mb-4 inline-block">← All Clients</button>
-              {clientData && clientData.referralCredits > 0 && (
-                <div className="mb-4 rounded-xl border border-purple-800/50 bg-purple-900/20 px-4 py-2.5 flex items-center gap-2">
-                  <span className="text-purple-300 font-semibold text-sm">{clientData.referralCredits}</span>
-                  <span className="text-xs text-purple-400">referral credit{clientData.referralCredits !== 1 ? "s" : ""} available</span>
+              {clientData && clientData.referralsTotal > 0 && (
+                <div className="mb-4 rounded-xl border border-purple-800/50 bg-purple-900/20 px-4 py-2.5 flex items-center gap-3">
+                  <span className="text-purple-300 font-semibold text-sm">{clientData.referralsAvailable} available</span>
+                  <span className="text-brown-600 text-xs">/</span>
+                  <span className="text-xs text-purple-400">{clientData.referralsTotal} total referral{clientData.referralsTotal !== 1 ? "s" : ""} made</span>
                 </div>
               )}
               <div className="space-y-3">
