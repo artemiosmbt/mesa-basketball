@@ -461,26 +461,30 @@ export default function AdminPage() {
   // Map each registration id to whether it falls within a monthly package
   const packageMembership = useMemo(() => {
     const result = new Map<string, { withinPackage: boolean; packagePaid: boolean }>();
+
+    function toMonthYear(dateStr: string | null): string | null {
+      if (!dateStr) return null;
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return null;
+      return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+    }
+
     const pkgMap = new Map<string, { package_type: number; is_paid: boolean }>();
     for (const pkg of packages) {
       const key = `${pkg.email.toLowerCase().trim()}|${pkg.month_year}`;
       if (!pkgMap.has(key)) pkgMap.set(key, { package_type: pkg.package_type, is_paid: pkg.is_paid });
     }
-    console.log("[mesa] pkgMap keys:", [...pkgMap.keys()].join(" | "));
-    const privateRegs = registrations.filter(r => (r.type === "private" || r.type === "group-private") && r.status === "confirmed" && !!r.booked_date);
-    console.log("[mesa] private/gp confirmed regs:", privateRegs.map(r => `${(r.email||"").toLowerCase().trim()}|${r.booked_date!.substring(0,7)} (type:${r.type})`).join(" | "));
     const regsByKey = new Map<string, Registration[]>();
     for (const r of registrations) {
       if (r.type !== "private" && r.type !== "group-private") continue;
       if (r.status !== "confirmed") continue;
-      if (!r.booked_date) continue;
-      const monthYear = r.booked_date.substring(0, 7);
+      const monthYear = toMonthYear(r.booked_date);
+      if (!monthYear) continue;
       const key = `${(r.email || "").toLowerCase().trim()}|${monthYear}`;
       if (!pkgMap.has(key)) continue;
       if (!regsByKey.has(key)) regsByKey.set(key, []);
       regsByKey.get(key)!.push(r);
     }
-    console.log("[mesa] matched regsByKey keys:", [...regsByKey.keys()].join(" | "));
     for (const [key, regs] of regsByKey) {
       const pkg = pkgMap.get(key)!;
       const sorted = [...regs].sort((a, b) => sessionMs(a.booked_date, a.booked_start_time) - sessionMs(b.booked_date, b.booked_start_time));
@@ -488,7 +492,6 @@ export default function AdminPage() {
         result.set(sorted[i].id, { withinPackage: i < pkg.package_type, packagePaid: pkg.is_paid });
       }
     }
-    console.log("[mesa] final packageMembership size:", result.size);
     return result;
   }, [registrations, packages]);
 

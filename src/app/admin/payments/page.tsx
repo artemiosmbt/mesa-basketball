@@ -147,6 +147,14 @@ export default function PaymentsPage() {
 
   const packageMembership = useMemo(() => {
     const result = new Map<string, { withinPackage: boolean; packagePaid: boolean }>();
+
+    function toMonthYear(dateStr: string | null): string | null {
+      if (!dateStr) return null;
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return null;
+      return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+    }
+
     const pkgMap = new Map<string, { package_type: number; is_paid: boolean }>();
     for (const pkg of packages) {
       const key = `${pkg.email.toLowerCase().trim()}|${pkg.month_year}`;
@@ -156,8 +164,8 @@ export default function PaymentsPage() {
     for (const r of registrations) {
       if (r.type !== "private" && r.type !== "group-private") continue;
       if (r.status !== "confirmed") continue;
-      if (!r.booked_date) continue;
-      const monthYear = r.booked_date.substring(0, 7);
+      const monthYear = toMonthYear(r.booked_date);
+      if (!monthYear) continue;
       const key = `${(r.email || "").toLowerCase().trim()}|${monthYear}`;
       if (!pkgMap.has(key)) continue;
       if (!regsByKey.has(key)) regsByKey.set(key, []);
