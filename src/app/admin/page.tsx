@@ -323,10 +323,6 @@ export default function AdminPage() {
   // Time Change state
   const [tcResult, setTcResult] = useState<{ changesFound: { session: string; oldTime: string; newTime: string; count: number }[]; totalEmailsSent: number; totalSmsSent: number } | null>(null);
 
-  // SMS opt-out sync state
-  const [smsSync, setSmsSync] = useState<{ optedOut: number; optedIn: number; profilesUpdated: number; regsUpdated: number } | null>(null);
-  const [smsSyncing, setSmsSyncing] = useState(false);
-
   useEffect(() => {
     authClient.auth.getSession().then(({ data: { session } }) => {
       if (!session || session.user.email !== ADMIN_EMAIL) {
@@ -388,19 +384,6 @@ export default function AdminPage() {
     });
     setRegistrations((prev) => prev.map((r) => (r.id === id ? { ...r, status: "cancelled" } : r)));
     setCancelling(null);
-  }
-
-  async function syncSmsOptouts() {
-    if (!token || smsSyncing) return;
-    setSmsSyncing(true);
-    setSmsSync(null);
-    const res = await fetch("/api/admin/sync-sms-optouts", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const data = await res.json();
-    setSmsSync(data);
-    setSmsSyncing(false);
   }
 
   async function markNoShow(id: string) {
@@ -782,24 +765,6 @@ export default function AdminPage() {
             <span className="text-xs text-green-500 shrink-0">{tcResult.totalEmailsSent} email{tcResult.totalEmailsSent !== 1 ? "s" : ""}, {tcResult.totalSmsSent} SMS sent</span>
           </div>
         )}
-
-        {/* SMS Opt-out Sync */}
-        <div className="mb-6 flex flex-wrap items-center gap-3">
-          <button
-            onClick={syncSmsOptouts}
-            disabled={smsSyncing}
-            className="rounded-lg border border-brown-700 bg-brown-900/60 px-4 py-2 text-sm text-brown-300 hover:text-white hover:border-brown-500 transition disabled:opacity-50"
-          >
-            {smsSyncing ? "Syncing..." : "Sync Twilio Opt-outs"}
-          </button>
-          {smsSync && (
-            <span className="text-xs text-brown-400">
-              {smsSync.profilesUpdated + smsSync.regsUpdated === 0
-                ? "Already up to date — no changes needed"
-                : `Updated ${smsSync.profilesUpdated} profile${smsSync.profilesUpdated !== 1 ? "s" : ""}, ${smsSync.regsUpdated} registration${smsSync.regsUpdated !== 1 ? "s" : ""} — ${smsSync.optedOut} opted out, ${smsSync.optedIn} opted in`}
-            </span>
-          )}
-        </div>
 
         {/* Tabs */}
         <div className="flex flex-wrap gap-2 mb-6">
