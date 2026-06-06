@@ -894,11 +894,22 @@ export default function AdminPage() {
           return (
             <>
               <button onClick={() => setSelectedClient(null)} className="text-sm text-mesa-accent hover:underline mb-4 inline-block">← All Clients</button>
-              {clientData && clientData.referralsTotal > 0 && (
-                <div className="mb-4 rounded-xl border border-purple-800/50 bg-purple-900/20 px-4 py-2.5 flex items-center gap-3">
-                  <span className="text-purple-300 font-semibold text-sm">{clientData.referralsAvailable} available</span>
-                  <span className="text-brown-600 text-xs">/</span>
-                  <span className="text-xs text-purple-400">{clientData.referralsTotal} total referral{clientData.referralsTotal !== 1 ? "s" : ""} made</span>
+              {clientData && (
+                <div className="mb-4 rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-3 flex items-center gap-6">
+                  <div className="text-center">
+                    <p className="text-mesa-accent font-bold text-xl leading-none">{clientData.count}</p>
+                    <p className="text-xs text-brown-500 mt-1">session{clientData.count !== 1 ? "s" : ""}</p>
+                  </div>
+                  <div className="w-px h-8 bg-brown-700" />
+                  <div className="text-center">
+                    <p className="text-purple-300 font-bold text-xl leading-none">{clientData.referralsAvailable}</p>
+                    <p className="text-xs text-brown-500 mt-1">credit{clientData.referralsAvailable !== 1 ? "s" : ""} available</p>
+                  </div>
+                  <div className="w-px h-8 bg-brown-700" />
+                  <div className="text-center">
+                    <p className="text-purple-400 font-bold text-xl leading-none">{clientData.referralsTotal}</p>
+                    <p className="text-xs text-brown-500 mt-1">total referral{clientData.referralsTotal !== 1 ? "s" : ""} given</p>
+                  </div>
                 </div>
               )}
               <div className="space-y-3">
