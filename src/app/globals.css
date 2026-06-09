@@ -18,6 +18,10 @@
   --color-mesa-light: #fffbeb;
 }
 
+html {
+  color-scheme: light;
+}
+
 html, body {
   overflow-x: clip;
   max-width: 100%;
