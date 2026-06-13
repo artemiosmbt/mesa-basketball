@@ -18,6 +18,8 @@ interface Registration {
   booked_start_time: string | null;
   status: string;
   session_price: number | null;
+  is_free: boolean;
+  used_referral_credit: boolean;
 }
 
 interface PackageData {
@@ -84,6 +86,13 @@ function fullPriceForType(type: string): number {
   if (type === "group-private") return 250;
   if (type === "private") return 150;
   return 50;
+}
+
+function effectivePrice(r: { type: string; session_price: number | null; is_free: boolean }): number {
+  if (r.session_price != null) return r.session_price;
+  const isPrivateType = r.type === "private" || r.type === "group-private";
+  if (r.is_free && isPrivateType) return Math.round(fullPriceForType(r.type) * 0.5);
+  return fullPriceForType(r.type);
 }
 
 function daysAway(dateStr: string | null): { label: string; cls: string } | null {
@@ -285,7 +294,7 @@ function CalendarView({ list, packageMembership, cancelRegistration, markNoShow,
                     </span>
                     {!packageMembership.get(r.id)?.withinPackage && (
                       <span className="text-xs font-medium text-green-400">
-                        {formatPrice(r.session_price ?? fullPriceForType(r.type))}
+                        {formatPrice(effectivePrice(r))}
                       </span>
                     )}
                     {r.status === "confirmed" && (
@@ -549,7 +558,7 @@ export default function AdminPage() {
           <div className="shrink-0 flex flex-col items-end justify-between self-stretch">
             <span className={`text-brown-500 transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}>▾</span>
             {!packageMembership.get(r.id)?.withinPackage && (
-              <span className="text-white font-medium text-xs">{formatPrice(r.session_price ?? fullPriceForType(r.type))}</span>
+              <span className="text-white font-medium text-xs">{formatPrice(effectivePrice(r))}</span>
             )}
           </div>
         </button>
@@ -577,7 +586,7 @@ export default function AdminPage() {
               {!packageMembership.get(r.id)?.withinPackage && (
                 <div>
                   <p className="text-brown-500 uppercase tracking-wider mb-0.5">Price</p>
-                  <p className="text-green-400 font-medium">{formatPrice(r.session_price ?? fullPriceForType(r.type))}</p>
+                  <p className="text-green-400 font-medium">{formatPrice(effectivePrice(r))}</p>
                 </div>
               )}
             </div>
@@ -661,7 +670,7 @@ export default function AdminPage() {
               {packageMembership.get(r.id)?.withinPackage ? (
                 <span className="text-brown-600">—</span>
               ) : (
-                <span className="text-green-400 font-medium">{formatPrice(r.session_price ?? fullPriceForType(r.type))}</span>
+                <span className="text-green-400 font-medium">{formatPrice(effectivePrice(r))}</span>
               )}
             </td>
             <td className="px-4 py-3 whitespace-nowrap">
