@@ -80,6 +80,12 @@ function formatPrice(price: number | null): string {
   return `$${price}`;
 }
 
+function fullPriceForType(type: string): number {
+  if (type === "group-private") return 250;
+  if (type === "private") return 150;
+  return 50;
+}
+
 function daysAway(dateStr: string | null): { label: string; cls: string } | null {
   if (!dateStr) return null;
   const d = new Date(dateStr);
@@ -277,9 +283,11 @@ function CalendarView({ list, packageMembership, cancelRegistration, markNoShow,
                     <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${r.status === "confirmed" ? "bg-green-900/40 text-green-400" : r.status === "no_show" ? "bg-orange-900/40 text-orange-400" : "bg-red-900/40 text-red-400"}`}>
                       {r.status === "no_show" ? "no show" : r.status}
                     </span>
-                    <span className={`text-xs font-medium ${r.session_price != null ? "text-green-400" : "text-brown-600"}`}>
-                      {formatPrice(r.session_price)}
-                    </span>
+                    {!packageMembership.get(r.id)?.withinPackage && (
+                      <span className="text-xs font-medium text-green-400">
+                        {formatPrice(r.session_price ?? fullPriceForType(r.type))}
+                      </span>
+                    )}
                     {r.status === "confirmed" && (
                       <div className="flex gap-2">
                         <button onClick={() => cancelRegistration(r.id)} disabled={cancelling === r.id} className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50">
@@ -531,9 +539,6 @@ export default function AdminPage() {
               <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${r.status === "confirmed" && !isPast ? "bg-green-900/40 text-green-400" : r.status === "confirmed" && isPast ? "bg-brown-800 text-brown-400" : r.status === "no_show" ? "bg-orange-900/40 text-orange-400" : "bg-red-900/40 text-red-400"}`}>
                 {r.status === "confirmed" ? (isPast ? "completed" : "scheduled") : r.status === "no_show" ? "no show" : r.status}
               </span>
-              {r.session_price != null && (
-                <span className="rounded-full bg-green-900/30 text-green-400 px-2 py-0.5 text-xs font-medium">{formatPrice(r.session_price)}</span>
-              )}
             </div>
             <div className="text-xs text-brown-300 mt-0.5 truncate">{athleteNames(r.kids || "")}</div>
             <div className="flex flex-wrap gap-x-3 mt-1 text-xs text-brown-500">
@@ -541,9 +546,12 @@ export default function AdminPage() {
               <span>{r.phone}</span>
             </div>
           </div>
-          <span className={`shrink-0 mt-0.5 text-brown-500 transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}>
-            ▾
-          </span>
+          <div className="shrink-0 flex flex-col items-end justify-between self-stretch">
+            <span className={`text-brown-500 transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}>▾</span>
+            {!packageMembership.get(r.id)?.withinPackage && (
+              <span className="text-green-400 font-semibold text-sm">{formatPrice(r.session_price ?? fullPriceForType(r.type))}</span>
+            )}
+          </div>
         </button>
 
         {/* Expanded detail */}
@@ -566,10 +574,12 @@ export default function AdminPage() {
                 <p className="text-brown-500 uppercase tracking-wider mb-0.5">Session Date</p>
                 <p className="text-mesa-accent font-medium">{formatDate(r.booked_date)}</p>
               </div>
-              <div>
-                <p className="text-brown-500 uppercase tracking-wider mb-0.5">Price</p>
-                <p className={r.session_price != null ? "text-green-400 font-medium" : "text-brown-600"}>{formatPrice(r.session_price)}</p>
-              </div>
+              {!packageMembership.get(r.id)?.withinPackage && (
+                <div>
+                  <p className="text-brown-500 uppercase tracking-wider mb-0.5">Price</p>
+                  <p className="text-green-400 font-medium">{formatPrice(r.session_price ?? fullPriceForType(r.type))}</p>
+                </div>
+              )}
             </div>
             <div>
               <p className="text-brown-500 uppercase tracking-wider mb-0.5">Athletes</p>
@@ -648,9 +658,11 @@ export default function AdminPage() {
               </span>
             </td>
             <td className="px-4 py-3 whitespace-nowrap text-xs">
-              <span className={r.session_price != null ? "text-green-400 font-medium" : "text-brown-600"}>
-                {formatPrice(r.session_price)}
-              </span>
+              {packageMembership.get(r.id)?.withinPackage ? (
+                <span className="text-brown-600">—</span>
+              ) : (
+                <span className="text-green-400 font-medium">{formatPrice(r.session_price ?? fullPriceForType(r.type))}</span>
+              )}
             </td>
             <td className="px-4 py-3 whitespace-nowrap">
               {isPast ? (
