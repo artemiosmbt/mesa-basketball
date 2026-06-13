@@ -549,7 +549,7 @@ export default function AdminPage() {
           <div className="shrink-0 flex flex-col items-end justify-between self-stretch">
             <span className={`text-brown-500 transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}>▾</span>
             {!packageMembership.get(r.id)?.withinPackage && (
-              <span className="text-green-400 font-semibold text-sm">{formatPrice(r.session_price ?? fullPriceForType(r.type))}</span>
+              <span className="text-white font-medium text-xs">{formatPrice(r.session_price ?? fullPriceForType(r.type))}</span>
             )}
           </div>
         </button>
