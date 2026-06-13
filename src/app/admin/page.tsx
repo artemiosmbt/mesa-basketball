@@ -75,6 +75,11 @@ function sessionText(details: string) {
   return details ? details.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "").split("\n")[0] : "—";
 }
 
+function formatPrice(price: number | null): string {
+  if (price == null) return "—";
+  return `$${price}`;
+}
+
 function daysAway(dateStr: string | null): { label: string; cls: string } | null {
   if (!dateStr) return null;
   const d = new Date(dateStr);
@@ -271,6 +276,9 @@ function CalendarView({ list, packageMembership, cancelRegistration, markNoShow,
                   <div className="shrink-0 flex flex-col items-end gap-2">
                     <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${r.status === "confirmed" ? "bg-green-900/40 text-green-400" : r.status === "no_show" ? "bg-orange-900/40 text-orange-400" : "bg-red-900/40 text-red-400"}`}>
                       {r.status === "no_show" ? "no show" : r.status}
+                    </span>
+                    <span className={`text-xs font-medium ${r.session_price != null ? "text-green-400" : "text-brown-600"}`}>
+                      {formatPrice(r.session_price)}
                     </span>
                     {r.status === "confirmed" && (
                       <div className="flex gap-2">
@@ -523,6 +531,9 @@ export default function AdminPage() {
               <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${r.status === "confirmed" && !isPast ? "bg-green-900/40 text-green-400" : r.status === "confirmed" && isPast ? "bg-brown-800 text-brown-400" : r.status === "no_show" ? "bg-orange-900/40 text-orange-400" : "bg-red-900/40 text-red-400"}`}>
                 {r.status === "confirmed" ? (isPast ? "completed" : "scheduled") : r.status === "no_show" ? "no show" : r.status}
               </span>
+              {r.session_price != null && (
+                <span className="rounded-full bg-green-900/30 text-green-400 px-2 py-0.5 text-xs font-medium">{formatPrice(r.session_price)}</span>
+              )}
             </div>
             <div className="text-xs text-brown-300 mt-0.5 truncate">{athleteNames(r.kids || "")}</div>
             <div className="flex flex-wrap gap-x-3 mt-1 text-xs text-brown-500">
@@ -554,6 +565,10 @@ export default function AdminPage() {
               <div>
                 <p className="text-brown-500 uppercase tracking-wider mb-0.5">Session Date</p>
                 <p className="text-mesa-accent font-medium">{formatDate(r.booked_date)}</p>
+              </div>
+              <div>
+                <p className="text-brown-500 uppercase tracking-wider mb-0.5">Price</p>
+                <p className={r.session_price != null ? "text-green-400 font-medium" : "text-brown-600"}>{formatPrice(r.session_price)}</p>
               </div>
             </div>
             <div>
@@ -632,6 +647,11 @@ export default function AdminPage() {
                 {r.status === "confirmed" ? (isPast ? "completed" : "scheduled") : r.status === "no_show" ? "no show" : r.status}
               </span>
             </td>
+            <td className="px-4 py-3 whitespace-nowrap text-xs">
+              <span className={r.session_price != null ? "text-green-400 font-medium" : "text-brown-600"}>
+                {formatPrice(r.session_price)}
+              </span>
+            </td>
             <td className="px-4 py-3 whitespace-nowrap">
               {isPast ? (
                 <div className="flex items-center gap-3">
@@ -660,7 +680,7 @@ export default function AdminPage() {
           </tr>
         ))}
         {list.length === 0 && (
-          <tr><td colSpan={9} className="px-4 py-8 text-center text-brown-500">No registrations found.</td></tr>
+          <tr><td colSpan={10} className="px-4 py-8 text-center text-brown-500">No registrations found.</td></tr>
         )}
       </>
     );
@@ -835,17 +855,17 @@ export default function AdminPage() {
                   <div className="hidden md:block rounded-xl border border-brown-700 overflow-hidden">
                     <table className="w-full text-sm">
                       <thead className="bg-brown-900/60 text-xs uppercase tracking-wider text-brown-400">
-                        <tr><th className="px-4 py-3 text-left">Registered</th><th className="px-4 py-3 text-left">Parent</th><th className="px-4 py-3 text-left">Email</th><th className="px-4 py-3 text-left">Phone</th><th className="px-4 py-3 text-left">Athletes</th><th className="px-4 py-3 text-left">Type</th><th className="px-4 py-3 text-left">Session</th><th className="px-4 py-3 text-left">Status</th><th className="px-4 py-3 text-left">Action</th></tr>
+                        <tr><th className="px-4 py-3 text-left">Registered</th><th className="px-4 py-3 text-left">Parent</th><th className="px-4 py-3 text-left">Email</th><th className="px-4 py-3 text-left">Phone</th><th className="px-4 py-3 text-left">Athletes</th><th className="px-4 py-3 text-left">Type</th><th className="px-4 py-3 text-left">Session</th><th className="px-4 py-3 text-left">Status</th><th className="px-4 py-3 text-left">Price</th><th className="px-4 py-3 text-left">Action</th></tr>
                       </thead>
                       <tbody>
-                        <tr><td colSpan={9} className="px-4 py-2 bg-brown-900/70 text-xs font-semibold text-mesa-accent">Today — {todayLabel}</td></tr>
+                        <tr><td colSpan={10} className="px-4 py-2 bg-brown-900/70 text-xs font-semibold text-mesa-accent">Today — {todayLabel}</td></tr>
                         {todaySessions.length === 0
-                          ? <tr><td colSpan={9} className="px-4 py-3 text-xs text-brown-500 italic">No sessions scheduled for today.</td></tr>
+                          ? <tr><td colSpan={10} className="px-4 py-3 text-xs text-brown-500 italic">No sessions scheduled for today.</td></tr>
                           : <RegTableRows list={todaySessions} />
                         }
                         {groupByDate(futureSessions).map(({ key, label, sessions }) => (
                           <Fragment key={key}>
-                            <tr><td colSpan={9} className="px-4 py-2 bg-brown-900/70 border-t-2 border-brown-600 text-xs font-semibold text-mesa-accent">{label}</td></tr>
+                            <tr><td colSpan={10} className="px-4 py-2 bg-brown-900/70 border-t-2 border-brown-600 text-xs font-semibold text-mesa-accent">{label}</td></tr>
                             <RegTableRows list={sessions} />
                           </Fragment>
                         ))}
@@ -876,13 +896,13 @@ export default function AdminPage() {
             <div className="hidden md:block rounded-xl border border-brown-700 overflow-hidden">
               <table className="w-full text-sm">
                 <thead className="bg-brown-900/60 text-xs uppercase tracking-wider text-brown-400">
-                  <tr><th className="px-4 py-3 text-left">Registered</th><th className="px-4 py-3 text-left">Parent</th><th className="px-4 py-3 text-left">Email</th><th className="px-4 py-3 text-left">Phone</th><th className="px-4 py-3 text-left">Athletes</th><th className="px-4 py-3 text-left">Type</th><th className="px-4 py-3 text-left">Session</th><th className="px-4 py-3 text-left">Status</th><th className="px-4 py-3 text-left">Action</th></tr>
+                  <tr><th className="px-4 py-3 text-left">Registered</th><th className="px-4 py-3 text-left">Parent</th><th className="px-4 py-3 text-left">Email</th><th className="px-4 py-3 text-left">Phone</th><th className="px-4 py-3 text-left">Athletes</th><th className="px-4 py-3 text-left">Type</th><th className="px-4 py-3 text-left">Session</th><th className="px-4 py-3 text-left">Status</th><th className="px-4 py-3 text-left">Price</th><th className="px-4 py-3 text-left">Action</th></tr>
                 </thead>
                 <tbody>
-                  {displayedPast.length === 0 && <tr><td colSpan={9} className="px-4 py-8 text-center text-brown-500">No past sessions.</td></tr>}
+                  {displayedPast.length === 0 && <tr><td colSpan={10} className="px-4 py-8 text-center text-brown-500">No past sessions.</td></tr>}
                   {groupByDate(displayedPast).map(({ key, label, sessions }) => (
                     <Fragment key={key}>
-                      <tr><td colSpan={9} className="px-4 py-2 bg-brown-900/70 border-t-2 border-brown-600 text-xs font-semibold text-mesa-accent">{label}</td></tr>
+                      <tr><td colSpan={10} className="px-4 py-2 bg-brown-900/70 border-t-2 border-brown-600 text-xs font-semibold text-mesa-accent">{label}</td></tr>
                       <RegTableRows list={sessions} isPast />
                     </Fragment>
                   ))}
