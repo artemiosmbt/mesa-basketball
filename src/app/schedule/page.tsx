@@ -1465,8 +1465,8 @@ export default function Home() {
 
     const sessionList = sessions
       .map((s) => {
-        const d = new Date(s.date);
-        const dayName = d.toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" });
+        const d = parseDateForDisplay(s.date);
+        const dayName = d.toLocaleDateString("en-US", { weekday: "short", timeZone: "America/New_York" });
         return `${dayName} ${s.date} ${s.startTime}-${s.endTime}`;
       })
       .join(", ");
@@ -1694,8 +1694,8 @@ export default function Home() {
                         const spotsLeft = s.maxSpots - enrolled;
                         const full = spotsLeft <= 0;
                         const checked = selectedGroupKeys.has(key);
-                        const d = new Date(s.date);
-                        const dayName = d.toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" });
+                        const d = parseDateForDisplay(s.date);
+                        const dayName = d.toLocaleDateString("en-US", { weekday: "short", timeZone: "America/New_York" });
 
                         return (
                           <label
@@ -2144,8 +2144,8 @@ export default function Home() {
                     <div>
                       <h3 className="font-semibold text-brown-200">
                         {(() => {
-                          const d = new Date(window.date);
-                          const day = d.toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" });
+                          const d = parseDateForDisplay(window.date);
+                          const day = d.toLocaleDateString("en-US", { weekday: "long", timeZone: "America/New_York" });
                           return `${day}, ${window.date}`;
                         })()}
                       </h3>
