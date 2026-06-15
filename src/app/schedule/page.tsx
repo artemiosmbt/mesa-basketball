@@ -156,6 +156,20 @@ interface PrivateSlot {
 
 type BookingType = "weekly" | "camp" | "private" | "group-private";
 
+// All session times are Eastern Time. This returns the current clock in ET so
+// visitors in other timezones (e.g. Greece) see the same sessions as someone in New York.
+function nowET() {
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    year: "numeric", month: "numeric", day: "numeric",
+    hour: "numeric", minute: "numeric", hour12: false,
+  }).formatToParts(now);
+  const get = (t: string) => parseInt(parts.find(p => p.type === t)?.value ?? "0");
+  const hour = get("hour") % 24; // hour12:false can return 24 at midnight on some browsers
+  return { year: get("year"), month: get("month"), day: get("day"), totalMins: hour * 60 + get("minute") };
+}
+
 // Parse "4:00 PM" → minutes since midnight
 function parseTime(t: string): number {
   const match = t.match(/(\d+):(\d+)\s*(AM|PM)/i);
@@ -1226,17 +1240,16 @@ export default function Home() {
 
   // Dates that have available private slots (for calendar highlights)
   const calendarHighlightedDates = useMemo(() => {
-    const now = new Date();
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const currentMins = now.getHours() * 60 + now.getMinutes();
+    const et = nowET();
+    const etToday = new Date(et.year, et.month - 1, et.day);
     const dates = new Set<string>();
     timeWindows.forEach((w) => {
       if (w.endMins - w.startMins < 60) return;
-      const d = new Date(w.date);
-      if (d < today) return;
-      if (d.getTime() === today.getTime()) {
-        const nextValidStart = Math.ceil(currentMins / 15) * 15;
+      const d = parseDateForDisplay(w.date);
+      const wDay = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+      if (wDay < etToday) return;
+      if (wDay.getTime() === etToday.getTime()) {
+        const nextValidStart = Math.ceil(et.totalMins / 15) * 15;
         const effectiveStart = Math.max(w.startMins, nextValidStart);
         if (w.endMins - effectiveStart < 60) return;
       }
@@ -1247,23 +1260,23 @@ export default function Home() {
 
   // Filter time windows by day of week, month, calendar date, and past dates
   const filteredWindows = useMemo(() => {
-    const now = new Date();
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const currentMins = now.getHours() * 60 + now.getMinutes();
+    const et = nowET();
+    const etToday = new Date(et.year, et.month - 1, et.day);
     return timeWindows.filter((w) => {
       if (w.endMins - w.startMins < 60) return false;
-      const d = new Date(w.date);
-      if (d < today) return false;
-      if (d.getTime() === today.getTime()) {
-        const nextValidStart = Math.ceil(currentMins / 15) * 15;
+      const d = parseDateForDisplay(w.date);
+      const wDay = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+      if (wDay < etToday) return false;
+      if (wDay.getTime() === etToday.getTime()) {
+        const nextValidStart = Math.ceil(et.totalMins / 15) * 15;
         const effectiveStart = Math.max(w.startMins, nextValidStart);
         if (w.endMins - effectiveStart < 60) return false;
       }
       if (calendarSelectedDate && w.date !== calendarSelectedDate) return false;
-      if (filterDays.size > 0 && !filterDays.has(d.getUTCDay())) return false;
+      const dUtc = new Date(w.date);
+      if (filterDays.size > 0 && !filterDays.has(dUtc.getUTCDay())) return false;
       if (filterMonth) {
-        const monthStr = d.toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+        const monthStr = dUtc.toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
         if (monthStr !== filterMonth) return false;
       }
       return true;
@@ -1341,31 +1354,24 @@ export default function Home() {
   }
 
   function isFutureSession(s: WeeklySession): boolean {
-    const sessionDate = new Date(s.date);
-    const now = new Date();
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    if (sessionDate > today) return true;
-    if (sessionDate < today) return false;
-    // Same day — check if start time is still in the future
-    const sessionStartMins = parseTime(s.startTime);
-    const currentMins = now.getHours() * 60 + now.getMinutes();
-    return sessionStartMins > currentMins;
+    const et = nowET();
+    const d = parseDateForDisplay(s.date);
+    const [sy, sm, sd] = [d.getFullYear(), d.getMonth() + 1, d.getDate()];
+    if (sy !== et.year || sm !== et.month || sd !== et.day) {
+      return new Date(sy, sm - 1, sd) > new Date(et.year, et.month - 1, et.day);
+    }
+    return parseTime(s.startTime) > et.totalMins;
   }
 
   function isFutureCampDay(day: string, campTime: string): boolean {
-    const dayDate = new Date(day);
-    if (isNaN(dayDate.getTime())) return true;
-    const now = new Date();
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    dayDate.setHours(0, 0, 0, 0);
-    if (dayDate > today) return true;
-    if (dayDate < today) return false;
-    // Same day — allow registration until 30 mins before this group's start time
-    const startMins = parseCampStartMins(campTime);
-    const nowMins = now.getHours() * 60 + now.getMinutes();
-    return nowMins < startMins - 30;
+    const d = parseDateForDisplay(day);
+    if (isNaN(d.getTime())) return true;
+    const et = nowET();
+    const [sy, sm, sd] = [d.getFullYear(), d.getMonth() + 1, d.getDate()];
+    if (sy !== et.year || sm !== et.month || sd !== et.day) {
+      return new Date(sy, sm - 1, sd) > new Date(et.year, et.month - 1, et.day);
+    }
+    return et.totalMins < parseCampStartMins(campTime) - 30;
   }
 
   function isSessionFull(s: WeeklySession): boolean {
@@ -1520,6 +1526,7 @@ export default function Home() {
             Browse available sessions below and register online. Questions? Call or text{" "}
             <a href="tel:6315991280" className="text-mesa-accent hover:text-yellow-400">(631) 599-1280</a>.
           </p>
+          <p className="mt-2 text-brown-500 text-xs">All session times are Eastern Time (ET).</p>
         </div>
       </header>
 
