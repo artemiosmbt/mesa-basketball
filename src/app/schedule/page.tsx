@@ -1711,7 +1711,7 @@ export default function Home() {
                             onClick={() => { setGroupTab("pickup"); setSelectedGroupKeys(new Set()); }}
                             className={`rounded-full px-4 py-1.5 text-xs font-semibold transition ${
                               groupTab === "pickup"
-                                ? "bg-orange-600 text-white"
+                                ? "bg-mesa-accent text-white"
                                 : "bg-brown-800 text-brown-400 hover:bg-brown-700 hover:text-white"
                             }`}
                           >
@@ -1879,16 +1879,6 @@ export default function Home() {
                         <div className="space-y-2">
                           <div className="flex items-center gap-2 mb-3">
                             <p className="text-sm font-bold text-mesa-accent">${pickupUnitPrice} / session</p>
-                            {pickupSessions.length > 0 && (() => {
-                              const enrolled = getEnrollmentCount(pickupSessions[0]);
-                              const max = pickupSessions[0].maxSpots;
-                              const spotsLeft = max - enrolled;
-                              return (
-                                <span className={`text-xs font-medium ${spotsLeft <= 0 ? "text-red-400" : spotsLeft <= 3 ? "text-yellow-400" : "text-brown-400"}`}>
-                                  &bull; {enrolled}/{max} signed up{spotsLeft <= 0 ? " — FULL" : ""}
-                                </span>
-                              );
-                            })()}
                           </div>
                           {pickupSessions.length === 0 && (
                             <p className="text-sm text-brown-500 py-2">No pickup sessions scheduled yet — check back soon.</p>
