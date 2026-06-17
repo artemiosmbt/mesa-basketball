@@ -426,7 +426,7 @@ export async function addRegistrationWithRewards(data: {
     .from("registrations")
     .insert({
       parent_name: data.parentName,
-      email: data.email,
+      email: data.email.toLowerCase().trim(),
       phone: data.phone,
       kids: data.kids,
       type: data.type,

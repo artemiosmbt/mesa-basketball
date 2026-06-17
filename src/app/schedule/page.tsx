@@ -672,6 +672,9 @@ export default function Home() {
   }
 
   async function saveProfile() {
+    if (typeof window !== "undefined" && email.trim()) {
+      localStorage.setItem("mesa_parent_email", email.toLowerCase().trim());
+    }
     const { data: { session } } = await authClient.auth.getSession();
     if (!session) return;
     fetch("/api/profile", {

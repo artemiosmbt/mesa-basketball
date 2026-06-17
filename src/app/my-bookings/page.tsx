@@ -126,11 +126,35 @@ export default function MyBookings() {
         )}
 
         {!loading && bookings === null && !error && (
-          <div className="mt-8 rounded-2xl bg-brown-900 p-8 text-center">
-            <p className="text-brown-300 mb-4">Log in to view your bookings.</p>
-            <a href="/login?next=/my-bookings" className="inline-block rounded-lg bg-mesa-accent px-6 py-3 font-semibold text-white hover:bg-yellow-600">
-              Log In
-            </a>
+          <div className="mt-8 space-y-6">
+            <form
+              onSubmit={(e) => { e.preventDefault(); if (email.trim()) lookupBookings(email.trim()); }}
+              className="rounded-2xl bg-brown-900 p-6 space-y-4"
+            >
+              <p className="text-sm text-brown-300">Enter the email you used when registering to view your bookings.</p>
+              <div className="flex gap-3">
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="your@email.com"
+                  className="flex-1 rounded-lg bg-brown-800 border border-brown-700 px-4 py-2.5 text-sm text-white placeholder-brown-500 focus:outline-none focus:border-mesa-accent"
+                />
+                <button
+                  type="submit"
+                  disabled={!email.trim()}
+                  className="rounded-lg bg-mesa-accent px-5 py-2.5 text-sm font-semibold text-white hover:bg-yellow-600 disabled:opacity-40"
+                >
+                  Look up
+                </button>
+              </div>
+            </form>
+            <div className="text-center text-sm text-brown-600">or</div>
+            <div className="text-center">
+              <a href="/login?next=/my-bookings" className="inline-block rounded-lg bg-brown-800 border border-brown-700 px-6 py-3 text-sm font-semibold text-white hover:bg-brown-700">
+                Log In
+              </a>
+            </div>
           </div>
         )}
 
