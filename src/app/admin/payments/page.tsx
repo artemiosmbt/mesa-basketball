@@ -302,13 +302,13 @@ export default function PaymentsPage() {
                         <span className="rounded-full bg-teal-900/40 text-teal-400 px-2 py-0.5 text-xs font-medium shrink-0">pkg</span>
                       )}
                       {da && <span className={`rounded-full px-2 py-0.5 text-xs font-medium shrink-0 ${da.cls}`}>{da.label}</span>}
-                      <span className="text-sm font-bold text-white shrink-0">${amount} owed</span>
                     </div>
                     {r.kids && <div className="text-xs text-white mt-0.5 truncate">{r.kids.split(",").map((k) => k.split("(")[0].trim()).filter(Boolean).join(", ")}</div>}
                     <div className="text-xs text-brown-400 mt-0.5 truncate">{sessionLabel(r)}</div>
                     <div className="flex flex-wrap gap-x-3 mt-1 text-xs text-brown-500">
                       <span>{formatDate(r.booked_date)}</span>
                       <span>{r.phone}</span>
+                      <span className="ml-auto text-brown-400 font-medium">${amount}</span>
                     </div>
                   </div>
                   <button
@@ -397,11 +397,14 @@ export default function PaymentsPage() {
                         <span className="rounded-full bg-teal-900/40 text-teal-400 px-2 py-0.5 text-xs font-medium shrink-0">pkg</span>
                       )}
                       {da && <span className={`rounded-full px-2 py-0.5 text-xs font-medium shrink-0 ${da.cls}`}>{da.label}</span>}
-                      <span className="text-sm font-bold text-green-400 shrink-0">${amount} paid</span>
                     </div>
                     {r.kids && <div className="text-xs text-white mt-0.5 truncate">{r.kids.split(",").map((k) => k.split("(")[0].trim()).filter(Boolean).join(", ")}</div>}
                     <div className="text-xs text-brown-400 mt-0.5 truncate">{sessionLabel(r)}</div>
-                    <div className="text-xs text-brown-500 mt-1">{formatDate(r.booked_date)}</div>
+                    <div className="flex flex-wrap gap-x-3 mt-1 text-xs text-brown-500">
+                      <span>{formatDate(r.booked_date)}</span>
+                      <span>{r.phone}</span>
+                      <span className="ml-auto text-brown-400 font-medium">${amount}</span>
+                    </div>
                   </div>
                   <button
                     onClick={() => togglePaid(r.id, r.is_paid)}
