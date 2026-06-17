@@ -127,6 +127,7 @@ export async function POST(req: NextRequest) {
       }
 
       // Send ONE consolidated email
+      const isPickupBooking = weeklySessions[0]?.group?.toLowerCase().includes("pickup");
       const allSessionsList = weeklySessions
         .map((s: { date: string; startTime: string; endTime: string; location: string }) =>
           `${s.date} ${s.startTime}-${s.endTime} at ${s.location}`
@@ -144,7 +145,7 @@ export async function POST(req: NextRequest) {
           phone,
           kids,
           type: "weekly",
-          sessionDetails: `Group Session${weeklySessions.length !== 1 ? "s" : ""} (${weeklySessions.length} ${weeklySessions.length !== 1 ? "dates" : "date"}):<br/>${allSessionsList}${priceNote ? "<br/>" + priceNote : ""}`,
+          sessionDetails: `${isPickupBooking ? "Pickup" : "Group"} Session${weeklySessions.length !== 1 ? "s" : ""} (${weeklySessions.length} ${weeklySessions.length !== 1 ? "dates" : "date"}):<br/>${allSessionsList}${priceNote ? "<br/>" + priceNote : ""}`,
           totalParticipants: totalParticipants || 1,
           referralCode,
           referredBy: weeklyReferrer?.name,
@@ -161,17 +162,19 @@ export async function POST(req: NextRequest) {
       }
 
       // SMS runs independently so it always fires even if email throws
+      const sessionTypeSMS = isPickupBooking ? "pickup session" : "session";
       if (smsConsent) {
         const sessionLines = weeklySessions.map((s: { date: string; startTime: string; endTime: string; location: string }) =>
           `${formatDateWithDay(s.date)} | ${s.startTime}-${s.endTime}\nLocation: ${resolveLocationName(s.location)}`
         ).join("\n");
         const count = weeklySessions.length;
-        await sendSMS(phone, `Mesa Basketball: ${count === 1 ? "Session" : `${count} sessions`} confirmed!\n${sessionLines}\nAthlete: ${kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
+        const confirmLabel = count === 1 ? `${isPickupBooking ? "Pickup session" : "Session"}` : `${count} ${isPickupBooking ? "pickup sessions" : "sessions"}`;
+        await sendSMS(phone, `Mesa Basketball: ${confirmLabel} confirmed!\n${sessionLines}\nAthlete: ${kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
       }
       const adminLines = weeklySessions.map((s: { date: string; startTime: string; endTime: string; location: string }) =>
         `${formatDateWithDay(s.date)} | ${s.startTime}-${s.endTime}\nLocation: ${resolveLocationName(s.location)}`
       ).join("\n");
-      await sendAdminSMS(`NEW BOOKING: ${parentName}\n${weeklySessions.length} group session${weeklySessions.length !== 1 ? "s" : ""}:\n${adminLines}\nPlayers: ${kids}${submittedReferralCode ? `\nRef code: ${submittedReferralCode}` : ""}`);
+      await sendAdminSMS(`NEW BOOKING: ${parentName}\n${weeklySessions.length} ${sessionTypeSMS}${weeklySessions.length !== 1 ? "s" : ""}:\n${adminLines}\nPlayers: ${kids}${submittedReferralCode ? `\nRef code: ${submittedReferralCode}` : ""}`);
 
       // Update Google Calendar for each weekly session
       for (const session of weeklySessions) {
