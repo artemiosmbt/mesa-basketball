@@ -32,10 +32,15 @@ interface PackageData {
 
 const TYPE_LABELS: Record<string, string> = {
   weekly: "Group",
+  pickup: "Pickup",
   camp: "Camp",
   private: "Private",
   "group-private": "Group Private",
 };
+
+function isPickup(r: { type: string; session_details: string }): boolean {
+  return r.type === "weekly" && r.session_details?.toLowerCase().includes("pickup");
+}
 
 function dateMs(d: string | null): number {
   if (!d) return 0;
@@ -470,7 +475,13 @@ export default function AdminPage() {
   // Apply type filter + search to a list
   function applyFilters(list: Registration[]) {
     return list.filter((r) => {
-      if (typeFilter !== "all" && r.type !== typeFilter) return false;
+      if (typeFilter === "pickup") {
+        if (!isPickup(r)) return false;
+      } else if (typeFilter === "weekly") {
+        if (r.type !== "weekly" || isPickup(r)) return false;
+      } else if (typeFilter !== "all") {
+        if (r.type !== typeFilter) return false;
+      }
       if (search) {
         const q = search.toLowerCase();
         if (!r.parent_name?.toLowerCase().includes(q) && !r.email?.toLowerCase().includes(q) && !r.phone?.includes(q)) return false;
@@ -836,7 +847,7 @@ export default function AdminPage() {
               className="rounded-lg border border-brown-700 bg-brown-800/60 px-4 py-2 text-sm text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none w-full sm:w-64"
             />
             <div className="flex flex-wrap gap-1">
-              {["all", "weekly", "camp", "private", "group-private"].map((t) => (
+              {["all", "weekly", "pickup", "camp", "private", "group-private"].map((t) => (
                 <button key={t} onClick={() => setTypeFilter(t)} className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${typeFilter === t ? "bg-mesa-accent text-white" : "border border-brown-700 text-brown-400 hover:text-white"}`}>
                   {t === "all" ? "All Types" : TYPE_LABELS[t] || t}
                 </button>
