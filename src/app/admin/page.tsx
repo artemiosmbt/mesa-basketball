@@ -42,6 +42,22 @@ function isPickup(r: { type: string; session_details: string }): boolean {
   return r.type === "weekly" && r.session_details?.toLowerCase().includes("pickup");
 }
 
+function typePill(type: string, sessionDetails?: string) {
+  if (type === "weekly" && sessionDetails?.toLowerCase().includes("pickup")) return "bg-orange-900/60 text-orange-400";
+  switch (type) {
+    case "private": return "bg-mesa-accent/30 text-mesa-accent";
+    case "weekly": return "bg-blue-900/60 text-blue-300";
+    case "camp": return "bg-purple-900/60 text-purple-300";
+    case "group-private": return "bg-green-900/60 text-green-300";
+    default: return "bg-brown-800 text-brown-300";
+  }
+}
+
+function typePillLabel(type: string, sessionDetails?: string) {
+  if (type === "weekly" && sessionDetails?.toLowerCase().includes("pickup")) return "Pickup";
+  return TYPE_LABELS[type] || type;
+}
+
 function dateMs(d: string | null): number {
   if (!d) return 0;
   const p = new Date(d);
@@ -198,16 +214,6 @@ function CalendarView({ list, packageMembership, cancelRegistration, markNoShow,
   const monthLabel = currentMonth.toLocaleDateString("en-US", { month: "long", year: "numeric" });
   const selectedSessions = selectedDay ? (sessionsByDay.get(selectedDay) ?? []) : [];
 
-  function typePill(type: string) {
-    switch (type) {
-      case "private": return "bg-mesa-accent/30 text-mesa-accent";
-      case "weekly": return "bg-blue-900/60 text-blue-300";
-      case "camp": return "bg-purple-900/60 text-purple-300";
-      case "group-private": return "bg-green-900/60 text-green-300";
-      default: return "bg-brown-800 text-brown-300";
-    }
-  }
-
   function prevMonth() {
     setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1));
     setSelectedDay(null);
@@ -282,7 +288,7 @@ function CalendarView({ list, packageMembership, cancelRegistration, markNoShow,
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mb-1">
                       <span className="font-medium text-sm">{r.parent_name}</span>
-                      <span className={`rounded-full px-2 py-0.5 text-xs ${typePill(r.type)}`}>{TYPE_LABELS[r.type] || r.type}</span>
+                      <span className={`rounded-full px-2 py-0.5 text-xs ${typePill(r.type, r.session_details)}`}>{typePillLabel(r.type, r.session_details)}</span>
                       {packageMembership.get(r.id)?.withinPackage && (
                         <span className="rounded-full bg-teal-900/40 text-teal-400 px-2 py-0.5 text-xs font-medium">pkg</span>
                       )}
@@ -551,7 +557,7 @@ export default function AdminPage() {
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
               <span className="font-medium text-sm">{r.parent_name}</span>
-              <span className="rounded-full bg-amber-400 px-2 py-0.5 text-xs font-semibold text-blue-900">{TYPE_LABELS[r.type] || r.type}</span>
+              <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${isPickup(r) ? "bg-orange-500 text-white" : "bg-amber-400 text-blue-900"}`}>{typePillLabel(r.type, r.session_details)}</span>
               {packageMembership.get(r.id)?.withinPackage && (
                 <span className="rounded-full bg-teal-900/40 text-teal-400 px-2 py-0.5 text-xs font-medium">pkg</span>
               )}
@@ -662,7 +668,7 @@ export default function AdminPage() {
             <td className="px-4 py-3 text-brown-300 text-xs">{athleteNames(r.kids || "")}</td>
             <td className="px-4 py-3 whitespace-nowrap">
               <div className="flex flex-wrap gap-1">
-                <span className="rounded-full bg-amber-400 px-2 py-0.5 text-xs font-semibold text-blue-900">{TYPE_LABELS[r.type] || r.type}</span>
+                <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${isPickup(r) ? "bg-orange-500 text-white" : "bg-amber-400 text-blue-900"}`}>{typePillLabel(r.type, r.session_details)}</span>
                 {packageMembership.get(r.id)?.withinPackage && (
                   <span className="rounded-full bg-teal-900/40 text-teal-400 px-2 py-0.5 text-xs font-medium">pkg</span>
                 )}
