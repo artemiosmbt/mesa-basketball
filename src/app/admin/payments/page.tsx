@@ -205,6 +205,10 @@ export default function PaymentsPage() {
     return 50;
   }
 
+  function effectiveAmount(r: Registration): number {
+    return r.session_price ?? fullPriceForType(r.type);
+  }
+
   const cancelFees = useMemo(() =>
     registrations.filter((r) => (r.is_late_cancel || r.status === "no_show") && !r.cancel_fee_settled),
   [registrations]);
@@ -287,6 +291,7 @@ export default function PaymentsPage() {
               {unpaid.map((r) => {
                 const da = daysAway(r.booked_date);
                 const pkgMem = packageMembership.get(r.id);
+                const amount = effectiveAmount(r);
                 return (
                 <div key={r.id} className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-3 flex items-center justify-between gap-3">
                   <div className="min-w-0 flex-1">
@@ -297,6 +302,7 @@ export default function PaymentsPage() {
                         <span className="rounded-full bg-teal-900/40 text-teal-400 px-2 py-0.5 text-xs font-medium shrink-0">pkg</span>
                       )}
                       {da && <span className={`rounded-full px-2 py-0.5 text-xs font-medium shrink-0 ${da.cls}`}>{da.label}</span>}
+                      <span className="text-sm font-bold text-white shrink-0">${amount} owed</span>
                     </div>
                     {r.kids && <div className="text-xs text-white mt-0.5 truncate">{r.kids.split(",").map((k) => k.split("(")[0].trim()).filter(Boolean).join(", ")}</div>}
                     <div className="text-xs text-brown-400 mt-0.5 truncate">{sessionLabel(r)}</div>
@@ -380,6 +386,7 @@ export default function PaymentsPage() {
             <div className="space-y-2">
               {(showAllPaid ? paid : paid.slice(0, 3)).map((r) => {
                 const da = daysAway(r.booked_date);
+                const amount = effectiveAmount(r);
                 return (
                 <div key={r.id} className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-3 flex items-center justify-between gap-3 opacity-60">
                   <div className="min-w-0 flex-1">
@@ -390,6 +397,7 @@ export default function PaymentsPage() {
                         <span className="rounded-full bg-teal-900/40 text-teal-400 px-2 py-0.5 text-xs font-medium shrink-0">pkg</span>
                       )}
                       {da && <span className={`rounded-full px-2 py-0.5 text-xs font-medium shrink-0 ${da.cls}`}>{da.label}</span>}
+                      <span className="text-sm font-bold text-green-400 shrink-0">${amount} paid</span>
                     </div>
                     {r.kids && <div className="text-xs text-white mt-0.5 truncate">{r.kids.split(",").map((k) => k.split("(")[0].trim()).filter(Boolean).join(", ")}</div>}
                     <div className="text-xs text-brown-400 mt-0.5 truncate">{sessionLabel(r)}</div>
