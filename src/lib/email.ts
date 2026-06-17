@@ -108,14 +108,17 @@ export async function sendRegistrationNotification(data: {
 
   const isPackageBooking = data.packageSessionsRemaining !== undefined;
 
+  const isPickup = data.type === "weekly" && data.sessionDetails.toLowerCase().includes("pickup");
   const typeLabel =
     data.type === "camp"
       ? "Camp Registration"
-      : data.type === "weekly"
-        ? "Group Session Registration"
-        : data.type === "private"
-          ? "Private Session Booking"
-          : "Group Private Session Booking";
+      : isPickup
+        ? "Pickup Session Registration"
+        : data.type === "weekly"
+          ? "Group Session Registration"
+          : data.type === "private"
+            ? "Private Session Booking"
+            : "Group Private Session Booking";
 
   const manageLink = data.manageToken
     ? `${BASE_URL}/booking/${data.manageToken}`
@@ -175,7 +178,7 @@ export async function sendRegistrationNotification(data: {
     if (!data.calendarEvent) return "";
     const { date, startTime, endTime, location } = data.calendarEvent;
     const loc = LOCATION_MAP[location]?.name || location;
-    const title = data.type === "camp" ? "Mesa Basketball Training — Camp" : data.type === "weekly" ? "Mesa Basketball Training — Group Session" : "Mesa Basketball Training — Private Session";
+    const title = data.type === "camp" ? "Mesa Basketball Training — Camp" : isPickup ? "Mesa Basketball Training — Pickup Session" : data.type === "weekly" ? "Mesa Basketball Training — Group Session" : "Mesa Basketball Training — Private Session";
     const googleUrl = buildGoogleCalendarUrl(date, startTime, endTime, loc, title);
     const params = new URLSearchParams({ date, start: startTime, end: endTime, location: loc, title });
     const icsUrl = `${BASE_URL}/api/ics?${params.toString()}`;
@@ -189,8 +192,8 @@ export async function sendRegistrationNotification(data: {
     if (!data.calendarEvent) return null;
     const { date, startTime, endTime, location } = data.calendarEvent;
     const loc = LOCATION_MAP[location]?.name || location;
-    const title = data.type === "camp" ? "Mesa Basketball Training — Camp" : data.type === "weekly" ? "Mesa Basketball Training — Group Session" : "Mesa Basketball Training — Private Session";
-    const content = buildICSContent(date, startTime, endTime, loc, title);
+    const icsTitle = data.type === "camp" ? "Mesa Basketball Training — Camp" : isPickup ? "Mesa Basketball Training — Pickup Session" : data.type === "weekly" ? "Mesa Basketball Training — Group Session" : "Mesa Basketball Training — Private Session";
+    const content = buildICSContent(date, startTime, endTime, loc, icsTitle);
     if (!content) return null;
     return { filename: "mesa-basketball.ics", content: Buffer.from(content) };
   })();
@@ -261,6 +264,7 @@ export async function sendCancellationNotification(data: {
   lateFeeAmount?: number;
 }) {
   const resend = getResend();
+  const isPickupCancel = data.sessionDetails.toLowerCase().includes("pickup");
 
   const lateFee = data.lateFeeAmount !== undefined
     ? data.lateFeeAmount
@@ -277,9 +281,9 @@ export async function sendCancellationNotification(data: {
   await resend.emails.send({
     from: FROM_EMAIL,
     to: ARTEMI_EMAIL,
-    subject: `Cancellation: ${data.parentName}`,
+    subject: `${isPickupCancel ? "Pickup " : ""}Cancellation: ${data.parentName}`,
     html: `
-      <h2>Session Cancelled</h2>
+      <h2>${isPickupCancel ? "Pickup " : ""}Session Cancelled</h2>
       <p><strong>Parent:</strong> ${data.parentName}</p>
       <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails)}</p>
       ${data.isLateCancel ? `<p><strong>⚠️ Late cancellation (within 24h) — 50% fee ($${lateFee}) applies</strong></p>` : ""}
@@ -291,11 +295,11 @@ export async function sendCancellationNotification(data: {
     from: FROM_EMAIL,
     to: data.email,
     replyTo: ARTEMI_EMAIL,
-    subject: `Session Cancelled — Mesa Basketball Training`,
+    subject: `${isPickupCancel ? "Pickup " : ""}Session Cancelled — Mesa Basketball Training`,
     html: `
-      <h2>Session Cancelled</h2>
+      <h2>${isPickupCancel ? "Pickup " : ""}Session Cancelled</h2>
       <p>Hi ${data.parentName},</p>
-      <p>Your session has been cancelled:</p>
+      <p>Your ${isPickupCancel ? "pickup " : ""}session has been cancelled:</p>
       <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails)}</p>
       ${lateNote}
       <p><a href="${BASE_URL}/my-bookings" style="color: #d4af37; font-weight: bold;">View My Bookings</a></p>

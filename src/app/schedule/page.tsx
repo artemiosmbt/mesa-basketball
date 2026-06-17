@@ -1689,6 +1689,8 @@ export default function Home() {
                     const selectedPickupSessions = pickupSessions.filter((s) => selectedPickupKeys.has(getGroupSessionKey(s)));
                     const pickupUnitPrice = pickupSessions[0]?.price || 30;
                     const pickupTotal = selectedPickupSessions.length * pickupUnitPrice;
+                    const showAllPickup = showAllGroups.has(`${group}|pickup`);
+                    const visiblePickupSessions = showAllPickup ? pickupSessions : pickupSessions.slice(0, 5);
 
                     const availDays = Array.from(
                       new Set(futureSessions.map((s) => new Date(s.date).getUTCDay()))
@@ -1891,7 +1893,7 @@ export default function Home() {
                           {pickupSessions.length === 0 && (
                             <p className="text-sm text-brown-500 py-2">No pickup sessions scheduled yet — check back soon.</p>
                           )}
-                          {pickupSessions.map((s) => {
+                          {visiblePickupSessions.map((s) => {
                             const key = getGroupSessionKey(s);
                             const enrolled = getEnrollmentCount(s);
                             const spotsLeft = s.maxSpots - enrolled;
@@ -1940,6 +1942,20 @@ export default function Home() {
                               </label>
                             );
                           })}
+                          {pickupSessions.length > 5 && (
+                            <button
+                              onClick={() => setShowAllGroups((prev) => {
+                                const next = new Set(prev);
+                                const pickupKey = `${group}|pickup`;
+                                if (next.has(pickupKey)) next.delete(pickupKey);
+                                else next.add(pickupKey);
+                                return next;
+                              })}
+                              className="w-full rounded-lg border border-brown-700 py-1.5 text-xs text-brown-400 hover:border-brown-500 hover:text-white transition"
+                            >
+                              {showAllPickup ? "Show less ↑" : `View ${pickupSessions.length - 5} more sessions ↓`}
+                            </button>
+                          )}
                           {selectedPickupSessions.length > 0 && (
                             <div className="mt-4 rounded-lg border border-brown-700 bg-brown-800/60 p-4">
                               <div className="flex items-center justify-between">
