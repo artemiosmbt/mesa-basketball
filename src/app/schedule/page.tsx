@@ -568,6 +568,8 @@ export default function Home() {
   const [showAllRecurring, setShowAllRecurring] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
   const [showAllGroups, setShowAllGroups] = useState<Set<string>>(new Set());
+  const [groupTab, setGroupTab] = useState<"skills" | "pickup">("skills");
+  const [selectedPickupKeys, setSelectedPickupKeys] = useState<Set<string>>(new Set());
   const [upsellExtra, setUpsellExtra] = useState(0); // extra minutes accepted
   const [referralCode, setReferralCode] = useState("");
   const [creditBalance, setCreditBalance] = useState<number | null>(null);
@@ -1476,6 +1478,38 @@ export default function Home() {
     setReferralCode("");
   }
 
+  function openPickupGroupRegistration(sessions: WeeklySession[], totalPrice: number) {
+    if (!userEmail) {
+      showAuthPrompt({ kind: "group", savedGroup: sessions[0]?.group || "", savedKeys: sessions.map(getGroupSessionKey) });
+      return;
+    }
+    if (sessions.length < 1) return;
+    setModal({
+      open: true,
+      type: "weekly",
+      sessionIndex: 0,
+      sessionDetails: `${sessions[0].group} — ${sessions.length} session${sessions.length !== 1 ? "s" : ""}`,
+      selectedGroupSessions: sessions.map((s) => ({
+        date: s.date, startTime: s.startTime, endTime: s.endTime,
+        location: s.location, group: s.group, maxSpots: s.maxSpots, price: s.price,
+      })),
+      weeklyTotalPrice: totalPrice,
+      weeklySavings: 0,
+    });
+    setSubmitResult(null);
+    setFirstName(profileRef.current?.firstName ?? "");
+    setLastName(profileRef.current?.lastName ?? "");
+    setPhone(profileRef.current?.phone ?? "");
+    setSmsConsent(profileRef.current?.smsConsent ?? false);
+    setShowAllRecurring(false);
+    setKids(profileRef.current?.kids ?? [{ name: "", dob: "", grade: "", gender: "" }]);
+    setIsGroupRate(false);
+    setUpsellExtra(0);
+    setReferralCode("");
+    setUseReferralCredit(false);
+    setCreditBalance(null);
+  }
+
   function openPickupRegistration(s: WeeklySession) {
     if (!userEmail) {
       showAuthPrompt({ kind: "group", savedGroup: s.group, savedKeys: [getGroupSessionKey(s)] });
@@ -1608,7 +1642,9 @@ export default function Home() {
                     setActiveGroup(isActive ? "" : group);
                     if (!isActive) {
                       setSelectedGroupKeys(new Set());
+                      setSelectedPickupKeys(new Set());
                       setGroupDayFilter(new Set());
+                      setGroupTab("skills");
                     }
                   }}
                 >
@@ -1637,7 +1673,15 @@ export default function Home() {
                   })()}
 
                   {isActive && (() => {
-                    // Compute available days for this group
+                    const pickupKey = Object.keys(grouped).find(
+                      (k) => k.toLowerCase().includes("pickup") && k.toLowerCase().includes("high school boys")
+                    ) ?? null;
+                    const hasPickup = !!pickupKey && group.toLowerCase().includes("high school boys");
+                    const pickupSessions = hasPickup ? (grouped[pickupKey!] || []).filter(isFutureSession) : [];
+                    const selectedPickupSessions = pickupSessions.filter((s) => selectedPickupKeys.has(getGroupSessionKey(s)));
+                    const pickupUnitPrice = pickupSessions[0]?.price || 30;
+                    const pickupTotal = selectedPickupSessions.length * pickupUnitPrice;
+
                     const availDays = Array.from(
                       new Set(futureSessions.map((s) => new Date(s.date).getUTCDay()))
                     ).sort();
@@ -1648,228 +1692,276 @@ export default function Home() {
                     const visibleSessions = showAll ? filteredSessions : filteredSessions.slice(0, 5);
 
                     return (
-                    <div className="mt-4 space-y-2" onClick={(e) => e.stopPropagation()}>
-                      <p className="text-sm font-bold text-mesa-accent mb-3">${futureSessions[0]?.price || 50} / session</p>
-                      {/* Day filter + Select all */}
-                      {availDays.length > 1 && (
-                        <div className="flex flex-wrap items-center gap-2 mb-3">
-                          {availDays.map((day) => (
+                    <div className="mt-4" onClick={(e) => e.stopPropagation()}>
+
+                      {/* Tab buttons */}
+                      {hasPickup && (
+                        <div className="flex gap-2 mb-4">
+                          <button
+                            onClick={() => { setGroupTab("skills"); setSelectedPickupKeys(new Set()); }}
+                            className={`rounded-full px-4 py-1.5 text-xs font-semibold transition ${
+                              groupTab !== "pickup"
+                                ? "bg-mesa-accent text-white"
+                                : "bg-brown-800 text-brown-400 hover:bg-brown-700 hover:text-white"
+                            }`}
+                          >
+                            Skills Sessions
+                          </button>
+                          <button
+                            onClick={() => { setGroupTab("pickup"); setSelectedGroupKeys(new Set()); }}
+                            className={`rounded-full px-4 py-1.5 text-xs font-semibold transition ${
+                              groupTab === "pickup"
+                                ? "bg-orange-600 text-white"
+                                : "bg-brown-800 text-brown-400 hover:bg-brown-700 hover:text-white"
+                            }`}
+                          >
+                            Pickup
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Skills Sessions tab */}
+                      {groupTab !== "pickup" && (
+                        <div className="space-y-2">
+                          <p className="text-sm font-bold text-mesa-accent mb-3">${futureSessions[0]?.price || 50} / session</p>
+                          {availDays.length > 1 && (
+                            <div className="flex flex-wrap items-center gap-2 mb-3">
+                              {availDays.map((day) => (
+                                <button
+                                  key={day}
+                                  onClick={() => setGroupDayFilter((prev) => {
+                                    const next = new Set(prev);
+                                    if (next.has(day)) next.delete(day);
+                                    else next.add(day);
+                                    return next;
+                                  })}
+                                  className={`rounded-full px-2.5 py-0.5 text-xs font-medium transition ${
+                                    groupDayFilter.has(day)
+                                      ? "bg-mesa-accent text-white"
+                                      : "bg-brown-800 text-brown-400 hover:bg-brown-700"
+                                  }`}
+                                >
+                                  {DAY_LABELS[day]}
+                                </button>
+                              ))}
+                              {groupDayFilter.size === 1 && (() => {
+                                const dayNum = Array.from(groupDayFilter)[0];
+                                const dayName = DAY_LABELS[dayNum];
+                                const daySessions = futureSessions.filter(
+                                  (s) => new Date(s.date).getUTCDay() === dayNum && !isSessionFull(s)
+                                );
+                                const allSelected = daySessions.every((s) => selectedGroupKeys.has(getGroupSessionKey(s)));
+                                return (
+                                  <button
+                                    onClick={() => {
+                                      setSelectedGroupKeys((prev) => {
+                                        const next = new Set(prev);
+                                        if (allSelected) {
+                                          daySessions.forEach((s) => next.delete(getGroupSessionKey(s)));
+                                        } else {
+                                          daySessions.forEach((s) => next.add(getGroupSessionKey(s)));
+                                        }
+                                        return next;
+                                      });
+                                    }}
+                                    className="text-xs text-mesa-accent hover:text-yellow-300 ml-1"
+                                  >
+                                    {allSelected ? `Deselect all ${dayName}s` : `Select all ${dayName}s`}
+                                  </button>
+                                );
+                              })()}
+                              {groupDayFilter.size > 0 && (
+                                <button
+                                  onClick={() => setGroupDayFilter(new Set())}
+                                  className="text-xs text-brown-500 hover:text-brown-400"
+                                >
+                                  Clear
+                                </button>
+                              )}
+                            </div>
+                          )}
+                          {visibleSessions.map((s) => {
+                            const key = getGroupSessionKey(s);
+                            const enrolled = getEnrollmentCount(s);
+                            const spotsLeft = s.maxSpots - enrolled;
+                            const full = spotsLeft <= 0;
+                            const checked = selectedGroupKeys.has(key);
+                            const d = parseDateForDisplay(s.date);
+                            const dayName = d.toLocaleDateString("en-US", { weekday: "short", timeZone: "America/New_York" });
+                            return (
+                              <label
+                                key={key}
+                                className={`flex items-center gap-3 rounded-lg px-4 py-3 transition ${
+                                  full
+                                    ? "bg-brown-800/30 opacity-50 cursor-not-allowed"
+                                    : checked
+                                      ? "bg-mesa-accent/10 border border-mesa-accent/30"
+                                      : "bg-brown-800/50 hover:bg-brown-800/70 cursor-pointer"
+                                }`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  disabled={full}
+                                  onChange={() => toggleGroupSession(s)}
+                                  className="rounded border-brown-600 accent-mesa-accent h-4 w-4"
+                                />
+                                <div className="flex-1 min-w-0">
+                                  <p className="font-medium text-sm">{dayName}, {s.date}</p>
+                                  <p className="text-xs text-brown-400">
+                                    {s.startTime} - {s.endTime} &bull; <LocationLink location={s.location} />
+                                  </p>
+                                </div>
+                                <div className="text-right shrink-0">
+                                  {full ? (
+                                    <span className="text-xs font-medium text-red-400">FULL</span>
+                                  ) : spotsLeft <= 3 ? (
+                                    <span className="text-xs font-medium text-yellow-400">{spotsLeft} spot{spotsLeft !== 1 ? "s" : ""} remaining</span>
+                                  ) : null}
+                                </div>
+                              </label>
+                            );
+                          })}
+                          {filteredSessions.length > 5 && (
                             <button
-                              key={day}
-                              onClick={() => setGroupDayFilter((prev) => {
+                              onClick={() => setShowAllGroups((prev) => {
                                 const next = new Set(prev);
-                                if (next.has(day)) next.delete(day);
-                                else next.add(day);
+                                if (next.has(group)) next.delete(group);
+                                else next.add(group);
                                 return next;
                               })}
-                              className={`rounded-full px-2.5 py-0.5 text-xs font-medium transition ${
-                                groupDayFilter.has(day)
-                                  ? "bg-mesa-accent text-white"
-                                  : "bg-brown-800 text-brown-400 hover:bg-brown-700"
-                              }`}
+                              className="w-full rounded-lg border border-brown-700 py-1.5 text-xs text-brown-400 hover:border-brown-500 hover:text-white transition"
                             >
-                              {DAY_LABELS[day]}
+                              {showAll ? "Show less ↑" : `View ${filteredSessions.length - 5} more sessions ↓`}
                             </button>
-                          ))}
-                          {groupDayFilter.size === 1 && (() => {
-                            const dayNum = Array.from(groupDayFilter)[0];
-                            const dayName = DAY_LABELS[dayNum];
-                            const daySessions = futureSessions.filter(
-                              (s) => new Date(s.date).getUTCDay() === dayNum && !isSessionFull(s)
-                            );
-                            const allSelected = daySessions.every((s) => selectedGroupKeys.has(getGroupSessionKey(s)));
-                            return (
-                              <button
-                                onClick={() => {
-                                  setSelectedGroupKeys((prev) => {
-                                    const next = new Set(prev);
-                                    if (allSelected) {
-                                      daySessions.forEach((s) => next.delete(getGroupSessionKey(s)));
-                                    } else {
-                                      daySessions.forEach((s) => next.add(getGroupSessionKey(s)));
-                                    }
-                                    return next;
-                                  });
-                                }}
-                                className="text-xs text-mesa-accent hover:text-yellow-300 ml-1"
-                              >
-                                {allSelected ? `Deselect all ${dayName}s` : `Select all ${dayName}s`}
-                              </button>
-                            );
-                          })()}
-                          {groupDayFilter.size > 0 && (
-                            <button
-                              onClick={() => setGroupDayFilter(new Set())}
-                              className="text-xs text-brown-500 hover:text-brown-400"
-                            >
-                              Clear
-                            </button>
+                          )}
+                          {groupPricing.count > 0 && (
+                            <div className="mt-4 rounded-lg border border-brown-700 bg-brown-800/60 p-4">
+                              <div className="flex items-center justify-between">
+                                <div>
+                                  <p className="text-sm font-semibold text-white">
+                                    {groupPricing.count} session{groupPricing.count !== 1 ? "s" : ""} &times; ${groupPricing.unitPrice}
+                                    {" = "}
+                                    <span className="text-mesa-accent">${groupPricing.totalPrice}</span>
+                                    <span className="text-brown-400 text-xs font-normal ml-1">per athlete</span>
+                                  </p>
+                                  {groupPricing.savings > 0 && (
+                                    <p className="text-xs text-green-400 mt-0.5">
+                                      {groupPricing.discountLabel} — You save ${groupPricing.savings}!
+                                    </p>
+                                  )}
+                                  {groupPricing.count >= 1 && groupPricing.count < 4 && (
+                                    <p className="text-xs text-brown-500 mt-0.5">
+                                      Add {4 - groupPricing.count} more for 10% off
+                                    </p>
+                                  )}
+                                  {groupPricing.count >= 4 && groupPricing.count < 8 && (
+                                    <p className="text-xs text-brown-500 mt-0.5">
+                                      Add {8 - groupPricing.count} more for 15% off
+                                    </p>
+                                  )}
+                                </div>
+                                <button
+                                  onClick={openGroupRegistration}
+                                  disabled={groupPricing.count < 1}
+                                  className="rounded bg-mesa-accent px-4 py-2 text-sm font-semibold text-white transition hover:bg-yellow-600 disabled:opacity-40 disabled:cursor-not-allowed"
+                                >
+                                  Register
+                                </button>
+                              </div>
+                            </div>
                           )}
                         </div>
                       )}
-                      {visibleSessions.map((s) => {
-                        const key = getGroupSessionKey(s);
-                        const enrolled = getEnrollmentCount(s);
-                        const spotsLeft = s.maxSpots - enrolled;
-                        const full = spotsLeft <= 0;
-                        const checked = selectedGroupKeys.has(key);
-                        const d = parseDateForDisplay(s.date);
-                        const dayName = d.toLocaleDateString("en-US", { weekday: "short", timeZone: "America/New_York" });
 
-                        return (
-                          <label
-                            key={key}
-                            className={`flex items-center gap-3 rounded-lg px-4 py-3 transition ${
-                              full
-                                ? "bg-brown-800/30 opacity-50 cursor-not-allowed"
-                                : checked
-                                  ? "bg-mesa-accent/10 border border-mesa-accent/30"
-                                  : "bg-brown-800/50 hover:bg-brown-800/70 cursor-pointer"
-                            }`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              disabled={full}
-                              onChange={() => toggleGroupSession(s)}
-                              className="rounded border-brown-600 accent-mesa-accent h-4 w-4"
-                            />
-                            <div className="flex-1 min-w-0">
-                              <p className="font-medium text-sm">
-                                {dayName}, {s.date}
-                              </p>
-                              <p className="text-xs text-brown-400">
-                                {s.startTime} - {s.endTime} &bull; <LocationLink location={s.location} />
-                              </p>
-                            </div>
-                            <div className="text-right shrink-0">
-                              {full ? (
-                                <span className="text-xs font-medium text-red-400">FULL</span>
-                              ) : group.toLowerCase().includes("pickup") ? (
-                                <span className={`text-xs font-medium ${spotsLeft <= 3 ? "text-yellow-400" : "text-brown-300"}`}>
-                                  {enrolled} / {s.maxSpots} signed up
-                                </span>
-                              ) : spotsLeft <= 3 ? (
-                                <span className="text-xs font-medium text-yellow-400">{spotsLeft} spot{spotsLeft !== 1 ? "s" : ""} remaining</span>
-                              ) : null}
-                            </div>
-                          </label>
-                        );
-                      })}
-
-                      {/* View more/less sessions */}
-                      {filteredSessions.length > 5 && (
-                        <button
-                          onClick={() => setShowAllGroups((prev) => {
-                            const next = new Set(prev);
-                            if (next.has(group)) next.delete(group);
-                            else next.add(group);
-                            return next;
-                          })}
-                          className="w-full rounded-lg border border-brown-700 py-1.5 text-xs text-brown-400 hover:border-brown-500 hover:text-white transition"
-                        >
-                          {showAll ? "Show less ↑" : `View ${filteredSessions.length - 5} more sessions ↓`}
-                        </button>
-                      )}
-
-                      {/* Pricing summary and register button */}
-                      {groupPricing.count > 0 && (
-                        <div className="mt-4 rounded-lg border border-brown-700 bg-brown-800/60 p-4">
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <p className="text-sm font-semibold text-white">
-                                {groupPricing.count} session{groupPricing.count !== 1 ? "s" : ""} &times; ${groupPricing.unitPrice}
-                                {" = "}
-                                <span className="text-mesa-accent">${groupPricing.totalPrice}</span>
-                                <span className="text-brown-400 text-xs font-normal ml-1">per athlete</span>
-                              </p>
-                              {groupPricing.savings > 0 && (
-                                <p className="text-xs text-green-400 mt-0.5">
-                                  {groupPricing.discountLabel} — You save ${groupPricing.savings}!
-                                </p>
-                              )}
-                              {groupPricing.count >= 1 && groupPricing.count < 4 && (
-                                <p className="text-xs text-brown-500 mt-0.5">
-                                  Add {4 - groupPricing.count} more for 10% off
-                                </p>
-                              )}
-                              {groupPricing.count >= 4 && groupPricing.count < 8 && (
-                                <p className="text-xs text-brown-500 mt-0.5">
-                                  Add {8 - groupPricing.count} more for 15% off
-                                </p>
-                              )}
-                            </div>
-                            <button
-                              onClick={openGroupRegistration}
-                              disabled={groupPricing.count < 1}
-                              className="rounded bg-mesa-accent px-4 py-2 text-sm font-semibold text-white transition hover:bg-yellow-600 disabled:opacity-40 disabled:cursor-not-allowed"
-                            >
-                              Register
-                            </button>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Pickup sub-section — embedded inside HS Boys 9-12 only */}
-                      {group.toLowerCase().includes("high school boys") && (() => {
-                        const pickupKey = Object.keys(grouped).find(
-                          (k) => k.toLowerCase().includes("pickup") && k.toLowerCase().includes("high school boys")
-                        );
-                        if (!pickupKey) return null;
-                        const pickupSessions = (grouped[pickupKey] || []).filter(isFutureSession);
-                        if (pickupSessions.length === 0) return null;
-                        const firstPickup = pickupSessions[0];
-                        const totalEnrolled = getEnrollmentCount(firstPickup);
-                        const maxSpots = firstPickup.maxSpots;
-                        const totalSpotsLeft = maxSpots - totalEnrolled;
-                        return (
-                          <div className="mt-5 pt-4 border-t border-brown-700/60">
-                            <div className="flex items-center gap-2 mb-3">
-                              <span className="rounded-full border border-orange-600 bg-orange-900/50 px-2.5 py-0.5 text-xs font-bold uppercase tracking-wide text-orange-400">
-                                Pickup
-                              </span>
-                              <span className="text-sm font-bold text-mesa-accent">${firstPickup.price} / session</span>
-                              <span className={`text-xs font-medium ${totalSpotsLeft <= 0 ? "text-red-400" : totalSpotsLeft <= 3 ? "text-yellow-400" : "text-brown-400"}`}>
-                                &bull; {totalEnrolled}/{maxSpots} signed up{totalSpotsLeft <= 0 ? " — FULL" : ""}
-                              </span>
-                            </div>
-                            <p className="text-xs text-brown-500 mb-2">Open run — show up, compete, work on your game.</p>
-                            {pickupSessions.map((s) => {
-                              const enrolled = getEnrollmentCount(s);
-                              const spotsLeft = s.maxSpots - enrolled;
-                              const full = spotsLeft <= 0;
-                              const d = parseDateForDisplay(s.date);
-                              const dayName = d.toLocaleDateString("en-US", { weekday: "short", timeZone: "America/New_York" });
+                      {/* Pickup tab */}
+                      {hasPickup && groupTab === "pickup" && (
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2 mb-3">
+                            <p className="text-sm font-bold text-mesa-accent">${pickupUnitPrice} / session</p>
+                            {pickupSessions.length > 0 && (() => {
+                              const enrolled = getEnrollmentCount(pickupSessions[0]);
+                              const max = pickupSessions[0].maxSpots;
+                              const spotsLeft = max - enrolled;
                               return (
-                                <div
-                                  key={getGroupSessionKey(s)}
-                                  className={`flex items-center gap-3 rounded-lg px-4 py-3 ${full ? "bg-brown-800/30 opacity-50" : "bg-brown-800/50"}`}
-                                >
-                                  <div className="flex-1 min-w-0">
-                                    <p className="font-medium text-sm">{dayName}, {s.date}</p>
-                                    <p className="text-xs text-brown-400">
-                                      {s.startTime} - {s.endTime} &bull; <LocationLink location={s.location} />
-                                    </p>
-                                  </div>
-                                  <span className={`text-xs font-medium shrink-0 ${spotsLeft <= 3 ? "text-yellow-400" : "text-brown-300"}`}>
-                                    {enrolled}/{s.maxSpots} signed up
-                                  </span>
+                                <span className={`text-xs font-medium ${spotsLeft <= 0 ? "text-red-400" : spotsLeft <= 3 ? "text-yellow-400" : "text-brown-400"}`}>
+                                  &bull; {enrolled}/{max} signed up{spotsLeft <= 0 ? " — FULL" : ""}
+                                </span>
+                              );
+                            })()}
+                          </div>
+                          {pickupSessions.length === 0 && (
+                            <p className="text-sm text-brown-500 py-2">No pickup sessions scheduled yet — check back soon.</p>
+                          )}
+                          {pickupSessions.map((s) => {
+                            const key = getGroupSessionKey(s);
+                            const enrolled = getEnrollmentCount(s);
+                            const spotsLeft = s.maxSpots - enrolled;
+                            const full = spotsLeft <= 0;
+                            const checked = selectedPickupKeys.has(key);
+                            const d = parseDateForDisplay(s.date);
+                            const dayName = d.toLocaleDateString("en-US", { weekday: "short", timeZone: "America/New_York" });
+                            return (
+                              <label
+                                key={key}
+                                className={`flex items-center gap-3 rounded-lg px-4 py-3 transition ${
+                                  full
+                                    ? "bg-brown-800/30 opacity-50 cursor-not-allowed"
+                                    : checked
+                                      ? "bg-mesa-accent/10 border border-mesa-accent/30"
+                                      : "bg-brown-800/50 hover:bg-brown-800/70 cursor-pointer"
+                                }`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  disabled={full}
+                                  onChange={() => setSelectedPickupKeys((prev) => {
+                                    const next = new Set(prev);
+                                    if (next.has(key)) next.delete(key);
+                                    else next.add(key);
+                                    return next;
+                                  })}
+                                  className="rounded border-brown-600 accent-mesa-accent h-4 w-4"
+                                />
+                                <div className="flex-1 min-w-0">
+                                  <p className="font-medium text-sm">{dayName}, {s.date}</p>
+                                  <p className="text-xs text-brown-400">
+                                    {s.startTime} - {s.endTime} &bull; <LocationLink location={s.location} />
+                                  </p>
+                                </div>
+                                <div className="text-right shrink-0">
                                   {full ? (
-                                    <span className="text-xs font-bold text-red-400 shrink-0">FULL</span>
+                                    <span className="text-xs font-medium text-red-400">FULL</span>
                                   ) : (
-                                    <button
-                                      onClick={() => openPickupRegistration(s)}
-                                      className="rounded bg-mesa-accent px-3 py-1.5 text-xs font-semibold text-white hover:bg-yellow-600 shrink-0"
-                                    >
-                                      Sign Up
-                                    </button>
+                                    <span className={`text-xs font-medium ${spotsLeft <= 3 ? "text-yellow-400" : "text-brown-300"}`}>
+                                      {enrolled}/{s.maxSpots} signed up
+                                    </span>
                                   )}
                                 </div>
-                              );
-                            })}
-                          </div>
-                        );
-                      })()}
+                              </label>
+                            );
+                          })}
+                          {selectedPickupSessions.length > 0 && (
+                            <div className="mt-4 rounded-lg border border-brown-700 bg-brown-800/60 p-4">
+                              <div className="flex items-center justify-between">
+                                <p className="text-sm font-semibold text-white">
+                                  {selectedPickupSessions.length} session{selectedPickupSessions.length !== 1 ? "s" : ""} &times; ${pickupUnitPrice}
+                                  {" = "}
+                                  <span className="text-mesa-accent">${pickupTotal}</span>
+                                  <span className="text-brown-400 text-xs font-normal ml-1">per athlete</span>
+                                </p>
+                                <button
+                                  onClick={() => openPickupGroupRegistration(selectedPickupSessions, pickupTotal)}
+                                  className="rounded bg-mesa-accent px-4 py-2 text-sm font-semibold text-white transition hover:bg-yellow-600"
+                                >
+                                  Register
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                     );
                   })()}
