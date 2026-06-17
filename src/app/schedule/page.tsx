@@ -1476,6 +1476,37 @@ export default function Home() {
     setReferralCode("");
   }
 
+  function openPickupRegistration(s: WeeklySession) {
+    if (!userEmail) {
+      showAuthPrompt({ kind: "group", savedGroup: s.group, savedKeys: [getGroupSessionKey(s)] });
+      return;
+    }
+    setModal({
+      open: true,
+      type: "weekly",
+      sessionIndex: 0,
+      sessionDetails: `${s.group} — 1 session`,
+      selectedGroupSessions: [{
+        date: s.date, startTime: s.startTime, endTime: s.endTime,
+        location: s.location, group: s.group, maxSpots: s.maxSpots, price: s.price,
+      }],
+      weeklyTotalPrice: s.price,
+      weeklySavings: 0,
+    });
+    setSubmitResult(null);
+    setFirstName(profileRef.current?.firstName ?? "");
+    setLastName(profileRef.current?.lastName ?? "");
+    setPhone(profileRef.current?.phone ?? "");
+    setSmsConsent(profileRef.current?.smsConsent ?? false);
+    setShowAllRecurring(false);
+    setKids(profileRef.current?.kids ?? [{ name: "", dob: "", grade: "", gender: "" }]);
+    setIsGroupRate(false);
+    setUpsellExtra(0);
+    setReferralCode("");
+    setUseReferralCredit(false);
+    setCreditBalance(null);
+  }
+
   const grouped = groupByGroup(schedule);
 
   return (
@@ -1556,6 +1587,8 @@ export default function Home() {
 
           <div id="group-schedule" className="mt-8 grid gap-6 md:grid-cols-2 scroll-mt-24">
             {Object.entries(grouped).map(([group, sessions]) => {
+              // Pickup is embedded inside the HS Boys 9-12 card — don't render as its own card
+              if (group.toLowerCase().includes("pickup")) return null;
               const futureSessions = sessions.filter(isFutureSession);
               if (futureSessions.length === 0) return null;
               const isActive = activeGroup === group;
@@ -1592,6 +1625,16 @@ export default function Home() {
                   <p className="mt-1 text-sm text-brown-500">
                     {futureSessions.length} upcoming session{futureSessions.length !== 1 ? "s" : ""}
                   </p>
+                  {group.toLowerCase().includes("pickup") && futureSessions.length > 0 && (() => {
+                    const enrolled = getEnrollmentCount(futureSessions[0]);
+                    const max = futureSessions[0].maxSpots;
+                    const spotsLeft = max - enrolled;
+                    return (
+                      <p className={`mt-0.5 text-sm font-semibold ${spotsLeft <= 0 ? "text-red-400" : spotsLeft <= 3 ? "text-yellow-400" : "text-white"}`}>
+                        {enrolled} / {max} signed up{spotsLeft <= 0 ? " — FULL" : ""}
+                      </p>
+                    );
+                  })()}
 
                   {isActive && (() => {
                     // Compute available days for this group
@@ -1606,7 +1649,7 @@ export default function Home() {
 
                     return (
                     <div className="mt-4 space-y-2" onClick={(e) => e.stopPropagation()}>
-                      <p className="text-sm font-bold text-mesa-accent mb-3">$50 / session</p>
+                      <p className="text-sm font-bold text-mesa-accent mb-3">${futureSessions[0]?.price || 50} / session</p>
                       {/* Day filter + Select all */}
                       {availDays.length > 1 && (
                         <div className="flex flex-wrap items-center gap-2 mb-3">
@@ -1702,6 +1745,10 @@ export default function Home() {
                             <div className="text-right shrink-0">
                               {full ? (
                                 <span className="text-xs font-medium text-red-400">FULL</span>
+                              ) : group.toLowerCase().includes("pickup") ? (
+                                <span className={`text-xs font-medium ${spotsLeft <= 3 ? "text-yellow-400" : "text-brown-300"}`}>
+                                  {enrolled} / {s.maxSpots} signed up
+                                </span>
                               ) : spotsLeft <= 3 ? (
                                 <span className="text-xs font-medium text-yellow-400">{spotsLeft} spot{spotsLeft !== 1 ? "s" : ""} remaining</span>
                               ) : null}
@@ -1762,6 +1809,67 @@ export default function Home() {
                           </div>
                         </div>
                       )}
+
+                      {/* Pickup sub-section — embedded inside HS Boys 9-12 only */}
+                      {group.toLowerCase().includes("high school boys") && (() => {
+                        const pickupKey = Object.keys(grouped).find(
+                          (k) => k.toLowerCase().includes("pickup") && k.toLowerCase().includes("high school boys")
+                        );
+                        if (!pickupKey) return null;
+                        const pickupSessions = (grouped[pickupKey] || []).filter(isFutureSession);
+                        if (pickupSessions.length === 0) return null;
+                        const firstPickup = pickupSessions[0];
+                        const totalEnrolled = getEnrollmentCount(firstPickup);
+                        const maxSpots = firstPickup.maxSpots;
+                        const totalSpotsLeft = maxSpots - totalEnrolled;
+                        return (
+                          <div className="mt-5 pt-4 border-t border-brown-700/60">
+                            <div className="flex items-center gap-2 mb-3">
+                              <span className="rounded-full border border-orange-600 bg-orange-900/50 px-2.5 py-0.5 text-xs font-bold uppercase tracking-wide text-orange-400">
+                                Pickup
+                              </span>
+                              <span className="text-sm font-bold text-mesa-accent">${firstPickup.price} / session</span>
+                              <span className={`text-xs font-medium ${totalSpotsLeft <= 0 ? "text-red-400" : totalSpotsLeft <= 3 ? "text-yellow-400" : "text-brown-400"}`}>
+                                &bull; {totalEnrolled}/{maxSpots} signed up{totalSpotsLeft <= 0 ? " — FULL" : ""}
+                              </span>
+                            </div>
+                            <p className="text-xs text-brown-500 mb-2">Open run — show up, compete, work on your game.</p>
+                            {pickupSessions.map((s) => {
+                              const enrolled = getEnrollmentCount(s);
+                              const spotsLeft = s.maxSpots - enrolled;
+                              const full = spotsLeft <= 0;
+                              const d = parseDateForDisplay(s.date);
+                              const dayName = d.toLocaleDateString("en-US", { weekday: "short", timeZone: "America/New_York" });
+                              return (
+                                <div
+                                  key={getGroupSessionKey(s)}
+                                  className={`flex items-center gap-3 rounded-lg px-4 py-3 ${full ? "bg-brown-800/30 opacity-50" : "bg-brown-800/50"}`}
+                                >
+                                  <div className="flex-1 min-w-0">
+                                    <p className="font-medium text-sm">{dayName}, {s.date}</p>
+                                    <p className="text-xs text-brown-400">
+                                      {s.startTime} - {s.endTime} &bull; <LocationLink location={s.location} />
+                                    </p>
+                                  </div>
+                                  <span className={`text-xs font-medium shrink-0 ${spotsLeft <= 3 ? "text-yellow-400" : "text-brown-300"}`}>
+                                    {enrolled}/{s.maxSpots} signed up
+                                  </span>
+                                  {full ? (
+                                    <span className="text-xs font-bold text-red-400 shrink-0">FULL</span>
+                                  ) : (
+                                    <button
+                                      onClick={() => openPickupRegistration(s)}
+                                      className="rounded bg-mesa-accent px-3 py-1.5 text-xs font-semibold text-white hover:bg-yellow-600 shrink-0"
+                                    >
+                                      Sign Up
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        );
+                      })()}
                     </div>
                     );
                   })()}
