@@ -1439,6 +1439,11 @@ export default function Home() {
     return { count, unitPrice, totalPrice, savings, discountLabel, basePrice };
   }, [selectedSessionsForActiveGroup]);
 
+  const selectedPickupSessionsForFooter = useMemo(() => {
+    return schedule
+      .filter((s) => s.group.toLowerCase().includes("pickup") && isFutureSession(s) && selectedPickupKeys.has(getGroupSessionKey(s)));
+  }, [schedule, selectedPickupKeys]);
+
   function openGroupRegistration() {
     if (!userEmail) { showAuthPrompt({ kind: "group", savedGroup: activeGroup, savedKeys: Array.from(selectedGroupKeys) }); return; }
     const sessions = selectedSessionsForActiveGroup;
@@ -2397,6 +2402,23 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+      {/* Sticky pickup registration bar */}
+      {selectedPickupSessionsForFooter.length >= 1 && (
+        <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-brown-700 bg-brown-900 px-6 py-3 shadow-2xl">
+          <div className="mx-auto flex max-w-5xl items-center justify-between">
+            <p className="text-sm font-semibold text-white">
+              {selectedPickupSessionsForFooter.length} pickup session{selectedPickupSessionsForFooter.length !== 1 ? "s" : ""} &times; ${selectedPickupSessionsForFooter[0]?.price || 30} = <span className="text-mesa-accent">${selectedPickupSessionsForFooter.length * (selectedPickupSessionsForFooter[0]?.price || 30)}</span>
+            </p>
+            <button
+              onClick={() => openPickupGroupRegistration(selectedPickupSessionsForFooter, selectedPickupSessionsForFooter.length * (selectedPickupSessionsForFooter[0]?.price || 30))}
+              className="rounded bg-mesa-accent px-5 py-2 text-sm font-semibold text-white hover:bg-yellow-600"
+            >
+              Register
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Sticky group session registration bar */}
       {groupPricing.count >= 1 && (
