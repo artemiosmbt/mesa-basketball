@@ -116,7 +116,7 @@ export async function getRegistrationsByEmail(
   const { data, error } = await supabase
     .from("registrations")
     .select("*")
-    .eq("email", email.toLowerCase().trim())
+    .ilike("email", email.trim())
     .order("created_at", { ascending: false });
   if (error) throw error;
   return (data || []) as Registration[];
@@ -498,7 +498,7 @@ export async function getActivePackage(
   const { data, error } = await supabase
     .from("monthly_packages")
     .select("*")
-    .eq("email", email.toLowerCase().trim())
+    .ilike("email", email.trim())
     .eq("month_year", monthYear)
     .eq("status", "active")
     .single();
