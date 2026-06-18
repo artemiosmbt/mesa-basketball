@@ -21,35 +21,97 @@ export const metadata: Metadata = {
 
 const jsonLd = {
   "@context": "https://schema.org",
-  "@type": "LocalBusiness",
+  "@type": ["LocalBusiness", "SportsActivityLocation"],
   "@id": "https://www.mesabasketballtraining.com",
   "name": "Mesa Basketball Training",
   "description": "Elite basketball training on Long Island for youth and adults. Group sessions, private lessons, and mini camps led by former D1 and international professional player Artemios Gavalas.",
   "url": "https://www.mesabasketballtraining.com",
   "telephone": "+16315991280",
   "email": "mesabasketballtraining@gmail.com",
+  "image": "https://www.mesabasketballtraining.com/og-image.jpg",
+  "address": {
+    "@type": "PostalAddress",
+    "addressLocality": "Long Island",
+    "addressRegion": "NY",
+    "addressCountry": "US"
+  },
+  "areaServed": [
+    { "@type": "AdministrativeArea", "name": "Nassau County, NY" },
+    { "@type": "AdministrativeArea", "name": "Suffolk County, NY" },
+    { "@type": "City", "name": "Manhasset, NY" },
+    { "@type": "City", "name": "Garden City, NY" },
+    { "@type": "City", "name": "Hempstead, NY" },
+    { "@type": "City", "name": "Long Beach, NY" },
+    { "@type": "City", "name": "Huntington, NY" },
+    { "@type": "City", "name": "Brookville, NY" },
+    { "@type": "City", "name": "Southampton, NY" },
+    { "@type": "City", "name": "Mineola, NY" },
+    { "@type": "City", "name": "Westbury, NY" }
+  ],
   "founder": {
     "@type": "Person",
     "name": "Artemios Gavalas",
     "jobTitle": "Head Trainer & Founder",
-    "description": "Former Division I point guard and international professional basketball player"
+    "description": "Former Division I point guard at St. John's University and Butler University, and international professional basketball player"
   },
-  "areaServed": [
-    { "@type": "City", "name": "Long Island, New York" },
-    { "@type": "AdministrativeArea", "name": "Nassau County, New York" },
-    { "@type": "AdministrativeArea", "name": "Suffolk County, New York" }
-  ],
   "hasOfferCatalog": {
     "@type": "OfferCatalog",
     "name": "Basketball Training Programs",
     "itemListElement": [
-      { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Group Basketball Training Sessions" } },
-      { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Private Basketball Lessons" } },
-      { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Basketball Mini Camps" } }
+      { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Group Basketball Training Sessions Long Island" } },
+      { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Private Basketball Lessons Long Island" } },
+      { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Basketball Mini Camps Long Island" } }
     ]
   },
   "sameAs": [
     "https://www.instagram.com/mesabasketballtraining"
+  ]
+};
+
+const faqJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "Where does Mesa Basketball Training hold sessions on Long Island?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Mesa Basketball Training runs sessions at multiple locations across Long Island, including Cherry Valley Sports, Holy Resurrection in Brookville, and St. Paul's Cathedral in Garden City. We serve athletes throughout Nassau County and Suffolk County."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What types of basketball training programs are available on Long Island?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Mesa offers three programs: group training sessions for players who want to develop alongside others in a competitive environment, one-on-one private basketball lessons for personalized skill development, and multi-day mini camps for intensive skill growth. All programs are available to athletes of all skill levels on Long Island."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "What age groups does Mesa Basketball Training work with?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Mesa Basketball Training works with athletes from age 4 through professional level. Programs are available for beginners learning the fundamentals, intermediate players developing their game, advanced players preparing for high school or college competition, and experienced athletes training at the college or pro level."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Who is the trainer at Mesa Basketball Training?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Mesa Basketball Training was founded by Artemios Gavalas, a former Division I point guard who played at St. John's University and Butler University, and went on to play professional basketball internationally. He brings elite-level playing experience to every training session on Long Island."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How do I book a basketball training session on Long Island?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "You can browse available sessions and book directly online at mesabasketballtraining.com. Select your program, choose an available date, and register in minutes. You can also call or text (631) 599-1280."
+      }
+    }
   ]
 };
 
@@ -59,6 +121,10 @@ export default function LandingPage() {
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }}
       />
       <LandingNav />
 
@@ -360,7 +426,12 @@ export default function LandingPage() {
 
           </div>
 
-          <p className="mt-8 text-xs text-mesa-accent text-center">Serving athletes across Long Island — NYC, Manhasset, Garden City, Hempstead, Long Beach, Huntington, Southampton &amp; surrounding areas.</p>
+          <div className="mt-10 rounded-xl border border-brown-700 bg-brown-900/30 px-6 py-5 text-center">
+            <p className="text-xs font-semibold uppercase tracking-widest text-mesa-accent mb-2">Service Area</p>
+            <p className="text-sm text-brown-300 leading-relaxed">
+              Serving athletes across Long Island — <span className="text-white">Manhasset, Garden City, Hempstead, Long Beach, Huntington, Brookville, Southampton, Mineola, Westbury</span> and surrounding areas in Nassau County and Suffolk County, NY.
+            </p>
+          </div>
         </div>
       </section>
 
@@ -383,6 +454,48 @@ export default function LandingPage() {
       </section>
 
       <AppInstallSection />
+
+      {/* FAQ — SEO + user value */}
+      <section className="bg-brown-950 border-t border-brown-800 py-16 md:py-20">
+        <div className="mx-auto max-w-3xl px-6">
+          <div className="text-center mb-10">
+            <p className="text-sm font-semibold uppercase tracking-widest text-mesa-accent mb-2">Common Questions</p>
+            <h2 className="font-[family-name:var(--font-fira-cond)] text-3xl md:text-4xl font-black tracking-wide">FREQUENTLY ASKED</h2>
+          </div>
+          <div className="space-y-4">
+            {[
+              {
+                q: "Where do sessions take place on Long Island?",
+                a: "Mesa runs sessions at multiple locations across Long Island — including Cherry Valley Sports, Holy Resurrection in Brookville, and St. Paul's Cathedral in Garden City. We serve athletes throughout Nassau County and Suffolk County, from Manhasset and Garden City to Long Beach, Huntington, and Southampton.",
+              },
+              {
+                q: "What basketball training programs are available?",
+                a: "Mesa offers group training sessions, one-on-one private basketball lessons, and multi-day mini camps. Group sessions are great for competitive development alongside other players. Private lessons are fully personalized to your position and goals. Mini camps are intensive multi-day programs for rapid skill growth.",
+              },
+              {
+                q: "What ages and skill levels do you train?",
+                a: "Mesa works with athletes from age 4 through the professional level — beginners building fundamentals, intermediate players developing their game, advanced players preparing for high school and college, and competitive athletes training year-round.",
+              },
+              {
+                q: "Who is the trainer?",
+                a: "Mesa was founded by Artemios Gavalas, a former Division I point guard at St. John's University and Butler University, who went on to play professional basketball internationally. He brings elite playing experience to every Long Island training session.",
+              },
+              {
+                q: "How do I sign up for basketball training on Long Island?",
+                a: "Browse available sessions and book directly online. Select your program, choose a date, and register in minutes. You can also call or text (631) 599-1280.",
+              },
+            ].map((item) => (
+              <details key={item.q} className="group rounded-xl border border-brown-700 bg-brown-900/40 px-6 py-4 cursor-pointer">
+                <summary className="flex items-center justify-between gap-4 text-sm font-semibold text-white list-none">
+                  {item.q}
+                  <span className="text-mesa-accent text-lg shrink-0 group-open:rotate-45 transition-transform">+</span>
+                </summary>
+                <p className="mt-3 text-sm text-brown-300 leading-relaxed">{item.a}</p>
+              </details>
+            ))}
+          </div>
+        </div>
+      </section>
 
       {/* Footer */}
       <footer className="border-t border-brown-800 bg-mesa-dark py-12">
