@@ -79,6 +79,8 @@ export default function PaymentsPage() {
   const [togglingPaid, setTogglingPaid] = useState<string | null>(null);
   const [settlingFee, setSettlingFee] = useState<string | null>(null);
   const [showAllPaid, setShowAllPaid] = useState(false);
+  const [backfilling, setBackfilling] = useState(false);
+  const [backfillResult, setBackfillResult] = useState<string | null>(null);
 
   useEffect(() => {
     authClient.auth.getSession().then(({ data: { session } }) => {
@@ -98,6 +100,26 @@ export default function PaymentsPage() {
         .finally(() => setLoading(false));
     });
   }, [router]);
+
+  async function backfillGroupPrices() {
+    if (!token) return;
+    setBackfilling(true);
+    setBackfillResult(null);
+    const res = await fetch("/api/admin/backfill-group-prices", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await res.json();
+    setBackfillResult(data.message || data.error || "Done");
+    setBackfilling(false);
+    if (data.updated > 0) {
+      // Reload registrations to reflect the updated prices
+      const refresh = await fetch("/api/admin/data", {
+        headers: { Authorization: `Bearer ${token}` },
+      }).then((r) => r.json());
+      setRegistrations(refresh.registrations || []);
+    }
+  }
 
   async function togglePaid(id: string, currentValue: boolean, referralCode?: string | null) {
     if (!token) return;
@@ -327,6 +349,22 @@ export default function PaymentsPage() {
         </aside>
 
       <div className="flex-1 min-w-0 px-4 sm:px-6 py-8 space-y-12">
+
+        {/* Backfill tool for past group session discounts */}
+        <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-3 flex flex-wrap items-center gap-3">
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-semibold text-white">Fix past group session prices</p>
+            <p className="text-xs text-brown-400 mt-0.5">Writes the correct discounted price into the database for any old group bookings that are still showing $50.</p>
+            {backfillResult && <p className="text-xs text-green-400 mt-1">{backfillResult}</p>}
+          </div>
+          <button
+            onClick={backfillGroupPrices}
+            disabled={backfilling}
+            className="shrink-0 rounded-lg bg-mesa-accent hover:bg-mesa-accent/80 px-3 py-1.5 text-xs font-semibold text-white transition disabled:opacity-50"
+          >
+            {backfilling ? "Running…" : "Run Fix"}
+          </button>
+        </div>
 
         {/* Unpaid */}
         <div>
