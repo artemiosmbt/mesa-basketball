@@ -166,7 +166,7 @@ export async function DELETE(
     if (!success) {
       return NextResponse.json({ error: "Failed to cancel camp" }, { status: 500 });
     }
-    const lateFeeAmount = reg.session_price && isLateCancel ? Math.round(reg.session_price * 0.5) : undefined;
+    const lateFeeAmount = isLateCancel ? Math.round(resolvedSessionPrice(reg) * 0.5) : undefined;
     // Extract camp name (everything before the first " — " in session_details)
     const campName = reg.session_details.split(" — ")[0] || reg.session_details;
     await sendCancellationNotification({
@@ -233,7 +233,7 @@ export async function DELETE(
     }
   }
 
-  const lateFeeAmount = reg.session_price && isLateCancel ? Math.round(reg.session_price * 0.5) : undefined;
+  const lateFeeAmount = isLateCancel ? Math.round(resolvedSessionPrice(reg) * 0.5) : undefined;
 
   let cancelSessionDetails = reg.session_details;
   let cancelLocation = reg.booked_location || "";
@@ -292,6 +292,14 @@ export async function DELETE(
   }
 
   return NextResponse.json({ success: true, isLateCancel });
+}
+
+// Returns the actual price owed for a session, respecting is_free discounts for privates.
+function resolvedSessionPrice(reg: { session_price: number | null; is_free: boolean; type: string }): number {
+  if (reg.session_price != null) return reg.session_price;
+  const isPrivateType = reg.type === "private" || reg.type === "group-private";
+  const fullPrice = reg.type === "group-private" ? 250 : reg.type === "private" ? 150 : 50;
+  return reg.is_free && isPrivateType ? Math.round(fullPrice * 0.5) : fullPrice;
 }
 
 // Helpers for PATCH
@@ -550,7 +558,7 @@ export async function PUT(
     console.error("Calendar sync error (reschedule new):", err);
   }
 
-  const lateFeeAmount = reg.session_price && isLateReschedule ? Math.round(reg.session_price * 0.5) : undefined;
+  const lateFeeAmount = isLateReschedule ? Math.round(resolvedSessionPrice(reg) * 0.5) : undefined;
 
   await sendRescheduleNotification({
     parentName: newParentName,

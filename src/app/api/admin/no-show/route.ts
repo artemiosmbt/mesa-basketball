@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
 
   const { data: reg } = await supabase
     .from("registrations")
-    .select("parent_name, email, session_details, type, session_price, phone, sms_consent")
+    .select("parent_name, email, session_details, type, session_price, is_free, phone, sms_consent")
     .eq("id", id)
     .single();
 
@@ -50,7 +50,10 @@ export async function POST(req: NextRequest) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  const feeAmount = reg.session_price ?? fullPriceForType(reg.type);
+  const isPrivateType = reg.type === "private" || reg.type === "group-private";
+  const feeAmount = reg.session_price != null
+    ? reg.session_price
+    : (reg.is_free && isPrivateType ? Math.round(fullPriceForType(reg.type) * 0.5) : fullPriceForType(reg.type));
 
   await sendNoShowNotification({
     parentName: reg.parent_name,

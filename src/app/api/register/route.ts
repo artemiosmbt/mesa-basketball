@@ -105,8 +105,11 @@ export async function POST(req: NextRequest) {
       }
 
       // Create one registration row per selected session
+      // Use weeklyTotalPrice / session count to capture any multi-session volume discounts
+      const perSessionPrice = weeklyTotalPrice && weeklySessions.length > 0
+        ? Math.round(weeklyTotalPrice / weeklySessions.length)
+        : (weeklySessions[0]?.price ? weeklySessions[0].price * (totalParticipants || 1) : undefined);
       for (const session of weeklySessions) {
-        const perSessionPrice = session.price ? session.price * (totalParticipants || 1) : undefined;
         await addRegistrationWithRewards({
           parentName,
           email,

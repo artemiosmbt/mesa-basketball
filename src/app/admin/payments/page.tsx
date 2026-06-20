@@ -21,6 +21,8 @@ interface Registration {
   cancel_fee_settled: boolean;
   session_price: number | null;
   total_participants: number | null;
+  is_free: boolean;
+  used_referral_credit: boolean;
 }
 
 interface PackageData {
@@ -206,7 +208,10 @@ export default function PaymentsPage() {
   }
 
   function effectiveAmount(r: Registration): number {
-    return r.session_price ?? fullPriceForType(r.type);
+    if (r.session_price != null) return r.session_price;
+    const isPrivateType = r.type === "private" || r.type === "group-private";
+    if (r.is_free && isPrivateType) return Math.round(fullPriceForType(r.type) * 0.5);
+    return fullPriceForType(r.type);
   }
 
   const cancelFees = useMemo(() =>
@@ -337,7 +342,7 @@ export default function PaymentsPage() {
           ) : (
             <div className="space-y-2">
               {cancelFees.map((r) => {
-                const sessionPrice = r.session_price ?? fullPriceForType(r.type);
+                const sessionPrice = effectiveAmount(r);
                 const isNoShow = r.status === "no_show";
                 const fee = isNoShow ? sessionPrice : Math.round(sessionPrice * 0.5);
                 const owesRefund = r.is_paid;
