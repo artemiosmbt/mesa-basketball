@@ -335,6 +335,26 @@ export async function POST(req: NextRequest) {
     }
 
     const isPrivateType = type === "private" || type === "group-private";
+
+    // Compute the full (undiscounted) price for private sessions from the booked duration.
+    // is_free flag handles the 50% discount at display time.
+    function parseMinsFromTime(t?: string): number {
+      if (!t) return 0;
+      const m = t.match(/(\d+):(\d+)\s*(AM|PM)/i);
+      if (!m) return 0;
+      let h = parseInt(m[1]);
+      const min = parseInt(m[2]);
+      if (m[3].toUpperCase() === "PM" && h !== 12) h += 12;
+      if (m[3].toUpperCase() === "AM" && h === 12) h = 0;
+      return h * 60 + min;
+    }
+    function calcPrivateSessionPrice(startTime?: string, endTime?: string, kidCount = 1): number | undefined {
+      if (!startTime || !endTime) return undefined;
+      const duration = Math.max(60, parseMinsFromTime(endTime) - parseMinsFromTime(startTime));
+      const rate = kidCount >= 4 ? 250 : 150;
+      return Math.round(rate * (duration / 60) * 100) / 100;
+    }
+
     let manageToken: string | undefined;
     let isFree = false;
     let isFirstTime = false;
@@ -387,6 +407,9 @@ export async function POST(req: NextRequest) {
         isFree,
         usedReferralCredit,
         smsConsent: !!smsConsent,
+        sessionPrice: isPrivateType
+          ? calcPrivateSessionPrice(bookedStartTime, bookedEndTime, totalParticipants || 1)
+          : undefined,
       });
       manageToken = result.manageToken;
 

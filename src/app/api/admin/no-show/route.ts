@@ -51,9 +51,8 @@ export async function POST(req: NextRequest) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   const isPrivateType = reg.type === "private" || reg.type === "group-private";
-  const feeAmount = reg.session_price != null
-    ? reg.session_price
-    : (reg.is_free && isPrivateType ? Math.round(fullPriceForType(reg.type) * 0.5) : fullPriceForType(reg.type));
+  const basePrice = reg.session_price != null ? reg.session_price : fullPriceForType(reg.type);
+  const feeAmount = reg.is_free && isPrivateType ? Math.round(basePrice * 0.5) : basePrice;
 
   await sendNoShowNotification({
     parentName: reg.parent_name,

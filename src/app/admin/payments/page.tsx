@@ -23,6 +23,8 @@ interface Registration {
   total_participants: number | null;
   is_free: boolean;
   used_referral_credit: boolean;
+  is_full_camp: boolean;
+  referral_code: string | null;
 }
 
 interface PackageData {
@@ -97,15 +99,20 @@ export default function PaymentsPage() {
     });
   }, [router]);
 
-  async function togglePaid(id: string, currentValue: boolean) {
+  async function togglePaid(id: string, currentValue: boolean, referralCode?: string | null) {
     if (!token) return;
     setTogglingPaid(id);
     await fetch("/api/admin/update-payment", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ id, field: "is_paid", value: !currentValue }),
+      body: JSON.stringify({ id, field: "is_paid", value: !currentValue, ...(referralCode ? { referralCode } : {}) }),
     });
-    setRegistrations((prev) => prev.map((r) => (r.id === id ? { ...r, is_paid: !currentValue } : r)));
+    if (referralCode) {
+      // Full camp: update all day rows belonging to this camp group
+      setRegistrations((prev) => prev.map((r) => r.referral_code === referralCode ? { ...r, is_paid: !currentValue } : r));
+    } else {
+      setRegistrations((prev) => prev.map((r) => (r.id === id ? { ...r, is_paid: !currentValue } : r)));
+    }
     setTogglingPaid(null);
   }
 
@@ -183,21 +190,35 @@ export default function PaymentsPage() {
     return result;
   }, [registrations, packages]);
 
-  const unpaid = useMemo(() =>
-    registrations
+  const unpaid = useMemo(() => {
+    const seenCamps = new Set<string>();
+    return registrations
       .filter((r) => {
         if (r.status !== "confirmed" || r.is_paid) return false;
         const mem = packageMembership.get(r.id);
         if (mem?.withinPackage && mem.packagePaid) return false;
+        // Full camps are one payment covering all days — only show one row per camp group
+        if (r.is_full_camp && r.referral_code) {
+          if (seenCamps.has(r.referral_code)) return false;
+          seenCamps.add(r.referral_code);
+        }
         return true;
       })
-      .sort((a, b) => dateMs(a.booked_date) - dateMs(b.booked_date)),
-  [registrations, packageMembership]);
+      .sort((a, b) => dateMs(a.booked_date) - dateMs(b.booked_date));
+  }, [registrations, packageMembership]);
 
   const paid = useMemo(() => {
+    const seenCamps = new Set<string>();
     const now = Date.now();
     return registrations
-      .filter((r) => r.status === "confirmed" && r.is_paid && sessionDateTimeMs(r) + 24 * 3600 * 1000 > now)
+      .filter((r) => {
+        if (r.status !== "confirmed" || !r.is_paid || sessionDateTimeMs(r) + 24 * 3600 * 1000 <= now) return false;
+        if (r.is_full_camp && r.referral_code) {
+          if (seenCamps.has(r.referral_code)) return false;
+          seenCamps.add(r.referral_code);
+        }
+        return true;
+      })
       .sort((a, b) => sessionDateTimeMs(a) - sessionDateTimeMs(b));
   }, [registrations]);
 
@@ -208,10 +229,10 @@ export default function PaymentsPage() {
   }
 
   function effectiveAmount(r: Registration): number {
-    if (r.session_price != null) return r.session_price;
+    const basePrice = r.session_price ?? fullPriceForType(r.type);
     const isPrivateType = r.type === "private" || r.type === "group-private";
-    if (r.is_free && isPrivateType) return Math.round(fullPriceForType(r.type) * 0.5);
-    return fullPriceForType(r.type);
+    if (r.is_free && isPrivateType) return Math.round(basePrice * 0.5);
+    return basePrice;
   }
 
   const cancelFees = useMemo(() =>
@@ -303,6 +324,7 @@ export default function PaymentsPage() {
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                       <span className="font-medium text-sm">{r.parent_name}</span>
                       <span className="rounded-full bg-amber-400 px-2 py-0.5 text-xs font-semibold text-blue-900 shrink-0">{TYPE_LABELS[r.type] || r.type}</span>
+                      {r.is_full_camp && <span className="rounded-full bg-purple-900/40 text-purple-300 px-2 py-0.5 text-xs font-medium shrink-0">full camp</span>}
                       {pkgMem?.withinPackage && (
                         <span className="rounded-full bg-teal-900/40 text-teal-400 px-2 py-0.5 text-xs font-medium shrink-0">pkg</span>
                       )}
@@ -311,13 +333,13 @@ export default function PaymentsPage() {
                     {r.kids && <div className="text-xs text-white mt-0.5 truncate">{r.kids.split(",").map((k) => k.split("(")[0].trim()).filter(Boolean).join(", ")}</div>}
                     <div className="text-xs text-brown-400 mt-0.5 truncate">{sessionLabel(r)}</div>
                     <div className="flex flex-wrap gap-x-3 mt-1 text-xs text-brown-500">
-                      <span>{formatDate(r.booked_date)}</span>
+                      <span>{r.is_full_camp ? "Full camp total" : formatDate(r.booked_date)}</span>
                       <span>{r.phone}</span>
                       <span className="ml-auto text-brown-400 font-medium">${amount}</span>
                     </div>
                   </div>
                   <button
-                    onClick={() => togglePaid(r.id, r.is_paid)}
+                    onClick={() => togglePaid(r.id, r.is_paid, r.is_full_camp ? r.referral_code : null)}
                     disabled={togglingPaid === r.id}
                     className="w-9 h-9 shrink-0 rounded-full border-2 border-brown-600 hover:border-green-500 flex items-center justify-center transition font-bold text-brown-600 hover:text-green-500 text-sm"
                     title="Mark paid"
@@ -412,7 +434,7 @@ export default function PaymentsPage() {
                     </div>
                   </div>
                   <button
-                    onClick={() => togglePaid(r.id, r.is_paid)}
+                    onClick={() => togglePaid(r.id, r.is_paid, r.is_full_camp ? r.referral_code : null)}
                     disabled={togglingPaid === r.id}
                     className="w-9 h-9 shrink-0 rounded-full border-2 border-green-500 bg-green-500/20 flex items-center justify-center transition font-bold text-green-400 hover:border-red-500 hover:bg-red-500/10 hover:text-red-400 text-sm"
                     title="Undo — mark unpaid"

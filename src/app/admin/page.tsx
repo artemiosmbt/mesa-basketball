@@ -110,10 +110,10 @@ function fullPriceForType(type: string): number {
 }
 
 function effectivePrice(r: { type: string; session_price: number | null; is_free: boolean }): number {
-  if (r.session_price != null) return r.session_price;
+  const basePrice = r.session_price ?? fullPriceForType(r.type);
   const isPrivateType = r.type === "private" || r.type === "group-private";
-  if (r.is_free && isPrivateType) return Math.round(fullPriceForType(r.type) * 0.5);
-  return fullPriceForType(r.type);
+  if (r.is_free && isPrivateType) return Math.round(basePrice * 0.5);
+  return basePrice;
 }
 
 function daysAway(dateStr: string | null): { label: string; cls: string } | null {

@@ -298,10 +298,10 @@ export async function DELETE(
 
 // Returns the actual price owed for a session, respecting is_free discounts for privates.
 function resolvedSessionPrice(reg: { session_price: number | null; is_free: boolean; type: string }): number {
-  if (reg.session_price != null) return reg.session_price;
   const isPrivateType = reg.type === "private" || reg.type === "group-private";
   const fullPrice = reg.type === "group-private" ? 250 : reg.type === "private" ? 150 : 50;
-  return reg.is_free && isPrivateType ? Math.round(fullPrice * 0.5) : fullPrice;
+  const basePrice = reg.session_price ?? fullPrice;
+  return reg.is_free && isPrivateType ? Math.round(basePrice * 0.5) : basePrice;
 }
 
 // Helpers for PATCH

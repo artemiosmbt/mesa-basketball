@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { id, field, value } = await req.json();
+  const { id, field, value, referralCode } = await req.json();
   if (!id || !field) return NextResponse.json({ error: "Missing fields" }, { status: 400 });
 
   const allowed = ["is_paid", "cancel_fee_settled"];
@@ -30,6 +30,17 @@ export async function POST(req: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
+
+  // For full camp registrations, update all rows sharing the same referral_code
+  if (referralCode && field === "is_paid") {
+    const { error } = await supabase
+      .from("registrations")
+      .update({ [field]: value })
+      .eq("referral_code", referralCode)
+      .eq("is_full_camp", true);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ ok: true });
+  }
 
   const { error } = await supabase
     .from("registrations")
