@@ -18,6 +18,8 @@ interface Registration {
   booked_start_time: string | null;
   status: string;
   session_price: number | null;
+  total_participants: number;
+  referral_code: string | null;
   is_free: boolean;
   used_referral_credit: boolean;
 }
@@ -109,9 +111,17 @@ function fullPriceForType(type: string): number {
   return 50;
 }
 
-function effectivePrice(r: { type: string; session_price: number | null; is_free: boolean }): number {
-  const basePrice = r.session_price ?? fullPriceForType(r.type);
+function effectivePrice(r: Registration, weeklyDiscountRates?: Map<string, number>): number {
   const isPrivateType = r.type === "private" || r.type === "group-private";
+  let basePrice: number;
+  if (r.session_price != null) {
+    basePrice = r.session_price;
+  } else if (r.type === "weekly" && r.referral_code && weeklyDiscountRates?.has(r.referral_code)) {
+    const discount = weeklyDiscountRates.get(r.referral_code)!;
+    basePrice = Math.round(50 * (r.total_participants || 1) * (1 - discount));
+  } else {
+    basePrice = fullPriceForType(r.type);
+  }
   if (r.is_free && isPrivateType) return Math.round(basePrice * 0.5);
   return basePrice;
 }
@@ -159,6 +169,7 @@ function groupByDate(list: Registration[]): { key: string; label: string; sessio
 interface CalendarViewProps {
   list: Registration[];
   packageMembership: Map<string, { withinPackage: boolean; packagePaid: boolean }>;
+  weeklyDiscountRates: Map<string, number>;
   cancelRegistration: (id: string) => Promise<void>;
   markNoShow: (id: string) => Promise<void>;
   cancelling: string | null;
@@ -167,7 +178,7 @@ interface CalendarViewProps {
   setNoShowConfirm: (id: string | null) => void;
 }
 
-function CalendarView({ list, packageMembership, cancelRegistration, markNoShow, cancelling, noShowing, noShowConfirm, setNoShowConfirm }: CalendarViewProps) {
+function CalendarView({ list, packageMembership, weeklyDiscountRates, cancelRegistration, markNoShow, cancelling, noShowing, noShowConfirm, setNoShowConfirm }: CalendarViewProps) {
   const [currentMonth, setCurrentMonth] = useState(() => {
     const n = new Date();
     return new Date(n.getFullYear(), n.getMonth(), 1);
@@ -305,7 +316,7 @@ function CalendarView({ list, packageMembership, cancelRegistration, markNoShow,
                     </span>
                     {!packageMembership.get(r.id)?.withinPackage && (
                       <span className="text-xs font-medium text-green-400">
-                        {formatPrice(effectivePrice(r))}
+                        {formatPrice(effectivePrice(r, weeklyDiscountRates))}
                       </span>
                     )}
                     {r.status === "confirmed" && (
@@ -478,6 +489,22 @@ export default function AdminPage() {
       .sort((a, b) => dateMs(b.booked_date) - dateMs(a.booked_date));
   }, [registrations, selectedClient]);
 
+  // Volume discount rates for group sessions booked together (no stored session_price)
+  const weeklyDiscountRates = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const r of registrations) {
+      if (r.type === "weekly" && r.referral_code && r.session_price == null) {
+        counts.set(r.referral_code, (counts.get(r.referral_code) || 0) + 1);
+      }
+    }
+    const rateMap = new Map<string, number>();
+    for (const [code, count] of counts) {
+      if (count >= 8) rateMap.set(code, 0.15);
+      else if (count >= 4) rateMap.set(code, 0.10);
+    }
+    return rateMap;
+  }, [registrations]);
+
   // Apply type filter + search to a list
   function applyFilters(list: Registration[]) {
     return list.filter((r) => {
@@ -575,7 +602,7 @@ export default function AdminPage() {
           <div className="shrink-0 flex flex-col items-end justify-between self-stretch">
             <span className={`text-brown-500 transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}>▾</span>
             {!packageMembership.get(r.id)?.withinPackage && (
-              <span className="text-white font-medium text-xs">{formatPrice(effectivePrice(r))}</span>
+              <span className="text-white font-medium text-xs">{formatPrice(effectivePrice(r, weeklyDiscountRates))}</span>
             )}
           </div>
         </button>
@@ -603,7 +630,7 @@ export default function AdminPage() {
               {!packageMembership.get(r.id)?.withinPackage && (
                 <div>
                   <p className="text-brown-500 uppercase tracking-wider mb-0.5">Price</p>
-                  <p className="text-green-400 font-medium">{formatPrice(effectivePrice(r))}</p>
+                  <p className="text-green-400 font-medium">{formatPrice(effectivePrice(r, weeklyDiscountRates))}</p>
                 </div>
               )}
             </div>
@@ -687,7 +714,7 @@ export default function AdminPage() {
               {packageMembership.get(r.id)?.withinPackage ? (
                 <span className="text-brown-600">—</span>
               ) : (
-                <span className="text-green-400 font-medium">{formatPrice(effectivePrice(r))}</span>
+                <span className="text-green-400 font-medium">{formatPrice(effectivePrice(r, weeklyDiscountRates))}</span>
               )}
             </td>
             <td className="px-4 py-3 whitespace-nowrap">
@@ -956,6 +983,7 @@ export default function AdminPage() {
             <CalendarView
               list={[...upcoming, ...past.filter(r => r.status !== "cancelled")]}
               packageMembership={packageMembership}
+              weeklyDiscountRates={weeklyDiscountRates}
               cancelRegistration={cancelRegistration}
               markNoShow={markNoShow}
               cancelling={cancelling}

@@ -228,9 +228,33 @@ export default function PaymentsPage() {
     return 50;
   }
 
+  // Volume discount rates for group sessions booked together (where session_price was not stored)
+  const weeklyDiscountRates = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const r of registrations) {
+      if (r.type === "weekly" && !r.is_full_camp && r.referral_code && r.session_price == null) {
+        counts.set(r.referral_code, (counts.get(r.referral_code) || 0) + 1);
+      }
+    }
+    const rateMap = new Map<string, number>();
+    for (const [code, count] of counts) {
+      if (count >= 8) rateMap.set(code, 0.15);
+      else if (count >= 4) rateMap.set(code, 0.10);
+    }
+    return rateMap;
+  }, [registrations]);
+
   function effectiveAmount(r: Registration): number {
-    const basePrice = r.session_price ?? fullPriceForType(r.type);
     const isPrivateType = r.type === "private" || r.type === "group-private";
+    let basePrice: number;
+    if (r.session_price != null) {
+      basePrice = r.session_price;
+    } else if (r.type === "weekly" && !r.is_full_camp && r.referral_code && weeklyDiscountRates.has(r.referral_code)) {
+      const discount = weeklyDiscountRates.get(r.referral_code)!;
+      basePrice = Math.round(50 * (r.total_participants || 1) * (1 - discount));
+    } else {
+      basePrice = fullPriceForType(r.type);
+    }
     if (r.is_free && isPrivateType) return Math.round(basePrice * 0.5);
     return basePrice;
   }
