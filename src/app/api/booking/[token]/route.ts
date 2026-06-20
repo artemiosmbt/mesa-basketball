@@ -104,6 +104,8 @@ export async function GET(
     createdAt: reg.created_at,
     isFullCamp: reg.is_full_camp ?? false,
     usedReferralCredit: reg.used_referral_credit ?? false,
+    sessionPrice: reg.session_price,
+    totalParticipants: reg.total_participants,
   });
 }
 
@@ -512,6 +514,14 @@ export async function PUT(
     }
   }
 
+  // Preserve per-player discount rate when rescheduling to the same session type.
+  // Divide by original participant count to get per-player rate, then scale to new count.
+  let newSessionPrice: number | undefined;
+  if (reg.type === newType && reg.session_price != null && reg.total_participants > 0) {
+    const perPlayerRate = reg.session_price / reg.total_participants;
+    newSessionPrice = Math.round(perPlayerRate * kidCount);
+  }
+
   // Create new booking with updated type, kids, and session details
   const { manageToken: newToken } = await addRegistration({
     parentName: newParentName,
@@ -527,6 +537,7 @@ export async function PUT(
     bookedLocation,
     isFree: newIsFree,
     usedReferralCredit: newUsedReferralCredit,
+    sessionPrice: newSessionPrice,
   });
 
   // Sync calendar for the new booking

@@ -59,6 +59,8 @@ interface Booking {
   createdAt: string;
   isFullCamp: boolean;
   usedReferralCredit: boolean;
+  sessionPrice: number | null;
+  totalParticipants: number;
 }
 
 interface TimeWindow {
@@ -237,6 +239,13 @@ export default function ManageBooking({
       setHideUpsell(localStorage.getItem("mesa_hide_upsell") === "true");
     }
   }, []);
+
+  // Default reschedule type to match the original booking type when the panel opens
+  useEffect(() => {
+    if (showReschedule && booking?.type) {
+      setRescheduleType(booking.type === "weekly" ? "weekly" : "private");
+    }
+  }, [showReschedule, booking?.type]);
 
   // Fetch credit balance when reschedule panel opens (for private sessions)
   useEffect(() => {
@@ -1214,8 +1223,13 @@ export default function ManageBooking({
                     );
                   }
                   if (groupSession) {
-                    const perPlayer = groupSession.price;
+                    const isOriginalGroup = booking?.type === "weekly";
+                    const discountedPerPlayer = isOriginalGroup && booking?.sessionPrice != null && (booking?.totalParticipants || 0) > 0
+                      ? booking.sessionPrice / booking.totalParticipants
+                      : null;
+                    const perPlayer = discountedPerPlayer ?? groupSession.price;
                     const total = perPlayer * kidCount;
+                    const isDiscounted = discountedPerPlayer != null && discountedPerPlayer < groupSession.price;
                     return (
                       <div className="rounded-lg bg-brown-800/50 px-4 py-3 text-sm">
                         <div className="flex items-center justify-between">
@@ -1224,6 +1238,7 @@ export default function ManageBooking({
                         </div>
                         <p className="mt-0.5 text-xs text-brown-500">
                           {formatPrice(perPlayer)}/player · {kidCount} player{kidCount !== 1 ? "s" : ""}
+                          {isDiscounted && <span className="text-green-400 ml-1">· discounted rate from original booking</span>}
                         </p>
                       </div>
                     );

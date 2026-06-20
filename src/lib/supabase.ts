@@ -51,6 +51,7 @@ export async function addRegistration(data: {
   bookedLocation?: string;
   usedReferralCredit?: boolean;
   isFree?: boolean;
+  sessionPrice?: number;
 }): Promise<{ manageToken: string }> {
   const supabase = getSupabase();
   const { data: row, error } = await supabase
@@ -69,6 +70,7 @@ export async function addRegistration(data: {
       booked_location: data.bookedLocation || null,
       ...(data.usedReferralCredit ? { used_referral_credit: true } : {}),
       ...(data.isFree ? { is_free: true } : {}),
+      ...(data.sessionPrice != null ? { session_price: data.sessionPrice } : {}),
     })
     .select("manage_token")
     .single();
