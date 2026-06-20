@@ -598,6 +598,12 @@ export default function ManageBooking({
 
   const alreadyCancelled = booking.status === "cancelled";
 
+  // Sessions booked at a volume discount cannot be cancelled — only rescheduled.
+  const isDiscountedGroup =
+    booking.type === "weekly" &&
+    booking.sessionPrice !== null &&
+    booking.sessionPrice < 50 * (booking.totalParticipants || 1);
+
   return (
     <div className="min-h-screen bg-mesa-dark text-white">
       <div className="mx-auto max-w-lg px-6 py-16">
@@ -694,13 +700,22 @@ export default function ManageBooking({
                 <>
                   {/* Drop-in or non-camp — normal cancel/reschedule/edit-players */}
                   {!showCancelConfirm && !showReschedule && !showEditPlayers && (
+                    <>
+                      {isDiscountedGroup && (
+                        <div className="mt-4 rounded-lg border border-brown-600 bg-brown-800/50 px-4 py-3 text-sm text-brown-300">
+                          <p className="font-medium text-white mb-1">Cancellation unavailable</p>
+                          <p>This session was booked at a discounted rate and cannot be cancelled. You&apos;re welcome to reschedule — the same late policy applies (changes within 24 hours incur a 50% fee). For anything else, reach out at <a href="mailto:artemios@mesabasketballtraining.com" className="text-mesa-accent underline">artemios@mesabasketballtraining.com</a>.</p>
+                        </div>
+                      )}
                     <div className="mt-6 flex flex-wrap gap-3">
-                      <button
-                        onClick={() => setShowCancelConfirm(true)}
-                        className="rounded border border-red-700 px-4 py-2 text-sm text-red-400 hover:bg-red-900/30"
-                      >
-                        Cancel Session
-                      </button>
+                      {!isDiscountedGroup && (
+                        <button
+                          onClick={() => setShowCancelConfirm(true)}
+                          className="rounded border border-red-700 px-4 py-2 text-sm text-red-400 hover:bg-red-900/30"
+                        >
+                          Cancel Session
+                        </button>
+                      )}
                       {booking.type !== "camp" && (
                         <button
                           onClick={() => {
@@ -731,6 +746,7 @@ export default function ManageBooking({
                         </button>
                       )}
                     </div>
+                    </>
                   )}
 
                   {/* Feedback after player update — only in the main (no-mode) view */}
@@ -913,7 +929,7 @@ export default function ManageBooking({
                   })()}
 
                   {/* Cancel Confirmation */}
-                  {showCancelConfirm && (
+                  {showCancelConfirm && !isDiscountedGroup && (
                     <div className="mt-6 rounded-lg border border-red-800 bg-red-900/20 p-4">
                       <p className="text-sm text-brown-300">
                         Are you sure you want to cancel this session?

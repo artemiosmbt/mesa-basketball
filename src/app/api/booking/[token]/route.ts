@@ -126,6 +126,14 @@ export async function DELETE(
     );
   }
 
+  // Block cancellation of discounted group sessions — reschedule only.
+  if (reg.type === "weekly" && reg.session_price !== null && reg.session_price < 50 * (reg.total_participants || 1)) {
+    return NextResponse.json(
+      { error: "Cancellation is not available for sessions booked at a discounted rate. Please use the reschedule option instead." },
+      { status: 403 }
+    );
+  }
+
   // Block camp cancellations once the camp has started.
   // For full camp, check the earliest day of the group so no day's token can be used
   // after the camp has already begun. For drop-in, check that specific day.
