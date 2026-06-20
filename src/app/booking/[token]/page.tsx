@@ -704,7 +704,7 @@ export default function ManageBooking({
                       {isDiscountedGroup && (
                         <div className="mt-4 rounded-lg border border-brown-600 bg-brown-800/50 px-4 py-3 text-sm text-brown-300">
                           <p className="font-medium text-white mb-1">Cancellation unavailable</p>
-                          <p>This session was booked at a discounted rate and cannot be cancelled. You&apos;re welcome to reschedule — the same late policy applies (changes within 24 hours incur a 50% fee). For anything else, reach out at <a href="mailto:artemios@mesabasketballtraining.com" className="text-mesa-accent underline">artemios@mesabasketballtraining.com</a>.</p>
+                          <p>This session was booked at a discounted rate and cannot be cancelled. You&apos;re welcome to reschedule — the same late policy applies (changes within 24 hours incur a 50% fee). For anything else, reach out at <a href="mailto:artemios@mesabasketballtraining.com" className="text-mesa-accent underline">artemios@mesabasketballtraining.com</a> or call/text <a href="tel:+15163003376" className="text-mesa-accent underline">(516) 300-3376</a>.</p>
                         </div>
                       )}
                     <div className="mt-6 flex flex-wrap gap-3">
