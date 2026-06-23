@@ -2310,14 +2310,14 @@ export default function Home() {
 
           <div className="mt-6 space-y-4">
             {(() => {
-              // Group filteredWindows by date+location, preserving original indices for state keying
-              const dayGroups: { key: string; date: string; location: string; entries: { window: TimeWindow; wi: number }[] }[] = [];
+              // Group filteredWindows by date only, preserving original indices for state keying
+              const dayGroups: { key: string; date: string; entries: { window: TimeWindow; wi: number }[] }[] = [];
               const seen = new Map<string, number>();
               filteredWindows.forEach((window, wi) => {
-                const key = `${window.date}|${window.location}`;
+                const key = window.date;
                 if (!seen.has(key)) {
                   seen.set(key, dayGroups.length);
-                  dayGroups.push({ key, date: window.date, location: window.location, entries: [] });
+                  dayGroups.push({ key, date: window.date, entries: [] });
                 }
                 dayGroups[seen.get(key)!].entries.push({ window, wi });
               });
@@ -2333,9 +2333,6 @@ export default function Home() {
                       <div key={group.key} className="rounded-xl border border-brown-700 bg-brown-900/40 p-5">
                         <div className="mb-4">
                           <h3 className="font-semibold text-brown-200">{dayLabel}</h3>
-                          <p className="text-sm text-brown-500">
-                            <LocationLink location={group.location} />
-                          </p>
                         </div>
 
                         <div className="space-y-4">
@@ -2363,7 +2360,7 @@ export default function Home() {
                                   : ""}
                               >
                                 <p className="text-sm text-brown-400 mb-3">
-                                  Available {window.startLabel} - {window.endLabel} ({totalAvailable} min)
+                                  <LocationLink location={window.location} className="text-brown-400" /> &bull; Available {window.startLabel} - {window.endLabel} ({totalAvailable} min)
                                 </p>
                                 <div className="flex flex-wrap items-end gap-4">
                                   <div>
