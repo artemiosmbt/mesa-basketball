@@ -2330,7 +2330,7 @@ export default function Home() {
                     const d = parseDateForDisplay(group.date);
                     const dayLabel = `${d.toLocaleDateString("en-US", { weekday: "long", timeZone: "America/New_York" })}, ${group.date}`;
                     return (
-                      <div key={group.key} className="rounded-xl border border-brown-700 bg-brown-900/40 p-5">
+                      <div key={group.key} className="rounded-xl border-2 border-brown-600 bg-brown-900/40 p-5 shadow-lg shadow-black/30">
                         <div className="mb-4">
                           <h3 className="font-semibold text-brown-200">{dayLabel}</h3>
                         </div>
