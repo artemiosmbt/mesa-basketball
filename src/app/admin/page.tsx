@@ -369,6 +369,7 @@ export default function AdminPage() {
 
   // Time Change state
   const [tcResult, setTcResult] = useState<{ changesFound: { session: string; oldTime: string; newTime: string; count: number }[]; totalEmailsSent: number; totalSmsSent: number } | null>(null);
+  const [cancelResult, setCancelResult] = useState<{ deletedFound: { session: string; date: string; count: number }[]; cancelEmailsSent: number; cancelSmsSent: number } | null>(null);
 
   useEffect(() => {
     authClient.auth.getSession().then(({ data: { session } }) => {
@@ -402,6 +403,12 @@ export default function AdminPage() {
         setPackages(adminData.packages || []);
         if (syncResult?.changesFound?.length > 0) {
           setTcResult(syncResult);
+        }
+        if (syncResult?.deletedFound?.length > 0) {
+          setCancelResult(syncResult);
+          setRegistrations((prev) =>
+            prev.map((r) => syncResult.deletedFound.some((d: { session: string; date: string }) => r.booked_date === d.date && r.status === "confirmed" && (r.session_details || "").startsWith(d.session)) ? { ...r, status: "cancelled" } : r)
+          );
         }
       }).finally(() => setLoading(false));
     });
@@ -848,6 +855,19 @@ export default function AdminPage() {
               </div>
             </div>
             <span className="text-xs text-green-500 shrink-0">{tcResult.totalEmailsSent} email{tcResult.totalEmailsSent !== 1 ? "s" : ""}, {tcResult.totalSmsSent} SMS sent</span>
+          </div>
+        )}
+        {cancelResult && cancelResult.deletedFound.length > 0 && (
+          <div className="mb-6 rounded-xl border border-red-800 bg-red-950/40 px-4 py-3 flex flex-wrap items-center gap-3">
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-red-300">Session deleted from sheet — cancellations sent</p>
+              <div className="text-xs text-red-400/80 mt-0.5 space-y-0.5">
+                {cancelResult.deletedFound.map((d, i) => (
+                  <p key={i}>{d.session} on {d.date} — {d.count} booking{d.count !== 1 ? "s" : ""} cancelled</p>
+                ))}
+              </div>
+            </div>
+            <span className="text-xs text-red-500 shrink-0">{cancelResult.cancelEmailsSent} email{cancelResult.cancelEmailsSent !== 1 ? "s" : ""}, {cancelResult.cancelSmsSent} SMS sent</span>
           </div>
         )}
 

@@ -101,10 +101,13 @@ export async function getCamps(): Promise<Camp[]> {
   })).filter((camp) => camp.name);
 }
 
-export async function getPrivateSlots(): Promise<PrivateSlot[]> {
+export async function getPrivateSlots(options?: { noCache?: boolean }): Promise<PrivateSlot[]> {
   const url = process.env.SHEET_CSV_PRIVATE_SLOTS;
   if (!url) return [];
-  const res = await fetch(url, { next: { revalidate: 60 } });
+  const fetchOptions = options?.noCache
+    ? { cache: "no-store" as const }
+    : { next: { revalidate: 60 } };
+  const res = await fetch(url, fetchOptions);
   const rows = parseCSV(await res.text());
   return rows.slice(1).map((row, i) => ({
     id: `slot-${i}`,
