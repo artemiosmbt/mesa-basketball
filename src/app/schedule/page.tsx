@@ -2309,112 +2309,139 @@ export default function Home() {
           )}
 
           <div className="mt-6 space-y-4">
-            {(showAllPrivate ? filteredWindows : filteredWindows.slice(0, 10)).map((window, wi) => {
-              const now = new Date();
-              const todayLocalStr = now.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
-              const isToday = window.date === todayLocalStr;
-              const nowMins = now.getHours() * 60 + now.getMinutes();
-              const startOptions = getStartOptions(window, 60, isToday ? nowMins : undefined);
-              const defaultStart = startOptions.length > 0 ? startOptions[0] : window.startMins;
-              const totalAvailable = window.endMins - window.startMins;
-              const sel = windowSelections[wi] || {
-                start: defaultStart,
-                duration: Math.min(60, window.endMins - defaultStart),
-              };
-              const durationOptions = getDurationOptions(sel.start, window.endMins);
-              const endTime = formatTimeFromMins(sel.start + sel.duration);
-              const price = getPrivatePrice(sel.duration, 1);
+            {(() => {
+              // Group filteredWindows by date+location, preserving original indices for state keying
+              const dayGroups: { key: string; date: string; location: string; entries: { window: TimeWindow; wi: number }[] }[] = [];
+              const seen = new Map<string, number>();
+              filteredWindows.forEach((window, wi) => {
+                const key = `${window.date}|${window.location}`;
+                if (!seen.has(key)) {
+                  seen.set(key, dayGroups.length);
+                  dayGroups.push({ key, date: window.date, location: window.location, entries: [] });
+                }
+                dayGroups[seen.get(key)!].entries.push({ window, wi });
+              });
+
+              const visibleGroups = showAllPrivate ? dayGroups : dayGroups.slice(0, 10);
 
               return (
-                <div
-                  key={wi}
-                  className="rounded-xl border border-brown-700 bg-brown-900/40 p-5"
-                >
-                  <div className="flex flex-wrap items-start justify-between gap-4">
-                    <div>
-                      <h3 className="font-semibold text-brown-200">
-                        {(() => {
-                          const d = parseDateForDisplay(window.date);
-                          const day = d.toLocaleDateString("en-US", { weekday: "long", timeZone: "America/New_York" });
-                          return `${day}, ${window.date}`;
-                        })()}
-                      </h3>
-                      <p className="text-sm text-brown-500">
-                        <LocationLink location={window.location} /> &bull; Available {window.startLabel} - {window.endLabel} ({totalAvailable} min)
-                      </p>
-                    </div>
-                  </div>
+                <>
+                  {visibleGroups.map((group) => {
+                    const d = parseDateForDisplay(group.date);
+                    const dayLabel = `${d.toLocaleDateString("en-US", { weekday: "long", timeZone: "America/New_York" })}, ${group.date}`;
+                    return (
+                      <div key={group.key} className="rounded-xl border border-brown-700 bg-brown-900/40 p-5">
+                        <div className="mb-4">
+                          <h3 className="font-semibold text-brown-200">{dayLabel}</h3>
+                          <p className="text-sm text-brown-500">
+                            <LocationLink location={group.location} />
+                          </p>
+                        </div>
 
-                  <div className="mt-4 flex flex-wrap items-end gap-4">
-                    <div>
-                      <label className="mb-1 block text-xs text-brown-400">Start Time</label>
-                      <select
-                        value={sel.start}
-                        onChange={(e) =>
-                          updateWindowSelection(wi, "start", parseInt(e.target.value), window)
-                        }
-                        className="rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-sm text-white focus:border-mesa-accent focus:outline-none"
-                      >
-                        {startOptions.map((t) => (
-                          <option key={t} value={t}>
-                            {formatTimeFromMins(t)}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                        <div className="space-y-4">
+                          {group.entries.map(({ window, wi }, entryIdx) => {
+                            const now = new Date();
+                            const todayLocalStr = now.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+                            const isToday = window.date === todayLocalStr;
+                            const nowMins = now.getHours() * 60 + now.getMinutes();
+                            const startOptions = getStartOptions(window, 60, isToday ? nowMins : undefined);
+                            const defaultStart = startOptions.length > 0 ? startOptions[0] : window.startMins;
+                            const totalAvailable = window.endMins - window.startMins;
+                            const sel = windowSelections[wi] || {
+                              start: defaultStart,
+                              duration: Math.min(60, window.endMins - defaultStart),
+                            };
+                            const durationOptions = getDurationOptions(sel.start, window.endMins);
+                            const endTime = formatTimeFromMins(sel.start + sel.duration);
+                            const price = getPrivatePrice(sel.duration, 1);
 
-                    <div>
-                      <label className="mb-1 block text-xs text-brown-400">Duration</label>
-                      <select
-                        value={sel.duration}
-                        onChange={(e) =>
-                          updateWindowSelection(wi, "duration", parseInt(e.target.value), window)
-                        }
-                        className="rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-sm text-white focus:border-mesa-accent focus:outline-none"
-                      >
-                        {durationOptions.map((d) => (
-                          <option key={d} value={d}>
-                            {formatDuration(d)}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                            return (
+                              <div
+                                key={wi}
+                                className={group.entries.length > 1 && entryIdx < group.entries.length - 1
+                                  ? "pb-4 border-b border-brown-700/50"
+                                  : ""}
+                              >
+                                <p className="text-sm text-brown-400 mb-3">
+                                  Available {window.startLabel} - {window.endLabel} ({totalAvailable} min)
+                                </p>
+                                <div className="flex flex-wrap items-end gap-4">
+                                  <div>
+                                    <label className="mb-1 block text-xs text-brown-400">Start Time</label>
+                                    <select
+                                      value={sel.start}
+                                      onChange={(e) =>
+                                        updateWindowSelection(wi, "start", parseInt(e.target.value), window)
+                                      }
+                                      className="rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-sm text-white focus:border-mesa-accent focus:outline-none"
+                                    >
+                                      {startOptions.map((t) => (
+                                        <option key={t} value={t}>
+                                          {formatTimeFromMins(t)}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
 
-                    <div className="text-sm text-brown-300">
-                      <span className="text-white font-medium">
-                        {formatTimeFromMins(sel.start)} - {endTime}
-                      </span>
-                      <span className="ml-2 text-mesa-accent font-semibold">
-                        From {formatPrice(price)}
-                      </span>
-                    </div>
+                                  <div>
+                                    <label className="mb-1 block text-xs text-brown-400">Duration</label>
+                                    <select
+                                      value={sel.duration}
+                                      onChange={(e) =>
+                                        updateWindowSelection(wi, "duration", parseInt(e.target.value), window)
+                                      }
+                                      className="rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-sm text-white focus:border-mesa-accent focus:outline-none"
+                                    >
+                                      {durationOptions.map((d) => (
+                                        <option key={d} value={d}>
+                                          {formatDuration(d)}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
 
+                                  <div className="text-sm text-brown-300">
+                                    <span className="text-white font-medium">
+                                      {formatTimeFromMins(sel.start)} - {endTime}
+                                    </span>
+                                    <span className="ml-2 text-mesa-accent font-semibold">
+                                      From {formatPrice(price)}
+                                    </span>
+                                  </div>
+
+                                  <button
+                                    onClick={() => openPrivateBooking(wi, window)}
+                                    className="rounded bg-mesa-accent px-4 py-2 text-sm font-semibold text-white transition hover:bg-yellow-600"
+                                  >
+                                    Book
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {!showAllPrivate && dayGroups.length > 10 && (
                     <button
-                      onClick={() => openPrivateBooking(wi, window)}
-                      className="rounded bg-mesa-accent px-4 py-2 text-sm font-semibold text-white transition hover:bg-yellow-600"
+                      onClick={() => setShowAllPrivate(true)}
+                      className="mt-2 w-full rounded-lg border border-brown-700 py-2 text-sm text-brown-400 hover:border-brown-500 hover:text-white transition"
                     >
-                      Book
+                      View {dayGroups.length - 10} more days ↓
                     </button>
-                  </div>
-                </div>
+                  )}
+                  {showAllPrivate && dayGroups.length > 10 && (
+                    <button
+                      onClick={() => setShowAllPrivate(false)}
+                      className="mt-2 w-full rounded-lg border border-brown-700 py-2 text-sm text-brown-400 hover:border-brown-500 hover:text-white transition"
+                    >
+                      Show less ↑
+                    </button>
+                  )}
+                </>
               );
-            })}
-            {!showAllPrivate && filteredWindows.length > 10 && (
-              <button
-                onClick={() => setShowAllPrivate(true)}
-                className="mt-2 w-full rounded-lg border border-brown-700 py-2 text-sm text-brown-400 hover:border-brown-500 hover:text-white transition"
-              >
-                View {filteredWindows.length - 10} more days ↓
-              </button>
-            )}
-            {showAllPrivate && filteredWindows.length > 10 && (
-              <button
-                onClick={() => setShowAllPrivate(false)}
-                className="mt-2 w-full rounded-lg border border-brown-700 py-2 text-sm text-brown-400 hover:border-brown-500 hover:text-white transition"
-              >
-                Show less ↑
-              </button>
-            )}
+            })()}
           </div>
         </div>
       </section>
