@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { ADMIN_EMAIL } from "@/lib/auth";
-import { getWeeklySchedule, getPrivateSlots } from "@/lib/sheets";
-import { sendTimeChangeNotification, sendCancellationNotification } from "@/lib/email";
+import { getWeeklySchedule } from "@/lib/sheets";
+import { sendTimeChangeNotification } from "@/lib/email";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 
 async function verifyAdmin(req: NextRequest) {
@@ -72,7 +72,6 @@ export async function POST(req: NextRequest) {
   let totalEmailsSent = 0;
   let totalSmsSent = 0;
 
-  // === TIME / LOCATION CHANGE DETECTION ===
   for (const session of upcoming) {
     const { data: allRegs, error } = await supabase
       .from("registrations")
@@ -185,158 +184,10 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // === DELETION DETECTION — WEEKLY SESSIONS ===
-  // If a row is gone from the sheet but there are still confirmed bookings for it, cancel them.
-  const sheetWeeklyKeys = new Set(upcoming.map((s) => `${s.date}|${s.group}`));
-
-  const { data: allWeeklyRegs } = await supabase
-    .from("registrations")
-    .select("*")
-    .eq("type", "weekly")
-    .eq("status", "confirmed");
-
-  const upcomingWeeklyRegs = (allWeeklyRegs || []).filter(
-    (r) => r.booked_date && sessionIsUpcoming(r.booked_date, r.booked_start_time || "")
-  );
-
-  const weeklyBySession = new Map<string, typeof upcomingWeeklyRegs>();
-  for (const r of upcomingWeeklyRegs) {
-    const group = (r.session_details || "").split(" — ")[0].trim();
-    const key = `${r.booked_date}|${group}`;
-    if (!weeklyBySession.has(key)) weeklyBySession.set(key, []);
-    weeklyBySession.get(key)!.push(r);
-  }
-
-  const deletedFound: { session: string; date: string; count: number }[] = [];
-  let cancelEmailsSent = 0;
-  let cancelSmsSent = 0;
-
-  for (const [key, regs] of weeklyBySession) {
-    if (sheetWeeklyKeys.has(key)) continue;
-
-    const pipeIdx = key.indexOf("|");
-    const date = key.slice(0, pipeIdx);
-    const sessionLabel = key.slice(pipeIdx + 1);
-
-    deletedFound.push({ session: sessionLabel, date, count: regs.length });
-
-    for (const r of regs) {
-      await supabase
-        .from("registrations")
-        .update({ status: "cancelled", is_late_cancel: false })
-        .eq("id", r.id);
-
-      try {
-        await sendCancellationNotification({
-          parentName: r.parent_name,
-          email: r.email,
-          sessionDetails: r.session_details || "",
-          sessionType: r.type,
-          isLateCancel: false,
-        });
-        cancelEmailsSent++;
-      } catch (err) {
-        console.error("Deletion cancel email failed for", r.email, err);
-      }
-
-      if (r.sms_consent && r.phone) {
-        const dateStr = formatDateWithDay(r.booked_date);
-        const locName = resolveLocationName(r.booked_location || "");
-        const timeStr = `${r.booked_start_time}${r.booked_end_time ? `-${r.booked_end_time}` : ""}`;
-        try {
-          await sendSMS(
-            r.phone,
-            `CANCELLED\nMesa Basketball: ${sessionLabel} on ${dateStr}\nTime: ${timeStr}${locName ? `\nLocation: ${locName}` : ""}\nSession cancelled by trainer.\nQuestions? (631) 599-1280\nReply STOP to opt out.`
-          );
-          cancelSmsSent++;
-        } catch (err) {
-          console.error("Deletion cancel SMS failed for", r.phone, err);
-        }
-      }
-    }
-  }
-
-  // === DELETION DETECTION — PRIVATE SESSIONS ===
-  let privateSlots: Awaited<ReturnType<typeof getPrivateSlots>> = [];
-  try {
-    privateSlots = await getPrivateSlots({ noCache: true });
-  } catch (err) {
-    console.error("sync-time-changes: failed to fetch private slots", err);
-  }
-
-  const sheetPrivateKeys = new Set(privateSlots.map((s) => `${s.date}|${s.startTime}`));
-
-  const { data: allPrivateRegs } = await supabase
-    .from("registrations")
-    .select("*")
-    .in("type", ["private", "group-private"])
-    .eq("status", "confirmed");
-
-  const upcomingPrivateRegs = (allPrivateRegs || []).filter(
-    (r) => r.booked_date && sessionIsUpcoming(r.booked_date, r.booked_start_time || "")
-  );
-
-  for (const r of upcomingPrivateRegs) {
-    const key = `${r.booked_date}|${r.booked_start_time}`;
-    if (sheetPrivateKeys.has(key)) continue;
-
-    const sessionLabel = (r.session_details || "").split(" — ")[0].trim() || "Private Session";
-    deletedFound.push({ session: sessionLabel, date: r.booked_date, count: 1 });
-
-    await supabase
-      .from("registrations")
-      .update({ status: "cancelled", is_late_cancel: false })
-      .eq("id", r.id);
-
-    try {
-      await sendCancellationNotification({
-        parentName: r.parent_name,
-        email: r.email,
-        sessionDetails: r.session_details || "",
-        sessionType: r.type,
-        isLateCancel: false,
-      });
-      cancelEmailsSent++;
-    } catch (err) {
-      console.error("Deletion cancel email failed for", r.email, err);
-    }
-
-    if (r.sms_consent && r.phone) {
-      const dateStr = formatDateWithDay(r.booked_date);
-      const locName = resolveLocationName(r.booked_location || "");
-      const timeStr = `${r.booked_start_time}${r.booked_end_time ? `-${r.booked_end_time}` : ""}`;
-      try {
-        await sendSMS(
-          r.phone,
-          `CANCELLED\nMesa Basketball: Private Session on ${dateStr}\nTime: ${timeStr}${locName ? `\nLocation: ${locName}` : ""}\nSession cancelled by trainer.\nQuestions? (631) 599-1280\nReply STOP to opt out.`
-        );
-        cancelSmsSent++;
-      } catch (err) {
-        console.error("Deletion cancel SMS failed for", r.phone, err);
-      }
-    }
-  }
-
-  if (deletedFound.length > 0) {
-    const summary = deletedFound
-      .map((d) => `• ${d.session} on ${d.date} (${d.count} booking${d.count !== 1 ? "s" : ""})`)
-      .join("\n");
-    try {
-      await sendAdminSMS(
-        `SESSIONS CANCELLED (deleted from sheet):\n${summary}\n${cancelEmailsSent} email${cancelEmailsSent !== 1 ? "s" : ""}, ${cancelSmsSent} SMS sent`
-      );
-    } catch (err) {
-      console.error("Admin deletion summary SMS failed:", err);
-    }
-  }
-
   return NextResponse.json({
     success: true,
     changesFound,
     totalEmailsSent,
     totalSmsSent,
-    deletedFound,
-    cancelEmailsSent,
-    cancelSmsSent,
   });
 }
