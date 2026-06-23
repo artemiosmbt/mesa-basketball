@@ -1641,10 +1641,10 @@ export default function Home() {
               return (
                 <div
                   key={group}
-                  className={`rounded-xl border p-6 transition cursor-pointer ${
+                  className={`rounded-xl border-2 p-6 transition cursor-pointer shadow-lg shadow-black/30 ${
                     isActive
                       ? "border-mesa-accent bg-brown-900/60"
-                      : "border-brown-700 bg-brown-900/40 hover:border-brown-500"
+                      : "border-brown-600 bg-brown-900/40 hover:border-brown-500"
                   }`}
                   onClick={() => {
                     setActiveGroup(isActive ? "" : group);
