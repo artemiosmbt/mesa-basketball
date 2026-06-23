@@ -2015,7 +2015,7 @@ export default function Home() {
           </p>
 
           {camps.length === 0 && !loading && (
-            <div className="mt-10 rounded-2xl border border-brown-700 bg-brown-900/40 px-8 py-12 text-center max-w-xl mx-auto">
+            <div className="mt-10 rounded-2xl border-2 border-brown-600 bg-brown-900/40 px-8 py-12 text-center max-w-xl mx-auto shadow-lg shadow-black/30">
               <p className="font-[family-name:var(--font-fira-cond)] text-2xl font-black tracking-wide text-white mb-3">NO CAMPS OPEN RIGHT NOW</p>
               <p className="text-brown-400 text-sm leading-relaxed mb-6">Check back soon or reach out directly to be notified when the next camp is announced.</p>
               <a
@@ -2052,7 +2052,7 @@ export default function Home() {
 
               if (isMultiGroup) {
                 return (
-                  <div key={group.name} className="mt-8 rounded-xl border border-brown-700 bg-brown-900/40 p-6">
+                  <div key={group.name} className="mt-8 rounded-xl border-2 border-brown-600 bg-brown-900/40 p-6 shadow-lg shadow-black/30">
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div>
                         <h3 className="text-xl font-bold text-mesa-accent">{group.name}</h3>
@@ -2113,7 +2113,7 @@ export default function Home() {
               const futureCampDays = camp.campDays.filter((d) => isFutureCampDay(d, camp.time));
               const campEnded = camp.campDays.length > 0 ? futureCampDays.length === 0 : false;
               return (
-                <div key={camp.id} className="mt-8 rounded-xl border border-brown-700 bg-brown-900/40 p-6">
+                <div key={camp.id} className="mt-8 rounded-xl border-2 border-brown-600 bg-brown-900/40 p-6 shadow-lg shadow-black/30">
                   <div className="flex items-start justify-between">
                     <div>
                       <h3 className="text-lg font-bold text-mesa-accent">{camp.name}</h3>
