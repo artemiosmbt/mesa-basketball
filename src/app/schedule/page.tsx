@@ -2358,7 +2358,7 @@ export default function Home() {
                                 className="rounded-lg bg-brown-800/50 border border-brown-700/60 p-4"
                               >
                                 <p className="text-sm text-brown-400 mb-3">
-                                  <LocationLink location={window.location} className="text-brown-400" /> &bull; Available {window.startLabel} - {window.endLabel} ({totalAvailable} min)
+                                  <LocationLink location={window.location} className="text-brown-400" /> &bull; Available {window.startLabel} - {window.endLabel}
                                 </p>
                                 <div className="flex flex-wrap items-end gap-4">
                                   <div>
