@@ -2335,8 +2335,8 @@ export default function Home() {
                           <h3 className="font-semibold text-brown-200">{dayLabel}</h3>
                         </div>
 
-                        <div className="space-y-4">
-                          {group.entries.map(({ window, wi }, entryIdx) => {
+                        <div className="space-y-3">
+                          {group.entries.map(({ window, wi }) => {
                             const now = new Date();
                             const todayLocalStr = now.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
                             const isToday = window.date === todayLocalStr;
@@ -2355,9 +2355,7 @@ export default function Home() {
                             return (
                               <div
                                 key={wi}
-                                className={group.entries.length > 1 && entryIdx < group.entries.length - 1
-                                  ? "pb-4 border-b border-brown-700/50"
-                                  : ""}
+                                className="rounded-lg bg-brown-800/50 border border-brown-700/60 p-4"
                               >
                                 <p className="text-sm text-brown-400 mb-3">
                                   <LocationLink location={window.location} className="text-brown-400" /> &bull; Available {window.startLabel} - {window.endLabel} ({totalAvailable} min)
