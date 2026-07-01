@@ -205,16 +205,21 @@ async function findMesaEventsAtTime(
   if (!resp.ok) return [];
 
   const data = await resp.json();
-  const items: Array<{ id: string; summary?: string; start?: { dateTime?: string } }> =
+  const items: Array<{ id: string; summary?: string; description?: string; start?: { dateTime?: string } }> =
     data.items || [];
 
-  // Match events that start at the same time and look like Mesa group/camp events
+  // Match events that start at the same time and look like Mesa group/camp events,
+  // but exclude events that already have a new-format tag (date|time|label) — those
+  // are legitimate separate sessions at the same time, not orphans.
   const targetDateTime = toDateTime(date, startTime);
   return items.filter((ev) => {
     if (!ev.start?.dateTime) return false;
     const evStart = ev.start.dateTime.slice(0, 16); // "YYYY-MM-DDTHH:MM"
     if (evStart !== targetDateTime.slice(0, 16)) return false;
-    return (ev.summary?.startsWith("Group —") || ev.summary?.startsWith("Camp —")) ?? false;
+    if (!(ev.summary?.startsWith("Group —") || ev.summary?.startsWith("Camp —"))) return false;
+    // New-format tags have three pipe-separated parts: [mesa-session:date|time|label]
+    if (/\[mesa-session:[^\]]+\|[^\]]+\|[^\]]+\]/.test(ev.description ?? "")) return false;
+    return true;
   });
 }
 
@@ -502,15 +507,21 @@ export async function addPrivateSessionToCalendar(
 
   const summary = `Private — ${params.parentName} (${params.kids})`;
   const tag = `[mesa-private:${params.bookedDate}|${params.email}]`;
-  const description = [
+  const workoutSection = generateWorkoutTemplate(params.bookedStartTime, params.bookedEndTime);
+
+  const descParts = [
     `Parent: ${params.parentName}`,
     `Email: ${params.email}`,
     `Phone: ${params.phone}`,
-    `Athletes: ${params.kids}`,
+    `Athletes: ${stripAthleteDetails(params.kids)}`,
     `Location: ${params.bookedLocation}`,
     "",
-    tag,
-  ].join("\n");
+  ];
+  if (workoutSection) {
+    descParts.push(workoutSection, "");
+  }
+  descParts.push(tag);
+  const description = descParts.join("\n");
 
   const event: CalendarEvent = {
     summary,
