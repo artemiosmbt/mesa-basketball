@@ -6,6 +6,7 @@ export interface WeeklySession {
   location: string;
   maxSpots: number;
   price: number;
+  trainer?: string;
 }
 
 export interface Camp {
@@ -75,6 +76,9 @@ export async function getWeeklySchedule(options?: { noCache?: boolean }): Promis
     location: row[4] || "",
     maxSpots: parseInt(row[5]) || 8,
     price: parseInt(row[6]) || 50,
+    // Column H (index 7) is "Day of Week"; column I (index 8) is the optional
+    // Trainer column — defaults to Artemios when not filled in.
+    trainer: (row[8] || "").trim() || "Artemios Gavalas",
   }));
 }
 
@@ -117,9 +121,9 @@ export async function getPrivateSlots(options?: { noCache?: boolean }): Promise<
     endTime: row[2] || "",
     location: row[3] || "",
     available: (row[4] || "").toUpperCase() === "TRUE",
-    // Optional 6th column — defaults to Artemios so existing sheets with no
-    // Trainer column keep working exactly as before.
-    trainer: (row[5] || "").trim() || "Artemios Gavalas",
+    // Column F (index 5) is "Day of Week"; column G (index 6) is the optional
+    // Trainer column — defaults to Artemios when not filled in.
+    trainer: (row[6] || "").trim() || "Artemios Gavalas",
   }));
 }
 

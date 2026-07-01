@@ -65,6 +65,7 @@ interface WeeklySession {
   location: string;
   maxSpots: number;
   price: number;
+  trainer?: string;
 }
 
 interface Camp {
@@ -1831,7 +1832,7 @@ export default function Home() {
                                 <div className="flex-1 min-w-0">
                                   <p className="font-medium text-sm">{dayName}, {s.date}</p>
                                   <p className="text-xs text-brown-400">
-                                    {s.startTime} - {s.endTime} &bull; <LocationLink location={s.location} />
+                                    {s.startTime} - {s.endTime} &bull; <LocationLink location={s.location} /> &bull; {s.trainer || "Artemios Gavalas"}
                                   </p>
                                 </div>
                                 <div className="text-right shrink-0">
@@ -1939,7 +1940,7 @@ export default function Home() {
                                 <div className="flex-1 min-w-0">
                                   <p className="font-medium text-sm">{dayName}, {s.date}</p>
                                   <p className="text-xs text-brown-400">
-                                    {s.startTime} - {s.endTime} &bull; <LocationLink location={s.location} />
+                                    {s.startTime} - {s.endTime} &bull; <LocationLink location={s.location} /> &bull; {s.trainer || "Artemios Gavalas"}
                                   </p>
                                 </div>
                                 <div className="text-right shrink-0">
