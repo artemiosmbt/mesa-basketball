@@ -365,6 +365,61 @@ function sessionHasStarted(dateStr: string, startTimeStr: string): boolean {
   return sessionTime <= nowTime;
 }
 
+/**
+ * Parse a time string like "5:00 PM" or "17:00" into total minutes since midnight.
+ */
+function parseTimeToMins(t: string): number {
+  const cleaned = t.trim();
+  const ampm = cleaned.match(/^(\d{1,2}):(\d{2})\s*(am|pm)$/i);
+  if (ampm) {
+    let h = parseInt(ampm[1], 10);
+    const m = parseInt(ampm[2], 10);
+    const mer = ampm[3].toLowerCase();
+    if (mer === "pm" && h !== 12) h += 12;
+    if (mer === "am" && h === 12) h = 0;
+    return h * 60 + m;
+  }
+  const plain = cleaned.match(/^(\d{1,2}):(\d{2})$/);
+  if (plain) return parseInt(plain[1], 10) * 60 + parseInt(plain[2], 10);
+  return 0;
+}
+
+/** Format total minutes since midnight as H:MM (12-hour, no AM/PM). */
+function formatBlockTime(totalMins: number): string {
+  let h = Math.floor(totalMins / 60) % 24;
+  const m = totalMins % 60;
+  if (h === 0) h = 12;
+  else if (h > 12) h -= 12;
+  return `${h}:${String(m).padStart(2, "0")}`;
+}
+
+/**
+ * Generate a workout template string with 15-minute blocks for the session duration.
+ * Returns empty string if end time is missing or not after start time.
+ */
+function generateWorkoutTemplate(startTimeStr: string, endTimeStr: string): string {
+  const startMins = parseTimeToMins(startTimeStr);
+  const endMins = parseTimeToMins(endTimeStr);
+  if (!endMins || endMins <= startMins) return "";
+  const blocks: string[] = [];
+  for (let t = startMins; t < endMins; t += 15) {
+    const blockEnd = Math.min(t + 15, endMins);
+    if (blocks.length > 0) blocks.push("");
+    blocks.push(`${formatBlockTime(t)}-${formatBlockTime(blockEnd)}`);
+  }
+  return blocks.join("\n");
+}
+
+/**
+ * Extract the workout section from an existing event description.
+ * Returns the content between "Location: ...\n\n" and "\n*[mesa-session:".
+ * Returns empty string if not found (old format events without a workout section).
+ */
+function extractWorkoutSection(description: string): string {
+  const match = description.match(/Location:[^\n]*\n\n([\s\S]*?)\n*\[mesa-session:/);
+  return match ? match[1].trim() : "";
+}
+
 // ---------------------------------------------------------------------------
 // Supabase query helper (inline — avoids importing the full supabase client
 // just to run two reads)
@@ -542,13 +597,22 @@ export async function upsertGroupSessionCalendarEvent(
       ? `Camp — ${params.sessionLabel} (${params.bookedDate})`
       : `Group — ${params.sessionLabel} (${params.bookedDate})`;
 
-  const description = [
+  // Preserve existing workout notes, or generate a fresh template for new events.
+  const workoutSection = existing
+    ? extractWorkoutSection(existing.description) || generateWorkoutTemplate(params.bookedStartTime, params.bookedEndTime)
+    : generateWorkoutTemplate(params.bookedStartTime, params.bookedEndTime);
+
+  const descParts = [
     countLine,
     `Athletes: ${athleteNames}`,
     `Location: ${params.bookedLocation}`,
     "",
-    tag,
-  ].join("\n");
+  ];
+  if (workoutSection) {
+    descParts.push(workoutSection, "");
+  }
+  descParts.push(tag);
+  const description = descParts.join("\n");
 
   if (existing) {
     await patchEvent(calendarId, token, existing.id, { summary, description });
