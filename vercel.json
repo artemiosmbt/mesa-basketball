@@ -15,10 +15,6 @@
     {
       "path": "/api/cron/calendar-sync",
       "schedule": "0 12 * * *"
-    },
-    {
-      "path": "/api/cron/patch-missing-workouts",
-      "schedule": "0 0 1 1 *"
     }
   ]
 }
