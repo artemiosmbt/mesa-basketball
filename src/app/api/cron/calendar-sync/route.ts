@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getWeeklySchedule, getCamps } from "@/lib/sheets";
-import { upsertGroupSessionCalendarEvent, deleteStaleGroupSessionEvents } from "@/lib/calendar";
+import { upsertGroupSessionCalendarEvent, deleteStaleGroupSessionEvents, sanitizeTagLabel } from "@/lib/calendar";
 
 function splitTime(time: string): { start: string; end: string } {
   const parts = time.split(/\s*[-–]\s*/);
@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
     const sessions = await getWeeklySchedule();
     for (const session of sessions) {
       if (!session.date || session.date < today) continue;
-      expectedTags.add(`[mesa-session:${session.date}|${session.startTime}]`);
+      expectedTags.add(`[mesa-session:${session.date}|${session.startTime}|${sanitizeTagLabel(session.group || "Group_Session")}]`);
       try {
         await upsertGroupSessionCalendarEvent({
           sessionType: "weekly",
@@ -58,7 +58,7 @@ export async function GET(req: NextRequest) {
       const { start: campStart, end: campEnd } = splitTime(camp.time);
       if (!camp.campDays || camp.campDays.length === 0) {
         if (!camp.startDate || camp.startDate < today) continue;
-        expectedTags.add(`[mesa-session:${camp.startDate}|${campStart}]`);
+        expectedTags.add(`[mesa-session:${camp.startDate}|${campStart}|${sanitizeTagLabel(camp.name)}]`);
         try {
           await upsertGroupSessionCalendarEvent({
             sessionType: "camp",
@@ -79,7 +79,7 @@ export async function GET(req: NextRequest) {
       } else {
         for (const day of camp.campDays) {
           if (!day || day < today) continue;
-          expectedTags.add(`[mesa-session:${day}|${campStart}]`);
+          expectedTags.add(`[mesa-session:${day}|${campStart}|${sanitizeTagLabel(camp.name)}]`);
           try {
             await upsertGroupSessionCalendarEvent({
               sessionType: "camp",

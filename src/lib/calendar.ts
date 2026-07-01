@@ -323,6 +323,19 @@ async function patchEvent(
 }
 
 // ---------------------------------------------------------------------------
+// Tag helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Sanitize a session label for embedding in a calendar event description tag.
+ * Replaces non-alphanumeric characters with underscores so tags remain parseable.
+ * e.g. "High School Boys Group" → "High_School_Boys_Group"
+ */
+export function sanitizeTagLabel(label: string): string {
+  return label.replace(/[^a-zA-Z0-9]/g, "_").replace(/_+/g, "_").replace(/^_|_$/, "");
+}
+
+// ---------------------------------------------------------------------------
 // Supabase query helper (inline — avoids importing the full supabase client
 // just to run two reads)
 // ---------------------------------------------------------------------------
@@ -335,7 +348,8 @@ interface RegistrationRow {
 async function getSessionRegistrations(
   date: string,
   startTime: string,
-  sessionType: "weekly" | "camp"
+  sessionType: "weekly" | "camp",
+  sessionLabel: string
 ): Promise<RegistrationRow[]> {
   const { createClient } = await import("@supabase/supabase-js");
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -349,7 +363,8 @@ async function getSessionRegistrations(
     .eq("type", sessionType)
     .eq("status", "confirmed")
     .eq("booked_date", date)
-    .eq("booked_start_time", startTime);
+    .eq("booked_start_time", startTime)
+    .ilike("session_details", `${sessionLabel} —%`);
 
   if (error || !data) return [];
   return data as RegistrationRow[];
@@ -465,20 +480,32 @@ export async function upsertGroupSessionCalendarEvent(
   const token = await getAccessToken(saEmail, privateKey);
 
   // A stable tag embedded in the description so we can find the event later.
-  const tag = `[mesa-session:${params.bookedDate}|${params.bookedStartTime}]`;
+  // Include the session label so two sessions at the same time get separate events.
+  const tag = `[mesa-session:${params.bookedDate}|${params.bookedStartTime}|${sanitizeTagLabel(params.sessionLabel)}]`;
 
   // Fetch current signup list from Supabase (includes the row just inserted).
   const rows = await getSessionRegistrations(
     params.bookedDate,
     params.bookedStartTime,
-    params.sessionType
+    params.sessionType,
+    params.sessionLabel
   );
 
   const totalSignedUp = rows.reduce((sum, r) => sum + (r.total_participants || 1), 0);
   const athleteNames = rows.map((r) => r.kids).filter(Boolean).join(", ");
 
-  const countLine = params.maxSpots
-    ? `${totalSignedUp}/${params.maxSpots} signed up`
+  // Find the existing event first so we can recover maxSpots from its description
+  // if the caller (e.g. a cancellation handler) didn't pass it.
+  const existing = await findExistingEvent(calendarId, token, params.bookedDate, tag);
+
+  let resolvedMaxSpots = params.maxSpots;
+  if (!resolvedMaxSpots && existing) {
+    const m = existing.description.match(/\d+\/(\d+) signed up/);
+    if (m) resolvedMaxSpots = parseInt(m[1], 10);
+  }
+
+  const countLine = resolvedMaxSpots
+    ? `${totalSignedUp}/${resolvedMaxSpots} signed up`
     : `${totalSignedUp} signed up`;
 
   const summary =
@@ -493,8 +520,6 @@ export async function upsertGroupSessionCalendarEvent(
     "",
     tag,
   ].join("\n");
-
-  const existing = await findExistingEvent(calendarId, token, params.bookedDate, tag);
 
   if (existing) {
     await patchEvent(calendarId, token, existing.id, { summary, description });
