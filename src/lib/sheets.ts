@@ -34,6 +34,7 @@ export interface PrivateSlot {
   endTime: string;
   location: string;
   available: boolean;
+  trainer: string;
 }
 
 function parseCSV(text: string): string[][] {
@@ -116,6 +117,9 @@ export async function getPrivateSlots(options?: { noCache?: boolean }): Promise<
     endTime: row[2] || "",
     location: row[3] || "",
     available: (row[4] || "").toUpperCase() === "TRUE",
+    // Optional 6th column — defaults to Artemios so existing sheets with no
+    // Trainer column keep working exactly as before.
+    trainer: (row[5] || "").trim() || "Artemios Gavalas",
   }));
 }
 

@@ -89,10 +89,10 @@ export const demoCamps: Camp[] = [
 ];
 
 export const demoPrivateSlots: PrivateSlot[] = [
-  { id: "slot-0", date: "March 22, 2026", startTime: "4:00 PM", endTime: "5:00 PM", location: "St. Pauls", available: true },
-  { id: "slot-1", date: "March 23, 2026", startTime: "3:00 PM", endTime: "4:00 PM", location: "St. Pauls", available: true },
-  { id: "slot-2", date: "March 25, 2026", startTime: "4:00 PM", endTime: "5:00 PM", location: "Cherry Valley", available: true },
-  { id: "slot-3", date: "March 29, 2026", startTime: "10:00 AM", endTime: "11:00 AM", location: "St. Pauls", available: true },
-  { id: "slot-4", date: "March 29, 2026", startTime: "3:00 PM", endTime: "3:45 PM", location: "St. Pauls", available: true },
-  { id: "slot-5", date: "March 30, 2026", startTime: "2:00 PM", endTime: "3:00 PM", location: "St. Pauls", available: true },
+  { id: "slot-0", date: "March 22, 2026", startTime: "4:00 PM", endTime: "5:00 PM", location: "St. Pauls", available: true, trainer: "Artemios Gavalas" },
+  { id: "slot-1", date: "March 23, 2026", startTime: "3:00 PM", endTime: "4:00 PM", location: "St. Pauls", available: true, trainer: "Artemios Gavalas" },
+  { id: "slot-2", date: "March 25, 2026", startTime: "4:00 PM", endTime: "5:00 PM", location: "Cherry Valley", available: true, trainer: "Artemios Gavalas" },
+  { id: "slot-3", date: "March 29, 2026", startTime: "10:00 AM", endTime: "11:00 AM", location: "St. Pauls", available: true, trainer: "Artemios Gavalas" },
+  { id: "slot-4", date: "March 29, 2026", startTime: "3:00 PM", endTime: "3:45 PM", location: "St. Pauls", available: true, trainer: "Artemios Gavalas" },
+  { id: "slot-5", date: "March 30, 2026", startTime: "2:00 PM", endTime: "3:00 PM", location: "St. Pauls", available: true, trainer: "Artemios Gavalas" },
 ];

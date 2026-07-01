@@ -152,6 +152,7 @@ interface PrivateSlot {
   endTime: string;
   location: string;
   available: boolean;
+  trainer: string;
 }
 
 type BookingType = "weekly" | "camp" | "private" | "group-private";
@@ -248,6 +249,7 @@ interface BookingModal {
   bookedStartTime?: string;
   bookedEndTime?: string;
   bookedLocation?: string;
+  bookedTrainer?: string;
   selectedDuration?: number;
   windowTotalMins?: number;
   remainingAfterSelection?: number;
@@ -280,6 +282,7 @@ function groupByGroup(sessions: WeeklySession[]) {
 interface TimeWindow {
   date: string;
   location: string;
+  trainer: string;
   startMins: number;
   endMins: number;
   startLabel: string;
@@ -287,10 +290,11 @@ interface TimeWindow {
 }
 
 function buildTimeWindows(slots: PrivateSlot[]): TimeWindow[] {
-  // Group by date + location
+  // Group by date + location + trainer so two trainers at the same location
+  // and time never get merged into one shared window.
   const groups: Record<string, PrivateSlot[]> = {};
   slots.forEach((s) => {
-    const key = `${s.date}|${s.location}`;
+    const key = `${s.date}|${s.location}|${s.trainer}`;
     if (!groups[key]) groups[key] = [];
     groups[key].push(s);
   });
@@ -313,6 +317,7 @@ function buildTimeWindows(slots: PrivateSlot[]): TimeWindow[] {
         windows.push({
           date: sorted[0].date,
           location: sorted[0].location,
+          trainer: sorted[0].trainer,
           startMins: windowStart,
           endMins: windowEnd,
           startLabel: formatTimeFromMins(windowStart),
@@ -326,6 +331,7 @@ function buildTimeWindows(slots: PrivateSlot[]): TimeWindow[] {
     windows.push({
       date: sorted[0].date,
       location: sorted[0].location,
+      trainer: sorted[0].trainer,
       startMins: windowStart,
       endMins: windowEnd,
       startLabel: formatTimeFromMins(windowStart),
@@ -519,7 +525,7 @@ export default function Home() {
   const [camps, setCamps] = useState<Camp[]>([]);
   const [privateSlots, setPrivateSlots] = useState<PrivateSlot[]>([]);
   const [bookedSlots, setBookedSlots] = useState<
-    { date: string; startTime: string; endTime: string; location: string }[]
+    { date: string; startTime: string; endTime: string; location: string; trainer: string }[]
   >([]);
   const [groupEnrollment, setGroupEnrollment] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
@@ -596,7 +602,7 @@ export default function Home() {
 
 
   const [recurringWeeks, setRecurringWeeks] = useState<
-    { date: string; startTime: string; endTime: string; location: string; selected: boolean }[]
+    { date: string; startTime: string; endTime: string; location: string; trainer: string; selected: boolean }[]
   >([]);
   const [submitting, setSubmitting] = useState(false);
   const [submitResult, setSubmitResult] = useState<{
@@ -743,6 +749,7 @@ export default function Home() {
         (b) =>
           b.date === w.date &&
           b.location === w.location &&
+          b.trainer === w.trainer &&
           parseTime(b.startTime) < w.endMins &&
           parseTime(b.endTime) > w.startMins
       );
@@ -848,6 +855,7 @@ export default function Home() {
           startTime: startLabel,
           endTime: endLabel,
           location: w.location,
+          trainer: w.trainer,
           selected: false,
         });
       }
@@ -863,6 +871,7 @@ export default function Home() {
       bookedStartTime: startLabel,
       bookedEndTime: endLabel,
       bookedLocation: window.location,
+      bookedTrainer: window.trainer,
       selectedDuration: sel.duration,
       windowTotalMins: window.endMins - window.startMins,
       remainingAfterSelection: window.endMins - endMins,
@@ -1060,12 +1069,14 @@ export default function Home() {
           startTime: modal.bookedStartTime,
           endTime: adjustedEndTime,
           location: modal.bookedLocation,
+          trainer: modal.bookedTrainer,
         },
         ...recurringWeeks.filter((w) => w.selected).map((w) => ({
           date: w.date,
           startTime: w.startTime,
           endTime: upsellExtra > 0 ? formatTimeFromMins(parseTime(w.endTime) + upsellExtra) : w.endTime,
           location: w.location,
+          trainer: w.trainer,
         })),
       ];
 
@@ -1090,6 +1101,7 @@ export default function Home() {
             bookedStartTime: booking.startTime,
             bookedEndTime: booking.endTime,
             bookedLocation: booking.location,
+            bookedTrainer: booking.trainer,
             skipEmail: isRecurring,
             submittedReferralCode: referralCode.trim() || undefined,
             useReferralCredit: bIdx === 0 ? useReferralCredit : false,
@@ -1335,7 +1347,7 @@ export default function Home() {
   }
 
   function getEnrollmentCount(s: WeeklySession): number {
-    const key = `${s.date}|${s.startTime}`;
+    const key = `${s.date}|${s.startTime}|${s.group || ""}`;
     return groupEnrollment[key] || 0;
   }
 
@@ -2641,7 +2653,7 @@ export default function Home() {
                   <div className="space-y-2">
                     {camp.campDays.filter((day) => isFutureCampDay(day, camp.time)).map((day) => {
                       const dayStartTime = camp.time.split("-")[0]?.trim() || camp.time;
-                      const enrolled = groupEnrollment[`${day}|${dayStartTime}`] || 0;
+                      const enrolled = groupEnrollment[`${day}|${dayStartTime}|${camp.name}`] || 0;
                       const spotsLeft = camp.maxSpots - enrolled;
                       const dayFull = spotsLeft <= 0;
                       return (
@@ -2798,7 +2810,7 @@ export default function Home() {
                     const campMaxKids = campForLimit
                       ? campSelectedDays.size > 0
                         ? Math.min(...Array.from(campSelectedDays).map((day) => {
-                            const enrolled = groupEnrollment[`${day}|${dayStart}`] || 0;
+                            const enrolled = groupEnrollment[`${day}|${dayStart}|${campForLimit.name}`] || 0;
                             return Math.max(0, campForLimit.maxSpots - enrolled);
                           }))
                         : campForLimit.maxSpots

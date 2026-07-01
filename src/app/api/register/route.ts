@@ -33,6 +33,7 @@ export async function POST(req: NextRequest) {
       bookedStartTime,
       bookedEndTime,
       bookedLocation,
+      bookedTrainer,
       skipEmail,
       emailOnly,
       submittedReferralCode,
@@ -74,7 +75,7 @@ export async function POST(req: NextRequest) {
       // Check capacity for all selected sessions
       const capacityChecks = await Promise.all(
         weeklySessions.map((s: { date: string; startTime: string; endTime: string; location: string; group: string; maxSpots: number }) =>
-          checkGroupSessionCapacity(s.date, s.startTime, s.maxSpots)
+          checkGroupSessionCapacity(s.date, s.startTime, s.group, s.maxSpots)
         )
       );
 
@@ -122,6 +123,7 @@ export async function POST(req: NextRequest) {
           bookedStartTime: session.startTime,
           bookedEndTime: session.endTime,
           bookedLocation: session.location,
+          bookedGroup: session.group,
           referralCode,
           isFree: false,
           smsConsent: !!smsConsent,
@@ -263,6 +265,7 @@ export async function POST(req: NextRequest) {
           bookedStartTime: session.startTime,
           bookedEndTime: session.endTime || "",
           bookedLocation: session.location,
+          bookedGroup: session.campName,
           referralCode,
           isFree: false,
           smsConsent: !!smsConsent,
@@ -403,6 +406,7 @@ export async function POST(req: NextRequest) {
         bookedStartTime,
         bookedEndTime,
         bookedLocation,
+        bookedTrainer: isPrivateType ? bookedTrainer : undefined,
         referralCode,
         isFree,
         usedReferralCredit,
@@ -512,6 +516,7 @@ export async function POST(req: NextRequest) {
             bookedStartTime,
             bookedEndTime,
             bookedLocation: bookedLocation || "",
+            trainer: bookedTrainer || undefined,
           });
         } catch (err) {
           console.error("Calendar sync error (private):", err);

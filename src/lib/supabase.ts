@@ -26,6 +26,8 @@ export interface Registration {
   booked_start_time: string | null;
   booked_end_time: string | null;
   booked_location: string | null;
+  booked_group: string | null;
+  booked_trainer: string | null;
   status: string;
   manage_token: string;
   referral_code: string | null;
@@ -49,6 +51,8 @@ export async function addRegistration(data: {
   bookedStartTime?: string;
   bookedEndTime?: string;
   bookedLocation?: string;
+  bookedGroup?: string;
+  bookedTrainer?: string;
   usedReferralCredit?: boolean;
   isFree?: boolean;
   sessionPrice?: number;
@@ -68,6 +72,8 @@ export async function addRegistration(data: {
       booked_start_time: data.bookedStartTime || null,
       booked_end_time: data.bookedEndTime || null,
       booked_location: data.bookedLocation || null,
+      booked_group: data.bookedGroup || null,
+      booked_trainer: data.bookedTrainer || null,
       ...(data.usedReferralCredit ? { used_referral_credit: true } : {}),
       ...(data.isFree ? { is_free: true } : {}),
       ...(data.sessionPrice != null ? { session_price: data.sessionPrice } : {}),
@@ -79,12 +85,12 @@ export async function addRegistration(data: {
 }
 
 export async function getBookedSlots(): Promise<
-  { date: string; startTime: string; endTime: string; location: string }[]
+  { date: string; startTime: string; endTime: string; location: string; trainer: string }[]
 > {
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from("registrations")
-    .select("booked_date, booked_start_time, booked_end_time, booked_location")
+    .select("booked_date, booked_start_time, booked_end_time, booked_location, booked_trainer")
     .not("booked_date", "is", null)
     .eq("status", "confirmed")
     .in("type", ["private", "group-private"]);
@@ -95,6 +101,7 @@ export async function getBookedSlots(): Promise<
     startTime: r.booked_start_time,
     endTime: r.booked_end_time,
     location: r.booked_location,
+    trainer: r.booked_trainer || "Artemios Gavalas",
   }));
 }
 
@@ -416,6 +423,8 @@ export async function addRegistrationWithRewards(data: {
   bookedStartTime?: string;
   bookedEndTime?: string;
   bookedLocation?: string;
+  bookedGroup?: string;
+  bookedTrainer?: string;
   referralCode: string;
   isFree: boolean;
   usedReferralCredit?: boolean;
@@ -438,6 +447,8 @@ export async function addRegistrationWithRewards(data: {
       booked_start_time: data.bookedStartTime || null,
       booked_end_time: data.bookedEndTime || null,
       booked_location: data.bookedLocation || null,
+      booked_group: data.bookedGroup || null,
+      booked_trainer: data.bookedTrainer || null,
       referral_code: data.referralCode,
       is_free: data.isFree,
       used_referral_credit: data.usedReferralCredit ?? false,
@@ -594,14 +605,14 @@ export async function markReminderSent(id: string): Promise<void> {
     .eq("id", id);
 }
 
-/** Count confirmed weekly registrations per session (by date + start time) */
+/** Count confirmed weekly/camp registrations per session (by date + start time + group) */
 export async function getGroupSessionEnrollment(): Promise<
   Record<string, number>
 > {
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from("registrations")
-    .select("booked_date, booked_start_time, total_participants")
+    .select("booked_date, booked_start_time, booked_group, total_participants")
     .in("type", ["weekly", "camp"])
     .eq("status", "confirmed")
     .not("booked_date", "is", null);
@@ -610,7 +621,9 @@ export async function getGroupSessionEnrollment(): Promise<
 
   const counts: Record<string, number> = {};
   for (const row of data) {
-    const key = `${row.booked_date}|${row.booked_start_time}`;
+    // Include the group label so two different groups/sessions at the same
+    // date+time never share a capacity pool — each gets its own count.
+    const key = `${row.booked_date}|${row.booked_start_time}|${row.booked_group || ""}`;
     counts[key] = (counts[key] || 0) + (row.total_participants || 1);
   }
   return counts;
@@ -620,6 +633,7 @@ export async function getGroupSessionEnrollment(): Promise<
 export async function checkGroupSessionCapacity(
   date: string,
   startTime: string,
+  group: string,
   maxSpots: number
 ): Promise<{ available: boolean; enrolled: number }> {
   const supabase = getSupabase();
@@ -629,7 +643,8 @@ export async function checkGroupSessionCapacity(
     .eq("type", "weekly")
     .eq("status", "confirmed")
     .eq("booked_date", date)
-    .eq("booked_start_time", startTime);
+    .eq("booked_start_time", startTime)
+    .eq("booked_group", group || "");
 
   const enrolled = error ? 0 : count || 0;
   return { available: enrolled < maxSpots, enrolled };

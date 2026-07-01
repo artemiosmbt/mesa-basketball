@@ -454,7 +454,7 @@ export async function PUT(
   }
 
   const body = await req.json();
-  const { bookedDate, bookedStartTime, bookedEndTime, bookedLocation, kids: bodyKids, sessionType: bodySessionType, sessionGroup, parentName: bodyParentName, phone: bodyPhone, useReferralCredit } = body;
+  const { bookedDate, bookedStartTime, bookedEndTime, bookedLocation, bookedTrainer, kids: bodyKids, sessionType: bodySessionType, sessionGroup, parentName: bodyParentName, phone: bodyPhone, useReferralCredit } = body;
 
   if (!bookedDate || !bookedStartTime || !bookedEndTime || !bookedLocation) {
     return NextResponse.json(
@@ -543,6 +543,8 @@ export async function PUT(
     bookedStartTime,
     bookedEndTime,
     bookedLocation,
+    bookedGroup: newType === "weekly" ? sessionGroup : undefined,
+    bookedTrainer: newType === "private" ? bookedTrainer : undefined,
     isFree: newIsFree,
     usedReferralCredit: newUsedReferralCredit,
     sessionPrice: newSessionPrice,
@@ -560,6 +562,7 @@ export async function PUT(
         bookedStartTime,
         bookedEndTime,
         bookedLocation,
+        trainer: bookedTrainer || undefined,
       });
     } else {
       await upsertGroupSessionCalendarEvent({

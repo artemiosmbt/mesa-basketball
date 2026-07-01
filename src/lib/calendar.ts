@@ -473,6 +473,7 @@ export interface PrivateSessionParams {
   bookedStartTime: string;  // e.g. "10:00 AM"
   bookedEndTime: string;
   bookedLocation: string;
+  trainer?: string;
 }
 
 export interface GroupSessionParams {
@@ -515,6 +516,7 @@ export async function addPrivateSessionToCalendar(
     `Phone: ${params.phone}`,
     `Athletes: ${stripAthleteDetails(params.kids)}`,
     `Location: ${params.bookedLocation}`,
+    ...(params.trainer ? [`Trainer: ${params.trainer}`] : []),
     "",
   ];
   if (workoutSection) {

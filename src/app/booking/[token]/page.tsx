@@ -66,6 +66,7 @@ interface Booking {
 interface TimeWindow {
   date: string;
   location: string;
+  trainer: string;
   startMins: number;
   endMins: number;
   startLabel: string;
@@ -205,10 +206,10 @@ export default function ManageBooking({
 
   // Schedule data for rescheduling
   const [privateSlots, setPrivateSlots] = useState<
-    { date: string; startTime: string; endTime: string; location: string; available: boolean }[]
+    { date: string; startTime: string; endTime: string; location: string; available: boolean; trainer: string }[]
   >([]);
   const [bookedSlots, setBookedSlots] = useState<
-    { date: string; startTime: string; endTime: string; location: string }[]
+    { date: string; startTime: string; endTime: string; location: string; trainer: string }[]
   >([]);
   const [weeklySessions, setWeeklySessions] = useState<
     { group: string; date: string; startTime: string; endTime: string; location: string; maxSpots: number; price: number }[]
@@ -332,10 +333,11 @@ export default function ManageBooking({
   const timeWindows = useMemo(() => {
     if (privateSlots.length === 0) return [];
     const available = privateSlots.filter((s) => s.available);
-    // Group by date + location and merge consecutive
+    // Group by date + location + trainer and merge consecutive — keeps two
+    // trainers at the same location/time from being merged into one window.
     const groups: Record<string, typeof available> = {};
     available.forEach((s) => {
-      const key = `${s.date}|${s.location}`;
+      const key = `${s.date}|${s.location}|${s.trainer}`;
       if (!groups[key]) groups[key] = [];
       groups[key].push(s);
     });
@@ -357,6 +359,7 @@ export default function ManageBooking({
           windows.push({
             date: sorted[0].date,
             location: sorted[0].location,
+            trainer: sorted[0].trainer,
             startMins: wStart,
             endMins: wEnd,
             startLabel: formatTimeFromMins(wStart),
@@ -369,6 +372,7 @@ export default function ManageBooking({
       windows.push({
         date: sorted[0].date,
         location: sorted[0].location,
+        trainer: sorted[0].trainer,
         startMins: wStart,
         endMins: wEnd,
         startLabel: formatTimeFromMins(wStart),
@@ -380,7 +384,7 @@ export default function ManageBooking({
     const result: TimeWindow[] = [];
     for (const w of windows) {
       const overlaps = bookedSlots.filter(
-        (b) => b.date === w.date && b.location === w.location
+        (b) => b.date === w.date && b.location === w.location && b.trainer === w.trainer
       );
       if (overlaps.length === 0) {
         result.push(w);
@@ -487,6 +491,7 @@ export default function ManageBooking({
         bookedStartTime: formatTimeFromMins(selectedStart),
         bookedEndTime: formatTimeFromMins(endMins),
         bookedLocation: w.location,
+        bookedTrainer: w.trainer,
         kids: kidsStr,
         sessionType: "private",
         parentName: rescheduleFormParentName,
@@ -1031,7 +1036,7 @@ export default function ManageBooking({
                               {isGroupSelected && (
                                 <div className="mt-3 space-y-2">
                                   {groupSessions.map(s => {
-                                    const key = `${s.date}|${s.startTime}`;
+                                    const key = `${s.date}|${s.startTime}|${s.group || ""}`;
                                     const enrolled = groupEnrollment[key] || 0;
                                     const spotsLeft = s.maxSpots - enrolled;
                                     const isFull = spotsLeft <= 0;
