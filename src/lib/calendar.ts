@@ -335,6 +335,36 @@ export function sanitizeTagLabel(label: string): string {
   return label.replace(/[^a-zA-Z0-9]/g, "_").replace(/_+/g, "_").replace(/^_|_$/, "");
 }
 
+/**
+ * Strip parenthetical detail blocks (DOB, Grade, Gender) from a kids string,
+ * leaving only the athlete names.
+ * e.g. "John Smith (DOB: 01/01/2012, Grade: 8, Gender: Male)" → "John Smith"
+ */
+function stripAthleteDetails(kidsStr: string): string {
+  return kidsStr.replace(/\s*\([^)]*\)/g, "").replace(/\s{2,}/g, " ").trim();
+}
+
+/**
+ * Returns true if the session start time (in ET) is at or before the current
+ * time, meaning the session has already begun.
+ */
+function sessionHasStarted(dateStr: string, startTimeStr: string): boolean {
+  const sessionISO = toDateTime(dateStr, startTimeStr); // "YYYY-MM-DDTHH:MM:00" naive ET
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  }).formatToParts(new Date());
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "00";
+  const nowDate = `${get("year")}-${get("month")}-${get("day")}`;
+  const nowTime = `${get("hour")}:${get("minute")}`;
+  const sessionDate = sessionISO.slice(0, 10);
+  const sessionTime = sessionISO.slice(11, 16);
+  if (sessionDate < nowDate) return true;
+  if (sessionDate > nowDate) return false;
+  return sessionTime <= nowTime;
+}
+
 // ---------------------------------------------------------------------------
 // Supabase query helper (inline — avoids importing the full supabase client
 // just to run two reads)
@@ -472,10 +502,9 @@ export async function upsertGroupSessionCalendarEvent(
     return;
   }
 
-  // Never touch past events — prevents re-creating deleted events and avoids
-  // creating duplicates when manually-edited Apple Calendar notes wipe the tag.
-  const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
-  if (normalizeDate(params.bookedDate) < todayStr) return;
+  // Never touch events that have already started (ET) — Artemios writes workout
+  // notes in the description after sessions; updating would wipe them.
+  if (sessionHasStarted(params.bookedDate, params.bookedStartTime)) return;
 
   const token = await getAccessToken(saEmail, privateKey);
 
@@ -492,7 +521,7 @@ export async function upsertGroupSessionCalendarEvent(
   );
 
   const totalSignedUp = rows.reduce((sum, r) => sum + (r.total_participants || 1), 0);
-  const athleteNames = rows.map((r) => r.kids).filter(Boolean).join(", ");
+  const athleteNames = rows.map((r) => stripAthleteDetails(r.kids)).filter(Boolean).join(", ");
 
   // Find the existing event first so we can recover maxSpots from its description
   // if the caller (e.g. a cancellation handler) didn't pass it.
