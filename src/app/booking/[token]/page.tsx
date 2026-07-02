@@ -1008,7 +1008,7 @@ export default function ManageBooking({
                               className="block w-full rounded-lg border border-brown-700 bg-brown-800/50 p-4 text-left transition hover:border-brown-500"
                             >
                               <p className="font-medium">{dayName}, {dateLabel}</p>
-                              <p className="text-sm text-brown-400">{w.location} &bull; {w.startLabel} – {w.endLabel} ({totalAvailable} min available) &bull; {w.trainer}</p>
+                              <p className="text-sm text-brown-400">{w.location} &bull; {w.startLabel} – {w.endLabel} &bull; {w.trainer}</p>
                             </button>
                           );
                         })}
