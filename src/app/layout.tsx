@@ -17,15 +17,16 @@ const firaCond = Fira_Sans_Condensed({
 
 export const metadata: Metadata = {
   title: {
-    default: "Mesa Basketball Training | Long Island",
+    default: "Long Island Basketball Training | Mesa Basketball Training",
     template: "%s | Mesa Basketball Training",
   },
   icons: {
     apple: "/apple-touch-icon.png",
   },
   description:
-    "Elite basketball training on Long Island with former D1 and international professional player Artemios Gavalas. Group sessions, private lessons, and mini camps for all ages.",
+    "Long Island basketball training with former D1 and international professional player Artemios Gavalas. Group sessions, private lessons, and mini camps for all ages.",
   keywords: [
+    "Long Island basketball training",
     "basketball training Long Island",
     "youth basketball training Long Island",
     "private basketball lessons Long Island",
@@ -39,8 +40,8 @@ export const metadata: Metadata = {
   ],
   metadataBase: new URL("https://www.mesabasketballtraining.com"),
   openGraph: {
-    title: "Mesa Basketball Training | Long Island",
-    description: "Elite basketball training on Long Island with former D1 and international professional player Artemios Gavalas.",
+    title: "Long Island Basketball Training | Mesa Basketball Training",
+    description: "Long Island basketball training with former D1 and international professional player Artemios Gavalas.",
     url: "https://www.mesabasketballtraining.com",
     siteName: "Mesa Basketball Training",
     images: [{ url: "/og-image.jpg", width: 1200, height: 630 }],
@@ -48,8 +49,8 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "Mesa Basketball Training | Long Island",
-    description: "Elite basketball training on Long Island. Group sessions, private lessons, and mini camps.",
+    title: "Long Island Basketball Training | Mesa Basketball Training",
+    description: "Long Island basketball training. Group sessions, private lessons, and mini camps.",
     images: ["/og-image.jpg"],
   },
 };

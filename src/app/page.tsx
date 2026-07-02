@@ -5,13 +5,13 @@ import LandingNav from "./LandingNav";
 import { AppInstallSection } from "./AppInstall";
 
 export const metadata: Metadata = {
-  title: "Mesa Basketball Training | Long Island",
+  title: "Long Island Basketball Training | Mesa Basketball Training",
   description:
-    "Elite basketball training on Long Island with former D1 and professional player Artemios Gavalas. Group sessions, mini camps, and private training for all ages.",
-  keywords: ["basketball training Long Island", "youth basketball training Long Island", "elite basketball trainer Long Island", "private basketball training near me", "basketball camps Long Island", "AAU basketball training", "basketball training Nassau County", "basketball training Suffolk County", "basketball trainer Long Island", "Mesa Basketball", "Artemios Gavalas", "D1 basketball trainer", "professional basketball trainer Long Island"],
+    "Long Island basketball training with former D1 and professional player Artemios Gavalas. Group sessions, mini camps, and private training for all ages.",
+  keywords: ["Long Island basketball training", "basketball training Long Island", "youth basketball training Long Island", "elite basketball trainer Long Island", "private basketball training near me", "basketball camps Long Island", "AAU basketball training", "basketball training Nassau County", "basketball training Suffolk County", "basketball trainer Long Island", "Mesa Basketball", "Artemios Gavalas", "D1 basketball trainer", "professional basketball trainer Long Island"],
   openGraph: {
-    title: "Mesa Basketball Training | Long Island",
-    description: "Elite basketball training on Long Island with former D1 and professional player Artemios Gavalas. Serving Nassau County, Suffolk County, and The Hamptons.",
+    title: "Long Island Basketball Training | Mesa Basketball Training",
+    description: "Long Island basketball training with former D1 and professional player Artemios Gavalas. Serving Nassau County, Suffolk County, and The Hamptons.",
     url: "https://www.mesabasketballtraining.com",
     siteName: "Mesa Basketball Training",
     images: [{ url: "https://www.mesabasketballtraining.com/og-image.jpg" }],
@@ -24,7 +24,7 @@ const jsonLd = {
   "@type": ["LocalBusiness", "SportsActivityLocation"],
   "@id": "https://www.mesabasketballtraining.com",
   "name": "Mesa Basketball Training",
-  "description": "Elite basketball training on Long Island for youth and adults. Group sessions, private lessons, and mini camps led by former D1 and international professional player Artemios Gavalas.",
+  "description": "Long Island basketball training for youth and adults. Group sessions, private lessons, and mini camps led by former D1 and international professional player Artemios Gavalas.",
   "url": "https://www.mesabasketballtraining.com",
   "telephone": "+16315991280",
   "email": "mesabasketballtraining@gmail.com",
@@ -148,7 +148,7 @@ export default function LandingPage() {
             {/* All content overlaid */}
             <div className="absolute inset-0 flex flex-col items-center justify-center px-6 text-center gap-0">
               <h1 className="mb-3 text-xs font-semibold uppercase tracking-widest text-mesa-accent drop-shadow">
-                Long Island&apos;s Elite Basketball Training
+                Long Island Basketball Training
               </h1>
               <p className="font-[family-name:var(--font-fira-cond)] text-5xl font-black tracking-wide leading-none drop-shadow-lg">
                 TRAIN WITH<br />PURPOSE.
@@ -180,7 +180,7 @@ export default function LandingPage() {
           <div className="relative mx-auto max-w-6xl px-6 py-36 w-full">
             <div className="flex flex-col items-center text-center">
               <h1 className="mb-4 text-sm font-semibold uppercase tracking-widest text-mesa-accent">
-                Long Island&apos;s Elite Basketball Training
+                Long Island Basketball Training
               </h1>
               <p className="font-[family-name:var(--font-fira-cond)] text-8xl font-black tracking-wide leading-none">
                 TRAIN WITH<br />PURPOSE.
