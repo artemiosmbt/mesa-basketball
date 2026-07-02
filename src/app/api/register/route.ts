@@ -124,6 +124,7 @@ export async function POST(req: NextRequest) {
           bookedEndTime: session.endTime,
           bookedLocation: session.location,
           bookedGroup: session.group,
+          bookedTrainer: session.trainer,
           referralCode,
           isFree: false,
           smsConsent: !!smsConsent,
@@ -155,6 +156,7 @@ export async function POST(req: NextRequest) {
           referralCode,
           referredBy: weeklyReferrer?.name,
           referralCodeUsed: submittedReferralCode || undefined,
+          trainer: weeklySessions[0]?.trainer,
           calendarEvent: weeklySessions[0] ? { date: weeklySessions[0].date, startTime: weeklySessions[0].startTime, endTime: weeklySessions[0].endTime, location: weeklySessions[0].location } : undefined,
         });
 
@@ -168,18 +170,19 @@ export async function POST(req: NextRequest) {
 
       // SMS runs independently so it always fires even if email throws
       const sessionTypeSMS = isPickupBooking ? "pickup session" : "session";
+      const weeklyTrainerLine = weeklySessions[0]?.trainer ? `\nTrainer: ${weeklySessions[0].trainer}` : "";
       if (smsConsent) {
         const sessionLines = weeklySessions.map((s: { date: string; startTime: string; endTime: string; location: string }) =>
           `${formatDateWithDay(s.date)} | ${s.startTime}-${s.endTime}\nLocation: ${resolveLocationName(s.location)}`
         ).join("\n");
         const count = weeklySessions.length;
         const confirmLabel = count === 1 ? `${isPickupBooking ? "Pickup session" : "Session"}` : `${count} ${isPickupBooking ? "pickup sessions" : "sessions"}`;
-        await sendSMS(phone, `Mesa Basketball: ${confirmLabel} confirmed!\n${sessionLines}\nAthlete: ${kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
+        await sendSMS(phone, `Mesa Basketball: ${confirmLabel} confirmed!\n${sessionLines}${weeklyTrainerLine}\nAthlete: ${kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
       }
       const adminLines = weeklySessions.map((s: { date: string; startTime: string; endTime: string; location: string }) =>
         `${formatDateWithDay(s.date)} | ${s.startTime}-${s.endTime}\nLocation: ${resolveLocationName(s.location)}`
       ).join("\n");
-      await sendAdminSMS(`NEW BOOKING: ${parentName}\n${weeklySessions.length} ${sessionTypeSMS}${weeklySessions.length !== 1 ? "s" : ""}:\n${adminLines}\nPlayers: ${kids}${submittedReferralCode ? `\nRef code: ${submittedReferralCode}` : ""}`);
+      await sendAdminSMS(`NEW BOOKING: ${parentName}\n${weeklySessions.length} ${sessionTypeSMS}${weeklySessions.length !== 1 ? "s" : ""}:\n${adminLines}${weeklyTrainerLine}\nPlayers: ${kids}${submittedReferralCode ? `\nRef code: ${submittedReferralCode}` : ""}`);
 
       // Update Google Calendar for each weekly session
       for (const session of weeklySessions) {
@@ -474,6 +477,7 @@ export async function POST(req: NextRequest) {
           referralCode,
           referredBy: privateReferrer?.name,
           referralCodeUsed: submittedReferralCode || undefined,
+          trainer: isPrivateType ? bookedTrainer : undefined,
           calendarEvent: bookedDate && bookedStartTime ? { date: bookedDate, startTime: bookedStartTime, endTime: bookedEndTime || bookedStartTime, location: bookedLocation || "" } : undefined,
         });
       } catch (notifyErr) {
@@ -492,7 +496,8 @@ export async function POST(req: NextRequest) {
         const pkgNote = effectivePkgRemaining !== undefined
           ? `\n${effectivePkgRemaining} session${effectivePkgRemaining !== 1 ? "s" : ""} remaining in your package.`
           : "";
-        await sendSMS(phone, `Mesa Basketball: Your ${typeStr} ${verbStr} confirmed!${dateLine}${pkgNote}\nAthlete: ${kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
+        const privateTrainerLine = isPrivateType && bookedTrainer ? `\nTrainer: ${bookedTrainer}` : "";
+        await sendSMS(phone, `Mesa Basketball: Your ${typeStr} ${verbStr} confirmed!${dateLine}${privateTrainerLine}${pkgNote}\nAthlete: ${kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
       }
       const adminDateLine = bookedDate
         ? `${formatDateWithDay(bookedDate)} | ${bookedStartTime}${bookedEndTime ? `-${bookedEndTime}` : ""}${bookedLocation ? `\nLocation: ${resolveLocationName(bookedLocation)}` : ""}`
@@ -500,7 +505,8 @@ export async function POST(req: NextRequest) {
       const pkgAdminNote = effectivePkgRemaining !== undefined
         ? `\nPkg: ${effectivePkgRemaining}/${effectivePkgType} remaining`
         : "";
-      await sendAdminSMS(`NEW BOOKING: ${parentName}\n${adminDateLine}\nPlayers: ${kids}${pkgAdminNote}${submittedReferralCode ? `\nRef code: ${submittedReferralCode}` : ""}`);
+      const adminTrainerLine = isPrivateType && bookedTrainer ? `\nTrainer: ${bookedTrainer}` : "";
+      await sendAdminSMS(`NEW BOOKING: ${parentName}\n${adminDateLine}${adminTrainerLine}\nPlayers: ${kids}${pkgAdminNote}${submittedReferralCode ? `\nRef code: ${submittedReferralCode}` : ""}`);
     }
 
     // Add to Google Calendar (private sessions only; group/camp handled above)

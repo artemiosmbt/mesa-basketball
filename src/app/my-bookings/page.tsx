@@ -48,6 +48,7 @@ interface BookingRecord {
   bookedStartTime: string | null;
   bookedEndTime: string | null;
   bookedLocation: string | null;
+  bookedTrainer: string | null;
   status: string;
   manageToken: string;
 }
@@ -309,6 +310,11 @@ export default function MyBookings() {
                       <p className="text-brown-400">
                         <span className="text-brown-500">Type:</span> {typeLabel}
                       </p>
+                      {b.bookedTrainer && (
+                        <p className="text-brown-400">
+                          <span className="text-brown-500">Trainer:</span> {b.bookedTrainer}
+                        </p>
+                      )}
                       <p className="text-brown-500 text-xs">
                         Registered{" "}
                         {new Date(b.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}

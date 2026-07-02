@@ -212,7 +212,7 @@ export default function ManageBooking({
     { date: string; startTime: string; endTime: string; location: string; trainer: string }[]
   >([]);
   const [weeklySessions, setWeeklySessions] = useState<
-    { group: string; date: string; startTime: string; endTime: string; location: string; maxSpots: number; price: number }[]
+    { group: string; date: string; startTime: string; endTime: string; location: string; maxSpots: number; price: number; trainer?: string }[]
   >([]);
   const [groupEnrollment, setGroupEnrollment] = useState<Record<string, number>>({});
 
@@ -510,6 +510,7 @@ export default function ManageBooking({
         kids: kidsStr,
         sessionType: "weekly",
         sessionGroup: session.group,
+        sessionTrainer: session.trainer,
         parentName: rescheduleFormParentName,
         phone: rescheduleFormPhone,
       };
@@ -1007,7 +1008,7 @@ export default function ManageBooking({
                               className="block w-full rounded-lg border border-brown-700 bg-brown-800/50 p-4 text-left transition hover:border-brown-500"
                             >
                               <p className="font-medium">{dayName}, {dateLabel}</p>
-                              <p className="text-sm text-brown-400">{w.location} &bull; {w.startLabel} – {w.endLabel} ({totalAvailable} min available)</p>
+                              <p className="text-sm text-brown-400">{w.location} &bull; {w.startLabel} – {w.endLabel} ({totalAvailable} min available) &bull; {w.trainer}</p>
                             </button>
                           );
                         })}
@@ -1045,7 +1046,7 @@ export default function ManageBooking({
                                         onClick={() => { setSelectedGroupDate(s.date); setShowRescheduleForm(true); }}
                                         className={`w-full rounded border p-3 text-left transition ${isFull ? "cursor-not-allowed border-brown-800 bg-brown-900/50 opacity-50" : "border-brown-700 bg-brown-800 hover:border-brown-500"}`}>
                                         <p className="text-sm font-medium text-white">{fmtDate(s.date)}</p>
-                                        <p className="mt-0.5 text-xs text-brown-400">{s.startTime}–{s.endTime} · {s.location}</p>
+                                        <p className="mt-0.5 text-xs text-brown-400">{s.startTime}–{s.endTime} · {s.location} · {s.trainer || "Artemios Gavalas"}</p>
                                         {(isFull || spotsLeft <= 3) && (
                                           <p className={`mt-0.5 text-xs ${isFull ? "text-red-400" : "text-yellow-400"}`}>
                                             {isFull ? "Full" : `${spotsLeft} spot${spotsLeft !== 1 ? "s" : ""} left`}

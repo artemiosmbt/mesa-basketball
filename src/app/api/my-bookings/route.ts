@@ -74,6 +74,7 @@ export async function POST(req: NextRequest) {
           bookedStartTime: r.booked_start_time,
           bookedEndTime: r.booked_end_time,
           bookedLocation,
+          bookedTrainer: r.booked_trainer,
           status: r.status,
           manageToken: r.manage_token,
         };

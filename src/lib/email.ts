@@ -102,6 +102,7 @@ export async function sendRegistrationNotification(data: {
   referralCode?: string;
   referredBy?: string;
   referralCodeUsed?: string;
+  trainer?: string;
   calendarEvent?: { date: string; startTime: string; endTime: string; location: string; };
 }) {
   const resend = getResend();
@@ -136,6 +137,7 @@ export async function sendRegistrationNotification(data: {
       <p><strong>Phone:</strong> ${data.phone}</p>
       <p><strong>Players:</strong> ${data.kids}</p>
       <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails)}</p>
+      ${data.trainer ? `<p><strong>Trainer:</strong> ${data.trainer}</p>` : ""}
       <p><strong>Total Participants:</strong> ${data.totalParticipants}</p>
       ${isPackageBooking ? `<p><strong>Package:</strong> ${data.packageType}-session monthly plan — ${data.packageSessionsRemaining} session${data.packageSessionsRemaining !== 1 ? "s" : ""} remaining after this booking</p>` : ""}
       ${data.isFree && !isPackageBooking ? `<p><strong style="color: #d4af37;">${data.isFirstTime ? "First-Time Discount" : "Referral Credit"}: 50% off applied</strong></p>` : ""}
@@ -214,6 +216,7 @@ export async function sendRegistrationNotification(data: {
       <p>Hi ${data.parentName},</p>
       <p>Your ${typeLabel.toLowerCase()} has been confirmed.</p>
       <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails)}</p>
+      ${data.trainer ? `<p><strong>Trainer:</strong> ${data.trainer}</p>` : ""}
       <p><strong>Players:</strong> ${data.kids}</p>
       ${packageNote}
       ${freeNote}
@@ -644,6 +647,7 @@ export async function sendRescheduleNotification(data: {
   manageToken: string;
   isLateReschedule?: boolean;
   lateFeeAmount?: number;
+  newTrainer?: string;
 }) {
   const resend = getResend();
 
@@ -665,6 +669,7 @@ export async function sendRescheduleNotification(data: {
       <p><strong>Parent:</strong> ${data.parentName}</p>
       <p><strong>Old Session:</strong> ${formatSessionDetailsForEmail(data.oldSessionDetails)}</p>
       <p><strong>New Session:</strong> ${formatSessionDetailsForEmail(data.newSessionDetails)}</p>
+      ${data.newTrainer ? `<p><strong>Trainer:</strong> ${data.newTrainer}</p>` : ""}
       ${lateFeeNote}
     `,
   });
@@ -681,6 +686,7 @@ export async function sendRescheduleNotification(data: {
       <p>Your session has been rescheduled.</p>
       <p><strong>Old Session:</strong> ${formatSessionDetailsForEmail(data.oldSessionDetails)}</p>
       <p><strong>New Session:</strong> ${formatSessionDetailsForEmail(data.newSessionDetails)}</p>
+      ${data.newTrainer ? `<p><strong>Trainer:</strong> ${data.newTrainer}</p>` : ""}
       ${data.isLateReschedule ? `<div style="background: #7c1d1d; border-left: 4px solid #ef4444; border-radius: 6px; padding: 14px 16px; margin: 16px 0;"><p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #ffffff;">⚠️ Late Fee</p><p style="margin: 0; color: #ffffff; font-size: 14px;">This reschedule was made within 24 hours of the session. Per our policy, a <strong>50% fee${data.lateFeeAmount ? ` of $${data.lateFeeAmount}` : ""}</strong> is still due.</p>${PAYMENT_LINES}</div>` : ""}
       <p><a href="${BASE_URL}/my-bookings" style="color: #d4af37; font-weight: bold;">View My Bookings</a> — Manage all your sessions</p>
       <br/>

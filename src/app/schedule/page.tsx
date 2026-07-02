@@ -239,6 +239,7 @@ interface SelectedGroupSession {
   group: string;
   maxSpots: number;
   price: number;
+  trainer?: string;
 }
 
 interface BookingModal {
@@ -1483,6 +1484,7 @@ export default function Home() {
         group: s.group,
         maxSpots: s.maxSpots,
         price: s.price,
+        trainer: s.trainer,
       })),
       weeklyTotalPrice: groupPricing.totalPrice,
       weeklySavings: groupPricing.savings,
@@ -1512,7 +1514,7 @@ export default function Home() {
       sessionDetails: `${sessions[0].group} — ${sessions.length} session${sessions.length !== 1 ? "s" : ""}`,
       selectedGroupSessions: sessions.map((s) => ({
         date: s.date, startTime: s.startTime, endTime: s.endTime,
-        location: s.location, group: s.group, maxSpots: s.maxSpots, price: s.price,
+        location: s.location, group: s.group, maxSpots: s.maxSpots, price: s.price, trainer: s.trainer,
       })),
       weeklyTotalPrice: totalPrice,
       weeklySavings: 0,
@@ -1543,7 +1545,7 @@ export default function Home() {
       sessionDetails: `${s.group} — 1 session`,
       selectedGroupSessions: [{
         date: s.date, startTime: s.startTime, endTime: s.endTime,
-        location: s.location, group: s.group, maxSpots: s.maxSpots, price: s.price,
+        location: s.location, group: s.group, maxSpots: s.maxSpots, price: s.price, trainer: s.trainer,
       }],
       weeklyTotalPrice: s.price,
       weeklySavings: 0,
@@ -2371,7 +2373,7 @@ export default function Home() {
                                 className="rounded-lg bg-brown-800/50 border border-brown-700/60 p-4"
                               >
                                 <p className="text-sm text-brown-400 mb-3">
-                                  <LocationLink location={window.location} className="text-brown-400" /> &bull; Available {window.startLabel} - {window.endLabel}
+                                  <LocationLink location={window.location} className="text-brown-400" /> &bull; Available {window.startLabel} - {window.endLabel} &bull; {window.trainer}
                                 </p>
                                 <div className="flex flex-wrap items-end gap-4">
                                   <div>
@@ -2639,6 +2641,12 @@ export default function Home() {
               </button>
             </div>
             <p className="mt-1 text-sm text-brown-400">{injectDayIntoDetails(modal.sessionDetails, modal.bookedDate)}</p>
+            {modal.type === "private" && modal.bookedTrainer && (
+              <p className="mt-1 text-sm text-brown-400">Trainer: {modal.bookedTrainer}</p>
+            )}
+            {modal.type === "weekly" && modal.selectedGroupSessions?.[0]?.trainer && (
+              <p className="mt-1 text-sm text-brown-400">Trainer: {modal.selectedGroupSessions[0].trainer}</p>
+            )}
 
             {/* Camp day selector */}
             {modal.type === "camp" && !submitResult?.success && (() => {

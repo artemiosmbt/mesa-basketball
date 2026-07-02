@@ -16,6 +16,7 @@ interface Registration {
   session_details: string;
   booked_date: string | null;
   booked_start_time: string | null;
+  booked_trainer: string | null;
   status: string;
   session_price: number | null;
   total_participants: number;
@@ -627,6 +628,12 @@ export default function AdminPage() {
                 <p className="text-brown-500 uppercase tracking-wider mb-0.5">Session Date</p>
                 <p className="text-mesa-accent font-medium">{formatDate(r.booked_date)}</p>
               </div>
+              {r.booked_trainer && (
+                <div>
+                  <p className="text-brown-500 uppercase tracking-wider mb-0.5">Trainer</p>
+                  <p className="text-brown-200">{r.booked_trainer}</p>
+                </div>
+              )}
               {!packageMembership.get(r.id)?.withinPackage && (
                 <div>
                   <p className="text-brown-500 uppercase tracking-wider mb-0.5">Price</p>

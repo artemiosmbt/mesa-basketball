@@ -454,7 +454,7 @@ export async function PUT(
   }
 
   const body = await req.json();
-  const { bookedDate, bookedStartTime, bookedEndTime, bookedLocation, bookedTrainer, kids: bodyKids, sessionType: bodySessionType, sessionGroup, parentName: bodyParentName, phone: bodyPhone, useReferralCredit } = body;
+  const { bookedDate, bookedStartTime, bookedEndTime, bookedLocation, bookedTrainer, kids: bodyKids, sessionType: bodySessionType, sessionGroup, sessionTrainer, parentName: bodyParentName, phone: bodyPhone, useReferralCredit } = body;
 
   if (!bookedDate || !bookedStartTime || !bookedEndTime || !bookedLocation) {
     return NextResponse.json(
@@ -470,6 +470,7 @@ export async function PUT(
   const newSessionDetails = newType === "weekly" && sessionGroup
     ? `${sessionGroup} — ${bookedDate} ${bookedStartTime}-${bookedEndTime} at ${bookedLocation}`
     : `Private Session — ${bookedDate} ${bookedStartTime}-${bookedEndTime} at ${bookedLocation}`;
+  const resolvedTrainer: string | undefined = newType === "weekly" ? sessionTrainer : bookedTrainer;
 
   // Check if original session is within 24h (with grace period) → late reschedule fee applies
   const isLateReschedule = !!(reg.booked_date && reg.booked_start_time && isLateAction(reg.booked_date, reg.booked_start_time, reg.created_at, reg.admin_change_at));
@@ -544,7 +545,7 @@ export async function PUT(
     bookedEndTime,
     bookedLocation,
     bookedGroup: newType === "weekly" ? sessionGroup : undefined,
-    bookedTrainer: newType === "private" ? bookedTrainer : undefined,
+    bookedTrainer: resolvedTrainer,
     isFree: newIsFree,
     usedReferralCredit: newUsedReferralCredit,
     sessionPrice: newSessionPrice,
@@ -590,13 +591,15 @@ export async function PUT(
     manageToken: newToken,
     isLateReschedule: !!isLateReschedule,
     lateFeeAmount,
+    newTrainer: resolvedTrainer,
   });
 
+  const rescheduleTrainerLine = resolvedTrainer ? `\nTrainer: ${resolvedTrainer}` : "";
   if (reg.sms_consent && reg.phone) {
     const lateNote = isLateReschedule ? "\nA late reschedule fee applies." : "";
-    await sendSMS(reg.phone, `Mesa Basketball: Session rescheduled!\n${formatDateWithDay(bookedDate)} | ${bookedStartTime}-${bookedEndTime}\nLocation: ${resolveLocationName(bookedLocation)}\nAthlete: ${kidsToUse}${lateNote}\nManage: mesabasketballtraining.com/booking/${newToken}\nReply STOP to opt out.`);
+    await sendSMS(reg.phone, `Mesa Basketball: Session rescheduled!\n${formatDateWithDay(bookedDate)} | ${bookedStartTime}-${bookedEndTime}\nLocation: ${resolveLocationName(bookedLocation)}${rescheduleTrainerLine}\nAthlete: ${kidsToUse}${lateNote}\nManage: mesabasketballtraining.com/booking/${newToken}\nReply STOP to opt out.`);
   }
-  await sendAdminSMS(`RESCHEDULED: ${newParentName}\nFrom: ${reg.session_details}\nTo: ${newSessionDetails}\nPlayers: ${kidsToUse}`);
+  await sendAdminSMS(`RESCHEDULED: ${newParentName}\nFrom: ${reg.session_details}\nTo: ${newSessionDetails}${rescheduleTrainerLine}\nPlayers: ${kidsToUse}`);
 
   return NextResponse.json({ success: true, newToken, isLateReschedule: !!isLateReschedule });
 }
