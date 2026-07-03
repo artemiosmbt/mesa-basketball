@@ -2060,7 +2060,7 @@ export default function Home() {
         <div className="absolute inset-0 bg-gradient-to-r from-mesa-dark/85 via-mesa-dark/50 to-mesa-dark/85" />
         <div className="absolute inset-0 flex items-center justify-center">
           <p className="font-[family-name:var(--font-fira-cond)] text-xl md:text-4xl font-black tracking-wide md:tracking-widest text-white text-center px-6 drop-shadow-lg">
-            MINI CAMPS &amp; <span className="text-mesa-accent">INTENSIVE TRAINING</span>
+            CAMPS &amp; <span className="text-mesa-accent">CLINICS</span>
           </p>
         </div>
       </div>
