@@ -626,6 +626,8 @@ export default function Home() {
   const [referralCode, setReferralCode] = useState("");
   const [creditBalance, setCreditBalance] = useState<number | null>(null);
   const [useReferralCredit, setUseReferralCredit] = useState(false);
+  const [accountCreditBalance, setAccountCreditBalance] = useState<number | null>(null);
+  const [applyAccountCredit, setApplyAccountCredit] = useState(true);
 
   // Load hideUpsell from localStorage
   useEffect(() => {
@@ -645,6 +647,18 @@ export default function Home() {
       .then((d) => setCreditBalance(d.credits ?? 0))
       .catch(() => setCreditBalance(0));
   }, [email, modal.open, modal.type, isReturningClient]);
+
+  // Fetch account credit balance (dollar credit, e.g. from a partial camp cancellation)
+  // whenever the modal is open with a valid email — applies to any booking type.
+  useEffect(() => {
+    if (!modal.open) { setAccountCreditBalance(null); return; }
+    const trimmed = email.trim().toLowerCase();
+    if (!trimmed || !trimmed.includes("@")) { setAccountCreditBalance(null); return; }
+    fetch(`/api/account-credits?email=${encodeURIComponent(trimmed)}`)
+      .then((r) => r.json())
+      .then((d) => setAccountCreditBalance(d.balance ?? 0))
+      .catch(() => setAccountCreditBalance(0));
+  }, [email, modal.open]);
 
 
   const [recurringWeeks, setRecurringWeeks] = useState<
@@ -933,6 +947,7 @@ export default function Home() {
     setUpsellExtra(0);
     setReferralCode("");
     setUseReferralCredit(false);
+    setApplyAccountCredit(true);
     setCreditBalance(null);
   }
 
@@ -950,6 +965,7 @@ export default function Home() {
     setUpsellExtra(0);
     setReferralCode("");
     setUseReferralCredit(false);
+    setApplyAccountCredit(true);
     setCreditBalance(null);
     // Pre-select future days only for camps with day selection
     if (type === "camp") {
@@ -1018,6 +1034,7 @@ export default function Home() {
             weeklySessions: modal.selectedGroupSessions,
             weeklyTotalPrice: (modal.weeklyTotalPrice || 0) * kids.length,
             submittedReferralCode: referralCode.trim() || undefined,
+            applyAccountCredit: accountCreditBalance !== null && accountCreditBalance > 0 && applyAccountCredit,
           }),
         });
         const result = await res.json();
@@ -1053,6 +1070,7 @@ export default function Home() {
         if (camp?.campDays?.length > 0) {
           const selectedDaysArr = camp.campDays.filter((d) => campSelectedDays.has(d));
           const totalPrice = calcCampPrice(selectedDaysArr.length, camp.campDays.length, camp, kids.length);
+          const dropInRatePerKid = parseInt(camp.dropInPrice.replace(/\D/g, "")) || 0;
           const campSessions = selectedDaysArr.map((day) => ({
             date: day,
             startTime: camp.time.split("-")[0]?.trim() || camp.time,
@@ -1076,6 +1094,8 @@ export default function Home() {
               campSessions,
               campTotalPrice: totalPrice,
               campTotalDays: camp.campDays.length,
+              campDropInRate: dropInRatePerKid * Math.max(1, kids.length),
+              applyAccountCredit: accountCreditBalance !== null && accountCreditBalance > 0 && applyAccountCredit,
             }),
           });
           const result = await res.json();
@@ -1151,6 +1171,7 @@ export default function Home() {
             skipEmail: isRecurring,
             submittedReferralCode: referralCode.trim() || undefined,
             useReferralCredit: bIdx === 0 ? useReferralCredit : false,
+            applyAccountCredit: bIdx === 0 && accountCreditBalance !== null && accountCreditBalance > 0 && applyAccountCredit,
           }),
         });
       }
@@ -1574,6 +1595,7 @@ export default function Home() {
     setUpsellExtra(0);
     setReferralCode("");
     setUseReferralCredit(false);
+    setApplyAccountCredit(true);
     setCreditBalance(null);
   }
 
@@ -1605,6 +1627,7 @@ export default function Home() {
     setUpsellExtra(0);
     setReferralCode("");
     setUseReferralCredit(false);
+    setApplyAccountCredit(true);
     setCreditBalance(null);
   }
 
@@ -3035,6 +3058,39 @@ export default function Home() {
                         <span className="rounded-full bg-green-900/60 px-2 py-0.5 text-xs font-medium text-green-300">✓ Credit applied — 50% off this session</span>
                       </div>
                     )}
+                  </div>
+                )}
+
+                {/* Account Credit — dollar-value credit (e.g. from a partial camp cancellation),
+                    applies to any booking type, unlike the private-only referral credit above */}
+                {accountCreditBalance !== null && accountCreditBalance > 0 && (
+                  <div className="rounded-lg border border-blue-700 bg-blue-900/20 px-4 py-3 transition">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-blue-300">Account Credit</p>
+                        <p className="text-xs mt-0.5 text-blue-400">
+                          ${accountCreditBalance} available
+                          {applyAccountCredit ? " — will be applied to this booking" : ""}
+                        </p>
+                      </div>
+                      {applyAccountCredit ? (
+                        <button
+                          type="button"
+                          onClick={() => setApplyAccountCredit(false)}
+                          className="shrink-0 text-xs text-brown-400 hover:text-white transition"
+                        >
+                          Remove
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setApplyAccountCredit(true)}
+                          className="shrink-0 rounded-lg bg-blue-800 hover:bg-blue-700 px-3 py-1.5 text-xs font-medium text-blue-200 transition"
+                        >
+                          Apply Credit
+                        </button>
+                      )}
+                    </div>
                   </div>
                 )}
 

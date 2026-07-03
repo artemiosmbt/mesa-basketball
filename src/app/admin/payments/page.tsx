@@ -25,6 +25,8 @@ interface Registration {
   used_referral_credit: boolean;
   is_full_camp: boolean;
   referral_code: string | null;
+  camp_day_late_fee: number | null;
+  camp_drop_in_rate: number | null;
 }
 
 interface PackageData {
@@ -33,6 +35,11 @@ interface PackageData {
   package_type: number;
   month_year: string;
   is_paid: boolean;
+}
+
+interface AccountCreditData {
+  email: string;
+  balance: number;
 }
 
 const TYPE_LABELS: Record<string, string> = {
@@ -75,10 +82,15 @@ export default function PaymentsPage() {
   const [loading, setLoading] = useState(true);
   const [registrations, setRegistrations] = useState<Registration[]>([]);
   const [packages, setPackages] = useState<PackageData[]>([]);
+  const [accountCredits, setAccountCredits] = useState<AccountCreditData[]>([]);
   const [token, setToken] = useState<string | null>(null);
   const [togglingPaid, setTogglingPaid] = useState<string | null>(null);
   const [settlingFee, setSettlingFee] = useState<string | null>(null);
   const [showAllPaid, setShowAllPaid] = useState(false);
+  const [adjustEmail, setAdjustEmail] = useState("");
+  const [adjustAmount, setAdjustAmount] = useState("");
+  const [adjustingCredit, setAdjustingCredit] = useState(false);
+  const [adjustError, setAdjustError] = useState("");
 
   useEffect(() => {
     authClient.auth.getSession().then(({ data: { session } }) => {
@@ -94,10 +106,43 @@ export default function PaymentsPage() {
         .then((data) => {
           setRegistrations(data.registrations || []);
           setPackages(data.packages || []);
+          setAccountCredits(data.accountCredits || []);
         })
         .finally(() => setLoading(false));
     });
   }, [router]);
+
+  async function adjustAccountCredit() {
+    if (!token || !adjustEmail.trim() || !adjustAmount.trim()) return;
+    const amount = parseFloat(adjustAmount);
+    if (isNaN(amount) || amount === 0) { setAdjustError("Enter a nonzero amount"); return; }
+    setAdjustingCredit(true);
+    setAdjustError("");
+    const res = await fetch("/api/admin/account-credits", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ email: adjustEmail.trim(), amount }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setAdjustError(data.error || "Failed to adjust credit");
+    } else {
+      const email = adjustEmail.trim().toLowerCase();
+      setAccountCredits((prev) => {
+        const existing = prev.find((a) => a.email.toLowerCase() === email);
+        if (existing) {
+          const newBalance = existing.balance + amount;
+          return newBalance > 0
+            ? prev.map((a) => a.email.toLowerCase() === email ? { ...a, balance: newBalance } : a)
+            : prev.filter((a) => a.email.toLowerCase() !== email);
+        }
+        return amount > 0 ? [...prev, { email, balance: amount }] : prev;
+      });
+      setAdjustEmail("");
+      setAdjustAmount("");
+    }
+    setAdjustingCredit(false);
+  }
 
   async function togglePaid(id: string, currentValue: boolean, referralCode?: string | null) {
     if (!token) return;
@@ -116,15 +161,19 @@ export default function PaymentsPage() {
     setTogglingPaid(null);
   }
 
-  async function settleFee(id: string) {
+  async function settleFee(id: string, referralCode?: string | null) {
     if (!token) return;
     setSettlingFee(id);
     await fetch("/api/admin/update-payment", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ id, field: "cancel_fee_settled", value: true }),
+      body: JSON.stringify({ id, field: "cancel_fee_settled", value: true, ...(referralCode ? { referralCode } : {}) }),
     });
-    setRegistrations((prev) => prev.map((r) => (r.id === id ? { ...r, cancel_fee_settled: true } : r)));
+    if (referralCode) {
+      setRegistrations((prev) => prev.map((r) => r.referral_code === referralCode ? { ...r, cancel_fee_settled: true } : r));
+    } else {
+      setRegistrations((prev) => prev.map((r) => (r.id === id ? { ...r, cancel_fee_settled: true } : r)));
+    }
     setSettlingFee(null);
   }
 
@@ -244,10 +293,35 @@ export default function PaymentsPage() {
     return rateMap;
   }, [registrations]);
 
+  // Recomputed current total per full-camp referral_code group (capped at the
+  // original full-week price), shared by effectiveAmount() and campAdjustments
+  // below so both agree on the same number for a given family.
+  const campGroupFinalAmounts = useMemo(() => {
+    const groups = new Map<string, Registration[]>();
+    for (const r of registrations) {
+      if (!r.is_full_camp || !r.referral_code) continue;
+      if (!groups.has(r.referral_code)) groups.set(r.referral_code, []);
+      groups.get(r.referral_code)!.push(r);
+    }
+    const map = new Map<string, number>();
+    for (const [code, rows] of groups) {
+      const originalAmount = rows[0].session_price ?? 0;
+      const confirmed = rows.filter((r) => r.status === "confirmed");
+      const cancelled = rows.filter((r) => r.status === "cancelled");
+      const perDayRate = rows[0].camp_drop_in_rate ?? Math.round(originalAmount / rows.length);
+      const recomputedPrice = Math.min(confirmed.length * perDayRate, originalAmount);
+      const accruedFees = cancelled.reduce((sum, r) => sum + (r.camp_day_late_fee || 0), 0);
+      map.set(code, Math.min(originalAmount, recomputedPrice + accruedFees));
+    }
+    return map;
+  }, [registrations]);
+
   function effectiveAmount(r: Registration): number {
     const isPrivateType = r.type === "private" || r.type === "group-private";
     let basePrice: number;
-    if (r.session_price != null) {
+    if (r.is_full_camp && r.referral_code && campGroupFinalAmounts.has(r.referral_code)) {
+      basePrice = campGroupFinalAmounts.get(r.referral_code)!;
+    } else if (r.session_price != null) {
       basePrice = r.session_price;
     } else if (r.type === "weekly" && !r.is_full_camp && r.referral_code && weeklyDiscountRates.has(r.referral_code)) {
       const discount = weeklyDiscountRates.get(r.referral_code)!;
@@ -260,8 +334,34 @@ export default function PaymentsPage() {
   }
 
   const cancelFees = useMemo(() =>
-    registrations.filter((r) => (r.is_late_cancel || r.status === "no_show") && !r.cancel_fee_settled),
+    // Full-camp rows are handled separately by campAdjustments below (recomputed
+    // per-group total, capped at the full-week price) instead of the flat 50% used here.
+    registrations.filter((r) => (r.is_late_cancel || r.status === "no_show") && !r.cancel_fee_settled && !r.is_full_camp),
   [registrations]);
+
+  // Full-camp groups with some (not all) days cancelled — recomputed capped total,
+  // one card per family rather than per cancelled day. Groups cancelled down to zero
+  // days still go through the original whole-camp-cancel flow (email-only, unchanged).
+  const campAdjustments = useMemo(() => {
+    const groups = new Map<string, Registration[]>();
+    for (const r of registrations) {
+      if (!r.is_full_camp || !r.referral_code) continue;
+      if (!groups.has(r.referral_code)) groups.set(r.referral_code, []);
+      groups.get(r.referral_code)!.push(r);
+    }
+    const out: { referralCode: string; parentName: string; finalAmount: number; originalAmount: number; isPaid: boolean; kids: string }[] = [];
+    for (const [referralCode, rows] of groups) {
+      const cancelled = rows.filter((r) => r.status === "cancelled");
+      const confirmed = rows.filter((r) => r.status === "confirmed");
+      if (cancelled.length === 0 || confirmed.length === 0) continue; // untouched, or fully cancelled (handled elsewhere)
+      if (cancelled.every((r) => r.cancel_fee_settled)) continue;
+      const originalAmount = rows[0].session_price ?? 0;
+      const finalAmount = campGroupFinalAmounts.get(referralCode) ?? originalAmount;
+      if (finalAmount === originalAmount) continue; // nothing changed, no adjustment to show
+      out.push({ referralCode, parentName: rows[0].parent_name, finalAmount, originalAmount, isPaid: !!rows[0].is_paid, kids: rows[0].kids });
+    }
+    return out;
+  }, [registrations, campGroupFinalAmounts]);
 
   if (loading) {
     return (
@@ -422,6 +522,92 @@ export default function PaymentsPage() {
               })}
             </div>
           )}
+        </div>
+
+        {/* Camp Adjustments — full-camp groups with some days cancelled, recomputed total */}
+        {campAdjustments.length > 0 && (
+          <div>
+            <h2 className="font-[family-name:var(--font-oswald)] text-lg font-bold tracking-wide text-white mb-4">
+              CAMP ADJUSTMENTS
+              <span className="ml-2 rounded-full bg-red-500 px-2 py-0.5 text-xs font-medium text-white">{campAdjustments.length}</span>
+            </h2>
+            <div className="space-y-2">
+              {campAdjustments.map((a) => {
+                const creditIssued = a.isPaid;
+                return (
+                  <div key={a.referralCode} className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-3 flex items-center justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                        <span className="font-medium text-sm">{a.parentName}</span>
+                        <span className="text-lg font-bold text-mesa-accent">${a.finalAmount}</span>
+                        <span className="text-xs text-brown-500">(was ${a.originalAmount})</span>
+                        {creditIssued ? (
+                          <span className="rounded-full bg-blue-900/40 px-2 py-0.5 text-xs font-medium text-blue-400">Credit issued</span>
+                        ) : (
+                          <span className="rounded-full bg-red-900/40 px-2 py-0.5 text-xs font-medium text-red-400">Owes you</span>
+                        )}
+                      </div>
+                      <div className="text-xs text-white mt-0.5 truncate">{a.kids.split(",").map((k) => k.split("(")[0].trim()).filter(Boolean).join(", ")}</div>
+                    </div>
+                    <button
+                      onClick={() => settleFee(a.referralCode, a.referralCode)}
+                      disabled={settlingFee === a.referralCode}
+                      className="shrink-0 rounded-lg bg-brown-700 hover:bg-brown-600 px-3 py-1.5 text-xs font-medium text-white transition disabled:opacity-50"
+                    >
+                      {settlingFee === a.referralCode ? "…" : "Settled"}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Account Credits */}
+        <div>
+          <h2 className="font-[family-name:var(--font-oswald)] text-lg font-bold tracking-wide text-white mb-4">
+            ACCOUNT CREDITS
+            {accountCredits.length > 0 && <span className="ml-2 rounded-full bg-blue-600 px-2 py-0.5 text-xs font-medium text-white">{accountCredits.length}</span>}
+          </h2>
+          {accountCredits.length === 0 ? (
+            <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-6 py-8 text-center text-brown-500 text-sm">No outstanding account credits.</div>
+          ) : (
+            <div className="space-y-2 mb-3">
+              {accountCredits.map((a) => (
+                <div key={a.email} className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-3 flex items-center justify-between gap-3">
+                  <span className="text-sm truncate">{a.email}</span>
+                  <span className="text-lg font-bold text-blue-400">${a.balance}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="rounded-xl border border-brown-700 bg-brown-900/40 p-4">
+            <p className="text-xs text-brown-400 mb-2">Manually adjust a balance (positive to add, negative to remove)</p>
+            <div className="flex flex-wrap gap-2">
+              <input
+                type="email"
+                value={adjustEmail}
+                onChange={(e) => setAdjustEmail(e.target.value)}
+                placeholder="email"
+                className="flex-1 min-w-[160px] rounded-lg border border-brown-700 bg-brown-800 px-3 py-1.5 text-sm text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
+              />
+              <input
+                type="number"
+                value={adjustAmount}
+                onChange={(e) => setAdjustAmount(e.target.value)}
+                placeholder="amount"
+                className="w-28 rounded-lg border border-brown-700 bg-brown-800 px-3 py-1.5 text-sm text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
+              />
+              <button
+                onClick={adjustAccountCredit}
+                disabled={adjustingCredit}
+                className="rounded-lg bg-blue-700 hover:bg-blue-600 px-4 py-1.5 text-sm font-medium text-white transition disabled:opacity-50"
+              >
+                {adjustingCredit ? "…" : "Adjust"}
+              </button>
+            </div>
+            {adjustError && <p className="mt-2 text-xs text-red-400">{adjustError}</p>}
+          </div>
         </div>
 
         {/* Paid — with undo */}

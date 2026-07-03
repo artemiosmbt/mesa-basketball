@@ -3,7 +3,7 @@ import {
   getRegistrationByToken,
   cancelRegistration,
   cancelFullCampByReferralCode,
-  getEarliestCampDay,
+  getCampGroupByReferralCode,
   addRegistration,
   getActivePackage,
   setPackageSessions,
@@ -12,6 +12,7 @@ import {
   addReferralCredit,
   getReferralCredits,
   decrementReferralCredit,
+  addAccountCredit,
 } from "@/lib/supabase";
 import {
   sendCancellationNotification,
@@ -88,6 +89,17 @@ export async function GET(
     }
   }
 
+  let campGroupDays: { token: string; bookedDate: string | null; bookedStartTime: string | null; status: string }[] | undefined;
+  if (reg.is_full_camp && reg.referral_code) {
+    const group = await getCampGroupByReferralCode(reg.referral_code);
+    campGroupDays = group.map((r) => ({
+      token: r.manage_token,
+      bookedDate: r.booked_date,
+      bookedStartTime: r.booked_start_time,
+      status: r.status,
+    }));
+  }
+
   return NextResponse.json({
     id: reg.id,
     parentName: reg.parent_name,
@@ -106,6 +118,7 @@ export async function GET(
     usedReferralCredit: reg.used_referral_credit ?? false,
     sessionPrice: reg.session_price,
     totalParticipants: reg.total_participants,
+    campGroupDays,
   });
 }
 
@@ -134,29 +147,22 @@ export async function DELETE(
     );
   }
 
-  // Block camp cancellations once the camp has started.
-  // For full camp, check the earliest day of the group so no day's token can be used
-  // after the camp has already begun. For drop-in, check that specific day.
-  if (reg.type === "camp") {
-    const checkDay = reg.is_full_camp && reg.referral_code
-      ? await getEarliestCampDay(reg.referral_code)
-      : { booked_date: reg.booked_date!, booked_start_time: reg.booked_start_time! };
-
-    if (checkDay?.booked_date && checkDay?.booked_start_time) {
-      const timeMatch = checkDay.booked_start_time.match(/(\d+):(\d+)\s*(AM|PM)/i);
-      if (timeMatch) {
-        let hours = parseInt(timeMatch[1]);
-        const mins = parseInt(timeMatch[2]);
-        const period = timeMatch[3].toUpperCase();
-        if (period === "PM" && hours !== 12) hours += 12;
-        if (period === "AM" && hours === 12) hours = 0;
-        const sessionDateTime = parseSessionDateTimeET(checkDay.booked_date, hours, mins);
-        if (Date.now() >= sessionDateTime.getTime()) {
-          return NextResponse.json(
-            { error: "Cancellations are not accepted once the camp has started. The full amount is due." },
-            { status: 400 }
-          );
-        }
+  // Block cancelling a camp day once that specific day's start time has passed.
+  // Each day locks independently — other days in the same camp are unaffected.
+  if (reg.type === "camp" && reg.booked_date && reg.booked_start_time) {
+    const timeMatch = reg.booked_start_time.match(/(\d+):(\d+)\s*(AM|PM)/i);
+    if (timeMatch) {
+      let hours = parseInt(timeMatch[1]);
+      const mins = parseInt(timeMatch[2]);
+      const period = timeMatch[3].toUpperCase();
+      if (period === "PM" && hours !== 12) hours += 12;
+      if (period === "AM" && hours === 12) hours = 0;
+      const sessionDateTime = parseSessionDateTimeET(reg.booked_date, hours, mins);
+      if (Date.now() >= sessionDateTime.getTime()) {
+        return NextResponse.json(
+          { error: "This day has already started — cancellations are no longer accepted for it. The full amount is due." },
+          { status: 400 }
+        );
       }
     }
   }
@@ -167,27 +173,104 @@ export async function DELETE(
     isLateCancel = isLateAction(reg.booked_date, reg.booked_start_time, reg.created_at, reg.admin_change_at);
   }
 
-  // Full camp: block individual-day cancellation — must cancel all days together
+  // Full camp: cancelling one day recalculates the group; cancelling the last
+  // remaining day falls back to the original whole-camp cancellation rule.
   if (reg.type === "camp" && reg.is_full_camp) {
     if (!reg.referral_code) {
       return NextResponse.json({ error: "Cannot cancel — missing camp group reference." }, { status: 500 });
     }
-    const success = await cancelFullCampByReferralCode(reg.referral_code);
-    if (!success) {
-      return NextResponse.json({ error: "Failed to cancel camp" }, { status: 500 });
-    }
-    const lateFeeAmount = isLateCancel ? Math.round(resolvedSessionPrice(reg) * 0.5) : undefined;
-    // Extract camp name (everything before the first " — " in session_details)
     const campName = reg.session_details.split(" — ")[0] || reg.session_details;
+    const group = await getCampGroupByReferralCode(reg.referral_code);
+    const totalOriginalDays = group.length || 1;
+    const remainingAfterThis = group.filter((r) => r.status === "confirmed" && r.id !== reg.id).length;
+
+    if (remainingAfterThis === 0) {
+      // Last remaining day — cancel the whole (now-empty) group, same rule as before.
+      const success = await cancelFullCampByReferralCode(reg.referral_code);
+      if (!success) {
+        return NextResponse.json({ error: "Failed to cancel camp" }, { status: 500 });
+      }
+      // Refund any account credit that was applied to any day in this group
+      const groupCredit = group.reduce((sum, r) => sum + (r.applied_account_credit || 0), 0);
+      if (groupCredit > 0 && reg.email) {
+        await addAccountCredit(reg.email, groupCredit).catch(() => {});
+      }
+      const lateFeeAmount = isLateCancel ? Math.round(resolvedSessionPrice(reg) * 0.5) : undefined;
+      await sendCancellationNotification({
+        parentName: reg.parent_name,
+        email: reg.email,
+        sessionDetails: campName,
+        sessionType: reg.type,
+        isLateCancel,
+        lateFeeAmount,
+      });
+      if (reg.booked_date && reg.booked_start_time) {
+        try {
+          await upsertGroupSessionCalendarEvent({
+            sessionType: "camp",
+            sessionLabel: campName,
+            bookedDate: reg.booked_date,
+            bookedStartTime: reg.booked_start_time,
+            bookedEndTime: reg.booked_end_time || reg.booked_start_time,
+            bookedLocation: reg.booked_location || "",
+            kidsJustRegistered: reg.kids,
+            participantsJustRegistered: reg.total_participants || 1,
+          });
+        } catch (err) {
+          console.error("Calendar sync error (camp cancel):", err);
+        }
+      }
+      return NextResponse.json({ success: true, isLateCancel, isFullCamp: true });
+    }
+
+    // Partial-day cancel — recompute the capped total and accrue this day's late fee (if any).
+    const perDayRate = reg.camp_drop_in_rate ?? Math.round((reg.session_price ?? 0) / totalOriginalDays);
+    const thisDayLateFee = isLateCancel ? Math.round(perDayRate * 0.5) : 0;
+    const success = await cancelRegistration(token, isLateCancel, thisDayLateFee);
+    if (!success) {
+      return NextResponse.json({ error: "Failed to cancel this day" }, { status: 500 });
+    }
+
+    // If this specific day was the one account credit was applied to, refund it —
+    // otherwise it would sit stranded on a cancelled row until the whole camp is cancelled.
+    if (reg.applied_account_credit && reg.email) {
+      await addAccountCredit(reg.email, reg.applied_account_credit).catch(() => {});
+    }
+
+    const originalAmount = reg.session_price ?? 0;
+    const recomputedPrice = Math.min(remainingAfterThis * perDayRate, originalAmount);
+    const priorAccruedFees = group
+      .filter((r) => r.status === "cancelled" && r.id !== reg.id)
+      .reduce((sum, r) => sum + (r.camp_day_late_fee || 0), 0);
+    // Late fees can never push the total above the original full-week price —
+    // the family never pays more than they would have by keeping the full week.
+    const finalAmount = Math.min(originalAmount, recomputedPrice + priorAccruedFees + thisDayLateFee);
+    const isPaid = !!reg.is_paid;
+    const delta = finalAmount - originalAmount;
+
+    // If they already paid more than the new total, that difference becomes
+    // account credit toward a future booking instead of a cash refund.
+    const creditGranted = isPaid && delta < 0 ? -delta : 0;
+    if (creditGranted > 0) {
+      await addAccountCredit(reg.email, creditGranted);
+    }
+
     await sendCancellationNotification({
       parentName: reg.parent_name,
       email: reg.email,
       sessionDetails: campName,
       sessionType: reg.type,
       isLateCancel,
-      lateFeeAmount,
+      campAdjustment: { finalAmount, originalAmount, isPaid, creditGranted },
     });
-    // Update calendar for this camp day (count decreases after cancellation)
+    if (reg.phone) {
+      const adjustmentLine = isPaid
+        ? creditGranted > 0 ? ` $${creditGranted} credited to your account for your next session.` : ""
+        : ` Amount due: $${finalAmount}.`;
+      await sendSMS(reg.phone, `Mesa Basketball: ${campName} — ${formatDateWithDay(reg.booked_date || "")} cancelled. New total: $${finalAmount} (was $${originalAmount}).${adjustmentLine}\nReply STOP to opt out.`);
+    }
+    await sendAdminSMS(`CAMP DAY CANCELLED: ${reg.parent_name}\n${campName} — ${reg.booked_date}\nNew total: $${finalAmount} (was $${originalAmount})${isPaid ? (creditGranted > 0 ? ` — $${creditGranted} credited to their account` : "") : ` — due: $${finalAmount}`}`);
+
     if (reg.booked_date && reg.booked_start_time) {
       try {
         await upsertGroupSessionCalendarEvent({
@@ -201,10 +284,22 @@ export async function DELETE(
           participantsJustRegistered: reg.total_participants || 1,
         });
       } catch (err) {
-        console.error("Calendar sync error (camp cancel):", err);
+        console.error("Calendar sync error (camp day cancel):", err);
       }
     }
-    return NextResponse.json({ success: true, isLateCancel });
+
+    return NextResponse.json({
+      success: true,
+      isLateCancel,
+      isFullCamp: true,
+      isPartialDayCancel: true,
+      remainingDays: remainingAfterThis,
+      finalAmount,
+      originalAmount,
+      isPaid,
+      delta,
+      creditGranted,
+    });
   }
 
   const success = await cancelRegistration(token, isLateCancel);
@@ -218,6 +313,11 @@ export async function DELETE(
   // Refund referral credit if one was used for this session
   if (reg.used_referral_credit && reg.email) {
     await addReferralCredit(reg.email).catch(() => {});
+  }
+
+  // Refund account credit if any was applied to this booking
+  if (reg.applied_account_credit && reg.email) {
+    await addAccountCredit(reg.email, reg.applied_account_credit).catch(() => {});
   }
 
   // Recalculate package sessions_used after cancellation
@@ -481,6 +581,11 @@ export async function PUT(
   // Refund referral credit from the old booking (always — they'll re-apply to the new one if they want)
   if (reg.used_referral_credit && reg.email) {
     await addReferralCredit(reg.email).catch(() => {});
+  }
+
+  // Refund account credit from the old booking (same — they can re-apply to the new one)
+  if (reg.applied_account_credit && reg.email) {
+    await addAccountCredit(reg.email, reg.applied_account_credit).catch(() => {});
   }
 
   // Sync calendar for the old booking

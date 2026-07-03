@@ -104,6 +104,8 @@ export async function sendRegistrationNotification(data: {
   referralCodeUsed?: string;
   trainer?: string;
   calendarEvent?: { date: string; startTime: string; endTime: string; location: string; };
+  accountCreditApplied?: number;
+  fullPrice?: number;
 }) {
   const resend = getResend();
 
@@ -141,6 +143,7 @@ export async function sendRegistrationNotification(data: {
       <p><strong>Total Participants:</strong> ${data.totalParticipants}</p>
       ${isPackageBooking ? `<p><strong>Package:</strong> ${data.packageType}-session monthly plan — ${data.packageSessionsRemaining} session${data.packageSessionsRemaining !== 1 ? "s" : ""} remaining after this booking</p>` : ""}
       ${data.isFree && !isPackageBooking ? `<p><strong style="color: #d4af37;">${data.isFirstTime ? "First-Time Discount" : "Referral Credit"}: 50% off applied</strong></p>` : ""}
+      ${data.accountCreditApplied && data.accountCreditApplied > 0 ? `<p><strong style="color: #93c5fd;">Account credit applied: $${data.accountCreditApplied}</strong></p>` : ""}
       ${data.referredBy ? `<p><strong>Referred by:</strong> ${data.referredBy}</p>` : ""}
       ${data.referralCodeUsed ? `<p><strong>Referral code used:</strong> ${data.referralCodeUsed}</p>` : ""}
     `,
@@ -172,6 +175,10 @@ export async function sendRegistrationNotification(data: {
     ? `<p style="background: #162d5a; color: #d4af37; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">First Session Discount Applied — 50% Off! Payment due upon registration: $${discountedPrice} via Cash, Venmo, or Zelle.</p>`
     : !isPackageBooking && data.isFree
     ? `<p style="background: #162d5a; color: #d4af37; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">Referral Credit Applied — 50% Off This Session! Payment due upon registration: $${discountedPrice} via Cash, Venmo, or Zelle.</p>`
+    : "";
+
+  const accountCreditNote = data.accountCreditApplied && data.accountCreditApplied > 0 && data.fullPrice != null
+    ? `<p style="background: #1e3a5f; color: #93c5fd; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">$${data.accountCreditApplied} account credit applied — Due: $${data.fullPrice - data.accountCreditApplied}</p>`
     : "";
 
   const manageSection = `<p><a href="${BASE_URL}/my-bookings" style="color: #d4af37; font-weight: bold;">View My Bookings</a> — Manage, cancel, or reschedule your sessions</p>`;
@@ -220,6 +227,7 @@ export async function sendRegistrationNotification(data: {
       <p><strong>Players:</strong> ${data.kids}</p>
       ${packageNote}
       ${freeNote}
+      ${accountCreditNote}
       ${priceNote}
       ${calendarButtons}
       ${paymentNote}
@@ -265,6 +273,7 @@ export async function sendCancellationNotification(data: {
   sessionType?: string;
   isLateCancel: boolean;
   lateFeeAmount?: number;
+  campAdjustment?: { finalAmount: number; originalAmount: number; isPaid: boolean; creditGranted: number };
 }) {
   const resend = getResend();
   const isPickupCancel = data.sessionDetails.toLowerCase().includes("pickup");
@@ -272,11 +281,30 @@ export async function sendCancellationNotification(data: {
   const lateFee = data.lateFeeAmount !== undefined
     ? data.lateFeeAmount
     : data.sessionType === "group-private" ? 125 : data.sessionType === "weekly" ? 25 : 75;
-  const lateNote = data.isLateCancel
+  const lateNote = data.isLateCancel && !data.campAdjustment
     ? `<div style="background: #7c1d1d; border-left: 4px solid #ef4444; border-radius: 6px; padding: 14px 16px; margin: 16px 0;">
         <p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #ffffff;">⚠️ Late Fee</p>
         <p style="margin: 0; color: #ffffff; font-size: 14px;">This cancellation was made within 24 hours of the session. Per our policy, a <strong>50% fee of $${lateFee}</strong> is still due.</p>
         ${PAYMENT_LINES}
+      </div>`
+    : "";
+
+  // Camp day partial-cancel: recomputed total + credit/due, worded off the is_paid flag
+  // rather than assuming payment happened (not every family pays at registration).
+  // Money already paid beyond the new total becomes account credit toward a future
+  // booking rather than a cash refund.
+  const campAdjustmentLine = data.campAdjustment
+    ? data.campAdjustment.isPaid
+      ? data.campAdjustment.creditGranted > 0
+        ? `<strong>$${data.campAdjustment.creditGranted}</strong> has been credited to your account for your next session.`
+        : ""
+      : `<strong>$${data.campAdjustment.finalAmount}</strong> is due.`
+    : "";
+  const campAdjustmentNote = data.campAdjustment
+    ? `<div style="background: #1e3a5f; border-left: 4px solid #3b82f6; border-radius: 6px; padding: 14px 16px; margin: 16px 0;">
+        <p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #ffffff;">Updated Camp Total</p>
+        <p style="margin: 0; color: #ffffff; font-size: 14px;">New total: <strong>$${data.campAdjustment.finalAmount}</strong> (was $${data.campAdjustment.originalAmount}). ${campAdjustmentLine}</p>
+        ${!data.campAdjustment.isPaid ? PAYMENT_LINES : ""}
       </div>`
     : "";
 
@@ -289,7 +317,8 @@ export async function sendCancellationNotification(data: {
       <h2>${isPickupCancel ? "Pickup " : ""}Session Cancelled</h2>
       <p><strong>Parent:</strong> ${data.parentName}</p>
       <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails)}</p>
-      ${data.isLateCancel ? `<p><strong>⚠️ Late cancellation (within 24h) — 50% fee ($${lateFee}) applies</strong></p>` : ""}
+      ${data.isLateCancel && !data.campAdjustment ? `<p><strong>⚠️ Late cancellation (within 24h) — 50% fee ($${lateFee}) applies</strong></p>` : ""}
+      ${data.campAdjustment ? `<p><strong>New total: $${data.campAdjustment.finalAmount} (was $${data.campAdjustment.originalAmount}).</strong> ${campAdjustmentLine.replace(/<\/?strong>/g, "")}</p>` : ""}
     `,
   });
 
@@ -305,6 +334,7 @@ export async function sendCancellationNotification(data: {
       <p>Your ${isPickupCancel ? "pickup " : ""}session has been cancelled:</p>
       <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails)}</p>
       ${lateNote}
+      ${campAdjustmentNote}
       <p><a href="${BASE_URL}/my-bookings" style="color: #d4af37; font-weight: bold;">View My Bookings</a></p>
       <br/>
       <p>Questions? Contact Artemios at (631) 599-1280 or email <a href="mailto:artemios@mesabasketballtraining.com">artemios@mesabasketballtraining.com</a>.</p>

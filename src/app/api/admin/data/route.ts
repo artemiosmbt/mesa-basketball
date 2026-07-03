@@ -35,12 +35,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ registrations: registrations || [] });
   }
 
-  const [{ data: registrations }, { data: profiles }, { data: referralCredits }, { data: packages }] = await Promise.all([
+  const [{ data: registrations }, { data: profiles }, { data: referralCredits }, { data: packages }, { data: accountCredits }] = await Promise.all([
     supabase.from("registrations").select("*").order("created_at", { ascending: false }),
     supabase.from("profiles").select("email, video_consent"),
     supabase.from("referral_credits").select("email, credits, total_referrals"),
     supabase.from("monthly_packages").select("id, email, package_type, month_year, is_paid"),
+    supabase.from("account_credits").select("email, balance").gt("balance", 0),
   ]);
 
-  return NextResponse.json({ registrations: registrations || [], profiles: profiles || [], referralCredits: referralCredits || [], packages: packages || [] });
+  return NextResponse.json({ registrations: registrations || [], profiles: profiles || [], referralCredits: referralCredits || [], packages: packages || [], accountCredits: accountCredits || [] });
 }

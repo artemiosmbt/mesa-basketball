@@ -20,6 +20,20 @@ function formatPrice(amount: number): string {
   return amount % 1 === 0 ? `$${amount}` : `$${amount.toFixed(2)}`;
 }
 
+function isDateTimePassed(dateStr: string | null, timeStr: string | null): boolean {
+  if (!dateStr || !timeStr) return false;
+  const timeMatch = timeStr.match(/(\d+):(\d+)\s*(AM|PM)/i);
+  if (!timeMatch) return false;
+  let hours = parseInt(timeMatch[1]);
+  const mins = parseInt(timeMatch[2]);
+  const period = timeMatch[3].toUpperCase();
+  if (period === "PM" && hours !== 12) hours += 12;
+  if (period === "AM" && hours === 12) hours = 0;
+  const dateTime = new Date(dateStr);
+  dateTime.setHours(hours, mins, 0, 0);
+  return Date.now() >= dateTime.getTime();
+}
+
 function formatSessionDetails(details: string, bookedDate?: string | null): string {
   let result = details;
 
@@ -61,6 +75,7 @@ interface Booking {
   usedReferralCredit: boolean;
   sessionPrice: number | null;
   totalParticipants: number;
+  campGroupDays?: { token: string; bookedDate: string | null; bookedStartTime: string | null; status: string }[];
 }
 
 interface TimeWindow {
@@ -185,6 +200,9 @@ export default function ManageBooking({
   const [cancelled, setCancelled] = useState(false);
   const [isLateCancel, setIsLateCancel] = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
+  const [cancelDayConfirmToken, setCancelDayConfirmToken] = useState<string | null>(null);
+  const [cancellingDayToken, setCancellingDayToken] = useState<string | null>(null);
+  const [dayCancelResult, setDayCancelResult] = useState<{ finalAmount: number; originalAmount: number; isPaid: boolean; creditGranted: number } | null>(null);
   const [showReschedule, setShowReschedule] = useState(false);
   const [rescheduling, setRescheduling] = useState(false);
   const [rescheduled, setRescheduled] = useState(false);
@@ -312,19 +330,10 @@ export default function ManageBooking({
   }, [booking, within24Hours]);
 
   // Session has already passed — no changes allowed
-  const sessionPassed = useMemo(() => {
-    if (!booking?.bookedDate || !booking?.bookedStartTime) return false;
-    const timeMatch = booking.bookedStartTime.match(/(\d+):(\d+)\s*(AM|PM)/i);
-    if (!timeMatch) return false;
-    let hours = parseInt(timeMatch[1]);
-    const mins = parseInt(timeMatch[2]);
-    const period = timeMatch[3].toUpperCase();
-    if (period === "PM" && hours !== 12) hours += 12;
-    if (period === "AM" && hours === 12) hours = 0;
-    const sessionDateTime = new Date(booking.bookedDate);
-    sessionDateTime.setHours(hours, mins, 0, 0);
-    return Date.now() >= sessionDateTime.getTime();
-  }, [booking]);
+  const sessionPassed = useMemo(
+    () => isDateTimePassed(booking?.bookedDate ?? null, booking?.bookedStartTime ?? null),
+    [booking]
+  );
 
   // Camp has already started — no cancellation allowed, full amount due
   const campStarted = sessionPassed && booking?.type === "camp";
@@ -475,6 +484,30 @@ export default function ManageBooking({
       setError(data.error || "Failed to cancel");
     }
     setCancelling(false);
+  }
+
+  // Cancel one specific day out of a full-week camp booking (not the whole camp).
+  async function handleCancelDay(dayToken: string) {
+    setCancellingDayToken(dayToken);
+    const res = await fetch(`/api/booking/${dayToken}`, { method: "DELETE" });
+    const data = await res.json();
+    if (data.success) {
+      if (data.remainingDays === 0) {
+        // That was the last remaining day — the whole camp is now cancelled.
+        setCancelled(true);
+        setIsLateCancel(data.isLateCancel);
+      } else {
+        setBooking((prev) => prev ? {
+          ...prev,
+          campGroupDays: (prev.campGroupDays || []).map((d) => d.token === dayToken ? { ...d, status: "cancelled" } : d),
+        } : prev);
+        setDayCancelResult({ finalAmount: data.finalAmount, originalAmount: data.originalAmount, isPaid: data.isPaid, creditGranted: data.creditGranted || 0 });
+      }
+    } else {
+      setError(data.error || "Failed to cancel this day");
+    }
+    setCancelDayConfirmToken(null);
+    setCancellingDayToken(null);
   }
 
   async function handleReschedule() {
@@ -637,11 +670,9 @@ export default function ManageBooking({
                 }</p>
               </div>
 
-              {within24Hours && !withinGracePeriod && (
+              {within24Hours && !withinGracePeriod && !booking.isFullCamp && (
                 <p className="mt-4 rounded-lg bg-yellow-900/30 px-4 py-2 text-sm text-yellow-400">
-                  {booking.isFullCamp
-                    ? "This camp is within 24 hours. Canceling the entire camp will result in a 50% charge of the total camp fee."
-                    : "This session is within 24 hours. Rescheduling, canceling, or removing players will result in a late fee per our cancellation policy."}
+                  This session is within 24 hours. Rescheduling, canceling, or removing players will result in a late fee per our cancellation policy.
                 </p>
               )}
 
@@ -652,53 +683,82 @@ export default function ManageBooking({
                 </p>
               )}
 
-              {/* Camp has started — no cancellation allowed */}
-              {campStarted && (
+              {/* Drop-in camp day has started — no cancellation allowed for it */}
+              {campStarted && !booking.isFullCamp && (
                 <p className="mt-4 rounded-lg bg-red-900/30 px-4 py-2 text-sm text-red-400">
                   This camp has already started. Cancellations are no longer accepted and the full amount is due.
                 </p>
               )}
 
-              {/* Full camp — can only cancel entire camp, no individual day cancel or reschedule */}
-              {!sessionPassed && booking.type === "camp" && booking.isFullCamp ? (
+              {/* Full camp — list every day in the camp; each future day can be cancelled
+                  independently. Cancelling the last remaining day cancels the whole camp. */}
+              {booking.type === "camp" && booking.isFullCamp ? (
                 <>
                   <p className="mt-4 rounded-lg bg-brown-800/60 px-4 py-2 text-sm text-brown-300">
-                    You registered for the full camp package. Individual days cannot be cancelled or rescheduled — you may only cancel the entire camp.
+                    Cancel individual days below — a spot opens up for that day only. Once a day&apos;s start time passes, it locks and can no longer be changed.
                   </p>
 
-                  {!showCancelConfirm && (
-                    <div className="mt-6">
-                      <button
-                        onClick={() => setShowCancelConfirm(true)}
-                        className="rounded border border-red-700 px-4 py-2 text-sm text-red-400 hover:bg-red-900/30"
-                      >
-                        Cancel Entire Camp
-                      </button>
-                    </div>
-                  )}
+                  <div className="mt-4 space-y-2">
+                    {(booking.campGroupDays || []).map((day) => {
+                      const dayPassed = isDateTimePassed(day.bookedDate, day.bookedStartTime);
+                      const isCancelled = day.status === "cancelled";
+                      return (
+                        <div key={day.token} className="rounded-lg border border-brown-700 bg-brown-800/40 px-4 py-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <span className={`text-sm ${isCancelled ? "text-brown-500 line-through" : "text-white"}`}>
+                              {day.bookedDate ? fmtDate(day.bookedDate) : "—"}
+                              {day.bookedStartTime ? ` — ${day.bookedStartTime}` : ""}
+                            </span>
+                            {isCancelled ? (
+                              <span className="shrink-0 text-xs font-medium text-red-400">Cancelled</span>
+                            ) : dayPassed ? (
+                              <span className="shrink-0 text-xs text-brown-500">Started</span>
+                            ) : cancelDayConfirmToken === day.token ? null : (
+                              <button
+                                onClick={() => setCancelDayConfirmToken(day.token)}
+                                className="shrink-0 rounded border border-red-700 px-3 py-1 text-xs text-red-400 hover:bg-red-900/30"
+                              >
+                                Cancel this day
+                              </button>
+                            )}
+                          </div>
+                          {cancelDayConfirmToken === day.token && (
+                            <div className="mt-3 rounded-lg border border-red-800 bg-red-900/20 p-3">
+                              <p className="text-xs text-brown-300">
+                                Cancel this day? Your total will be recalculated based on the days you keep.
+                              </p>
+                              <div className="mt-2 flex gap-2">
+                                <button
+                                  onClick={() => handleCancelDay(day.token)}
+                                  disabled={cancellingDayToken === day.token}
+                                  className="rounded bg-red-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-600 disabled:opacity-50"
+                                >
+                                  {cancellingDayToken === day.token ? "Cancelling..." : "Yes, Cancel This Day"}
+                                </button>
+                                <button
+                                  onClick={() => setCancelDayConfirmToken(null)}
+                                  className="rounded bg-brown-700 px-3 py-1.5 text-xs text-brown-300 hover:bg-brown-600"
+                                >
+                                  Go Back
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
 
-                  {showCancelConfirm && (
-                    <div className="mt-6 rounded-lg border border-red-800 bg-red-900/20 p-4">
-                      <p className="text-sm text-brown-300">
-                        Are you sure you want to cancel the entire camp? All registered days will be cancelled.
-                        {within24Hours && !withinGracePeriod &&
-                          " Since the camp is within 24 hours, 50% of the total camp fee will still be due per our cancellation policy."}
+                  {dayCancelResult && (
+                    <div className="mt-4 rounded-lg border border-blue-800 bg-blue-900/20 px-4 py-3 text-sm text-blue-300">
+                      <p>
+                        New total: <strong>${dayCancelResult.finalAmount}</strong> (was ${dayCancelResult.originalAmount}).{" "}
+                        {dayCancelResult.isPaid
+                          ? dayCancelResult.creditGranted > 0
+                            ? `$${dayCancelResult.creditGranted} has been credited to your account for your next session.`
+                            : ""
+                          : `$${dayCancelResult.finalAmount} is due.`}
                       </p>
-                      <div className="mt-3 flex gap-3">
-                        <button
-                          onClick={handleCancel}
-                          disabled={cancelling}
-                          className="rounded bg-red-700 px-4 py-2 text-sm font-semibold text-white hover:bg-red-600 disabled:opacity-50"
-                        >
-                          {cancelling ? "Cancelling..." : "Yes, Cancel Entire Camp"}
-                        </button>
-                        <button
-                          onClick={() => setShowCancelConfirm(false)}
-                          className="rounded bg-brown-700 px-4 py-2 text-sm text-brown-300 hover:bg-brown-600"
-                        >
-                          Go Back
-                        </button>
-                      </div>
                     </div>
                   )}
                 </>

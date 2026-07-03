@@ -31,13 +31,17 @@ export async function POST(req: NextRequest) {
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
 
-  // For full camp registrations, update all rows sharing the same referral_code
-  if (referralCode && field === "is_paid") {
-    const { error } = await supabase
+  // For full camp registrations, update all rows sharing the same referral_code.
+  // cancel_fee_settled only needs to apply to the cancelled day-rows (the ones a
+  // camp adjustment fee was actually assessed on); is_paid applies to every row.
+  if (referralCode && (field === "is_paid" || field === "cancel_fee_settled")) {
+    let query = supabase
       .from("registrations")
       .update({ [field]: value })
       .eq("referral_code", referralCode)
       .eq("is_full_camp", true);
+    if (field === "cancel_fee_settled") query = query.eq("status", "cancelled");
+    const { error } = await query;
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ ok: true });
   }

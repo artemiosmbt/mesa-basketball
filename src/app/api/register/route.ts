@@ -16,6 +16,8 @@ import {
   getActivePackage,
   setPackageSessions,
   countConfirmedPrivateSessions,
+  getAccountCreditBalance,
+  deductAccountCredit,
 } from "@/lib/supabase";
 
 export async function POST(req: NextRequest) {
@@ -45,8 +47,11 @@ export async function POST(req: NextRequest) {
       campSessions,
       campTotalPrice,
       campTotalDays,
+      campDropInRate,
       // Referral credit opt-in
       useReferralCredit,
+      // Account credit opt-in (dollar-value credit from e.g. a partial camp cancellation)
+      applyAccountCredit,
     } = body;
 
     if (!parentName || !email || !phone || !kids || !type || !sessionDetails) {
@@ -110,7 +115,17 @@ export async function POST(req: NextRequest) {
       const perSessionPrice = weeklyTotalPrice && weeklySessions.length > 0
         ? Math.round(weeklyTotalPrice / weeklySessions.length)
         : (weeklySessions[0]?.price ? weeklySessions[0].price * (totalParticipants || 1) : undefined);
-      for (const session of weeklySessions) {
+
+      // Account credit is applied once, against the first session's row only —
+      // same convention as referral credit on recurring private bookings.
+      let weeklyCreditApplied = 0;
+      if (applyAccountCredit && perSessionPrice != null) {
+        const balance = await getAccountCreditBalance(email);
+        weeklyCreditApplied = Math.min(balance, perSessionPrice);
+        if (weeklyCreditApplied > 0) await deductAccountCredit(email, weeklyCreditApplied);
+      }
+
+      for (const [i, session] of weeklySessions.entries()) {
         await addRegistrationWithRewards({
           parentName,
           email,
@@ -129,6 +144,7 @@ export async function POST(req: NextRequest) {
           isFree: false,
           smsConsent: !!smsConsent,
           sessionPrice: perSessionPrice,
+          ...(i === 0 && weeklyCreditApplied > 0 ? { appliedAccountCredit: weeklyCreditApplied } : {}),
         });
       }
 
@@ -141,7 +157,9 @@ export async function POST(req: NextRequest) {
         .join("<br/>");
 
       const priceNote = weeklyTotalPrice
-        ? `<p><strong>Total:</strong> $${weeklyTotalPrice}</p>`
+        ? weeklyCreditApplied > 0
+          ? `<p><strong>Total:</strong> $${weeklyTotalPrice} — $${weeklyCreditApplied} account credit applied — <strong>Due:</strong> $${weeklyTotalPrice - weeklyCreditApplied}</p>`
+          : `<p><strong>Total:</strong> $${weeklyTotalPrice}</p>`
         : "";
 
       try {
@@ -177,7 +195,8 @@ export async function POST(req: NextRequest) {
         ).join("\n");
         const count = weeklySessions.length;
         const confirmLabel = count === 1 ? `${isPickupBooking ? "Pickup session" : "Session"}` : `${count} ${isPickupBooking ? "pickup sessions" : "sessions"}`;
-        await sendSMS(phone, `Mesa Basketball: ${confirmLabel} confirmed!\n${sessionLines}${weeklyTrainerLine}\nAthlete: ${kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
+        const creditLine = weeklyCreditApplied > 0 ? `\n$${weeklyCreditApplied} account credit applied.` : "";
+        await sendSMS(phone, `Mesa Basketball: ${confirmLabel} confirmed!\n${sessionLines}${weeklyTrainerLine}\nAthlete: ${kids}${creditLine}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
       }
       const adminLines = weeklySessions.map((s: { date: string; startTime: string; endTime: string; location: string }) =>
         `${formatDateWithDay(s.date)} | ${s.startTime}-${s.endTime}\nLocation: ${resolveLocationName(s.location)}`
@@ -255,7 +274,17 @@ export async function POST(req: NextRequest) {
           : Math.round(campTotalNum / campSessions.length)
         : undefined;
 
-      for (const session of campSessions) {
+      // Account credit is applied once, against the first day's row only — never
+      // against sessionPrice itself, since every row in a full-camp group must
+      // agree on the same "original" price for the per-day-cancellation cap math.
+      let campCreditApplied = 0;
+      if (applyAccountCredit && sessionPrice != null) {
+        const balance = await getAccountCreditBalance(email);
+        campCreditApplied = Math.min(balance, sessionPrice);
+        if (campCreditApplied > 0) await deductAccountCredit(email, campCreditApplied);
+      }
+
+      for (const [i, session] of campSessions.entries()) {
         await addRegistrationWithRewards({
           parentName,
           email,
@@ -274,13 +303,19 @@ export async function POST(req: NextRequest) {
           smsConsent: !!smsConsent,
           sessionPrice,
           isFullCamp,
+          ...(isFullCamp && campDropInRate != null ? { campDropInRate: parseInt(String(campDropInRate)) || undefined } : {}),
+          ...(i === 0 && campCreditApplied > 0 ? { appliedAccountCredit: campCreditApplied } : {}),
         });
       }
 
       const daysList = campSessions
         .map((s: { date: string; startTime: string; endTime: string }) => `${s.date} ${s.startTime}${s.endTime ? `-${s.endTime}` : ""}`)
         .join("<br/>");
-      const priceNote = campTotalPrice ? `<br/><strong>Total:</strong> ${campTotalPrice}` : "";
+      const priceNote = campTotalPrice
+        ? campCreditApplied > 0
+          ? `<br/><strong>Total:</strong> ${campTotalPrice} — $${campCreditApplied} account credit applied — <strong>Due:</strong> $${(sessionPrice ?? 0) - campCreditApplied}`
+          : `<br/><strong>Total:</strong> ${campTotalPrice}`
+        : "";
       const firstSession = campSessions[0];
 
       try {
@@ -311,7 +346,11 @@ export async function POST(req: NextRequest) {
         const campDayLines = campSessions.map((s: { date: string; startTime: string; endTime?: string; location: string }) =>
           `${formatDateWithDay(s.date)} | ${s.startTime}${s.endTime ? `-${s.endTime}` : ""}\nLocation: ${resolveLocationName(s.location)}`
         ).join("\n");
-        const priceText = campTotalPrice ? ` Total: ${campTotalPrice}.` : "";
+        const priceText = campTotalPrice
+          ? campCreditApplied > 0
+            ? ` Total: ${campTotalPrice}, $${campCreditApplied} credit applied.`
+            : ` Total: ${campTotalPrice}.`
+          : "";
         await sendSMS(phone, `Mesa Basketball: Camp confirmed (${campSessions.length} day${campSessions.length !== 1 ? "s" : ""})!${priceText}\n${campDayLines}\nAthlete: ${kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
       }
       const adminCampLines = campSessions.map((s: { date: string; startTime: string; endTime?: string; location: string }) =>
@@ -367,6 +406,8 @@ export async function POST(req: NextRequest) {
     let usedReferralCredit = false;
     let packageSessionsRemaining: number | undefined;
     let packageType: number | undefined;
+    let accountCreditApplied = 0;
+    let privateSessionPrice: number | undefined;
     const referralCode = await generateUniqueReferralCode(parentName, email);
     let privateReferrer: { email: string; name: string } | null = null;
 
@@ -397,6 +438,19 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      privateSessionPrice = isPrivateType
+        ? calcPrivateSessionPrice(bookedStartTime, bookedEndTime, totalParticipants || 1)
+        : undefined;
+
+      // Account credit is applied against the full computed price, same as the
+      // camp/weekly branches — never against a discounted amount, matching how
+      // isFree's 50% off is also always computed at display time, not stored here.
+      if (isPrivateType && applyAccountCredit && privateSessionPrice != null) {
+        const balance = await getAccountCreditBalance(email);
+        accountCreditApplied = Math.min(balance, privateSessionPrice);
+        if (accountCreditApplied > 0) await deductAccountCredit(email, accountCreditApplied);
+      }
+
       const result = await addRegistrationWithRewards({
         parentName,
         email,
@@ -414,9 +468,8 @@ export async function POST(req: NextRequest) {
         isFree,
         usedReferralCredit,
         smsConsent: !!smsConsent,
-        sessionPrice: isPrivateType
-          ? calcPrivateSessionPrice(bookedStartTime, bookedEndTime, totalParticipants || 1)
-          : undefined,
+        sessionPrice: privateSessionPrice,
+        ...(accountCreditApplied > 0 ? { appliedAccountCredit: accountCreditApplied } : {}),
       });
       manageToken = result.manageToken;
 
@@ -479,6 +532,8 @@ export async function POST(req: NextRequest) {
           referralCodeUsed: submittedReferralCode || undefined,
           trainer: isPrivateType ? bookedTrainer : undefined,
           calendarEvent: bookedDate && bookedStartTime ? { date: bookedDate, startTime: bookedStartTime, endTime: bookedEndTime || bookedStartTime, location: bookedLocation || "" } : undefined,
+          accountCreditApplied,
+          fullPrice: privateSessionPrice,
         });
       } catch (notifyErr) {
         console.error("Private booking email failed (booking was saved):", notifyErr);
@@ -497,7 +552,8 @@ export async function POST(req: NextRequest) {
           ? `\n${effectivePkgRemaining} session${effectivePkgRemaining !== 1 ? "s" : ""} remaining in your package.`
           : "";
         const privateTrainerLine = isPrivateType && bookedTrainer ? `\nTrainer: ${bookedTrainer}` : "";
-        await sendSMS(phone, `Mesa Basketball: Your ${typeStr} ${verbStr} confirmed!${dateLine}${privateTrainerLine}${pkgNote}\nAthlete: ${kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
+        const creditLine = accountCreditApplied > 0 ? `\n$${accountCreditApplied} account credit applied.` : "";
+        await sendSMS(phone, `Mesa Basketball: Your ${typeStr} ${verbStr} confirmed!${dateLine}${privateTrainerLine}${pkgNote}${creditLine}\nAthlete: ${kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
       }
       const adminDateLine = bookedDate
         ? `${formatDateWithDay(bookedDate)} | ${bookedStartTime}${bookedEndTime ? `-${bookedEndTime}` : ""}${bookedLocation ? `\nLocation: ${resolveLocationName(bookedLocation)}` : ""}`

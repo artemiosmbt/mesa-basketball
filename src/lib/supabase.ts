@@ -37,6 +37,12 @@ export interface Registration {
   is_full_camp: boolean;
   sms_consent?: boolean;
   admin_change_at?: string | null;
+  is_paid?: boolean;
+  is_late_cancel?: boolean;
+  cancel_fee_settled?: boolean;
+  camp_day_late_fee?: number;
+  camp_drop_in_rate?: number | null;
+  applied_account_credit?: number;
 }
 
 export async function addRegistration(data: {
@@ -148,31 +154,32 @@ export async function updateRegistrationPlayers(
   return !error;
 }
 
-export async function cancelRegistration(token: string, isLateCancel = false): Promise<boolean> {
+export async function cancelRegistration(token: string, isLateCancel = false, campDayLateFee = 0): Promise<boolean> {
   const supabase = getSupabase();
+  // applied_account_credit is zeroed here because the caller is responsible for
+  // refunding that amount back to the account_credits balance right after this
+  // call succeeds — zeroing it prevents the same credit being refunded twice if
+  // this row is later swept up by a bulk cancellation (e.g. the full-camp fallback).
   const { error } = await supabase
     .from("registrations")
-    .update({ status: "cancelled", is_late_cancel: isLateCancel })
+    .update({ status: "cancelled", is_late_cancel: isLateCancel, camp_day_late_fee: campDayLateFee, applied_account_credit: 0 })
     .eq("manage_token", token)
     .eq("status", "confirmed");
   return !error;
 }
 
-/** Get the earliest booked_date + booked_start_time across all days of a full camp group. */
-export async function getEarliestCampDay(referralCode: string): Promise<{ booked_date: string; booked_start_time: string } | null> {
+/** Get every day-row sharing a referral_code for a full camp group, ordered by date. */
+export async function getCampGroupByReferralCode(referralCode: string): Promise<Registration[]> {
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from("registrations")
-    .select("booked_date, booked_start_time")
+    .select("*")
     .eq("referral_code", referralCode)
     .eq("type", "camp")
     .eq("is_full_camp", true)
-    .not("booked_date", "is", null)
-    .order("booked_date", { ascending: true })
-    .limit(1)
-    .single();
-  if (error || !data) return null;
-  return data;
+    .order("booked_date", { ascending: true });
+  if (error || !data) return [];
+  return data as Registration[];
 }
 
 /** Cancel all confirmed camp days sharing the same referral_code (full camp cancellation). */
@@ -241,6 +248,60 @@ export async function decrementReferralCredit(email: string): Promise<void> {
       .update({ credits: data.credits - 1, updated_at: new Date().toISOString() })
       .eq("email", email);
   }
+}
+
+// --- Account Credit Helpers (dollar-value credit, e.g. from a partial camp
+// cancellation, applied toward a future booking of any type) ---
+
+/** Get account credit balance (dollars) for an email */
+export async function getAccountCreditBalance(email: string): Promise<number> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("account_credits")
+    .select("balance")
+    .eq("email", email)
+    .single();
+  if (error || !data) return 0;
+  return data.balance || 0;
+}
+
+/** Add dollars to an email's account credit balance (upsert) */
+export async function addAccountCredit(email: string, amount: number): Promise<void> {
+  if (amount <= 0) return;
+  const supabase = getSupabase();
+  const { data } = await supabase
+    .from("account_credits")
+    .select("balance")
+    .eq("email", email)
+    .single();
+
+  if (data) {
+    await supabase
+      .from("account_credits")
+      .update({ balance: (data.balance || 0) + amount, updated_at: new Date().toISOString() })
+      .eq("email", email);
+  } else {
+    await supabase
+      .from("account_credits")
+      .insert({ email, balance: amount });
+  }
+}
+
+/** Deduct dollars from an email's account credit balance. Returns false if balance is insufficient. */
+export async function deductAccountCredit(email: string, amount: number): Promise<boolean> {
+  if (amount <= 0) return true;
+  const supabase = getSupabase();
+  const { data } = await supabase
+    .from("account_credits")
+    .select("balance")
+    .eq("email", email)
+    .single();
+  if (!data || (data.balance || 0) < amount) return false;
+  await supabase
+    .from("account_credits")
+    .update({ balance: data.balance - amount, updated_at: new Date().toISOString() })
+    .eq("email", email);
+  return true;
 }
 
 /** Check if email OR phone has any previous registrations (fraud-resistant new client check) */
@@ -431,6 +492,8 @@ export async function addRegistrationWithRewards(data: {
   smsConsent?: boolean;
   sessionPrice?: number;
   isFullCamp?: boolean;
+  campDropInRate?: number;
+  appliedAccountCredit?: number;
 }): Promise<{ manageToken: string }> {
   const supabase = getSupabase();
   const { data: row, error } = await supabase
@@ -455,6 +518,8 @@ export async function addRegistrationWithRewards(data: {
       sms_consent: data.smsConsent ?? false,
       session_price: data.sessionPrice ?? null,
       is_full_camp: data.isFullCamp ?? false,
+      camp_drop_in_rate: data.campDropInRate ?? null,
+      applied_account_credit: data.appliedAccountCredit ?? 0,
     })
     .select("manage_token")
     .single();
