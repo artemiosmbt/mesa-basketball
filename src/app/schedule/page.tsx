@@ -23,6 +23,11 @@ function parseDateForDisplay(dateStr: string): Date {
     : new Date(dateStr + " 12:00:00");
 }
 
+function fmtPrice(price: string): string {
+  const trimmed = price.trim();
+  return trimmed.startsWith("$") ? trimmed : `$${trimmed}`;
+}
+
 function fmtDate(dateStr: string): string {
   return parseDateForDisplay(dateStr).toLocaleDateString("en-US", {
     weekday: "long", month: "long", day: "numeric", year: "numeric",
@@ -2076,19 +2081,27 @@ export default function Home() {
                           {firstCamp.startDate}{firstCamp.endDate ? ` — ${firstCamp.endDate}` : ""} &bull; <LocationLink location={firstCamp.location} />
                         </p>
                       </div>
-                      <div className="flex flex-row items-center gap-2 sm:flex-col sm:items-end sm:gap-1">
-                        {earlyBird && firstCamp.earlyBirdPrice ? (
-                          <>
-                            <span className="rounded-full bg-green-900/60 border border-green-700 px-3 py-1 text-sm font-bold text-green-400">
-                              Early Bird: {firstCamp.earlyBirdPrice}
-                            </span>
-                            <span className="text-xs text-brown-500 line-through">{firstCamp.price} after Mar 31</span>
-                          </>
-                        ) : (
-                          <span className="rounded-full bg-brown-800 px-3 py-1 text-sm font-semibold text-mesa-accent">{firstCamp.price}</span>
-                        )}
+                      <div className="inline-flex self-start divide-x divide-brown-700 rounded-lg border border-brown-700 bg-brown-800/40 overflow-hidden">
+                        <div className="px-4 py-2 text-center">
+                          {earlyBird && firstCamp.earlyBirdPrice ? (
+                            <>
+                              <p className="text-lg font-bold leading-tight text-green-400">{firstCamp.earlyBirdPrice}</p>
+                              <p className="text-[10px] leading-tight text-brown-500">
+                                <span className="line-through">{firstCamp.price}</span> Early Bird
+                              </p>
+                            </>
+                          ) : (
+                            <>
+                              <p className="text-lg font-bold leading-tight text-mesa-accent">{firstCamp.price}</p>
+                              <p className="text-[10px] uppercase tracking-wide leading-tight text-brown-500">Full Week</p>
+                            </>
+                          )}
+                        </div>
                         {firstCamp.dropInPrice && (
-                          <span className="text-xs text-brown-400">{firstCamp.dropInPrice}/day drop-in</span>
+                          <div className="px-4 py-2 text-center">
+                            <p className="text-lg font-bold leading-tight text-white">{fmtPrice(firstCamp.dropInPrice)}</p>
+                            <p className="text-[10px] uppercase tracking-wide leading-tight text-brown-500">Per Day</p>
+                          </div>
                         )}
                       </div>
                     </div>
@@ -2115,7 +2128,7 @@ export default function Home() {
                     </div>
                     {firstCamp.campDays.filter((d) => isFutureCampDay(d, firstCamp.time)).length > 0 && (
                       <p className="mt-3 text-xs text-brown-500">
-                        Select any combination of days — {firstCamp.dropInPrice}/day drop-in, or {earlyBird && firstCamp.earlyBirdPrice ? `${firstCamp.earlyBirdPrice} early bird` : firstCamp.price} for all {firstCamp.campDays.filter((d) => isFutureCampDay(d, firstCamp.time)).length} remaining days.
+                        Select any combination of days — {fmtPrice(firstCamp.dropInPrice)}/day drop-in, or {earlyBird && firstCamp.earlyBirdPrice ? `${firstCamp.earlyBirdPrice} early bird` : firstCamp.price} for all {firstCamp.campDays.filter((d) => isFutureCampDay(d, firstCamp.time)).length} remaining days.
                       </p>
                     )}
                   </div>
@@ -2700,7 +2713,7 @@ export default function Home() {
                       </p>
                       {selectedCount < totalDays && camp.dropInPrice && (
                         <p className="text-xs text-brown-400 mt-0.5">
-                          Drop-in rate: {camp.dropInPrice}/day &bull; All {totalDays} days: {earlyBird && camp.earlyBirdPrice ? `${camp.earlyBirdPrice} (EB) / ${camp.price}` : camp.price}
+                          Drop-in rate: {fmtPrice(camp.dropInPrice)}/day &bull; All {totalDays} days: {earlyBird && camp.earlyBirdPrice ? `${camp.earlyBirdPrice} (EB) / ${camp.price}` : camp.price}
                         </p>
                       )}
                       <p className="text-xs text-brown-500 mt-1">Payment due upon registration — Cash, Venmo, or Zelle</p>
