@@ -40,6 +40,14 @@ function fmtDateShort(dateStr: string): string {
   });
 }
 
+function campDayRange(campDays: string[]): string | null {
+  if (campDays.length === 0) return null;
+  const first = parseDateForDisplay(campDays[0]).toLocaleDateString("en-US", { weekday: "long" });
+  if (campDays.length === 1) return first;
+  const last = parseDateForDisplay(campDays[campDays.length - 1]).toLocaleDateString("en-US", { weekday: "long" });
+  return first === last ? first : `${first}-${last}`;
+}
+
 function injectDayIntoDetails(details: string, bookedDate?: string | null): string {
   if (!bookedDate) return details;
   // ISO format (YYYY-MM-DD) — used in supabase-stored session details
@@ -2147,7 +2155,10 @@ export default function Home() {
                         return (
                           <div key={camp.id} className="rounded-lg border border-brown-600 bg-brown-800/50 p-4 flex flex-col gap-2">
                             <p className="font-semibold text-white text-sm">{camp.gradeGroup}</p>
-                            <p className="text-xs text-brown-400">{camp.time}</p>
+                            <p className="text-xs text-brown-400">
+                              {camp.time}
+                              {campDayRange(camp.campDays) && ` • ${campDayRange(camp.campDays)}`}
+                            </p>
                             {!ended && (
                               <button
                                 onClick={() => openModal("camp", index, `${camp.name} — ${camp.gradeGroup} at ${camp.location}`)}
