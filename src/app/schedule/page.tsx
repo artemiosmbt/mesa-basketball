@@ -2153,7 +2153,7 @@ export default function Home() {
                         const futureDays = camp.campDays.filter((d) => isFutureCampDay(d, camp.time));
                         const ended = camp.campDays.length > 0 && futureDays.length === 0;
                         return (
-                          <div key={camp.id} className="rounded-lg border border-brown-600 bg-brown-800/50 p-4 flex flex-col gap-2">
+                          <div key={camp.id} className="rounded-lg border border-brown-600 bg-brown-800/50 p-4 flex flex-col gap-2 text-center sm:text-left">
                             <p className="font-semibold text-white text-sm">{camp.gradeGroup}</p>
                             <p className="text-xs text-brown-400">
                               {camp.time}
@@ -2172,7 +2172,7 @@ export default function Home() {
                       })}
                     </div>
                     {firstCamp.campDays.filter((d) => isFutureCampDay(d, firstCamp.time)).length > 0 && (
-                      <p className="mt-3 text-xs text-brown-500">
+                      <p className="mt-3 text-center text-xs text-brown-500 sm:text-left">
                         Select any combination of days — {fmtPrice(firstCamp.dropInPrice)}/day, or {earlyBird && firstCamp.earlyBirdPrice ? `${firstCamp.earlyBirdPrice} early bird` : firstCamp.price} for the week.
                       </p>
                     )}
