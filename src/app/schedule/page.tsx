@@ -2692,7 +2692,7 @@ export default function Home() {
                   {selectedCount > 0 && (
                     <div className="mt-3 border-t border-brown-700 pt-3">
                       <p className="text-sm font-semibold text-mesa-accent">
-                        {selectedCount === totalDays ? "All 4 days" : `${selectedCount} day${selectedCount !== 1 ? "s" : ""}`}: {price}
+                        {selectedCount === totalDays ? `All ${totalDays} days` : `${selectedCount} day${selectedCount !== 1 ? "s" : ""}`}: {price}
                         {selectedCount === totalDays && earlyBird && camp.earlyBirdPrice && (
                           <span className="ml-2 text-xs text-green-400">(Early Bird — ends Mar 31)</span>
                         )}
