@@ -2066,16 +2066,17 @@ export default function Home() {
               const earlyBird = isEarlyBirdActive();
 
               if (isMultiGroup) {
+                const groupCols = group.camps.length >= 3 ? "sm:grid-cols-3" : group.camps.length === 2 ? "sm:grid-cols-2" : "sm:grid-cols-1";
                 return (
                   <div key={group.name} className="mt-8 rounded-xl border-2 border-brown-600 bg-brown-900/40 p-6 shadow-lg shadow-black/30">
-                    <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                       <div>
                         <h3 className="text-xl font-bold text-mesa-accent">{group.name}</h3>
                         <p className="text-sm text-brown-300 mt-0.5">
                           {firstCamp.startDate}{firstCamp.endDate ? ` — ${firstCamp.endDate}` : ""} &bull; <LocationLink location={firstCamp.location} />
                         </p>
                       </div>
-                      <div className="flex flex-col items-end gap-1">
+                      <div className="flex flex-row items-center gap-2 sm:flex-col sm:items-end sm:gap-1">
                         {earlyBird && firstCamp.earlyBirdPrice ? (
                           <>
                             <span className="rounded-full bg-green-900/60 border border-green-700 px-3 py-1 text-sm font-bold text-green-400">
@@ -2092,7 +2093,7 @@ export default function Home() {
                       </div>
                     </div>
                     {firstCamp.description && <p className="mt-2 text-sm text-brown-400">{firstCamp.description}</p>}
-                    <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                    <div className={`mt-4 grid gap-3 ${groupCols}`}>
                       {group.camps.map(({ camp, index }) => {
                         const futureDays = camp.campDays.filter((d) => isFutureCampDay(d, camp.time));
                         const ended = camp.campDays.length > 0 && futureDays.length === 0;
