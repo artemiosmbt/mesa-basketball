@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import Image from "next/image";
 import { authClient } from "@/lib/auth";
 import LandingNav from "@/app/LandingNav";
@@ -48,6 +48,37 @@ function injectDayIntoDetails(details: string, bookedDate?: string | null): stri
   // Non-ISO (e.g. "April 25, 2026") — direct replace of the raw date string
   if (details.includes(bookedDate)) return details.replace(bookedDate, fmtDate(bookedDate));
   return details;
+}
+
+function FitTitle({ text, className, maxSize = 20, minSize = 13 }: { text: string; className?: string; maxSize?: number; minSize?: number }) {
+  const ref = useRef<HTMLHeadingElement>(null);
+  const [fontSize, setFontSize] = useState(maxSize);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    const parent = el?.parentElement;
+    if (!el || !parent) return;
+
+    function fit() {
+      let size = maxSize;
+      el!.style.fontSize = `${size}px`;
+      while (size > minSize && el!.scrollWidth > parent!.clientWidth) {
+        size -= 1;
+        el!.style.fontSize = `${size}px`;
+      }
+      setFontSize(size);
+    }
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(parent);
+    return () => ro.disconnect();
+  }, [text, maxSize, minSize]);
+
+  return (
+    <h3 ref={ref} className={className} style={{ whiteSpace: "nowrap", fontSize }}>
+      {text}
+    </h3>
+  );
 }
 
 function LocationLink({ location, className }: { location: string; className?: string }) {
@@ -2075,14 +2106,14 @@ export default function Home() {
                 return (
                   <div key={group.name} className="mt-8 rounded-xl border-2 border-brown-600 bg-brown-900/40 p-6 shadow-lg shadow-black/30">
                     <div className="flex flex-col items-center gap-3 text-center sm:flex-row sm:items-start sm:justify-between sm:text-left">
-                      <div>
-                        <h3 className="text-xl font-bold text-mesa-accent">{group.name}</h3>
+                      <div className="w-full min-w-0 sm:flex-1">
+                        <FitTitle text={group.name} className="font-bold text-mesa-accent" maxSize={20} minSize={14} />
                         <p className="text-sm text-brown-300 mt-0.5">
                           {firstCamp.startDate}{firstCamp.endDate ? ` — ${firstCamp.endDate}` : ""}{" "}
                           <span className="whitespace-nowrap">&bull; <LocationLink location={firstCamp.location} /></span>
                         </p>
                       </div>
-                      <div className="inline-flex divide-x divide-brown-700 rounded-lg border border-brown-700 bg-brown-800/40 overflow-hidden">
+                      <div className="inline-flex shrink-0 divide-x divide-brown-700 rounded-lg border border-brown-700 bg-brown-800/40 overflow-hidden">
                         <div className="px-4 py-2 text-center">
                           {earlyBird && firstCamp.earlyBirdPrice ? (
                             <>
@@ -2131,7 +2162,7 @@ export default function Home() {
                     </div>
                     {firstCamp.campDays.filter((d) => isFutureCampDay(d, firstCamp.time)).length > 0 && (
                       <p className="mt-3 text-xs text-brown-500">
-                        Select any combination of days — {fmtPrice(firstCamp.dropInPrice)}/day drop-in, or {earlyBird && firstCamp.earlyBirdPrice ? `${firstCamp.earlyBirdPrice} early bird` : firstCamp.price} for all {firstCamp.campDays.filter((d) => isFutureCampDay(d, firstCamp.time)).length} remaining days.
+                        Select any combination of days — {fmtPrice(firstCamp.dropInPrice)}/day, or {earlyBird && firstCamp.earlyBirdPrice ? `${firstCamp.earlyBirdPrice} early bird` : firstCamp.price} for the week.
                       </p>
                     )}
                   </div>
@@ -2146,12 +2177,12 @@ export default function Home() {
               const campEnded = camp.campDays.length > 0 ? futureCampDays.length === 0 : false;
               return (
                 <div key={camp.id} className="mt-8 rounded-xl border-2 border-brown-600 bg-brown-900/40 p-6 shadow-lg shadow-black/30">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <h3 className="text-lg font-bold text-mesa-accent">{camp.name}</h3>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <FitTitle text={camp.name} className="font-bold text-mesa-accent" maxSize={18} minSize={13} />
                       <p className="text-sm text-brown-300">{camp.startDate}{camp.endDate ? ` — ${camp.endDate}` : ""}</p>
                     </div>
-                    <span className="rounded-full bg-brown-800 px-3 py-1 text-sm font-semibold text-mesa-accent">
+                    <span className="shrink-0 rounded-full bg-brown-800 px-3 py-1 text-sm font-semibold text-mesa-accent">
                       {camp.price}
                     </span>
                   </div>
