@@ -2029,7 +2029,7 @@ export default function Home() {
       {/* Mini Camps */}
       <section id="camps" className="bg-brown-900/30 py-16 scroll-mt-20">
         <div className="mx-auto max-w-5xl px-6">
-          <h2 className="font-[family-name:var(--font-oswald)] text-center text-3xl font-bold tracking-wide">Mini Camps</h2>
+          <h2 className="font-[family-name:var(--font-oswald)] text-center text-3xl font-bold tracking-wide">Camps</h2>
           <p className="mt-2 text-center text-brown-400">
             Intensive multi-day programs — spots are limited, register early.
           </p>
@@ -2074,14 +2074,15 @@ export default function Home() {
                 const groupCols = group.camps.length >= 3 ? "sm:grid-cols-3" : group.camps.length === 2 ? "sm:grid-cols-2" : "sm:grid-cols-1";
                 return (
                   <div key={group.name} className="mt-8 rounded-xl border-2 border-brown-600 bg-brown-900/40 p-6 shadow-lg shadow-black/30">
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="flex flex-col items-center gap-3 text-center sm:flex-row sm:items-start sm:justify-between sm:text-left">
                       <div>
                         <h3 className="text-xl font-bold text-mesa-accent">{group.name}</h3>
                         <p className="text-sm text-brown-300 mt-0.5">
-                          {firstCamp.startDate}{firstCamp.endDate ? ` — ${firstCamp.endDate}` : ""} &bull; <LocationLink location={firstCamp.location} />
+                          {firstCamp.startDate}{firstCamp.endDate ? ` — ${firstCamp.endDate}` : ""}{" "}
+                          <span className="whitespace-nowrap">&bull; <LocationLink location={firstCamp.location} /></span>
                         </p>
                       </div>
-                      <div className="inline-flex self-start divide-x divide-brown-700 rounded-lg border border-brown-700 bg-brown-800/40 overflow-hidden">
+                      <div className="inline-flex divide-x divide-brown-700 rounded-lg border border-brown-700 bg-brown-800/40 overflow-hidden">
                         <div className="px-4 py-2 text-center">
                           {earlyBird && firstCamp.earlyBirdPrice ? (
                             <>
@@ -2105,7 +2106,9 @@ export default function Home() {
                         )}
                       </div>
                     </div>
-                    {firstCamp.description && <p className="mt-2 text-sm text-brown-400">{firstCamp.description}</p>}
+                    {firstCamp.description && (
+                      <p className="mt-3 text-center text-xs text-brown-400 sm:text-left sm:text-sm">{firstCamp.description}</p>
+                    )}
                     <div className={`mt-4 grid gap-3 ${groupCols}`}>
                       {group.camps.map(({ camp, index }) => {
                         const futureDays = camp.campDays.filter((d) => isFutureCampDay(d, camp.time));
