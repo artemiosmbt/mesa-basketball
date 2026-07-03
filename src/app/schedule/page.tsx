@@ -136,14 +136,14 @@ function isEarlyBirdActive(): boolean {
 function calcCampPrice(daysSelected: number, totalDays: number, camp: Camp, kidCount: number = 1): string {
   if (daysSelected === 0) return "";
   const count = Math.max(1, kidCount);
+  const fullBaseStr = isEarlyBirdActive() && camp.earlyBirdPrice ? camp.earlyBirdPrice : camp.price;
+  const fullBase = (parseInt(fullBaseStr.replace(/\D/g, "")) || 0) * count;
   if (daysSelected === totalDays) {
-    const baseStr = isEarlyBirdActive() && camp.earlyBirdPrice ? camp.earlyBirdPrice : camp.price;
-    if (count === 1) return baseStr;
-    const base = parseInt(baseStr.replace(/\D/g, "")) || 0;
-    return `$${base * count}`;
+    return count === 1 ? fullBaseStr : `$${fullBase}`;
   }
   const perDay = parseInt(camp.dropInPrice.replace(/\D/g, "")) || 100;
-  return `$${perDay * daysSelected * count}`;
+  const dropInTotal = perDay * daysSelected * count;
+  return `$${Math.min(dropInTotal, fullBase)}`;
 }
 
 interface PrivateSlot {
