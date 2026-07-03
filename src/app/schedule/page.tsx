@@ -2031,7 +2031,7 @@ export default function Home() {
         <div className="mx-auto max-w-5xl px-6">
           <h2 className="font-[family-name:var(--font-oswald)] text-center text-3xl font-bold tracking-wide">Camps &amp; Clinics</h2>
           <p className="mt-2 text-center text-brown-400">
-            Intensive multi-day programs — spots are limited.
+            Intensive multi-day programs — Spots are limited.
           </p>
 
           {camps.length === 0 && !loading && (
