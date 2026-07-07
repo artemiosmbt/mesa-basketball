@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import Image from "next/image";
-import { authClient } from "@/lib/auth";
+import { authClient, ADMIN_EMAIL } from "@/lib/auth";
 import LandingNav from "@/app/LandingNav";
 
 const LOCATION_LINKS: Record<string, { name: string; url: string }> = {
@@ -710,6 +710,7 @@ export default function Home() {
   }, [loading]);
 
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const isAdmin = userEmail === ADMIN_EMAIL;
   const [authPrompt, setAuthPrompt] = useState(false);
   const [pendingGroupOpen, setPendingGroupOpen] = useState(false);
   const profileRef = useRef<{ firstName: string; lastName: string; phone: string; smsConsent: boolean; kids: { name: string; dob: string; grade: string; gender: string }[] } | null>(null);
@@ -1755,9 +1756,14 @@ export default function Home() {
                     const enrolled = getEnrollmentCount(futureSessions[0]);
                     const max = futureSessions[0].maxSpots;
                     const spotsLeft = max - enrolled;
+                    if (!isAdmin && spotsLeft > 5) return null;
                     return (
                       <p className={`mt-0.5 text-sm font-semibold ${spotsLeft <= 0 ? "text-red-400" : spotsLeft <= 3 ? "text-yellow-400" : "text-white"}`}>
-                        {enrolled} / {max} signed up{spotsLeft <= 0 ? " — FULL" : ""}
+                        {isAdmin
+                          ? `${enrolled} / ${max} signed up${spotsLeft <= 0 ? " — FULL" : ""}`
+                          : spotsLeft <= 0
+                          ? "FULL"
+                          : `${spotsLeft} spot${spotsLeft === 1 ? "" : "s"} remaining`}
                       </p>
                     );
                   })()}
@@ -2015,11 +2021,15 @@ export default function Home() {
                                 <div className="text-right shrink-0">
                                   {full ? (
                                     <span className="text-xs font-medium text-red-400">FULL</span>
-                                  ) : (
+                                  ) : isAdmin ? (
                                     <span className={`text-xs font-medium ${spotsLeft <= 3 ? "text-yellow-400" : "text-brown-300"}`}>
                                       {enrolled}/{s.maxSpots} signed up
                                     </span>
-                                  )}
+                                  ) : spotsLeft <= 5 ? (
+                                    <span className={`text-xs font-medium ${spotsLeft <= 3 ? "text-yellow-400" : "text-brown-300"}`}>
+                                      {spotsLeft} spot{spotsLeft === 1 ? "" : "s"} remaining
+                                    </span>
+                                  ) : null}
                                 </div>
                               </label>
                             );
