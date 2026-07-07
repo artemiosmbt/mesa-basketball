@@ -1978,7 +1978,7 @@ export default function Home() {
                           <div className="flex items-center gap-2 mb-3">
                             <p className="text-sm font-bold text-mesa-accent">${pickupUnitPrice} / session</p>
                             <span className="text-brown-600">&bull;</span>
-                            <p className="text-xs text-brown-400">{pickupSessions[0]?.maxSpots ?? 15} player limit</p>
+                            <p className="text-sm font-bold text-mesa-accent">{pickupSessions[0]?.maxSpots ?? 15} player limit</p>
                           </div>
                           {pickupSessions.length === 0 && (
                             <p className="text-sm text-brown-500 py-2">No pickup sessions scheduled yet — check back soon.</p>
