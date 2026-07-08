@@ -87,10 +87,6 @@ export default function PaymentsPage() {
   const [togglingPaid, setTogglingPaid] = useState<string | null>(null);
   const [settlingFee, setSettlingFee] = useState<string | null>(null);
   const [showAllPaid, setShowAllPaid] = useState(false);
-  const [adjustEmail, setAdjustEmail] = useState("");
-  const [adjustAmount, setAdjustAmount] = useState("");
-  const [adjustingCredit, setAdjustingCredit] = useState(false);
-  const [adjustError, setAdjustError] = useState("");
 
   useEffect(() => {
     authClient.auth.getSession().then(({ data: { session } }) => {
@@ -111,38 +107,6 @@ export default function PaymentsPage() {
         .finally(() => setLoading(false));
     });
   }, [router]);
-
-  async function adjustAccountCredit() {
-    if (!token || !adjustEmail.trim() || !adjustAmount.trim()) return;
-    const amount = parseFloat(adjustAmount);
-    if (isNaN(amount) || amount === 0) { setAdjustError("Enter a nonzero amount"); return; }
-    setAdjustingCredit(true);
-    setAdjustError("");
-    const res = await fetch("/api/admin/account-credits", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ email: adjustEmail.trim(), amount }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setAdjustError(data.error || "Failed to adjust credit");
-    } else {
-      const email = adjustEmail.trim().toLowerCase();
-      setAccountCredits((prev) => {
-        const existing = prev.find((a) => a.email.toLowerCase() === email);
-        if (existing) {
-          const newBalance = existing.balance + amount;
-          return newBalance > 0
-            ? prev.map((a) => a.email.toLowerCase() === email ? { ...a, balance: newBalance } : a)
-            : prev.filter((a) => a.email.toLowerCase() !== email);
-        }
-        return amount > 0 ? [...prev, { email, balance: amount }] : prev;
-      });
-      setAdjustEmail("");
-      setAdjustAmount("");
-    }
-    setAdjustingCredit(false);
-  }
 
   async function togglePaid(id: string, currentValue: boolean, referralCode?: string | null) {
     if (!token) return;
@@ -581,33 +545,6 @@ export default function PaymentsPage() {
               ))}
             </div>
           )}
-          <div className="rounded-xl border border-brown-700 bg-brown-900/40 p-4">
-            <p className="text-xs text-brown-400 mb-2">Manually adjust a balance (positive to add, negative to remove)</p>
-            <div className="flex flex-wrap gap-2">
-              <input
-                type="email"
-                value={adjustEmail}
-                onChange={(e) => setAdjustEmail(e.target.value)}
-                placeholder="email"
-                className="flex-1 min-w-[160px] rounded-lg border border-brown-700 bg-brown-800 px-3 py-1.5 text-sm text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
-              />
-              <input
-                type="number"
-                value={adjustAmount}
-                onChange={(e) => setAdjustAmount(e.target.value)}
-                placeholder="amount"
-                className="w-28 rounded-lg border border-brown-700 bg-brown-800 px-3 py-1.5 text-sm text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
-              />
-              <button
-                onClick={adjustAccountCredit}
-                disabled={adjustingCredit}
-                className="rounded-lg bg-blue-700 hover:bg-blue-600 px-4 py-1.5 text-sm font-medium text-white transition disabled:opacity-50"
-              >
-                {adjustingCredit ? "…" : "Adjust"}
-              </button>
-            </div>
-            {adjustError && <p className="mt-2 text-xs text-red-400">{adjustError}</p>}
-          </div>
         </div>
 
         {/* Paid — with undo */}

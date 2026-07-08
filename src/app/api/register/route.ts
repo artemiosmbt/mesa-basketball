@@ -162,6 +162,12 @@ export async function POST(req: NextRequest) {
           : `<p><strong>Total:</strong> $${weeklyTotalPrice}</p>`
         : "";
 
+      // Award referral credit unconditionally — must not depend on the confirmation
+      // email succeeding below, or a Resend hiccup silently drops the referrer's credit.
+      if (weeklyReferrer) {
+        await addReferralCredit(weeklyReferrer.email);
+      }
+
       try {
         await sendRegistrationNotification({
           parentName,
@@ -179,7 +185,6 @@ export async function POST(req: NextRequest) {
         });
 
         if (weeklyReferrer) {
-          await addReferralCredit(weeklyReferrer.email);
           await sendReferralCreditNotification({ referrerName: weeklyReferrer.name, referrerEmail: weeklyReferrer.email, newClientName: parentName });
         }
       } catch (notifyErr) {
@@ -324,6 +329,12 @@ export async function POST(req: NextRequest) {
         : "";
       const firstSession = campSessions[0];
 
+      // Award referral credit unconditionally — must not depend on the confirmation
+      // email succeeding below, or a Resend hiccup silently drops the referrer's credit.
+      if (campReferrer) {
+        await addReferralCredit(campReferrer.email);
+      }
+
       try {
         await sendRegistrationNotification({
           parentName,
@@ -340,7 +351,6 @@ export async function POST(req: NextRequest) {
         });
 
         if (campReferrer) {
-          await addReferralCredit(campReferrer.email);
           await sendReferralCreditNotification({ referrerName: campReferrer.name, referrerEmail: campReferrer.email, newClientName: parentName });
         }
       } catch (notifyErr) {
