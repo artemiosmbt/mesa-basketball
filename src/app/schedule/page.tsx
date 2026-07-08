@@ -1096,6 +1096,7 @@ export default function Home() {
               campTotalPrice: totalPrice,
               campTotalDays: camp.campDays.length,
               campDropInRate: dropInRatePerKid * Math.max(1, kids.length),
+              submittedReferralCode: referralCode.trim() || undefined,
               applyAccountCredit: accountCreditBalance !== null && accountCreditBalance > 0 && applyAccountCredit,
             }),
           });
@@ -2991,7 +2992,7 @@ export default function Home() {
                 </div>
 
                 {/* Referral Code — only shown to first-time clients */}
-                {!isReturningClient && (modal.type === "private" || modal.type === "group-private" || modal.type === "weekly") && (
+                {!isReturningClient && (modal.type === "private" || modal.type === "group-private" || modal.type === "weekly" || modal.type === "camp") && (
                   <div>
                     <div className="mb-1 flex items-center gap-2">
                       <label className="text-sm font-medium text-brown-300">Referral Code <span className="text-brown-500 font-normal">(optional)</span></label>
