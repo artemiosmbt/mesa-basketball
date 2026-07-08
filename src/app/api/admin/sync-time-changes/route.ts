@@ -16,6 +16,20 @@ async function verifyAdmin(req: NextRequest) {
   return user?.email === ADMIN_EMAIL;
 }
 
+interface WeeklyRegistration {
+  id: string;
+  parent_name: string;
+  email: string;
+  phone: string;
+  kids: string;
+  booked_date: string;
+  booked_start_time: string;
+  booked_end_time: string | null;
+  booked_location: string | null;
+  session_details: string | null;
+  sms_consent: boolean;
+}
+
 function sessionIsUpcoming(dateStr: string, startTimeStr: string): boolean {
   try {
     const now = new Date();
@@ -72,18 +86,38 @@ export async function POST(req: NextRequest) {
   let totalEmailsSent = 0;
   let totalSmsSent = 0;
 
-  for (const session of upcoming) {
-    const { data: allRegs, error } = await supabase
+  // Fetch all candidate registrations in one query instead of one query per
+  // upcoming session (this loop can run 200+ times, which turned into 200+
+  // sequential round-trips).
+  const uniqueDates = [...new Set(upcoming.map((s) => s.date))];
+  let candidateRegs: WeeklyRegistration[] = [];
+  if (uniqueDates.length) {
+    const { data, error: candidateError } = await supabase
       .from("registrations")
       .select("*")
-      .eq("booked_date", session.date)
       .eq("type", "weekly")
       .eq("status", "confirmed")
-      .ilike("session_details", `%${session.group}%`);
+      .in("booked_date", uniqueDates);
+    if (candidateError) {
+      console.error("sync-time-changes: failed to fetch candidate registrations", candidateError);
+    } else {
+      candidateRegs = data || [];
+    }
+  }
 
-    if (error) continue;
+  const regsByDate = new Map<string, WeeklyRegistration[]>();
+  for (const r of candidateRegs) {
+    const key = r.booked_date as string;
+    if (!regsByDate.has(key)) regsByDate.set(key, []);
+    regsByDate.get(key)!.push(r);
+  }
 
-    const stale = (allRegs || []).filter(
+  for (const session of upcoming) {
+    const allRegs = (regsByDate.get(session.date) || []).filter((r) =>
+      r.session_details?.toLowerCase().includes(session.group.toLowerCase())
+    );
+
+    const stale = allRegs.filter(
       (r) =>
         r.booked_start_time !== session.startTime ||
         r.booked_end_time !== session.endTime ||

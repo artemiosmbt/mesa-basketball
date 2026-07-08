@@ -379,16 +379,10 @@ export default function AdminPage() {
       }
       setToken(session.access_token);
 
-      // Load registrations and auto-sync time changes in parallel
-      Promise.all([
-        fetch("/api/admin/data", {
-          headers: { Authorization: `Bearer ${session.access_token}` },
-        }).then((r) => r.json()),
-        fetch("/api/admin/sync-time-changes", {
-          method: "POST",
-          headers: { Authorization: `Bearer ${session.access_token}` },
-        }).then((r) => r.json()).catch(() => null),
-      ]).then(([adminData, syncResult]) => {
+      // Load registrations first so the dashboard renders right away
+      fetch("/api/admin/data", {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      }).then((r) => r.json()).then((adminData) => {
         setRegistrations(adminData.registrations || []);
         const map: Record<string, boolean> = {};
         for (const p of (adminData.profiles || [])) {
@@ -401,10 +395,18 @@ export default function AdminPage() {
         }
         setReferralCreditsMap(creditsMap);
         setPackages(adminData.packages || []);
+      }).finally(() => setLoading(false));
+
+      // Auto-sync time changes in the background — banner appears when it's done,
+      // but it no longer holds up the rest of the dashboard from rendering.
+      fetch("/api/admin/sync-time-changes", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      }).then((r) => r.json()).then((syncResult) => {
         if (syncResult?.changesFound?.length > 0) {
           setTcResult(syncResult);
         }
-      }).finally(() => setLoading(false));
+      }).catch(() => {});
     });
   }, [router]);
 
