@@ -1,18 +1,7 @@
-// Run with: node scripts/sync-sms-optouts.mjs
-// Reads env from .env.local via --env-file flag or dotenv
+// Run with: node --env-file=.env.local scripts/sync-sms-optouts.mjs
 
 import { createClient } from "@supabase/supabase-js";
 import twilio from "twilio";
-import { readFileSync } from "fs";
-import { resolve } from "path";
-
-// Load .env.local manually
-const envPath = resolve(process.cwd(), ".env.local");
-const envLines = readFileSync(envPath, "utf-8").split("\n");
-for (const line of envLines) {
-  const [key, ...rest] = line.split("=");
-  if (key && rest.length) process.env[key.trim()] = rest.join("=").trim();
-}
 
 const OPT_OUT = new Set(["STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT"]);
 const OPT_IN = new Set(["START", "UNSTOP", "YES"]);
