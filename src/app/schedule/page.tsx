@@ -624,6 +624,8 @@ export default function Home() {
   const [selectedPickupKeys, setSelectedPickupKeys] = useState<Set<string>>(new Set());
   const [upsellExtra, setUpsellExtra] = useState(0); // extra minutes accepted
   const [referralCode, setReferralCode] = useState("");
+  const [referralCodeError, setReferralCodeError] = useState("");
+  const [referralCodeChecking, setReferralCodeChecking] = useState(false);
   const [creditBalance, setCreditBalance] = useState<number | null>(null);
   const [useReferralCredit, setUseReferralCredit] = useState(false);
   const [accountCreditBalance, setAccountCreditBalance] = useState<number | null>(null);
@@ -679,6 +681,8 @@ export default function Home() {
   const [pkgPhone, setPkgPhone] = useState("");
   const [pkgMonth, setPkgMonth] = useState("");
   const [pkgReferralCode, setPkgReferralCode] = useState("");
+  const [pkgReferralCodeError, setPkgReferralCodeError] = useState("");
+  const [pkgReferralCodeChecking, setPkgReferralCodeChecking] = useState(false);
   const [pkgSubmitting, setPkgSubmitting] = useState(false);
   const [pkgResult, setPkgResult] = useState<{ success: boolean; message: string } | null>(null);
   const [calendarSessions, setCalendarSessions] = useState<CalSession[]>([]);
@@ -948,6 +952,7 @@ export default function Home() {
     setIsGroupRate(false);
     setUpsellExtra(0);
     setReferralCode("");
+    setReferralCodeError("");
     setUseReferralCredit(false);
     setApplyAccountCredit(true);
     setCreditBalance(null);
@@ -966,6 +971,7 @@ export default function Home() {
     setIsGroupRate(false);
     setUpsellExtra(0);
     setReferralCode("");
+    setReferralCodeError("");
     setUseReferralCredit(false);
     setApplyAccountCredit(true);
     setCreditBalance(null);
@@ -1009,6 +1015,30 @@ export default function Home() {
     return code.trim() && !applied
       ? " Note: the referral code you entered wasn't applied — it may be invalid, or you may already have an account with us."
       : "";
+  }
+
+  const REFERRAL_INVALID_MESSAGES: Record<string, string> = {
+    not_found: "That referral code doesn't match any Mesa family — check the spelling, or leave it blank.",
+    self: "That's your own referral code — you can't refer yourself.",
+    not_eligible: "That referral code can't be applied to your account.",
+  };
+
+  // Validates against the exact same rule /api/register uses to award the credit, so
+  // "valid" here always means it will actually apply. Fails open on a network error —
+  // an infra hiccup shouldn't block someone from booking.
+  async function checkReferralCode(code: string, checkEmail: string, checkPhone: string): Promise<string> {
+    if (!code.trim()) return "";
+    try {
+      const params = new URLSearchParams({ code: code.trim() });
+      if (checkEmail.trim()) params.set("email", checkEmail.trim());
+      if (checkPhone.trim()) params.set("phone", checkPhone.trim());
+      const res = await fetch(`/api/referral-check?${params.toString()}`);
+      const data = await res.json();
+      if (data.valid) return "";
+      return REFERRAL_INVALID_MESSAGES[data.reason] || "That referral code couldn't be applied.";
+    } catch {
+      return "";
+    }
   }
 
   async function performSubmit() {
@@ -1273,11 +1303,39 @@ export default function Home() {
         return;
       }
     }
+
+    // Re-validate the referral code at submit time — a blur check may never have
+    // fired (autofill, paste-then-submit), and this is the last chance to block
+    // before the booking is created.
+    if (referralCode.trim()) {
+      setReferralCodeChecking(true);
+      const err = await checkReferralCode(referralCode, email, phone);
+      setReferralCodeChecking(false);
+      if (err) {
+        setReferralCodeError(err);
+        return;
+      }
+    }
+
     await performSubmit();
   }
 
   async function handlePackageSubmit(e: React.FormEvent) {
     e.preventDefault();
+
+    // Re-validate the referral code at submit time — a blur check may never have
+    // fired (autofill, paste-then-submit), and this is the last chance to block
+    // before the enrollment is created.
+    if (pkgReferralCode.trim()) {
+      setPkgReferralCodeChecking(true);
+      const err = await checkReferralCode(pkgReferralCode, pkgEmail, pkgPhone);
+      setPkgReferralCodeChecking(false);
+      if (err) {
+        setPkgReferralCodeError(err);
+        return;
+      }
+    }
+
     setPkgSubmitting(true);
     setPkgResult(null);
     const kidsStr = kids.map((k) => `${k.name} (DOB: ${k.dob}, Grade: ${k.grade}${k.gender ? `, Gender: ${k.gender === "male" ? "Male" : "Female"}` : ""})`).join(", ");
@@ -1581,6 +1639,7 @@ export default function Home() {
     setIsGroupRate(false);
     setUpsellExtra(0);
     setReferralCode("");
+    setReferralCodeError("");
   }
 
   function openPickupGroupRegistration(sessions: WeeklySession[], totalPrice: number) {
@@ -1611,6 +1670,7 @@ export default function Home() {
     setIsGroupRate(false);
     setUpsellExtra(0);
     setReferralCode("");
+    setReferralCodeError("");
     setUseReferralCredit(false);
     setApplyAccountCredit(true);
     setCreditBalance(null);
@@ -1643,6 +1703,7 @@ export default function Home() {
     setIsGroupRate(false);
     setUpsellExtra(0);
     setReferralCode("");
+    setReferralCodeError("");
     setUseReferralCredit(false);
     setApplyAccountCredit(true);
     setCreditBalance(null);
@@ -2325,7 +2386,7 @@ export default function Home() {
                   <p className="text-xs text-brown-400">$118.75 per session</p>
                 </div>
                 <button
-                  onClick={() => { if (!userEmail) { setAuthPrompt(true); return; } setPkgModal({ open: true, packageType: 4 }); setPkgFirstName(profileRef.current?.firstName ?? ""); setPkgLastName(profileRef.current?.lastName ?? ""); setPkgEmail(userEmail ?? ""); setPkgPhone(profileRef.current?.phone ?? ""); setPkgMonth(pkgMonthOptions[0]?.value || ""); setPkgResult(null); setKids(profileRef.current?.kids ?? [{ name: "", dob: "", grade: "", gender: "" }]); setReferralCode(""); }}
+                  onClick={() => { if (!userEmail) { setAuthPrompt(true); return; } setPkgModal({ open: true, packageType: 4 }); setPkgFirstName(profileRef.current?.firstName ?? ""); setPkgLastName(profileRef.current?.lastName ?? ""); setPkgEmail(userEmail ?? ""); setPkgPhone(profileRef.current?.phone ?? ""); setPkgMonth(pkgMonthOptions[0]?.value || ""); setPkgResult(null); setKids(profileRef.current?.kids ?? [{ name: "", dob: "", grade: "", gender: "" }]); setPkgReferralCode(""); setPkgReferralCodeError(""); }}
                   className="mt-4 w-full rounded-lg bg-mesa-accent px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-yellow-600"
                 >
                   Enroll — 4 Sessions
@@ -2342,7 +2403,7 @@ export default function Home() {
                   <p className="text-xs text-brown-400">$112.50 per session</p>
                 </div>
                 <button
-                  onClick={() => { if (!userEmail) { setAuthPrompt(true); return; } setPkgModal({ open: true, packageType: 8 }); setPkgFirstName(profileRef.current?.firstName ?? ""); setPkgLastName(profileRef.current?.lastName ?? ""); setPkgEmail(userEmail ?? ""); setPkgPhone(profileRef.current?.phone ?? ""); setPkgMonth(pkgMonthOptions[0]?.value || ""); setPkgResult(null); setKids(profileRef.current?.kids ?? [{ name: "", dob: "", grade: "", gender: "" }]); setReferralCode(""); }}
+                  onClick={() => { if (!userEmail) { setAuthPrompt(true); return; } setPkgModal({ open: true, packageType: 8 }); setPkgFirstName(profileRef.current?.firstName ?? ""); setPkgLastName(profileRef.current?.lastName ?? ""); setPkgEmail(userEmail ?? ""); setPkgPhone(profileRef.current?.phone ?? ""); setPkgMonth(pkgMonthOptions[0]?.value || ""); setPkgResult(null); setKids(profileRef.current?.kids ?? [{ name: "", dob: "", grade: "", gender: "" }]); setPkgReferralCode(""); setPkgReferralCodeError(""); }}
                   className="mt-4 w-full rounded-lg bg-mesa-accent px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-yellow-600"
                 >
                   Enroll — 8 Sessions
@@ -3039,10 +3100,19 @@ export default function Home() {
                     <input
                       type="text"
                       value={referralCode}
-                      onChange={(e) => setReferralCode(e.target.value.toUpperCase())}
+                      onChange={(e) => { setReferralCode(e.target.value.toUpperCase()); setReferralCodeError(""); }}
+                      onBlur={async (e) => {
+                        const code = e.target.value;
+                        if (!code.trim()) return;
+                        setReferralCodeChecking(true);
+                        setReferralCodeError(await checkReferralCode(code, email, phone));
+                        setReferralCodeChecking(false);
+                      }}
                       placeholder="e.g. SMITH-MESA"
-                      className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
+                      className={`w-full rounded-lg border bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:outline-none ${referralCodeError ? "border-red-500" : "border-brown-700 focus:border-mesa-accent"}`}
                     />
+                    {referralCodeChecking && <p className="mt-1 text-xs text-brown-500">Checking code…</p>}
+                    {referralCodeError && <p className="mt-1 text-xs text-red-400">{referralCodeError}</p>}
                   </div>
                 )}
 
@@ -3357,10 +3427,19 @@ export default function Home() {
                     <input
                       type="text"
                       value={pkgReferralCode}
-                      onChange={(e) => setPkgReferralCode(e.target.value.toUpperCase())}
+                      onChange={(e) => { setPkgReferralCode(e.target.value.toUpperCase()); setPkgReferralCodeError(""); }}
+                      onBlur={async (e) => {
+                        const code = e.target.value;
+                        if (!code.trim()) return;
+                        setPkgReferralCodeChecking(true);
+                        setPkgReferralCodeError(await checkReferralCode(code, pkgEmail, pkgPhone));
+                        setPkgReferralCodeChecking(false);
+                      }}
                       placeholder="e.g. SMITH-MESA"
-                      className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
+                      className={`w-full rounded-lg border bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:outline-none ${pkgReferralCodeError ? "border-red-500" : "border-brown-700 focus:border-mesa-accent"}`}
                     />
+                    {pkgReferralCodeChecking && <p className="mt-1 text-xs text-brown-500">Checking code…</p>}
+                    {pkgReferralCodeError && <p className="mt-1 text-xs text-red-400">{pkgReferralCodeError}</p>}
                   </div>
                 )}
                 <div>
