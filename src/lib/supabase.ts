@@ -169,29 +169,35 @@ export async function cancelRegistration(token: string, isLateCancel = false, ca
 }
 
 /** Get every day-row sharing a referral_code for a full camp group, ordered by date. */
-export async function getCampGroupByReferralCode(referralCode: string): Promise<Registration[]> {
+// referral_code alone isn't a unique purchase ID — it's the client's own permanent
+// referral code, so it's identical across every full-camp purchase they've ever made.
+// booked_group (the camp's own name) disambiguates which specific camp purchase this is.
+export async function getCampGroupByReferralCode(referralCode: string, bookedGroup: string | null): Promise<Registration[]> {
   const supabase = getSupabase();
-  const { data, error } = await supabase
+  let query = supabase
     .from("registrations")
     .select("*")
     .eq("referral_code", referralCode)
     .eq("type", "camp")
-    .eq("is_full_camp", true)
-    .order("booked_date", { ascending: true });
+    .eq("is_full_camp", true);
+  query = bookedGroup ? query.eq("booked_group", bookedGroup) : query.is("booked_group", null);
+  const { data, error } = await query.order("booked_date", { ascending: true });
   if (error || !data) return [];
   return data as Registration[];
 }
 
-/** Cancel all confirmed camp days sharing the same referral_code (full camp cancellation). */
-export async function cancelFullCampByReferralCode(referralCode: string): Promise<boolean> {
+/** Cancel all confirmed camp days sharing the same referral_code AND camp (full camp cancellation). */
+export async function cancelFullCampByReferralCode(referralCode: string, bookedGroup: string | null): Promise<boolean> {
   const supabase = getSupabase();
-  const { error } = await supabase
+  let query = supabase
     .from("registrations")
     .update({ status: "cancelled" })
     .eq("referral_code", referralCode)
     .eq("type", "camp")
     .eq("is_full_camp", true)
     .eq("status", "confirmed");
+  query = bookedGroup ? query.eq("booked_group", bookedGroup) : query.is("booked_group", null);
+  const { error } = await query;
   return !error;
 }
 

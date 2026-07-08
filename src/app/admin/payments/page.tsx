@@ -15,6 +15,7 @@ interface Registration {
   session_details: string;
   booked_date: string | null;
   booked_start_time: string | null;
+  booked_group: string | null;
   status: string;
   is_paid: boolean;
   is_late_cancel: boolean;
@@ -60,6 +61,13 @@ function sessionLabel(r: Registration) {
   return r.session_details
     ? r.session_details.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "").split("\n")[0]
     : "—";
+}
+
+// referral_code alone isn't a unique purchase ID — it's the client's own permanent
+// referral code, identical across every full-camp purchase they've ever made.
+// booked_group (the camp's own name) disambiguates which specific camp this is.
+function campGroupKey(r: Registration): string {
+  return `${r.referral_code ?? ""}::${r.booked_group ?? ""}`;
 }
 
 function daysAway(dateStr: string | null): { label: string; cls: string } | null {
@@ -108,33 +116,33 @@ export default function PaymentsPage() {
     });
   }, [router]);
 
-  async function togglePaid(id: string, currentValue: boolean, referralCode?: string | null) {
+  async function togglePaid(id: string, currentValue: boolean, referralCode?: string | null, bookedGroup?: string | null) {
     if (!token) return;
     setTogglingPaid(id);
     await fetch("/api/admin/update-payment", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ id, field: "is_paid", value: !currentValue, ...(referralCode ? { referralCode } : {}) }),
+      body: JSON.stringify({ id, field: "is_paid", value: !currentValue, ...(referralCode ? { referralCode, bookedGroup: bookedGroup ?? null } : {}) }),
     });
     if (referralCode) {
-      // Full camp: update all day rows belonging to this camp group
-      setRegistrations((prev) => prev.map((r) => r.referral_code === referralCode ? { ...r, is_paid: !currentValue } : r));
+      // Full camp: update all day rows belonging to this specific camp group
+      setRegistrations((prev) => prev.map((r) => r.referral_code === referralCode && r.booked_group === (bookedGroup ?? null) ? { ...r, is_paid: !currentValue } : r));
     } else {
       setRegistrations((prev) => prev.map((r) => (r.id === id ? { ...r, is_paid: !currentValue } : r)));
     }
     setTogglingPaid(null);
   }
 
-  async function settleFee(id: string, referralCode?: string | null) {
+  async function settleFee(id: string, referralCode?: string | null, bookedGroup?: string | null) {
     if (!token) return;
     setSettlingFee(id);
     await fetch("/api/admin/update-payment", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ id, field: "cancel_fee_settled", value: true, ...(referralCode ? { referralCode } : {}) }),
+      body: JSON.stringify({ id, field: "cancel_fee_settled", value: true, ...(referralCode ? { referralCode, bookedGroup: bookedGroup ?? null } : {}) }),
     });
     if (referralCode) {
-      setRegistrations((prev) => prev.map((r) => r.referral_code === referralCode ? { ...r, cancel_fee_settled: true } : r));
+      setRegistrations((prev) => prev.map((r) => r.referral_code === referralCode && r.booked_group === (bookedGroup ?? null) ? { ...r, cancel_fee_settled: true } : r));
     } else {
       setRegistrations((prev) => prev.map((r) => (r.id === id ? { ...r, cancel_fee_settled: true } : r)));
     }
@@ -212,8 +220,9 @@ export default function PaymentsPage() {
         if (mem?.withinPackage && mem.packagePaid) return false;
         // Full camps are one payment covering all days — only show one row per camp group
         if (r.is_full_camp && r.referral_code) {
-          if (seenCamps.has(r.referral_code)) return false;
-          seenCamps.add(r.referral_code);
+          const key = campGroupKey(r);
+          if (seenCamps.has(key)) return false;
+          seenCamps.add(key);
         }
         return true;
       })
@@ -227,8 +236,9 @@ export default function PaymentsPage() {
       .filter((r) => {
         if (r.status !== "confirmed" || !r.is_paid || sessionDateTimeMs(r) + 24 * 3600 * 1000 <= now) return false;
         if (r.is_full_camp && r.referral_code) {
-          if (seenCamps.has(r.referral_code)) return false;
-          seenCamps.add(r.referral_code);
+          const key = campGroupKey(r);
+          if (seenCamps.has(key)) return false;
+          seenCamps.add(key);
         }
         return true;
       })
@@ -264,18 +274,19 @@ export default function PaymentsPage() {
     const groups = new Map<string, Registration[]>();
     for (const r of registrations) {
       if (!r.is_full_camp || !r.referral_code) continue;
-      if (!groups.has(r.referral_code)) groups.set(r.referral_code, []);
-      groups.get(r.referral_code)!.push(r);
+      const key = campGroupKey(r);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(r);
     }
     const map = new Map<string, number>();
-    for (const [code, rows] of groups) {
+    for (const [key, rows] of groups) {
       const originalAmount = rows[0].session_price ?? 0;
       const confirmed = rows.filter((r) => r.status === "confirmed");
       const cancelled = rows.filter((r) => r.status === "cancelled");
       const perDayRate = rows[0].camp_drop_in_rate ?? Math.round(originalAmount / rows.length);
       const recomputedPrice = Math.min(confirmed.length * perDayRate, originalAmount);
       const accruedFees = cancelled.reduce((sum, r) => sum + (r.camp_day_late_fee || 0), 0);
-      map.set(code, Math.min(originalAmount, recomputedPrice + accruedFees));
+      map.set(key, Math.min(originalAmount, recomputedPrice + accruedFees));
     }
     return map;
   }, [registrations]);
@@ -283,8 +294,8 @@ export default function PaymentsPage() {
   function effectiveAmount(r: Registration): number {
     const isPrivateType = r.type === "private" || r.type === "group-private";
     let basePrice: number;
-    if (r.is_full_camp && r.referral_code && campGroupFinalAmounts.has(r.referral_code)) {
-      basePrice = campGroupFinalAmounts.get(r.referral_code)!;
+    if (r.is_full_camp && r.referral_code && campGroupFinalAmounts.has(campGroupKey(r))) {
+      basePrice = campGroupFinalAmounts.get(campGroupKey(r))!;
     } else if (r.session_price != null) {
       basePrice = r.session_price;
     } else if (r.type === "weekly" && !r.is_full_camp && r.referral_code && weeklyDiscountRates.has(r.referral_code)) {
@@ -310,19 +321,20 @@ export default function PaymentsPage() {
     const groups = new Map<string, Registration[]>();
     for (const r of registrations) {
       if (!r.is_full_camp || !r.referral_code) continue;
-      if (!groups.has(r.referral_code)) groups.set(r.referral_code, []);
-      groups.get(r.referral_code)!.push(r);
+      const key = campGroupKey(r);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(r);
     }
-    const out: { referralCode: string; parentName: string; finalAmount: number; originalAmount: number; isPaid: boolean; kids: string }[] = [];
-    for (const [referralCode, rows] of groups) {
+    const out: { key: string; referralCode: string; bookedGroup: string | null; parentName: string; finalAmount: number; originalAmount: number; isPaid: boolean; kids: string }[] = [];
+    for (const [key, rows] of groups) {
       const cancelled = rows.filter((r) => r.status === "cancelled");
       const confirmed = rows.filter((r) => r.status === "confirmed");
       if (cancelled.length === 0 || confirmed.length === 0) continue; // untouched, or fully cancelled (handled elsewhere)
       if (cancelled.every((r) => r.cancel_fee_settled)) continue;
       const originalAmount = rows[0].session_price ?? 0;
-      const finalAmount = campGroupFinalAmounts.get(referralCode) ?? originalAmount;
+      const finalAmount = campGroupFinalAmounts.get(key) ?? originalAmount;
       if (finalAmount === originalAmount) continue; // nothing changed, no adjustment to show
-      out.push({ referralCode, parentName: rows[0].parent_name, finalAmount, originalAmount, isPaid: !!rows[0].is_paid, kids: rows[0].kids });
+      out.push({ key, referralCode: rows[0].referral_code!, bookedGroup: rows[0].booked_group, parentName: rows[0].parent_name, finalAmount, originalAmount, isPaid: !!rows[0].is_paid, kids: rows[0].kids });
     }
     return out;
   }, [registrations, campGroupFinalAmounts]);
@@ -427,7 +439,7 @@ export default function PaymentsPage() {
                     </div>
                   </div>
                   <button
-                    onClick={() => togglePaid(r.id, r.is_paid, r.is_full_camp ? r.referral_code : null)}
+                    onClick={() => togglePaid(r.id, r.is_paid, r.is_full_camp ? r.referral_code : null, r.is_full_camp ? r.booked_group : null)}
                     disabled={togglingPaid === r.id}
                     className="w-9 h-9 shrink-0 rounded-full border-2 border-brown-600 hover:border-green-500 flex items-center justify-center transition font-bold text-brown-600 hover:text-green-500 text-sm"
                     title="Mark paid"
@@ -499,7 +511,7 @@ export default function PaymentsPage() {
               {campAdjustments.map((a) => {
                 const creditIssued = a.isPaid;
                 return (
-                  <div key={a.referralCode} className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-3 flex items-center justify-between gap-3">
+                  <div key={a.key} className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-3 flex items-center justify-between gap-3">
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                         <span className="font-medium text-sm">{a.parentName}</span>
@@ -514,11 +526,11 @@ export default function PaymentsPage() {
                       <div className="text-xs text-white mt-0.5 truncate">{a.kids.split(",").map((k) => k.split("(")[0].trim()).filter(Boolean).join(", ")}</div>
                     </div>
                     <button
-                      onClick={() => settleFee(a.referralCode, a.referralCode)}
-                      disabled={settlingFee === a.referralCode}
+                      onClick={() => settleFee(a.key, a.referralCode, a.bookedGroup)}
+                      disabled={settlingFee === a.key}
                       className="shrink-0 rounded-lg bg-brown-700 hover:bg-brown-600 px-3 py-1.5 text-xs font-medium text-white transition disabled:opacity-50"
                     >
-                      {settlingFee === a.referralCode ? "…" : "Settled"}
+                      {settlingFee === a.key ? "…" : "Settled"}
                     </button>
                   </div>
                 );
@@ -581,7 +593,7 @@ export default function PaymentsPage() {
                     </div>
                   </div>
                   <button
-                    onClick={() => togglePaid(r.id, r.is_paid, r.is_full_camp ? r.referral_code : null)}
+                    onClick={() => togglePaid(r.id, r.is_paid, r.is_full_camp ? r.referral_code : null, r.is_full_camp ? r.booked_group : null)}
                     disabled={togglingPaid === r.id}
                     className="w-9 h-9 shrink-0 rounded-full border-2 border-green-500 bg-green-500/20 flex items-center justify-center transition font-bold text-green-400 hover:border-red-500 hover:bg-red-500/10 hover:text-red-400 text-sm"
                     title="Undo — mark unpaid"

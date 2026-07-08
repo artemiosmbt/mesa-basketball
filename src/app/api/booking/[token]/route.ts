@@ -91,7 +91,7 @@ export async function GET(
 
   let campGroupDays: { token: string; bookedDate: string | null; bookedStartTime: string | null; status: string }[] | undefined;
   if (reg.is_full_camp && reg.referral_code) {
-    const group = await getCampGroupByReferralCode(reg.referral_code);
+    const group = await getCampGroupByReferralCode(reg.referral_code, reg.booked_group);
     campGroupDays = group.map((r) => ({
       token: r.manage_token,
       bookedDate: r.booked_date,
@@ -180,13 +180,13 @@ export async function DELETE(
       return NextResponse.json({ error: "Cannot cancel — missing camp group reference." }, { status: 500 });
     }
     const campName = reg.session_details.split(" — ")[0] || reg.session_details;
-    const group = await getCampGroupByReferralCode(reg.referral_code);
+    const group = await getCampGroupByReferralCode(reg.referral_code, reg.booked_group);
     const totalOriginalDays = group.length || 1;
     const remainingAfterThis = group.filter((r) => r.status === "confirmed" && r.id !== reg.id).length;
 
     if (remainingAfterThis === 0) {
       // Last remaining day — cancel the whole (now-empty) group, same rule as before.
-      const success = await cancelFullCampByReferralCode(reg.referral_code);
+      const success = await cancelFullCampByReferralCode(reg.referral_code, reg.booked_group);
       if (!success) {
         return NextResponse.json({ error: "Failed to cancel camp" }, { status: 500 });
       }

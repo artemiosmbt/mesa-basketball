@@ -678,6 +678,7 @@ export default function Home() {
   const [pkgEmail, setPkgEmail] = useState("");
   const [pkgPhone, setPkgPhone] = useState("");
   const [pkgMonth, setPkgMonth] = useState("");
+  const [pkgReferralCode, setPkgReferralCode] = useState("");
   const [pkgSubmitting, setPkgSubmitting] = useState(false);
   const [pkgResult, setPkgResult] = useState<{ success: boolean; message: string } | null>(null);
   const [calendarSessions, setCalendarSessions] = useState<CalSession[]>([]);
@@ -1004,6 +1005,12 @@ export default function Home() {
     return null;
   }
 
+  function referralNote(applied: boolean, code = referralCode): string {
+    return code.trim() && !applied
+      ? " Note: the referral code you entered wasn't applied — it may be invalid, or you may already have an account with us."
+      : "";
+  }
+
   async function performSubmit() {
     setSubmitting(true);
     setSubmitResult(null);
@@ -1050,7 +1057,7 @@ export default function Home() {
         })));
         setSubmitResult({
           success: true,
-          message: `${modal.selectedGroupSessions.length} sessions booked! A confirmation email has been sent to ${email}.`,
+          message: `${modal.selectedGroupSessions.length} sessions booked! A confirmation email has been sent to ${email}.${referralNote(!!result.referralApplied)}`,
         });
         saveProfile();
         // Clear selections
@@ -1112,7 +1119,7 @@ export default function Home() {
           })));
           setSubmitResult({
             success: true,
-            message: `Camp registration confirmed for ${selectedDaysArr.length} day${selectedDaysArr.length !== 1 ? "s" : ""}! A confirmation email has been sent to ${email}.`,
+            message: `Camp registration confirmed for ${selectedDaysArr.length} day${selectedDaysArr.length !== 1 ? "s" : ""}! A confirmation email has been sent to ${email}.${referralNote(!!result.referralApplied)}`,
           });
           saveProfile();
           setCampSelectedDays(new Set());
@@ -1150,9 +1157,12 @@ export default function Home() {
 
       // Register each date (skip emails for all — we'll send one consolidated email)
       const isRecurring = datesToBook.length > 1;
+      // Only the first date's call can still see isNewClient === true, so it's the only
+      // one that can actually apply the referral — capture its result to report accurately.
+      let firstBookingReferralApplied = false;
       for (let bIdx = 0; bIdx < datesToBook.length; bIdx++) {
         const booking = datesToBook[bIdx];
-        await fetch("/api/register", {
+        const res = await fetch("/api/register", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1176,6 +1186,10 @@ export default function Home() {
             applyAccountCredit: bIdx === 0 && accountCreditBalance !== null && accountCreditBalance > 0 && applyAccountCredit,
           }),
         });
+        if (bIdx === 0) {
+          const result = await res.json().catch(() => null);
+          firstBookingReferralApplied = !!result?.referralApplied;
+        }
       }
 
       // Send one consolidated email listing all dates
@@ -1198,6 +1212,7 @@ export default function Home() {
             totalParticipants,
             emailOnly: true,
             submittedReferralCode: referralCode.trim() || undefined,
+            referralWasApplied: firstBookingReferralApplied,
           }),
         });
       }
@@ -1208,9 +1223,9 @@ export default function Home() {
       })));
       setSubmitResult({
         success: true,
-        message: datesToBook.length > 1
+        message: (datesToBook.length > 1
           ? `${datesToBook.length} sessions booked! A confirmation email has been sent to ${email}.`
-          : `Booking confirmed! A confirmation email has been sent to ${email}.`,
+          : `Booking confirmed! A confirmation email has been sent to ${email}.`) + referralNote(firstBookingReferralApplied),
       });
       saveProfile();
       const fresh = await fetch("/api/schedule").then((r) => r.json());
@@ -1277,7 +1292,7 @@ export default function Home() {
           packageType: pkgModal.packageType,
           monthYear: pkgMonth,
           kids: kidsStr,
-          referralCode: referralCode.trim() || undefined,
+          referralCode: pkgReferralCode.trim() || undefined,
           smsConsent,
         }),
       });
@@ -1285,7 +1300,7 @@ export default function Home() {
       if (!res.ok) {
         setPkgResult({ success: false, message: data.error || "Enrollment failed." });
       } else {
-        setPkgResult({ success: true, message: `You're enrolled! Check your email for details. Book your ${pkgModal.packageType} private sessions for ${pkgMonthOptions.find(o => o.value === pkgMonth)?.label} and we'll track them automatically.` });
+        setPkgResult({ success: true, message: `You're enrolled! Check your email for details. Book your ${pkgModal.packageType} private sessions for ${pkgMonthOptions.find(o => o.value === pkgMonth)?.label} and we'll track them automatically.${referralNote(!!data.referralApplied, pkgReferralCode)}` });
       }
     } catch {
       setPkgResult({ success: false, message: "Something went wrong. Please try again." });
@@ -3336,6 +3351,18 @@ export default function Home() {
                     ))}
                   </select>
                 </div>
+                {!isReturningClient && (
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-brown-300">Referral Code <span className="text-brown-500 font-normal">(optional)</span></label>
+                    <input
+                      type="text"
+                      value={pkgReferralCode}
+                      onChange={(e) => setPkgReferralCode(e.target.value.toUpperCase())}
+                      placeholder="e.g. SMITH-MESA"
+                      className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
+                    />
+                  </div>
+                )}
                 <div>
                   {(() => {
                     const groupMaxSpots = modal.selectedGroupSessions?.[0]?.maxSpots ?? 8;

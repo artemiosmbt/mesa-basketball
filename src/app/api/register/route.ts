@@ -52,6 +52,11 @@ export async function POST(req: NextRequest) {
       useReferralCredit,
       // Account credit opt-in (dollar-value credit from e.g. a partial camp cancellation)
       applyAccountCredit,
+      // Set by the frontend on the consolidated emailOnly call for a recurring private
+      // series, echoing back whether the first dated call actually applied the referral
+      // — that call is the only one where isNewClient can still be true, so it's the
+      // only one that can know for sure.
+      referralWasApplied,
     } = body;
 
     if (!parentName || !email || !phone || !kids || !type || !sessionDetails) {
@@ -164,8 +169,14 @@ export async function POST(req: NextRequest) {
 
       // Award referral credit unconditionally — must not depend on the confirmation
       // email succeeding below, or a Resend hiccup silently drops the referrer's credit.
+      // Wrapped so a failure here (the sessions are already booked) can't surface as a
+      // failed registration to the client.
       if (weeklyReferrer) {
-        await addReferralCredit(weeklyReferrer.email);
+        try {
+          await addReferralCredit(weeklyReferrer.email);
+        } catch (creditErr) {
+          console.error("Failed to award referral credit (weekly, booking was saved):", creditErr);
+        }
       }
 
       try {
@@ -212,7 +223,7 @@ export async function POST(req: NextRequest) {
       const adminLines = weeklySessions.map((s: { date: string; startTime: string; endTime: string; location: string }) =>
         `${formatDateWithDay(s.date)} | ${s.startTime}-${s.endTime}\nLocation: ${resolveLocationName(s.location)}`
       ).join("\n");
-      await sendAdminSMS(`NEW BOOKING: ${parentName}\n${weeklySessions.length} ${sessionTypeSMS} session${weeklySessions.length !== 1 ? "s" : ""}:\n${adminLines}${weeklyTrainerLine}\nPlayers: ${kids}${submittedReferralCode ? `\nRef code: ${submittedReferralCode}` : ""}`);
+      await sendAdminSMS(`NEW BOOKING: ${parentName}\n${weeklySessions.length} ${sessionTypeSMS} session${weeklySessions.length !== 1 ? "s" : ""}:\n${adminLines}${weeklyTrainerLine}\nPlayers: ${kids}${submittedReferralCode ? `\nRef code: ${submittedReferralCode} ${weeklyReferrer ? "✓ applied" : "✗ NOT applied"}` : ""}`);
 
       // Update Google Calendar for each weekly session
       for (const session of weeklySessions) {
@@ -233,7 +244,7 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      return NextResponse.json({ success: true, count: weeklySessions.length });
+      return NextResponse.json({ success: true, count: weeklySessions.length, referralApplied: !!weeklyReferrer });
     }
 
     // Handle camp multi-day registration
@@ -331,8 +342,14 @@ export async function POST(req: NextRequest) {
 
       // Award referral credit unconditionally — must not depend on the confirmation
       // email succeeding below, or a Resend hiccup silently drops the referrer's credit.
+      // Wrapped so a failure here (the days are already booked) can't surface as a
+      // failed registration to the client.
       if (campReferrer) {
-        await addReferralCredit(campReferrer.email);
+        try {
+          await addReferralCredit(campReferrer.email);
+        } catch (creditErr) {
+          console.error("Failed to award referral credit (camp, booking was saved):", creditErr);
+        }
       }
 
       try {
@@ -373,7 +390,7 @@ export async function POST(req: NextRequest) {
         `${formatDateWithDay(s.date)} | ${s.startTime}${s.endTime ? `-${s.endTime}` : ""}\nLocation: ${resolveLocationName(s.location)}`
       ).join("\n");
       const campNameLine = `${firstSession.campName}${firstSession.gradeGroup ? ` — ${firstSession.gradeGroup}` : ""}`;
-      await sendAdminSMS(`NEW BOOKING: ${parentName}\n${campNameLine}\n${campSessions.length} camp day${campSessions.length !== 1 ? "s" : ""}:\n${adminCampLines}\nPlayers: ${kids}${submittedReferralCode ? `\nRef code: ${submittedReferralCode}` : ""}`);
+      await sendAdminSMS(`NEW BOOKING: ${parentName}\n${campNameLine}\n${campSessions.length} camp day${campSessions.length !== 1 ? "s" : ""}:\n${adminCampLines}\nPlayers: ${kids}${submittedReferralCode ? `\nRef code: ${submittedReferralCode} ${campReferrer ? "✓ applied" : "✗ NOT applied"}` : ""}`);
 
       // Update Google Calendar for each camp day
       for (const session of campSessions) {
@@ -393,7 +410,7 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      return NextResponse.json({ success: true, count: campSessions.length });
+      return NextResponse.json({ success: true, count: campSessions.length, referralApplied: !!campReferrer });
     }
 
     const isPrivateType = type === "private" || type === "group-private";
@@ -508,10 +525,16 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Award referral credit to referrer and notify them
+      // Award referral credit to referrer and notify them. Best-effort — the booking
+      // above already succeeded, so a failure here must not surface as a failed
+      // registration to the client (they'd retry and double-book).
       if (privateReferrer) {
-        await addReferralCredit(privateReferrer.email);
-        await sendReferralCreditNotification({ referrerName: privateReferrer.name, referrerEmail: privateReferrer.email, newClientName: parentName });
+        try {
+          await addReferralCredit(privateReferrer.email);
+          await sendReferralCreditNotification({ referrerName: privateReferrer.name, referrerEmail: privateReferrer.email, newClientName: parentName });
+        } catch (creditErr) {
+          console.error("Failed to award referral credit (private, booking was saved):", creditErr);
+        }
       }
     }
 
@@ -583,7 +606,11 @@ export async function POST(req: NextRequest) {
       // sees the session type up front instead of jumping straight to the date.
       const adminTypeLabel = type === "group-private" ? "group private" : "private";
       const adminTypeHeader = bookedDate ? `1 ${adminTypeLabel} session:` : `${adminTypeLabel} sessions:`;
-      await sendAdminSMS(`NEW BOOKING: ${parentName}\n${adminTypeHeader}\n${adminDateLine}${adminTrainerLine}\nPlayers: ${kids}${pkgAdminNote}${submittedReferralCode ? `\nRef code: ${submittedReferralCode}` : ""}`);
+      // emailOnly consolidated calls (recurring series) never compute privateReferrer
+      // themselves — isNewClient is already false by then — so trust the flag echoed
+      // back from the first dated call instead.
+      const referralWasAppliedForSms = emailOnly ? !!referralWasApplied : !!privateReferrer;
+      await sendAdminSMS(`NEW BOOKING: ${parentName}\n${adminTypeHeader}\n${adminDateLine}${adminTrainerLine}\nPlayers: ${kids}${pkgAdminNote}${submittedReferralCode ? `\nRef code: ${submittedReferralCode} ${referralWasAppliedForSms ? "✓ applied" : "✗ NOT applied"}` : ""}`);
     }
 
     // Add to Google Calendar (private sessions only; group/camp handled above)
@@ -607,7 +634,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({ success: true, isFree });
+    return NextResponse.json({ success: true, isFree, referralApplied: !!privateReferrer });
   } catch (error) {
     console.error("Registration error:", error);
     return NextResponse.json(

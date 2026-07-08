@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { id, field, value, referralCode } = await req.json();
+  const { id, field, value, referralCode, bookedGroup } = await req.json();
   if (!id || !field) return NextResponse.json({ error: "Missing fields" }, { status: 400 });
 
   const allowed = ["is_paid", "cancel_fee_settled"];
@@ -31,15 +31,16 @@ export async function POST(req: NextRequest) {
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
 
-  // For full camp registrations, update all rows sharing the same referral_code.
-  // cancel_fee_settled only needs to apply to the cancelled day-rows (the ones a
-  // camp adjustment fee was actually assessed on); is_paid applies to every row.
+  // For full camp registrations, update all rows sharing the same referral_code AND
+  // booked_group (the camp's own name) — referral_code alone isn't a unique purchase
+  // ID, it's the client's permanent code, identical across every camp they've bought.
   if (referralCode && (field === "is_paid" || field === "cancel_fee_settled")) {
     let query = supabase
       .from("registrations")
       .update({ [field]: value })
       .eq("referral_code", referralCode)
       .eq("is_full_camp", true);
+    query = bookedGroup ? query.eq("booked_group", bookedGroup) : query.is("booked_group", null);
     if (field === "cancel_fee_settled") query = query.eq("status", "cancelled");
     const { error } = await query;
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });

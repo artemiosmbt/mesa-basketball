@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { enrollInPackage, getActivePackage, countConfirmedPrivateSessions, setPackageSessions } from "@/lib/supabase";
-import { sendPackageConfirmation } from "@/lib/email";
+import { enrollInPackage, getActivePackage, countConfirmedPrivateSessions, setPackageSessions, isNewClient, findReferrerInfoByCode, addReferralCredit } from "@/lib/supabase";
+import { sendPackageConfirmation, sendReferralCreditNotification } from "@/lib/email";
 import { sendSMS, sendAdminSMS } from "@/lib/sms";
 
 export async function POST(req: NextRequest) {
@@ -25,6 +25,21 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Check referrer BEFORE enrolling — same eligibility rule as every other booking type:
+    // only a genuinely new client (no prior registration under this email or phone) can
+    // trigger a reward for whoever referred them.
+    let referrer: { email: string; name: string } | null = null;
+    if (referralCode) {
+      const newClient = await isNewClient(email, phone);
+      if (newClient) {
+        const info = await findReferrerInfoByCode(referralCode);
+        if (info && info.email !== email) {
+          referrer = info;
+        }
+      }
+    }
+    const referralApplied = !!referrer;
+
     const { id } = await enrollInPackage({ email, parentName, phone, packageType, monthYear });
 
     // Seed sessions_used from any private sessions already booked this month
@@ -35,14 +50,26 @@ export async function POST(req: NextRequest) {
 
     const totalPrice = packageType === 4 ? 475 : 900;
 
+    // Award referral credit unconditionally — must not depend on the confirmation email
+    // succeeding below, and wrapped so a failure here (the package is already enrolled)
+    // can't surface as a failed enrollment to the client.
+    if (referrer) {
+      try {
+        await addReferralCredit(referrer.email);
+        await sendReferralCreditNotification({ referrerName: referrer.name, referrerEmail: referrer.email, newClientName: parentName });
+      } catch (creditErr) {
+        console.error("Failed to award referral credit (package, enrollment was saved):", creditErr);
+      }
+    }
+
     await sendPackageConfirmation({ parentName, email, phone, packageType, monthYear, totalPrice, kids, referralCode });
 
     if (smsConsent && phone) {
       await sendSMS(phone, `Mesa Basketball: Your ${packageType}-session package is confirmed for ${monthYear}!\nBook your private sessions at mesabasketballtraining.com/schedule and we'll track them automatically.\nReply STOP to opt out.`);
     }
-    await sendAdminSMS(`NEW PACKAGE: ${parentName}\n${packageType}-session package — ${monthYear}\nPhone: ${phone}${kids ? `\nPlayers: ${kids}` : ""}`);
+    await sendAdminSMS(`NEW PACKAGE: ${parentName}\n${packageType}-session package — ${monthYear}\nPhone: ${phone}${kids ? `\nPlayers: ${kids}` : ""}${referralCode ? `\nRef code: ${referralCode} ${referralApplied ? "✓ applied" : "✗ NOT applied"}` : ""}`);
 
-    return NextResponse.json({ success: true, id });
+    return NextResponse.json({ success: true, id, referralApplied });
   } catch (error) {
     console.error("Package enrollment error:", error);
     return NextResponse.json({ error: "Enrollment failed. Please try again." }, { status: 500 });
