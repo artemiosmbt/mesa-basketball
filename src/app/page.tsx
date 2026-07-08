@@ -176,7 +176,7 @@ export default function LandingPage() {
               muted
               loop
               playsInline
-              className="absolute inset-0 h-full w-full object-cover object-center"
+              className="absolute inset-0 h-full w-full object-cover object-[center_42%]"
             />
             <div className="absolute inset-0 bg-gradient-to-br from-mesa-dark/95 via-mesa-dark/75 to-brown-900/60" />
             <div className="absolute inset-0 bg-gradient-to-t from-mesa-dark via-transparent to-transparent" />
