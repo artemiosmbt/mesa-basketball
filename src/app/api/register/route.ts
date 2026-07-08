@@ -186,22 +186,28 @@ export async function POST(req: NextRequest) {
         console.error("Weekly booking email failed (booking was saved):", notifyErr);
       }
 
-      // SMS runs independently so it always fires even if email throws
-      const sessionTypeSMS = isPickupBooking ? "pickup session" : "session";
+      // SMS runs independently so it always fires even if email throws.
+      // Label uses the actual group name (e.g. "High School Boys") rather than the generic
+      // word "group" — a plain "session" label doesn't tell the admin which group booked.
+      const groupNames: string[] = Array.from(new Set(
+        weeklySessions.map((s: { group?: string }) => s.group).filter((g: string | undefined): g is string => !!g)
+      ));
+      const sessionTypeSMS = isPickupBooking ? "pickup" : (groupNames.length === 1 ? groupNames[0] : "group");
       const weeklyTrainerLine = weeklySessions[0]?.trainer ? `\nTrainer: ${weeklySessions[0].trainer}` : "";
       if (smsConsent) {
         const sessionLines = weeklySessions.map((s: { date: string; startTime: string; endTime: string; location: string }) =>
           `${formatDateWithDay(s.date)} | ${s.startTime}-${s.endTime}\nLocation: ${resolveLocationName(s.location)}`
         ).join("\n");
         const count = weeklySessions.length;
-        const confirmLabel = count === 1 ? `${isPickupBooking ? "Pickup session" : "Session"}` : `${count} ${isPickupBooking ? "pickup sessions" : "sessions"}`;
+        const capitalizedType = sessionTypeSMS.charAt(0).toUpperCase() + sessionTypeSMS.slice(1);
+        const confirmLabel = count === 1 ? `${capitalizedType} session` : `${count} ${sessionTypeSMS} sessions`;
         const creditLine = weeklyCreditApplied > 0 ? `\n$${weeklyCreditApplied} account credit applied.` : "";
         await sendSMS(phone, `Mesa Basketball: ${confirmLabel} confirmed!\n${sessionLines}${weeklyTrainerLine}\nAthlete: ${kids}${creditLine}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
       }
       const adminLines = weeklySessions.map((s: { date: string; startTime: string; endTime: string; location: string }) =>
         `${formatDateWithDay(s.date)} | ${s.startTime}-${s.endTime}\nLocation: ${resolveLocationName(s.location)}`
       ).join("\n");
-      await sendAdminSMS(`NEW BOOKING: ${parentName}\n${weeklySessions.length} ${sessionTypeSMS}${weeklySessions.length !== 1 ? "s" : ""}:\n${adminLines}${weeklyTrainerLine}\nPlayers: ${kids}${submittedReferralCode ? `\nRef code: ${submittedReferralCode}` : ""}`);
+      await sendAdminSMS(`NEW BOOKING: ${parentName}\n${weeklySessions.length} ${sessionTypeSMS} session${weeklySessions.length !== 1 ? "s" : ""}:\n${adminLines}${weeklyTrainerLine}\nPlayers: ${kids}${submittedReferralCode ? `\nRef code: ${submittedReferralCode}` : ""}`);
 
       // Update Google Calendar for each weekly session
       for (const session of weeklySessions) {
@@ -356,7 +362,8 @@ export async function POST(req: NextRequest) {
       const adminCampLines = campSessions.map((s: { date: string; startTime: string; endTime?: string; location: string }) =>
         `${formatDateWithDay(s.date)} | ${s.startTime}${s.endTime ? `-${s.endTime}` : ""}\nLocation: ${resolveLocationName(s.location)}`
       ).join("\n");
-      await sendAdminSMS(`NEW BOOKING: ${parentName}\n${campSessions.length} camp day${campSessions.length !== 1 ? "s" : ""}:\n${adminCampLines}\nPlayers: ${kids}${submittedReferralCode ? `\nRef code: ${submittedReferralCode}` : ""}`);
+      const campNameLine = `${firstSession.campName}${firstSession.gradeGroup ? ` — ${firstSession.gradeGroup}` : ""}`;
+      await sendAdminSMS(`NEW BOOKING: ${parentName}\n${campNameLine}\n${campSessions.length} camp day${campSessions.length !== 1 ? "s" : ""}:\n${adminCampLines}\nPlayers: ${kids}${submittedReferralCode ? `\nRef code: ${submittedReferralCode}` : ""}`);
 
       // Update Google Calendar for each camp day
       for (const session of campSessions) {
@@ -562,7 +569,11 @@ export async function POST(req: NextRequest) {
         ? `\nPkg: ${effectivePkgRemaining}/${effectivePkgType} remaining`
         : "";
       const adminTrainerLine = isPrivateType && bookedTrainer ? `\nTrainer: ${bookedTrainer}` : "";
-      await sendAdminSMS(`NEW BOOKING: ${parentName}\n${adminDateLine}${adminTrainerLine}\nPlayers: ${kids}${pkgAdminNote}${submittedReferralCode ? `\nRef code: ${submittedReferralCode}` : ""}`);
+      // Match the pickup/group/camp texts' "N x session(s):" header so the admin always
+      // sees the session type up front instead of jumping straight to the date.
+      const adminTypeLabel = type === "group-private" ? "group private" : "private";
+      const adminTypeHeader = bookedDate ? `1 ${adminTypeLabel} session:` : `${adminTypeLabel} sessions:`;
+      await sendAdminSMS(`NEW BOOKING: ${parentName}\n${adminTypeHeader}\n${adminDateLine}${adminTrainerLine}\nPlayers: ${kids}${pkgAdminNote}${submittedReferralCode ? `\nRef code: ${submittedReferralCode}` : ""}`);
     }
 
     // Add to Google Calendar (private sessions only; group/camp handled above)

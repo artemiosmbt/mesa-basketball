@@ -63,7 +63,8 @@ export async function POST(req: NextRequest) {
   });
 
   if (reg.sms_consent && reg.phone) {
-    await sendSMS(reg.phone, `Mesa Basketball: You were marked as a no-show for today's session. The full session fee of $${feeAmount} is due. Reply here with any questions. Reply STOP to opt out.`);
+    const noShowLabel = reg.session_details.split(" — ")[0] || "session";
+    await sendSMS(reg.phone, `Mesa Basketball: You were marked as a no-show for today's ${noShowLabel}. The full session fee of $${feeAmount} is due. Reply here with any questions. Reply STOP to opt out.`);
   }
   await sendAdminSMS(`NO-SHOW: ${reg.parent_name} — ${reg.session_details} | Fee: $${feeAmount}`);
 
