@@ -16,7 +16,12 @@ interface Registration {
   session_details: string;
   booked_date: string | null;
   booked_start_time: string | null;
+  booked_end_time: string | null;
+  booked_location: string | null;
+  booked_group: string | null;
   booked_trainer: string | null;
+  manage_token: string;
+  sms_consent: boolean;
   status: string;
   session_price: number | null;
   total_participants: number;
@@ -173,13 +178,14 @@ interface CalendarViewProps {
   weeklyDiscountRates: Map<string, number>;
   cancelRegistration: (id: string) => Promise<void>;
   markNoShow: (id: string) => Promise<void>;
+  openReschedule: (r: Registration) => void;
   cancelling: string | null;
   noShowing: string | null;
   noShowConfirm: string | null;
   setNoShowConfirm: (id: string | null) => void;
 }
 
-function CalendarView({ list, packageMembership, weeklyDiscountRates, cancelRegistration, markNoShow, cancelling, noShowing, noShowConfirm, setNoShowConfirm }: CalendarViewProps) {
+function CalendarView({ list, packageMembership, weeklyDiscountRates, cancelRegistration, markNoShow, openReschedule, cancelling, noShowing, noShowConfirm, setNoShowConfirm }: CalendarViewProps) {
   const [currentMonth, setCurrentMonth] = useState(() => {
     const n = new Date();
     return new Date(n.getFullYear(), n.getMonth(), 1);
@@ -325,6 +331,9 @@ function CalendarView({ list, packageMembership, weeklyDiscountRates, cancelRegi
                         <button onClick={() => cancelRegistration(r.id)} disabled={cancelling === r.id} className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50">
                           {cancelling === r.id ? "..." : "Cancel"}
                         </button>
+                        <button onClick={() => openReschedule(r)} className="text-xs text-blue-400 hover:text-blue-300 transition">
+                          Reschedule
+                        </button>
                         {noShowConfirm !== r.id ? (
                           <button onClick={() => setNoShowConfirm(r.id)} disabled={noShowing === r.id} className="text-xs text-orange-400 hover:text-orange-300 transition disabled:opacity-50">
                             No Show
@@ -367,6 +376,13 @@ export default function AdminPage() {
   const [noShowing, setNoShowing] = useState<string | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [selectedClient, setSelectedClient] = useState<string | null>(null);
+
+  // Admin reschedule state
+  const [reschedulingId, setReschedulingId] = useState<string | null>(null);
+  const [rescheduleStep, setRescheduleStep] = useState<"edit" | "confirm">("edit");
+  const [rescheduleForm, setRescheduleForm] = useState({ date: "", start: "", end: "", location: "" });
+  const [rescheduleSaving, setRescheduleSaving] = useState(false);
+  const [rescheduleError, setRescheduleError] = useState<string | null>(null);
 
   // Time Change state
   const [tcResult, setTcResult] = useState<{ changesFound: { session: string; oldTime: string; newTime: string; count: number }[]; totalEmailsSent: number; totalSmsSent: number } | null>(null);
@@ -447,6 +463,60 @@ export default function AdminPage() {
     });
     setRegistrations((prev) => prev.map((r) => (r.id === id ? { ...r, status: "no_show" } : r)));
     setNoShowing(null);
+  }
+
+  function openReschedule(r: Registration) {
+    setReschedulingId(r.id);
+    setRescheduleStep("edit");
+    setRescheduleError(null);
+    setRescheduleForm({
+      date: r.booked_date || "",
+      start: r.booked_start_time || "",
+      end: r.booked_end_time || "",
+      location: r.booked_location || "",
+    });
+  }
+
+  function reviewReschedule() {
+    if (!rescheduleForm.date.trim() || !rescheduleForm.start.trim() || !rescheduleForm.end.trim() || !rescheduleForm.location.trim()) {
+      setRescheduleError("All fields are required.");
+      return;
+    }
+    setRescheduleError(null);
+    setRescheduleStep("confirm");
+  }
+
+  async function submitReschedule() {
+    if (!token || !reschedulingId) return;
+    setRescheduleSaving(true);
+    setRescheduleError(null);
+    const res = await fetch("/api/admin/reschedule", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        id: reschedulingId,
+        bookedDate: rescheduleForm.date.trim(),
+        bookedStartTime: rescheduleForm.start.trim(),
+        bookedEndTime: rescheduleForm.end.trim(),
+        bookedLocation: rescheduleForm.location.trim(),
+      }),
+    });
+    const data = await res.json();
+    setRescheduleSaving(false);
+    if (!res.ok) {
+      setRescheduleError(data.error || "Failed to reschedule.");
+      return;
+    }
+    const id = reschedulingId;
+    setRegistrations((prev) => prev.map((r) => (r.id === id ? {
+      ...r,
+      booked_date: rescheduleForm.date.trim(),
+      booked_start_time: rescheduleForm.start.trim(),
+      booked_end_time: rescheduleForm.end.trim(),
+      booked_location: rescheduleForm.location.trim(),
+      session_details: data.sessionDetails || r.session_details,
+    } : r)));
+    setReschedulingId(null);
   }
 
   const upcoming = useMemo(() => {
@@ -660,6 +730,11 @@ export default function AdminPage() {
                     {cancelling === r.id ? "Cancelling..." : "Cancel"}
                   </button>
                 )}
+                {r.status === "confirmed" && !isPast && (
+                  <button onClick={() => openReschedule(r)} className="text-xs text-blue-400 hover:text-blue-300 transition">
+                    Reschedule
+                  </button>
+                )}
                 {r.status === "confirmed" && noShowConfirm !== r.id && (
                   <button onClick={() => setNoShowConfirm(r.id)} disabled={noShowing === r.id} className="text-xs text-orange-400 hover:text-orange-300 transition disabled:opacity-50">
                     No Show
@@ -743,6 +818,9 @@ export default function AdminPage() {
                   <div className="flex items-center gap-3">
                     <button onClick={() => cancelRegistration(r.id)} disabled={cancelling === r.id} className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50">
                       {cancelling === r.id ? "..." : "Cancel"}
+                    </button>
+                    <button onClick={() => openReschedule(r)} className="text-xs text-blue-400 hover:text-blue-300 transition">
+                      Reschedule
                     </button>
                     <button onClick={() => { if (window.confirm("Mark as no show?")) markNoShow(r.id); }} disabled={noShowing === r.id} className="text-xs text-orange-400 hover:text-orange-300 transition disabled:opacity-50">
                       {noShowing === r.id ? "..." : "No Show"}
@@ -995,6 +1073,7 @@ export default function AdminPage() {
               weeklyDiscountRates={weeklyDiscountRates}
               cancelRegistration={cancelRegistration}
               markNoShow={markNoShow}
+              openReschedule={openReschedule}
               cancelling={cancelling}
               noShowing={noShowing}
               noShowConfirm={noShowConfirm}
@@ -1075,6 +1154,107 @@ export default function AdminPage() {
 
       </div>
       </div>
+
+      {/* Admin reschedule modal */}
+      {reschedulingId && (() => {
+        const r = registrations.find((x) => x.id === reschedulingId);
+        if (!r) return null;
+
+        if (rescheduleStep === "confirm") {
+          return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4" onClick={() => setReschedulingId(null)}>
+              <div className="w-full max-w-sm rounded-xl bg-brown-900 border border-brown-700 p-5" onClick={(e) => e.stopPropagation()}>
+                <h3 className="text-sm font-semibold text-white mb-1">Confirm Reschedule</h3>
+                <p className="text-xs text-brown-400 mb-3">{r.parent_name} — {athleteNames(r.kids || "")}</p>
+                <div className="rounded-lg border border-brown-700 bg-brown-950 p-3 space-y-2 text-xs">
+                  <div>
+                    <p className="text-brown-500 uppercase tracking-wider text-[10px] mb-0.5">From</p>
+                    <p className="text-brown-300">{formatDate(r.booked_date)} · {r.booked_start_time}{r.booked_end_time ? `-${r.booked_end_time}` : ""}</p>
+                    <p className="text-brown-400">{r.booked_location}</p>
+                  </div>
+                  <div className="border-t border-brown-800 pt-2">
+                    <p className="text-brown-500 uppercase tracking-wider text-[10px] mb-0.5">To</p>
+                    <p className="text-white font-medium">{rescheduleForm.date} · {rescheduleForm.start}-{rescheduleForm.end}</p>
+                    <p className="text-mesa-accent">{rescheduleForm.location}</p>
+                  </div>
+                </div>
+                {rescheduleError && <p className="text-xs text-red-400 mt-2">{rescheduleError}</p>}
+                <p className="text-[11px] text-brown-500 mt-3">No late fee is charged. The client will get an email/text about the change.</p>
+                <div className="flex gap-3 mt-4">
+                  <button onClick={submitReschedule} disabled={rescheduleSaving} className="flex-1 rounded-lg bg-mesa-accent text-white text-sm font-semibold py-2 disabled:opacity-50">
+                    {rescheduleSaving ? "Sending..." : "Confirm & Send"}
+                  </button>
+                  <button onClick={() => setRescheduleStep("edit")} disabled={rescheduleSaving} className="rounded-lg border border-brown-700 text-brown-300 text-sm px-4 py-2 disabled:opacity-50">
+                    Back
+                  </button>
+                </div>
+                <button onClick={() => setReschedulingId(null)} disabled={rescheduleSaving} className="mt-2 w-full text-center text-xs text-brown-500 hover:text-brown-300 transition disabled:opacity-50">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          );
+        }
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4" onClick={() => setReschedulingId(null)}>
+            <div className="w-full max-w-sm rounded-xl bg-brown-900 border border-brown-700 p-5" onClick={(e) => e.stopPropagation()}>
+              <h3 className="text-sm font-semibold text-white mb-1">Reschedule Session</h3>
+              <p className="text-xs text-brown-400 mb-3">{r.parent_name} — {athleteNames(r.kids || "")}</p>
+              <div className="space-y-2">
+                <div>
+                  <label className="text-[10px] uppercase tracking-wider text-brown-500">Date</label>
+                  <input
+                    value={rescheduleForm.date}
+                    onChange={(e) => setRescheduleForm((f) => ({ ...f, date: e.target.value }))}
+                    placeholder="e.g. July 20, 2026"
+                    className="mt-0.5 w-full rounded bg-brown-950 border border-brown-700 px-2 py-1.5 text-sm text-white"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] uppercase tracking-wider text-brown-500">Start</label>
+                    <input
+                      value={rescheduleForm.start}
+                      onChange={(e) => setRescheduleForm((f) => ({ ...f, start: e.target.value }))}
+                      placeholder="e.g. 7:00 PM"
+                      className="mt-0.5 w-full rounded bg-brown-950 border border-brown-700 px-2 py-1.5 text-sm text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] uppercase tracking-wider text-brown-500">End</label>
+                    <input
+                      value={rescheduleForm.end}
+                      onChange={(e) => setRescheduleForm((f) => ({ ...f, end: e.target.value }))}
+                      placeholder="e.g. 8:00 PM"
+                      className="mt-0.5 w-full rounded bg-brown-950 border border-brown-700 px-2 py-1.5 text-sm text-white"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[10px] uppercase tracking-wider text-brown-500">Location</label>
+                  <input
+                    value={rescheduleForm.location}
+                    onChange={(e) => setRescheduleForm((f) => ({ ...f, location: e.target.value }))}
+                    placeholder="Location"
+                    className="mt-0.5 w-full rounded bg-brown-950 border border-brown-700 px-2 py-1.5 text-sm text-white"
+                  />
+                </div>
+              </div>
+              {rescheduleError && <p className="text-xs text-red-400 mt-2">{rescheduleError}</p>}
+              <p className="text-[11px] text-brown-500 mt-3">No late fee is charged — this updates the client&apos;s existing booking and notifies them by email/text.</p>
+              <div className="flex gap-3 mt-4">
+                <button onClick={reviewReschedule} className="flex-1 rounded-lg bg-mesa-accent text-white text-sm font-semibold py-2">
+                  Review Change
+                </button>
+                <button onClick={() => setReschedulingId(null)} className="rounded-lg border border-brown-700 text-brown-300 text-sm px-4 py-2">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
