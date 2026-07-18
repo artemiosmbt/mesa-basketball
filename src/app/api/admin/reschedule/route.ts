@@ -9,7 +9,7 @@ import {
 import { sendRescheduleNotification } from "@/lib/email";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import { getWeeklySchedule } from "@/lib/sheets";
-import { addAccountCredit } from "@/lib/supabase";
+import { addAccountCredit, addReferralCredit } from "@/lib/supabase";
 
 async function verifyAdmin(req: NextRequest) {
   const token = req.headers.get("authorization")?.replace("Bearer ", "");
@@ -41,6 +41,15 @@ function isPrivateType(type: string): boolean {
   return type === "private" || type === "group-private";
 }
 
+// The DB always stores the FULL (undiscounted) session_price for private
+// sessions — the referral-credit / first-time 50% off is applied at display
+// and billing time via is_free, never baked into the stored price. Mirrors
+// resolvedSessionPrice() in booking/[token]/route.ts and effectivePrice() in
+// the admin dashboard.
+function effectiveAmount(fullPrice: number, isFree: boolean, isPriv: boolean): number {
+  return isFree && isPriv ? Math.round(fullPrice * 0.5) : fullPrice;
+}
+
 // Admin-initiated move of a single confirmed booking to a new day/time/location
 // (and optionally a new type, e.g. converting a group booking into a private
 // one). Unlike the client-facing reschedule, this updates the row in place
@@ -51,7 +60,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { id, bookedDate, bookedStartTime, bookedEndTime, bookedLocation, bookedGroup, bookedTrainer, sessionLabelPrefix, newType } = await req.json();
+  const { id, bookedDate, bookedStartTime, bookedEndTime, bookedLocation, bookedGroup, bookedTrainer, sessionLabelPrefix, newType, keepReferralCredit } = await req.json();
   if (!id || !bookedDate || !bookedStartTime || !bookedEndTime || !bookedLocation) {
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
   }
@@ -96,37 +105,47 @@ export async function POST(req: NextRequest) {
   const newSessionLabel: string = (typeof bookedGroup === "string" && bookedGroup) ? bookedGroup : oldSessionLabel;
   const resolvedTrainer = (typeof bookedTrainer === "string" && bookedTrainer) ? bookedTrainer : (reg.booked_trainer || undefined);
 
-  // Recompute price whenever the destination charges differently than the
-  // source. Group -> private isn't comparable at all, so it's always
-  // recalculated. Weekly -> weekly is recalculated too, since different
-  // groups can have very different rates (e.g. "HS Pickup" is $30, a regular
-  // group is $50) — we look the new group's actual rate up from the live
-  // sheet rather than trusting a client-supplied number.
-  //
-  // Skip entirely for bookings with special pricing already applied (free /
-  // referral-credit sessions) — silently overwriting a discounted price with
-  // the sheet's sticker price would be a real money bug, not a convenience.
-  const skipPriceRecompute = !!reg.is_free || !!reg.used_referral_credit;
-  let newSessionPrice: number | undefined;
-  if (!skipPriceRecompute) {
-    if (isNewPrivate && !wasPrivate) {
-      const durationMins = Math.max(60, parseMinsFromTime(bookedEndTime) - parseMinsFromTime(bookedStartTime));
-      newSessionPrice = calcPrivatePrice(durationMins, reg.total_participants || 1);
-    } else if (effectiveType === "weekly") {
-      try {
-        const sessions = await getWeeklySchedule();
-        const match = sessions.find((s) => s.group === newSessionLabel && s.date === bookedDate && s.startTime === bookedStartTime);
-        if (match) {
-          newSessionPrice = Math.round(match.price * (reg.total_participants || 1));
-        }
-      } catch {
-        // Sheet lookup failed — leave the existing price untouched rather than guessing.
+  // Referral-credit reuse: only meaningful when the booking already used one
+  // (private-only in this codebase) and the caller explicitly says whether to
+  // keep applying it. Default (no explicit value) preserves whatever the
+  // booking already had — nothing changes unless the admin actively unchecks it.
+  let newIsFree: boolean = !!reg.is_free;
+  let newUsedReferralCredit: boolean = !!reg.used_referral_credit;
+  let creditRefunded = false;
+  if (reg.used_referral_credit && typeof keepReferralCredit === "boolean" && !keepReferralCredit) {
+    newIsFree = false;
+    newUsedReferralCredit = false;
+  }
+
+  // Recompute the FULL (undiscounted) price whenever the destination charges
+  // differently than the source. Group -> private isn't comparable at all, so
+  // it's always recalculated from the new duration. Private -> private is also
+  // recalculated, since duration-based pricing should reflect the actual new
+  // slot length. Weekly -> weekly is recalculated too, since different groups
+  // can have very different rates (e.g. "HS Pickup" is $30, a regular group is
+  // $50) — looked up from the live sheet rather than trusted from the client.
+  // Camp pricing is left untouched — too many variables (early-bird, drop-in
+  // rate, referral discounts) to safely auto-recompute.
+  let newFullPrice: number | undefined;
+  if (isNewPrivate) {
+    const durationMins = Math.max(60, parseMinsFromTime(bookedEndTime) - parseMinsFromTime(bookedStartTime));
+    newFullPrice = calcPrivatePrice(durationMins, reg.total_participants || 1);
+  } else if (effectiveType === "weekly") {
+    try {
+      const sessions = await getWeeklySchedule();
+      const match = sessions.find((s) => s.group === newSessionLabel && s.date === bookedDate && s.startTime === bookedStartTime);
+      if (match) {
+        newFullPrice = Math.round(match.price * (reg.total_participants || 1));
       }
+    } catch {
+      // Sheet lookup failed — leave the existing price untouched rather than guessing.
     }
   }
 
-  const oldPrice = reg.session_price ?? 0;
-  const priceDelta = newSessionPrice !== undefined ? newSessionPrice - oldPrice : 0;
+  const oldFullPrice = reg.session_price ?? 0;
+  const oldAmount = effectiveAmount(oldFullPrice, !!reg.is_free, wasPrivate);
+  const newAmount = newFullPrice !== undefined ? effectiveAmount(newFullPrice, newIsFree, isNewPrivate) : oldAmount;
+  const priceDelta = newFullPrice !== undefined ? newAmount - oldAmount : 0;
 
   const { error } = await supabase
     .from("registrations")
@@ -140,7 +159,9 @@ export async function POST(req: NextRequest) {
       booked_trainer: resolvedTrainer || null,
       session_details: newSessionDetails,
       admin_change_at: new Date().toISOString(),
-      ...(newSessionPrice !== undefined ? { session_price: newSessionPrice } : {}),
+      is_free: newIsFree,
+      used_referral_credit: newUsedReferralCredit,
+      ...(newFullPrice !== undefined ? { session_price: newFullPrice } : {}),
     })
     .eq("id", id);
 
@@ -148,11 +169,23 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  // If the client already paid and the new price is lower, credit the
-  // difference to their account (same rule already used for partial camp-day
-  // cancellations elsewhere). If the new price is higher, there's no Stripe
-  // charge to trigger yet — surface the amount due in the response/notices
-  // instead so it doesn't get charged silently once Stripe is live.
+  // Unchecking "keep referral credit" gives the credit back — they're no
+  // longer using it, so it shouldn't just vanish.
+  if (reg.used_referral_credit && !newUsedReferralCredit) {
+    try {
+      await addReferralCredit(reg.email);
+      creditRefunded = true;
+    } catch (err) {
+      console.error("Failed to refund referral credit (admin reschedule):", err);
+    }
+  }
+
+  // If the client already paid and the new amount owed is lower, credit the
+  // difference to their account for their next booking (same rule already
+  // used for partial camp-day cancellations elsewhere). If the new amount is
+  // higher, there's no Stripe charge to trigger yet — surface it in the
+  // response/notices instead so it doesn't get charged silently once Stripe
+  // is live.
   let creditGranted = 0;
   if (reg.is_paid && priceDelta < 0) {
     try {
@@ -218,17 +251,17 @@ export async function POST(req: NextRequest) {
 
   // Notify the client — no late fee, this was the business's call. The price
   // note is appended directly (not part of the shared template) since only
-  // this admin flow needs to say "no change to your rate" vs "new rate" vs
-  // "credited"/"due".
-  const priceNote = newSessionPrice === undefined
+  // this admin flow needs to say "no change" vs "credited" vs "due".
+  const priceNote = newFullPrice === undefined
     ? ""
     : creditGranted > 0
-      ? `\n$${creditGranted} has been credited to your account.`
+      ? `\n$${oldAmount} → $${newAmount}. $${creditGranted} credited to your account for your next booking.`
       : amountDue > 0
-        ? `\nNew price: $${newSessionPrice} (was $${oldPrice}). $${amountDue} additional due.`
+        ? `\n$${oldAmount} → $${newAmount}. $${amountDue} additional due.`
         : priceDelta !== 0
-          ? `\nNew price: $${newSessionPrice} (was $${oldPrice}).`
+          ? `\n$${oldAmount} → $${newAmount}.`
           : "";
+  const creditRefundNote = creditRefunded ? "\nYour referral credit was refunded since it's no longer applied to this booking." : "";
 
   try {
     await sendRescheduleNotification({
@@ -243,19 +276,20 @@ export async function POST(req: NextRequest) {
     if (reg.sms_consent && reg.phone) {
       await sendSMS(
         reg.phone,
-        `Mesa Basketball: Your session has been rescheduled by your trainer.\n${formatDateWithDay(bookedDate)} | ${bookedStartTime}-${bookedEndTime}\nLocation: ${resolveLocationName(bookedLocation)}\nAthlete: ${reg.kids}${priceNote}\nManage: mesabasketballtraining.com/booking/${reg.manage_token}\nReply STOP to opt out.`
+        `Mesa Basketball: Your session has been rescheduled by your trainer.\n${formatDateWithDay(bookedDate)} | ${bookedStartTime}-${bookedEndTime}\nLocation: ${resolveLocationName(bookedLocation)}\nAthlete: ${reg.kids}${priceNote}${creditRefundNote}\nManage: mesabasketballtraining.com/booking/${reg.manage_token}\nReply STOP to opt out.`
       );
     }
-    const adminPriceNote = newSessionPrice === undefined
+    const adminPriceNote = newFullPrice === undefined
       ? ""
       : creditGranted > 0
-        ? `\n$${creditGranted} credited to their account (was paid, new price is lower)`
+        ? `\n$${oldAmount} -> $${newAmount}: $${creditGranted} credited to their account (already paid)`
         : amountDue > 0
-          ? `\n$${amountDue} additional now due (already paid at the old price)`
+          ? `\n$${oldAmount} -> $${newAmount}: $${amountDue} additional now due (already paid at the old price)`
           : priceDelta !== 0
-            ? `\nPrice: $${oldPrice} -> $${newSessionPrice}`
+            ? `\nPrice: $${oldAmount} -> $${newAmount}`
             : "";
-    await sendAdminSMS(`ADMIN RESCHEDULED: ${reg.parent_name}\nFrom: ${oldSessionDetails}\nTo: ${newSessionDetails}\nPlayers: ${reg.kids}${adminPriceNote}`);
+    const adminCreditRefundNote = creditRefunded ? "\nReferral credit refunded (no longer applied)." : "";
+    await sendAdminSMS(`ADMIN RESCHEDULED: ${reg.parent_name}\nFrom: ${oldSessionDetails}\nTo: ${newSessionDetails}\nPlayers: ${reg.kids}${adminPriceNote}${adminCreditRefundNote}`);
   } catch (err) {
     console.error("Notification error (admin reschedule):", err);
   }
@@ -264,10 +298,14 @@ export async function POST(req: NextRequest) {
     success: true,
     sessionDetails: newSessionDetails,
     newType: effectiveType,
-    newSessionPrice,
-    oldSessionPrice: oldPrice,
+    newSessionPrice: newFullPrice,
+    oldAmount,
+    newAmount,
     priceDelta,
     creditGranted,
     amountDue,
+    creditRefunded,
+    newIsFree,
+    newUsedReferralCredit,
   });
 }

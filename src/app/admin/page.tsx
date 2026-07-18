@@ -200,6 +200,17 @@ function calcPrivatePricePreview(durationMins: number, kidCount: number): number
   return Math.round((kidCount >= 4 ? 250 : 150) * (durationMins / 60) * 100) / 100;
 }
 
+function isPrivateTypeClient(type: string): boolean {
+  return type === "private" || type === "group-private";
+}
+
+// The DB stores the FULL (undiscounted) session_price for private sessions —
+// the 50% referral-credit/first-time discount is applied at display time via
+// is_free, mirroring effectivePrice() and the server's identical logic.
+function effectiveAmountPreview(fullPrice: number, isFree: boolean, isPriv: boolean): number {
+  return isFree && isPriv ? Math.round(fullPrice * 0.5) : fullPrice;
+}
+
 function uniqueSorted(values: string[]): string[] {
   return Array.from(new Set(values.filter(Boolean))).sort();
 }
@@ -674,6 +685,13 @@ export default function AdminPage() {
   const [rescheduleError, setRescheduleError] = useState<string | null>(null);
   const [scheduleData, setScheduleData] = useState<ScheduleData | null>(null);
   const [rescheduleConvertToPrivate, setRescheduleConvertToPrivate] = useState(false);
+  const [rescheduleKeepCredit, setRescheduleKeepCredit] = useState(true);
+
+  // Add-player state
+  const [addPlayerOpenId, setAddPlayerOpenId] = useState<string | null>(null);
+  const [addPlayerName, setAddPlayerName] = useState("");
+  const [addPlayerSaving, setAddPlayerSaving] = useState(false);
+  const [addPlayerError, setAddPlayerError] = useState<string | null>(null);
 
   // Time Change state
   const [tcResult, setTcResult] = useState<{ changesFound: { session: string; oldTime: string; newTime: string; count: number }[]; totalEmailsSent: number; totalSmsSent: number } | null>(null);
@@ -766,11 +784,45 @@ export default function AdminPage() {
     setNoShowing(null);
   }
 
+  async function submitAddPlayer(id: string) {
+    if (!token || !addPlayerName.trim()) {
+      setAddPlayerError("Enter a player name.");
+      return;
+    }
+    setAddPlayerSaving(true);
+    setAddPlayerError(null);
+    const res = await fetch("/api/admin/add-player", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ id, playerName: addPlayerName.trim() }),
+    });
+    const data = await res.json();
+    setAddPlayerSaving(false);
+    if (!res.ok) {
+      setAddPlayerError(data.error || "Failed to add player.");
+      return;
+    }
+    setRegistrations((prev) => prev.map((reg) => (reg.id === id ? {
+      ...reg,
+      kids: data.kids || reg.kids,
+      total_participants: typeof data.totalParticipants === "number" ? data.totalParticipants : reg.total_participants,
+      session_price: typeof data.sessionPrice === "number" ? data.sessionPrice : reg.session_price,
+    } : reg)));
+    setAddPlayerOpenId(null);
+    setAddPlayerName("");
+    if (data.creditGranted > 0) {
+      alert(`Player added. $${data.creditGranted} was credited to their account (already paid at the old, lower price).`);
+    } else if (data.amountDue > 0) {
+      alert(`Player added. $${data.amountDue} additional is now due (already paid at the old price) — collect this manually, no auto-charge yet.`);
+    }
+  }
+
   function openReschedule(r: Registration) {
     setReschedulingId(r.id);
     setRescheduleStep("edit");
     setRescheduleError(null);
     setRescheduleConvertToPrivate(false);
+    setRescheduleKeepCredit(true);
     // For weekly/camp we start the picker blank so the admin actively selects
     // from real sheet options rather than pre-filling with the (possibly
     // stale) current label. Private sessions still start pre-filled since
@@ -806,6 +858,8 @@ export default function AdminPage() {
     setRescheduleError(null);
 
     const convertingToPrivate = r.type === "weekly" && rescheduleConvertToPrivate;
+    const willBePrivate = convertingToPrivate || isPrivateTypeClient(r.type);
+    const showCreditCheckbox = !!r.used_referral_credit && willBePrivate;
 
     let bookedGroup: string | undefined;
     let sessionLabelPrefix: string | undefined;
@@ -839,6 +893,7 @@ export default function AdminPage() {
         bookedTrainer: rescheduleForm.trainer || undefined,
         sessionLabelPrefix,
         newType,
+        keepReferralCredit: showCreditCheckbox ? rescheduleKeepCredit : undefined,
       }),
     });
     const data = await res.json();
@@ -858,14 +913,21 @@ export default function AdminPage() {
       booked_group: convertingToPrivate ? null : (bookedGroup ?? reg.booked_group),
       booked_trainer: rescheduleForm.trainer || reg.booked_trainer,
       session_price: typeof data.newSessionPrice === "number" ? data.newSessionPrice : reg.session_price,
+      is_free: typeof data.newIsFree === "boolean" ? data.newIsFree : reg.is_free,
+      used_referral_credit: typeof data.newUsedReferralCredit === "boolean" ? data.newUsedReferralCredit : reg.used_referral_credit,
       session_details: data.sessionDetails || reg.session_details,
     } : reg)));
     setReschedulingId(null);
+    const notes: string[] = [];
     if (data.creditGranted > 0) {
-      alert(`Rescheduled. $${data.creditGranted} was credited to ${r.parent_name}'s account (new price is lower and they'd already paid).`);
+      notes.push(`$${data.creditGranted} was credited to ${r.parent_name}'s account (new price is lower and they'd already paid).`);
     } else if (data.amountDue > 0) {
-      alert(`Rescheduled. $${data.amountDue} additional is now due from ${r.parent_name} (already paid at the old, lower price) — there's no auto-charge yet, so collect this manually.`);
+      notes.push(`$${data.amountDue} additional is now due from ${r.parent_name} (already paid at the old, lower price) — there's no auto-charge yet, so collect this manually.`);
     }
+    if (data.creditRefunded) {
+      notes.push(`Their referral credit was refunded since it's no longer applied to this booking.`);
+    }
+    if (notes.length > 0) alert(`Rescheduled. ${notes.join(" ")}`);
   }
 
   const upcoming = useMemo(() => {
@@ -1065,6 +1127,29 @@ export default function AdminPage() {
             <div>
               <p className="text-brown-500 uppercase tracking-wider mb-0.5">Athletes</p>
               <p className="text-brown-200">{r.kids ? r.kids.split(",").map((k) => k.trim()).join("\n") : "—"}</p>
+              {r.status === "confirmed" && (
+                addPlayerOpenId === r.id ? (
+                  <div className="mt-2 flex gap-2">
+                    <input
+                      value={addPlayerName}
+                      onChange={(e) => setAddPlayerName(e.target.value)}
+                      placeholder="Player name"
+                      className="min-w-0 flex-1 rounded bg-brown-950 border border-brown-700 px-2 py-1 text-xs text-white"
+                    />
+                    <button onClick={() => submitAddPlayer(r.id)} disabled={addPlayerSaving} className="text-xs text-mesa-accent hover:text-yellow-300 font-semibold transition disabled:opacity-50 shrink-0">
+                      {addPlayerSaving ? "..." : "Add"}
+                    </button>
+                    <button onClick={() => { setAddPlayerOpenId(null); setAddPlayerName(""); setAddPlayerError(null); }} className="text-xs text-brown-500 hover:text-brown-300 transition shrink-0">
+                      ✕
+                    </button>
+                  </div>
+                ) : (
+                  <button onClick={() => { setAddPlayerOpenId(r.id); setAddPlayerName(""); setAddPlayerError(null); }} className="mt-1 text-xs text-blue-400 hover:text-blue-300 transition">
+                    + Add Player
+                  </button>
+                )
+              )}
+              {addPlayerOpenId === r.id && addPlayerError && <p className="text-xs text-red-400 mt-1">{addPlayerError}</p>}
             </div>
             <div>
               <p className="text-brown-500 uppercase tracking-wider mb-0.5">Session Details</p>
@@ -1542,37 +1627,42 @@ export default function AdminPage() {
                   </div>
                 </div>
                 {(() => {
-                  if (r.is_free || r.used_referral_credit) {
-                    return (
-                      <p className="text-[11px] text-amber-400 mt-2">
-                        This booking has a discount/credit applied — price will not be auto-adjusted. Check pricing manually if needed.
-                      </p>
-                    );
-                  }
-                  let newPrice: number | undefined;
-                  if (convertingToPrivate) {
+                  const targetIsPrivate = convertingToPrivate || isPrivateTypeClient(r.type);
+                  let newFull: number | undefined;
+                  if (targetIsPrivate) {
                     const durationMins = Math.max(60, parseTimeToMinsClient(rescheduleForm.end) - parseTimeToMinsClient(rescheduleForm.start));
-                    newPrice = calcPrivatePricePreview(durationMins, r.total_participants || 1);
+                    newFull = calcPrivatePricePreview(durationMins, r.total_participants || 1);
                   } else if (r.type === "weekly" && typeof rescheduleForm.price === "number") {
-                    newPrice = Math.round(rescheduleForm.price * (r.total_participants || 1));
+                    newFull = Math.round(rescheduleForm.price * (r.total_participants || 1));
                   }
-                  if (newPrice === undefined) return null;
-                  const oldPrice = r.session_price ?? 0;
-                  const delta = newPrice - oldPrice;
+                  if (newFull === undefined) {
+                    return <p className="text-[11px] text-brown-500 mt-2">Price isn&apos;t auto-tracked for camps — adjust manually if needed.</p>;
+                  }
+
+                  const showCreditCheckbox = !!r.used_referral_credit && targetIsPrivate;
+                  const newIsFreePreview = showCreditCheckbox ? rescheduleKeepCredit : !!r.is_free;
+
+                  const oldAmount = effectiveAmountPreview(r.session_price ?? 0, !!r.is_free, isPrivateTypeClient(r.type));
+                  const newAmount = effectiveAmountPreview(newFull, newIsFreePreview, targetIsPrivate);
+                  const delta = newAmount - oldAmount;
+
                   return (
-                    <div className="rounded-lg border border-brown-700 bg-brown-950 p-3 mt-2 text-xs">
-                      <p className="text-brown-500 uppercase tracking-wider text-[10px] mb-1">Price</p>
-                      <p className="text-brown-300">${oldPrice} → <span className="text-white font-medium">${newPrice}</span></p>
-                      {delta !== 0 ? (
-                        <p className={`mt-1 font-medium ${delta > 0 ? "text-orange-400" : "text-green-400"}`}>
-                          {delta > 0
-                            ? `$${delta} more ${r.is_paid ? "due from the client" : "will be owed"}`
-                            : `$${-delta} ${r.is_paid ? "will be credited to their account" : "less will be owed"}`}
-                        </p>
-                      ) : (
-                        <p className="text-brown-500 mt-1">No price change.</p>
+                    <>
+                      <div className="rounded-lg border border-brown-700 bg-brown-950 p-3 mt-2 text-xs">
+                        <p className="text-brown-500 uppercase tracking-wider text-[10px] mb-1">Price</p>
+                        <p className="text-brown-300">${oldAmount} → <span className="text-white font-medium">${newAmount}</span></p>
+                        {delta !== 0 ? (
+                          <p className={`mt-1 font-medium ${delta > 0 ? "text-orange-400" : "text-green-400"}`}>
+                            {delta > 0 ? `$${delta} owed` : `$${-delta} credited for next booking`}
+                          </p>
+                        ) : (
+                          <p className="text-brown-500 mt-1">No price change.</p>
+                        )}
+                      </div>
+                      {showCreditCheckbox && !rescheduleKeepCredit && (
+                        <p className="text-[11px] text-amber-400 mt-1">1 referral credit will be refunded to their account.</p>
                       )}
-                    </div>
+                    </>
                   );
                 })()}
                 {rescheduleError && <p className="text-xs text-red-400 mt-2">{rescheduleError}</p>}
@@ -1631,6 +1721,17 @@ export default function AdminPage() {
               </div>
               {rescheduleConvertToPrivate && (
                 <p className="text-[11px] text-amber-400 mt-2">Price will be recalculated for a private session based on duration and player count.</p>
+              )}
+              {!!r.used_referral_credit && (rescheduleConvertToPrivate || isPrivateTypeClient(r.type)) && (
+                <label className="flex items-start gap-2 mt-2 text-xs text-brown-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={rescheduleKeepCredit}
+                    onChange={(e) => setRescheduleKeepCredit(e.target.checked)}
+                    className="mt-0.5"
+                  />
+                  <span>Apply the same referral credit used on the original booking (50% off)</span>
+                </label>
               )}
               {rescheduleError && <p className="text-xs text-red-400 mt-2">{rescheduleError}</p>}
               <p className="text-[11px] text-brown-500 mt-3">No late fee is charged — this updates the client&apos;s existing booking and notifies them by email/text.</p>

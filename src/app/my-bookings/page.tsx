@@ -60,6 +60,7 @@ export default function MyBookings() {
     referralCredits: number;
     referralCode: string | null;
   } | null>(null);
+  const [accountCredit, setAccountCredit] = useState(0);
   const [activePackage, setActivePackage] = useState<{ packageType: number; sessionsUsed: number; monthYear: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -99,6 +100,7 @@ export default function MyBookings() {
       } else {
         setBookings(data.registrations);
         setRewards(data.rewards || null);
+        setAccountCredit(data.accountCredit || 0);
         setActivePackage(data.activePackage || null);
         localStorage.setItem("mesa_parent_email", lookupEmail.trim());
       }
@@ -162,9 +164,24 @@ export default function MyBookings() {
         {bookings !== null && (
           <div className="mt-8 md:grid md:grid-cols-3 md:gap-8 md:items-start">
 
-            {/* Sidebar — referrals + package */}
-            {(rewards || activePackage) && (
+            {/* Sidebar — referrals + package + credit */}
+            {(rewards || activePackage || accountCredit > 0) && (
               <div className="md:col-span-1 space-y-5 mb-8 md:mb-0">
+                {accountCredit > 0 && (
+                  <div className="rounded-2xl bg-brown-900 p-5">
+                    <h2 className="text-sm font-bold uppercase tracking-widest text-mesa-accent mb-3">Account Credit</h2>
+                    <div className="rounded-xl border border-mesa-accent/50 bg-mesa-accent/10 px-4 py-3">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-semibold uppercase tracking-widest text-brown-400">Available</p>
+                        <span className="text-2xl font-bold text-mesa-accent">${accountCredit}</span>
+                      </div>
+                      <p className="mt-1 text-xs leading-relaxed text-mesa-accent/80">
+                        Applied automatically toward your next booking&apos;s total.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
                 {rewards && (
                   <div className="rounded-2xl bg-brown-900 p-5 space-y-4">
                     <div>
@@ -226,7 +243,7 @@ export default function MyBookings() {
             )}
 
             {/* Main — bookings */}
-            <div className={rewards || activePackage ? "md:col-span-2" : "md:col-span-3"}>
+            <div className={rewards || activePackage || accountCredit > 0 ? "md:col-span-2" : "md:col-span-3"}>
 
         {bookings.length === 0 && (
           <div className="rounded-2xl bg-brown-900 p-6 text-center">

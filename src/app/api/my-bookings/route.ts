@@ -5,6 +5,7 @@ import {
   generateReferralCode,
   getProfileReferralCode,
   getActivePackage,
+  getAccountCreditBalance,
 } from "@/lib/supabase";
 import { getWeeklySchedule, getPrivateSlots } from "@/lib/sheets";
 
@@ -21,13 +22,14 @@ export async function POST(req: NextRequest) {
 
   try {
     const currentMonthYear = new Date().toISOString().substring(0, 7); // "2026-03"
-    const [registrations, referralCredits, activePackage, profileCode, weeklySessions, privateSlots] = await Promise.all([
+    const [registrations, referralCredits, activePackage, profileCode, weeklySessions, privateSlots, accountCreditBalance] = await Promise.all([
       getRegistrationsByEmail(email),
       getReferralCredits(email).catch(() => 0),
       getActivePackage(email, currentMonthYear).catch(() => null),
       getProfileReferralCode(email).catch(() => null),
       getWeeklySchedule().catch(() => []),
       getPrivateSlots().catch(() => []),
+      getAccountCreditBalance(email).catch(() => 0),
     ]);
 
     // Build a location lookup keyed by "date|startTime" from the current sheet
@@ -83,6 +85,7 @@ export async function POST(req: NextRequest) {
         referralCredits,
         referralCode,
       },
+      accountCredit: accountCreditBalance || 0,
       activePackage: activePackage
         ? {
             packageType: activePackage.package_type,
