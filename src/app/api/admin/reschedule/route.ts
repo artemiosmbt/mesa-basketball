@@ -109,10 +109,16 @@ export async function POST(req: NextRequest) {
   // (private-only in this codebase) and the caller explicitly says whether to
   // keep applying it. Default (no explicit value) preserves whatever the
   // booking already had — nothing changes unless the admin actively unchecks it.
+  // Moving away from private entirely always drops it — the 50% discount
+  // mechanism doesn't exist for weekly/camp sessions in this codebase, so
+  // leaving these flags set on a non-private row would be inconsistent state.
   let newIsFree: boolean = !!reg.is_free;
   let newUsedReferralCredit: boolean = !!reg.used_referral_credit;
   let creditRefunded = false;
-  if (reg.used_referral_credit && typeof keepReferralCredit === "boolean" && !keepReferralCredit) {
+  if (wasPrivate && !isNewPrivate) {
+    newIsFree = false;
+    newUsedReferralCredit = false;
+  } else if (reg.used_referral_credit && typeof keepReferralCredit === "boolean" && !keepReferralCredit) {
     newIsFree = false;
     newUsedReferralCredit = false;
   }

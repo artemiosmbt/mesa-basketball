@@ -164,23 +164,22 @@ export default function MyBookings() {
         {bookings !== null && (
           <div className="mt-8 md:grid md:grid-cols-3 md:gap-8 md:items-start">
 
-            {/* Sidebar — referrals + package + credit */}
-            {(rewards || activePackage || accountCredit > 0) && (
-              <div className="md:col-span-1 space-y-5 mb-8 md:mb-0">
-                {accountCredit > 0 && (
-                  <div className="rounded-2xl bg-brown-900 p-5">
-                    <h2 className="text-sm font-bold uppercase tracking-widest text-mesa-accent mb-3">Account Credit</h2>
-                    <div className="rounded-xl border border-mesa-accent/50 bg-mesa-accent/10 px-4 py-3">
-                      <div className="flex items-center justify-between">
-                        <p className="text-xs font-semibold uppercase tracking-widest text-brown-400">Available</p>
-                        <span className="text-2xl font-bold text-mesa-accent">${accountCredit}</span>
-                      </div>
-                      <p className="mt-1 text-xs leading-relaxed text-mesa-accent/80">
-                        Applied automatically toward your next booking&apos;s total.
-                      </p>
+            {/* Sidebar — referrals + package + credit (credit card always shows, even at $0) */}
+            <div className="md:col-span-1 space-y-5 mb-8 md:mb-0">
+                <div className="rounded-2xl bg-brown-900 p-5">
+                  <h2 className="text-sm font-bold uppercase tracking-widest text-mesa-accent mb-3">Account Credit</h2>
+                  <div className={`rounded-xl border px-4 py-3 ${accountCredit > 0 ? "border-mesa-accent/50 bg-mesa-accent/10" : "border-brown-700 bg-brown-800/40"}`}>
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-semibold uppercase tracking-widest text-brown-400">Available</p>
+                      <span className={`text-2xl font-bold ${accountCredit > 0 ? "text-mesa-accent" : "text-brown-600"}`}>${accountCredit}</span>
                     </div>
+                    <p className={`mt-1 text-xs leading-relaxed ${accountCredit > 0 ? "text-mesa-accent/80" : "text-brown-600"}`}>
+                      {accountCredit > 0
+                        ? "Applied automatically toward your next booking's total."
+                        : "No credit on your account right now."}
+                    </p>
                   </div>
-                )}
+                </div>
 
                 {rewards && (
                   <div className="rounded-2xl bg-brown-900 p-5 space-y-4">
@@ -239,11 +238,10 @@ export default function MyBookings() {
                     </div>
                   );
                 })()}
-              </div>
-            )}
+            </div>
 
             {/* Main — bookings */}
-            <div className={rewards || activePackage || accountCredit > 0 ? "md:col-span-2" : "md:col-span-3"}>
+            <div className="md:col-span-2">
 
         {bookings.length === 0 && (
           <div className="rounded-2xl bg-brown-900 p-6 text-center">

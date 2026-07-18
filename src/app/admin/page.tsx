@@ -685,6 +685,7 @@ export default function AdminPage() {
   const [rescheduleError, setRescheduleError] = useState<string | null>(null);
   const [scheduleData, setScheduleData] = useState<ScheduleData | null>(null);
   const [rescheduleConvertToPrivate, setRescheduleConvertToPrivate] = useState(false);
+  const [rescheduleConvertToGroup, setRescheduleConvertToGroup] = useState(false);
   const [rescheduleKeepCredit, setRescheduleKeepCredit] = useState(true);
 
   // Add-player state
@@ -822,6 +823,7 @@ export default function AdminPage() {
     setRescheduleStep("edit");
     setRescheduleError(null);
     setRescheduleConvertToPrivate(false);
+    setRescheduleConvertToGroup(false);
     setRescheduleKeepCredit(true);
     // For weekly/camp we start the picker blank so the admin actively selects
     // from real sheet options rather than pre-filling with the (possibly
@@ -841,7 +843,8 @@ export default function AdminPage() {
   function reviewReschedule() {
     const r = registrations.find((x) => x.id === reschedulingId);
     const convertingToPrivate = r?.type === "weekly" && rescheduleConvertToPrivate;
-    const needsGroup = (r?.type === "weekly" && !convertingToPrivate) || r?.type === "camp";
+    const convertingToGroup = !!r && isPrivateTypeClient(r.type) && rescheduleConvertToGroup;
+    const needsGroup = (r?.type === "weekly" && !convertingToPrivate) || r?.type === "camp" || convertingToGroup;
     if ((needsGroup && !rescheduleForm.group.trim()) || !rescheduleForm.date.trim() || !rescheduleForm.start.trim() || !rescheduleForm.end.trim() || !rescheduleForm.location.trim()) {
       setRescheduleError("Please select all fields.");
       return;
@@ -858,7 +861,8 @@ export default function AdminPage() {
     setRescheduleError(null);
 
     const convertingToPrivate = r.type === "weekly" && rescheduleConvertToPrivate;
-    const willBePrivate = convertingToPrivate || isPrivateTypeClient(r.type);
+    const convertingToGroup = isPrivateTypeClient(r.type) && rescheduleConvertToGroup;
+    const willBePrivate = convertingToPrivate || (isPrivateTypeClient(r.type) && !convertingToGroup);
     const showCreditCheckbox = !!r.used_referral_credit && willBePrivate;
 
     let bookedGroup: string | undefined;
@@ -867,6 +871,10 @@ export default function AdminPage() {
     if (convertingToPrivate) {
       sessionLabelPrefix = "Private Session";
       newType = "private";
+    } else if (convertingToGroup) {
+      bookedGroup = rescheduleForm.group;
+      sessionLabelPrefix = rescheduleForm.group;
+      newType = "weekly";
     } else if (r.type === "weekly") {
       bookedGroup = rescheduleForm.group;
       sessionLabelPrefix = rescheduleForm.group;
@@ -1595,16 +1603,19 @@ export default function AdminPage() {
         if (!r) return null;
 
         // For the confirm-step "To" label: converting clears the group in favor
-        // of "Private Session"; weekly uses the group name as-is; camp resolves
-        // the picked option key back to "Name — GradeGroup".
+        // of "Private Session" (or vice versa); weekly uses the group name as-is;
+        // camp resolves the picked option key back to "Name — GradeGroup".
         const convertingToPrivate = r.type === "weekly" && rescheduleConvertToPrivate;
+        const convertingToGroup = isPrivateTypeClient(r.type) && rescheduleConvertToGroup;
         const toGroupLabel = convertingToPrivate
           ? "Private Session"
-          : r.type === "weekly"
+          : convertingToGroup
             ? rescheduleForm.group
-            : r.type === "camp" && scheduleData
-              ? campOptions(scheduleData.camps).find((o) => o.key === rescheduleForm.group)?.label
-              : undefined;
+            : r.type === "weekly"
+              ? rescheduleForm.group
+              : r.type === "camp" && scheduleData
+                ? campOptions(scheduleData.camps).find((o) => o.key === rescheduleForm.group)?.label
+                : undefined;
 
         if (rescheduleStep === "confirm") {
           return (
@@ -1627,12 +1638,13 @@ export default function AdminPage() {
                   </div>
                 </div>
                 {(() => {
-                  const targetIsPrivate = convertingToPrivate || isPrivateTypeClient(r.type);
+                  const targetIsPrivate = convertingToPrivate || (isPrivateTypeClient(r.type) && !convertingToGroup);
+                  const targetIsWeekly = convertingToGroup || (r.type === "weekly" && !convertingToPrivate);
                   let newFull: number | undefined;
                   if (targetIsPrivate) {
                     const durationMins = Math.max(60, parseTimeToMinsClient(rescheduleForm.end) - parseTimeToMinsClient(rescheduleForm.start));
                     newFull = calcPrivatePricePreview(durationMins, r.total_participants || 1);
-                  } else if (r.type === "weekly" && typeof rescheduleForm.price === "number") {
+                  } else if (targetIsWeekly && typeof rescheduleForm.price === "number") {
                     newFull = Math.round(rescheduleForm.price * (r.total_participants || 1));
                   }
                   if (newFull === undefined) {
@@ -1640,7 +1652,9 @@ export default function AdminPage() {
                   }
 
                   const showCreditCheckbox = !!r.used_referral_credit && targetIsPrivate;
-                  const newIsFreePreview = showCreditCheckbox ? rescheduleKeepCredit : !!r.is_free;
+                  // Discounts only apply to private sessions — moving away from
+                  // private always drops it, regardless of the checkbox.
+                  const newIsFreePreview = !targetIsPrivate ? false : (showCreditCheckbox ? rescheduleKeepCredit : !!r.is_free);
 
                   const oldAmount = effectiveAmountPreview(r.session_price ?? 0, !!r.is_free, isPrivateTypeClient(r.type));
                   const newAmount = effectiveAmountPreview(newFull, newIsFreePreview, targetIsPrivate);
@@ -1704,6 +1718,22 @@ export default function AdminPage() {
                   </button>
                 </div>
               )}
+              {isPrivateTypeClient(r.type) && (
+                <div className="flex rounded-lg border border-brown-700 overflow-hidden mb-3 text-xs font-medium">
+                  <button
+                    onClick={() => { setRescheduleConvertToGroup(false); setRescheduleForm({ group: "", date: r.booked_date || "", start: r.booked_start_time || "", end: r.booked_end_time || "", location: r.booked_location || "", trainer: r.booked_trainer || "" }); }}
+                    className={`flex-1 py-1.5 transition ${!rescheduleConvertToGroup ? "bg-mesa-accent text-white" : "bg-brown-950 text-brown-400 hover:text-white"}`}
+                  >
+                    Private Session
+                  </button>
+                  <button
+                    onClick={() => { setRescheduleConvertToGroup(true); setRescheduleForm({ group: "", date: "", start: "", end: "", location: "", trainer: "" }); }}
+                    className={`flex-1 py-1.5 transition ${rescheduleConvertToGroup ? "bg-mesa-accent text-white" : "bg-brown-950 text-brown-400 hover:text-white"}`}
+                  >
+                    Convert to Group
+                  </button>
+                </div>
+              )}
               <div className="space-y-2">
                 {!scheduleData ? (
                   <p className="text-xs text-brown-500">Loading available sessions…</p>
@@ -1715,6 +1745,8 @@ export default function AdminPage() {
                   renderWeeklyRescheduleFields(scheduleData.weeklySchedule, rescheduleForm, setRescheduleForm)
                 ) : r.type === "camp" ? (
                   renderCampRescheduleFields(scheduleData.camps, rescheduleForm, setRescheduleForm)
+                ) : isPrivateTypeClient(r.type) && rescheduleConvertToGroup ? (
+                  renderWeeklyRescheduleFields(scheduleData.weeklySchedule, rescheduleForm, setRescheduleForm)
                 ) : (
                   renderPrivateRescheduleFields(scheduleData.privateSlots, rescheduleForm, setRescheduleForm)
                 )}
@@ -1722,7 +1754,10 @@ export default function AdminPage() {
               {rescheduleConvertToPrivate && (
                 <p className="text-[11px] text-amber-400 mt-2">Price will be recalculated for a private session based on duration and player count.</p>
               )}
-              {!!r.used_referral_credit && (rescheduleConvertToPrivate || isPrivateTypeClient(r.type)) && (
+              {isPrivateTypeClient(r.type) && rescheduleConvertToGroup && (
+                <p className="text-[11px] text-amber-400 mt-2">Price will be recalculated using the new group&apos;s rate.</p>
+              )}
+              {!!r.used_referral_credit && ((r.type === "weekly" && rescheduleConvertToPrivate) || (isPrivateTypeClient(r.type) && !rescheduleConvertToGroup)) && (
                 <label className="flex items-start gap-2 mt-2 text-xs text-brown-300 cursor-pointer">
                   <input
                     type="checkbox"
