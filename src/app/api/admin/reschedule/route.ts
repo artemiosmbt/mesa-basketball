@@ -269,6 +269,14 @@ export async function POST(req: NextRequest) {
           : "";
   const creditRefundNote = creditRefunded ? "\nYour referral credit was refunded since it's no longer applied to this booking." : "";
 
+  // Spell out exactly what moved — which session type/name, on what day, at
+  // what time — rather than just the new slot, so it reads as a clear
+  // "from this, to this" rather than a bare confirmation.
+  const fromLine = (oldBookedDate && oldBookedStartTime)
+    ? `From: ${derivedPrefix || "Session"} — ${formatDateWithDay(oldBookedDate)} | ${oldBookedStartTime}${reg.booked_end_time ? `-${reg.booked_end_time}` : ""}${reg.booked_location ? ` at ${resolveLocationName(reg.booked_location)}` : ""}`
+    : null;
+  const toLine = `To: ${prefix} — ${formatDateWithDay(bookedDate)} | ${bookedStartTime}-${bookedEndTime} at ${resolveLocationName(bookedLocation)}`;
+
   try {
     await sendRescheduleNotification({
       parentName: reg.parent_name,
@@ -282,7 +290,7 @@ export async function POST(req: NextRequest) {
     if (reg.sms_consent && reg.phone) {
       await sendSMS(
         reg.phone,
-        `Mesa Basketball: Your session has been rescheduled by your trainer.\n${formatDateWithDay(bookedDate)} | ${bookedStartTime}-${bookedEndTime}\nLocation: ${resolveLocationName(bookedLocation)}\nAthlete: ${reg.kids}${priceNote}${creditRefundNote}\nManage: mesabasketballtraining.com/booking/${reg.manage_token}\nReply STOP to opt out.`
+        `Mesa Basketball: Your session has been rescheduled by your trainer.\n${fromLine ? `${fromLine}\n` : ""}${toLine}\nAthlete: ${reg.kids}${priceNote}${creditRefundNote}\nManage: mesabasketballtraining.com/booking/${reg.manage_token}\nReply STOP to opt out.`
       );
     }
     const adminPriceNote = newFullPrice === undefined
