@@ -274,6 +274,11 @@ export async function sendCancellationNotification(data: {
   isLateCancel: boolean;
   lateFeeAmount?: number;
   campAdjustment?: { finalAmount: number; originalAmount: number; isPaid: boolean; creditGranted: number };
+  // Set only when the client had already paid — the pre-Stripe stand-in for
+  // a refund. Full amount for 24+ hours notice, 50% for a late cancel. When
+  // this is set, the "fee still due" note below doesn't apply (they already
+  // paid; a credit is going out instead of a charge coming in).
+  cancelCredit?: number;
 }) {
   const resend = getResend();
   const isPickupCancel = data.sessionDetails.toLowerCase().includes("pickup");
@@ -281,11 +286,17 @@ export async function sendCancellationNotification(data: {
   const lateFee = data.lateFeeAmount !== undefined
     ? data.lateFeeAmount
     : data.sessionType === "group-private" ? 125 : data.sessionType === "weekly" ? 25 : 75;
-  const lateNote = data.isLateCancel && !data.campAdjustment
+  const lateNote = data.isLateCancel && !data.campAdjustment && data.cancelCredit === undefined
     ? `<div style="background: #7c1d1d; border-left: 4px solid #ef4444; border-radius: 6px; padding: 14px 16px; margin: 16px 0;">
         <p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #ffffff;">⚠️ Late Fee</p>
         <p style="margin: 0; color: #ffffff; font-size: 14px;">This cancellation was made within 24 hours of the session. Per our policy, a <strong>50% fee of $${lateFee}</strong> is still due.</p>
         ${PAYMENT_LINES}
+      </div>`
+    : "";
+  const creditNote = !data.campAdjustment && data.cancelCredit !== undefined && data.cancelCredit > 0
+    ? `<div style="background: #1e3a5f; border-left: 4px solid #3b82f6; border-radius: 6px; padding: 14px 16px; margin: 16px 0;">
+        <p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #ffffff;">Account Credit</p>
+        <p style="margin: 0; color: #ffffff; font-size: 14px;"><strong>$${data.cancelCredit}</strong> has been credited to your account for a future booking${data.isLateCancel ? " (50% of what you paid — this was a late cancellation, so the other half isn't refunded per our policy)" : ""}.</p>
       </div>`
     : "";
 
@@ -317,7 +328,8 @@ export async function sendCancellationNotification(data: {
       <h2>${isPickupCancel ? "Pickup " : ""}Session Cancelled</h2>
       <p><strong>Parent:</strong> ${data.parentName}</p>
       <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails)}</p>
-      ${data.isLateCancel && !data.campAdjustment ? `<p><strong>⚠️ Late cancellation (within 24h) — 50% fee ($${lateFee}) applies</strong></p>` : ""}
+      ${data.isLateCancel && !data.campAdjustment && data.cancelCredit === undefined ? `<p><strong>⚠️ Late cancellation (within 24h) — 50% fee ($${lateFee}) applies</strong></p>` : ""}
+      ${data.cancelCredit !== undefined && data.cancelCredit > 0 ? `<p><strong>$${data.cancelCredit} credited to their account</strong>${data.isLateCancel ? " (late cancellation — 50% of what they paid)" : " (full refund as account credit — 24+ hours notice)"}</p>` : ""}
       ${data.campAdjustment ? `<p><strong>New total: $${data.campAdjustment.finalAmount} (was $${data.campAdjustment.originalAmount}).</strong> ${campAdjustmentLine.replace(/<\/?strong>/g, "")}</p>` : ""}
     `,
   });
@@ -334,6 +346,7 @@ export async function sendCancellationNotification(data: {
       <p>Your ${isPickupCancel ? "pickup " : ""}session has been cancelled:</p>
       <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails)}</p>
       ${lateNote}
+      ${creditNote}
       ${campAdjustmentNote}
       <p><a href="${BASE_URL}/my-bookings" style="color: #d4af37; font-weight: bold;">View My Bookings</a></p>
       <br/>

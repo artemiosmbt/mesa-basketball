@@ -19,7 +19,7 @@ import {
   sendRescheduleNotification,
   sendPlayerUpdateNotification,
 } from "@/lib/email";
-import { getCurrentSheetLocation } from "@/lib/sheets";
+import { getCurrentSheetLocation, getWeeklySchedule } from "@/lib/sheets";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import {
   addPrivateSessionToCalendar,
@@ -139,12 +139,29 @@ export async function DELETE(
     );
   }
 
-  // Block cancellation of discounted group sessions — reschedule only.
-  if (reg.type === "weekly" && reg.session_price !== null && reg.session_price < 50 * (reg.total_participants || 1)) {
-    return NextResponse.json(
-      { error: "Cancellation is not available for sessions booked at a discounted rate. Please use the reschedule option instead." },
-      { status: 403 }
-    );
+  // Block cancellation of group sessions that were volume-discounted at
+  // booking time (e.g. booking several sessions together nets a lower
+  // per-session rate) — those get rescheduled instead so the discount math
+  // isn't disturbed. Compare against the group's actual live sheet rate, not
+  // a flat $50 — some groups (e.g. "HS Pickup") are normally priced below
+  // $50, and that's not a discount, just their regular rate.
+  if (reg.type === "weekly" && reg.session_price !== null && reg.booked_date && reg.booked_start_time) {
+    try {
+      const sessions = await getWeeklySchedule();
+      const groupLabel = reg.booked_group || reg.session_details.split(" — ")[0] || "";
+      const match = sessions.find((s) => s.group === groupLabel && s.date === reg.booked_date && s.startTime === reg.booked_start_time);
+      if (match) {
+        const standardRate = match.price * (reg.total_participants || 1);
+        if (reg.session_price < standardRate) {
+          return NextResponse.json(
+            { error: "Cancellation is not available for sessions booked at a discounted rate. Please use the reschedule option instead." },
+            { status: 403 }
+          );
+        }
+      }
+    } catch {
+      // Sheet lookup failed — don't block cancellation on an unverifiable guess.
+    }
   }
 
   // Block cancelling a camp day once that specific day's start time has passed.
@@ -195,6 +212,19 @@ export async function DELETE(
       if (groupCredit > 0 && reg.email) {
         await addAccountCredit(reg.email, groupCredit).catch(() => {});
       }
+      // If they already paid, credit back what they paid in cash (not
+      // counting the applied-credit portion refunded above): full amount
+      // with 24+ hours notice, 50% if cancelled late — the pre-Stripe
+      // stand-in for the refund policy already locked in for when Stripe
+      // goes live (full refund vs 50% credit for a late cancel).
+      let cancelCredit = 0;
+      if ((reg.is_paid || group.some((r) => r.is_paid)) && reg.email) {
+        const paidAmount = Math.max(0, resolvedSessionPrice(reg) - groupCredit);
+        cancelCredit = isLateCancel ? Math.round(paidAmount * 0.5) : paidAmount;
+        if (cancelCredit > 0) {
+          await addAccountCredit(reg.email, cancelCredit).catch(() => {});
+        }
+      }
       const lateFeeAmount = isLateCancel ? Math.round(resolvedSessionPrice(reg) * 0.5) : undefined;
       await sendCancellationNotification({
         parentName: reg.parent_name,
@@ -203,9 +233,12 @@ export async function DELETE(
         sessionType: reg.type,
         isLateCancel,
         lateFeeAmount,
+        cancelCredit: cancelCredit > 0 ? cancelCredit : undefined,
       });
       if (reg.sms_consent && reg.phone) {
-        const lateNote = isLateCancel ? "\nA late cancellation fee applies." : "";
+        const lateNote = cancelCredit > 0
+          ? (isLateCancel ? `\n$${cancelCredit} credited to your account (50% of what you paid — late cancellation).` : `\n$${cancelCredit} credited to your account for a future booking.`)
+          : isLateCancel ? "\nA late cancellation fee applies." : "";
         await sendSMS(reg.phone, `Mesa Basketball: ${campName} cancelled.${lateNote}\nmesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
       }
       await sendAdminSMS(`CANCELLED (Camp): ${reg.parent_name}\n${campName}${isLateCancel ? " (late)" : ""}\nPlayers: ${reg.kids}`);
@@ -325,6 +358,20 @@ export async function DELETE(
     await addAccountCredit(reg.email, reg.applied_account_credit).catch(() => {});
   }
 
+  // If they already paid, credit back what they paid in cash (not counting
+  // the applied-credit portion refunded above): full amount with 24+ hours
+  // notice, 50% if cancelled late — the pre-Stripe stand-in for the refund
+  // policy already locked in for when Stripe goes live (full refund vs 50%
+  // credit for a late cancel).
+  let cancelCredit = 0;
+  if (reg.is_paid && reg.email) {
+    const paidAmount = Math.max(0, resolvedSessionPrice(reg) - (reg.applied_account_credit || 0));
+    cancelCredit = isLateCancel ? Math.round(paidAmount * 0.5) : paidAmount;
+    if (cancelCredit > 0) {
+      await addAccountCredit(reg.email, cancelCredit).catch(() => {});
+    }
+  }
+
   // Recalculate package sessions_used after cancellation
   if (reg.booked_date && (reg.type === "private" || reg.type === "group-private")) {
     try {
@@ -367,6 +414,7 @@ export async function DELETE(
     sessionType: reg.type,
     isLateCancel,
     lateFeeAmount,
+    cancelCredit: cancelCredit > 0 ? cancelCredit : undefined,
   });
 
   if (reg.sms_consent && reg.phone) {
@@ -374,10 +422,12 @@ export async function DELETE(
     const sessionLine = reg.booked_date && reg.booked_start_time
       ? `\n${formatDateWithDay(reg.booked_date)} | ${reg.booked_start_time}${reg.booked_end_time ? `-${reg.booked_end_time}` : ""}${cancelLocation ? `\nLocation: ${resolveLocationName(cancelLocation)}` : ""}`
       : "";
-    const lateNote = isLateCancel ? "\nA late cancellation fee applies." : "";
+    const lateNote = cancelCredit > 0
+      ? (isLateCancel ? `\n$${cancelCredit} credited to your account (50% of what you paid — late cancellation).` : `\n$${cancelCredit} credited to your account for a future booking.`)
+      : isLateCancel ? "\nA late cancellation fee applies." : "";
     await sendSMS(reg.phone, `Mesa Basketball: ${cancelLabel} cancelled.${sessionLine}\nAthlete: ${reg.kids}${lateNote}\nmesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
   }
-  await sendAdminSMS(`CANCELLED: ${reg.parent_name}\n${cancelSessionDetails}${isLateCancel ? " (late)" : ""}\nPlayers: ${reg.kids}`);
+  await sendAdminSMS(`CANCELLED: ${reg.parent_name}\n${cancelSessionDetails}${isLateCancel ? " (late)" : ""}${cancelCredit > 0 ? `\n$${cancelCredit} credited to their account` : ""}\nPlayers: ${reg.kids}`);
 
   // Sync calendar after cancellation
   if (reg.booked_date && reg.booked_start_time) {
