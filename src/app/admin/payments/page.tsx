@@ -28,6 +28,7 @@ interface Registration {
   referral_code: string | null;
   camp_day_late_fee: number | null;
   camp_drop_in_rate: number | null;
+  applied_account_credit: number | null;
 }
 
 interface PackageData {
@@ -304,8 +305,11 @@ export default function PaymentsPage() {
     } else {
       basePrice = fullPriceForType(r.type);
     }
-    if (r.is_free && isPrivateType) return Math.round(basePrice * 0.5);
-    return basePrice;
+    const discounted = r.is_free && isPrivateType ? Math.round(basePrice * 0.5) : basePrice;
+    // session_price/basePrice is always the full pre-credit rate — account
+    // credit applied at booking time is a separate field and has to be
+    // subtracted here, or this shows what they'd owe with no credit at all.
+    return Math.max(0, discounted - (r.applied_account_credit || 0));
   }
 
   const cancelFees = useMemo(() =>

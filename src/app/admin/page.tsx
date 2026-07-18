@@ -30,6 +30,7 @@ interface Registration {
   is_free: boolean;
   used_referral_credit: boolean;
   is_paid?: boolean;
+  applied_account_credit?: number | null;
 }
 
 interface PackageData {
@@ -148,8 +149,11 @@ function effectivePrice(r: Registration, weeklyDiscountRates?: Map<string, numbe
   } else {
     basePrice = fullPriceForType(r.type);
   }
-  if (r.is_free && isPrivateType) return Math.round(basePrice * 0.5);
-  return basePrice;
+  const discounted = r.is_free && isPrivateType ? Math.round(basePrice * 0.5) : basePrice;
+  // session_price/basePrice is always the full pre-credit rate — account
+  // credit applied at booking time is a separate field and has to be
+  // subtracted here, or this shows what they'd owe with no credit at all.
+  return Math.max(0, discounted - (r.applied_account_credit || 0));
 }
 
 function daysAway(dateStr: string | null): { label: string; cls: string } | null {
@@ -1656,8 +1660,9 @@ export default function AdminPage() {
                   // private always drops it, regardless of the checkbox.
                   const newIsFreePreview = !targetIsPrivate ? false : (showCreditCheckbox ? rescheduleKeepCredit : !!r.is_free);
 
-                  const oldAmount = effectiveAmountPreview(r.session_price ?? 0, !!r.is_free, isPrivateTypeClient(r.type));
-                  const newAmount = effectiveAmountPreview(newFull, newIsFreePreview, targetIsPrivate);
+                  const appliedCredit = r.applied_account_credit || 0;
+                  const oldAmount = Math.max(0, effectiveAmountPreview(r.session_price ?? 0, !!r.is_free, isPrivateTypeClient(r.type)) - appliedCredit);
+                  const newAmount = Math.max(0, effectiveAmountPreview(newFull, newIsFreePreview, targetIsPrivate) - appliedCredit);
                   const delta = newAmount - oldAmount;
 
                   return (

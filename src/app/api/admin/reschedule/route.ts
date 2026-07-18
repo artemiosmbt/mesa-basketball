@@ -148,9 +148,16 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Account credit applied at the original booking (separate from the
+  // referral-credit 50% discount) still belongs to this same booking after a
+  // reschedule — it isn't touched by this update, so it reduces what's shown
+  // as owed on both sides. It's a constant offset either way, so it doesn't
+  // change the credit-granted/amount-due delta, but the displayed $ amounts
+  // need to reflect what the client actually still owes, not the pre-credit rate.
+  const appliedCredit = reg.applied_account_credit || 0;
   const oldFullPrice = reg.session_price ?? 0;
-  const oldAmount = effectiveAmount(oldFullPrice, !!reg.is_free, wasPrivate);
-  const newAmount = newFullPrice !== undefined ? effectiveAmount(newFullPrice, newIsFree, isNewPrivate) : oldAmount;
+  const oldAmount = Math.max(0, effectiveAmount(oldFullPrice, !!reg.is_free, wasPrivate) - appliedCredit);
+  const newAmount = newFullPrice !== undefined ? Math.max(0, effectiveAmount(newFullPrice, newIsFree, isNewPrivate) - appliedCredit) : oldAmount;
   const priceDelta = newFullPrice !== undefined ? newAmount - oldAmount : 0;
 
   const { error } = await supabase

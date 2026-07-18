@@ -92,9 +92,14 @@ export async function POST(req: NextRequest) {
   // camp (or missing price data): leave session_price untouched — pass null so
   // updateRegistrationPlayers doesn't overwrite it.
 
+  // Account credit applied at booking time is a separate field from
+  // session_price/is_free and still belongs to this booking — subtract it
+  // from both sides so the displayed/texted amounts reflect what's actually
+  // still owed, not the pre-credit rate.
+  const appliedCredit = reg.applied_account_credit || 0;
   const oldFullPrice = reg.session_price ?? 0;
-  const oldAmount = effectiveAmount(oldFullPrice, !!reg.is_free, isPriv);
-  const newAmount = newFullPrice !== null ? effectiveAmount(newFullPrice, !!reg.is_free, isPriv) : oldAmount;
+  const oldAmount = Math.max(0, effectiveAmount(oldFullPrice, !!reg.is_free, isPriv) - appliedCredit);
+  const newAmount = newFullPrice !== null ? Math.max(0, effectiveAmount(newFullPrice, !!reg.is_free, isPriv) - appliedCredit) : oldAmount;
   const priceDelta = newFullPrice !== null ? newAmount - oldAmount : 0;
 
   const ok = await updateRegistrationPlayers(reg.manage_token, newKids, newCount, newFullPrice);
