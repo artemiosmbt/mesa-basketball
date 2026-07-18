@@ -69,6 +69,7 @@ interface Booking {
   bookedStartTime: string | null;
   bookedEndTime: string | null;
   bookedLocation: string | null;
+  bookedGroup: string | null;
   status: string;
   createdAt: string;
   isFullCamp: boolean;
@@ -283,6 +284,15 @@ export default function ManageBooking({
     setUseReferralCredit(booking.usedReferralCredit ?? false);
   }, [showReschedule, booking?.email, booking?.type, booking?.usedReferralCredit]);
 
+  async function loadSchedule() {
+    const res = await fetch("/api/schedule");
+    const data = await res.json();
+    setPrivateSlots(data.privateSlots || []);
+    setBookedSlots(data.bookedSlots || []);
+    setWeeklySessions(data.weeklySchedule || []);
+    setGroupEnrollment(data.groupEnrollment || {});
+  }
+
   useEffect(() => {
     fetch(`/api/booking/${token}`)
       .then((r) => r.json())
@@ -292,6 +302,10 @@ export default function ManageBooking({
       })
       .catch(() => setError("Failed to load booking"))
       .finally(() => setLoading(false));
+    // Load eagerly (not just when the reschedule panel opens) so the
+    // discounted-rate check below has real group rates to compare against
+    // as soon as the page renders.
+    loadSchedule();
   }, [token]);
 
   // True when the session is within 24 hours
@@ -464,15 +478,6 @@ export default function ManageBooking({
     setSavingPlayers(false);
   }
 
-  async function loadSchedule() {
-    const res = await fetch("/api/schedule");
-    const data = await res.json();
-    setPrivateSlots(data.privateSlots || []);
-    setBookedSlots(data.bookedSlots || []);
-    setWeeklySessions(data.weeklySchedule || []);
-    setGroupEnrollment(data.groupEnrollment || {});
-  }
-
   async function handleCancel() {
     setCancelling(true);
     const res = await fetch(`/api/booking/${token}`, { method: "DELETE" });
@@ -638,10 +643,20 @@ export default function ManageBooking({
   const alreadyCancelled = booking.status === "cancelled";
 
   // Sessions booked at a volume discount cannot be cancelled — only rescheduled.
+  // Compare against this specific group's actual live rate, not a flat $50 —
+  // some groups (e.g. "HS Pickup") are normally priced below $50, and that's
+  // not a discount, just their regular rate. Only flag it once the schedule
+  // has loaded and a matching session is actually found; before then (or if
+  // the group can't be matched at all) default to not-discounted rather than
+  // guessing and blocking a legitimate cancellation.
+  const matchingWeeklySession = booking.type === "weekly"
+    ? weeklySessions.find((s) => s.group === booking.bookedGroup && s.date === booking.bookedDate && s.startTime === booking.bookedStartTime)
+    : undefined;
   const isDiscountedGroup =
     booking.type === "weekly" &&
     booking.sessionPrice !== null &&
-    booking.sessionPrice < 50 * (booking.totalParticipants || 1);
+    !!matchingWeeklySession &&
+    booking.sessionPrice < matchingWeeklySession.price * (booking.totalParticipants || 1);
 
   return (
     <div className="min-h-screen bg-mesa-dark text-white">

@@ -112,6 +112,7 @@ export async function GET(
     bookedStartTime: reg.booked_start_time,
     bookedEndTime: reg.booked_end_time,
     bookedLocation,
+    bookedGroup: reg.booked_group,
     status: reg.status,
     createdAt: reg.created_at,
     isFullCamp: reg.is_full_camp ?? false,
