@@ -179,7 +179,7 @@ export async function DELETE(
     if (!reg.referral_code) {
       return NextResponse.json({ error: "Cannot cancel — missing camp group reference." }, { status: 500 });
     }
-    const campName = reg.session_details.split(" — ")[0] || reg.session_details;
+    const campName = reg.booked_group || reg.session_details.split(" — ")[0] || reg.session_details;
     const group = await getCampGroupByReferralCode(reg.referral_code, reg.booked_group);
     const totalOriginalDays = group.length || 1;
     const remainingAfterThis = group.filter((r) => r.status === "confirmed" && r.id !== reg.id).length;
@@ -390,7 +390,10 @@ export async function DELETE(
         });
       } else {
         // Group/weekly: update the event count (DB already reflects cancellation)
-        const sessionLabel = reg.session_details.split(" — ")[0] || "Group Session";
+        // Use the stored booked_group rather than re-parsing session_details — group
+        // labels can themselves contain " — " (e.g. "High School Girls — Grades 9-12"),
+        // which would truncate the label and miss the calendar event's tag.
+        const sessionLabel = reg.booked_group || reg.session_details.split(" — ")[0] || "Group Session";
         await upsertGroupSessionCalendarEvent({
           sessionType: reg.type as "weekly" | "camp",
           sessionLabel,
@@ -603,7 +606,10 @@ export async function PUT(
       if (wasPrivate) {
         await deletePrivateSessionFromCalendar({ email: reg.email, bookedDate: reg.booked_date });
       } else {
-        const sessionLabel = reg.session_details.split(" — ")[0] || "Group Session";
+        // Use the stored booked_group rather than re-parsing session_details — group
+        // labels can themselves contain " — " (e.g. "High School Girls — Grades 9-12"),
+        // which would truncate the label and miss the calendar event's tag.
+        const sessionLabel = reg.booked_group || reg.session_details.split(" — ")[0] || "Group Session";
         await upsertGroupSessionCalendarEvent({
           sessionType: reg.type as "weekly" | "camp",
           sessionLabel,

@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
   // Fetch registration details before deleting so we can clean up the calendar
   const { data: reg } = await supabase
     .from("registrations")
-    .select("type, email, booked_date, booked_start_time, booked_end_time, booked_location, kids, session_details, total_participants, status")
+    .select("type, email, booked_date, booked_start_time, booked_end_time, booked_location, booked_group, kids, session_details, total_participants, status")
     .eq("id", id)
     .single();
 
@@ -44,7 +44,10 @@ export async function POST(req: NextRequest) {
       if (isPrivate) {
         await deletePrivateSessionFromCalendar({ email: reg.email, bookedDate: reg.booked_date });
       } else {
-        const sessionLabel = reg.session_details?.split(" — ")[0] || "Group Session";
+        // Use the stored booked_group rather than re-parsing session_details — group
+        // labels can themselves contain " — " (e.g. "High School Girls — Grades 9-12"),
+        // which would truncate the label and miss the calendar event's tag.
+        const sessionLabel = reg.booked_group || reg.session_details?.split(" — ")[0] || "Group Session";
         await upsertGroupSessionCalendarEvent({
           sessionType: reg.type as "weekly" | "camp",
           sessionLabel,
