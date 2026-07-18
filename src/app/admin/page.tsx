@@ -29,6 +29,7 @@ interface Registration {
   referral_code: string | null;
   is_free: boolean;
   used_referral_credit: boolean;
+  is_paid?: boolean;
 }
 
 interface PackageData {
@@ -46,6 +47,9 @@ interface RescheduleForm {
   end: string;
   location: string;
   trainer: string;
+  // Per-session rate from the sheet for the picked weekly group (not yet
+  // multiplied by player count) — used to preview the price before saving.
+  price?: number;
 }
 
 interface ScheduleData {
@@ -179,6 +183,23 @@ function dateSortKey(d: string): number {
   return isNaN(t) ? 0 : t;
 }
 
+// Mirrors the pricing formulas in /api/admin/reschedule so the confirm step
+// can preview the price before saving — the server always has the final say.
+function parseTimeToMinsClient(t: string): number {
+  const m = t.match(/(\d+):(\d+)\s*(AM|PM)/i);
+  if (!m) return 0;
+  let h = parseInt(m[1]);
+  const min = parseInt(m[2]);
+  const period = m[3].toUpperCase();
+  if (period === "PM" && h !== 12) h += 12;
+  if (period === "AM" && h === 12) h = 0;
+  return h * 60 + min;
+}
+
+function calcPrivatePricePreview(durationMins: number, kidCount: number): number {
+  return Math.round((kidCount >= 4 ? 250 : 150) * (durationMins / 60) * 100) / 100;
+}
+
 function uniqueSorted(values: string[]): string[] {
   return Array.from(new Set(values.filter(Boolean))).sort();
 }
@@ -225,7 +246,7 @@ function renderWeeklyRescheduleFields(weeklySchedule: WeeklySession[], form: Res
           onChange={(e) => {
             const group = e.target.value;
             const first = weeklySchedule.find((s) => s.group === group);
-            setForm({ group, date: "", start: "", end: "", location: "", trainer: first?.trainer || "" });
+            setForm({ group, date: "", start: "", end: "", location: "", trainer: first?.trainer || "", price: first?.price });
           }}
           className={RESCHEDULE_SELECT_CLASS}
         >
@@ -254,7 +275,7 @@ function renderWeeklyRescheduleFields(weeklySchedule: WeeklySession[], form: Res
             onChange={(e) => {
               const start = e.target.value;
               const match = sessionsForDate.find((s) => s.startTime === start);
-              setForm({ ...form, start, end: match?.endTime || "", location: match?.location || form.location, trainer: match?.trainer || form.trainer });
+              setForm({ ...form, start, end: match?.endTime || "", location: match?.location || form.location, trainer: match?.trainer || form.trainer, price: match?.price ?? form.price });
             }}
             className={RESCHEDULE_SELECT_CLASS}
           >
@@ -652,6 +673,7 @@ export default function AdminPage() {
   const [rescheduleSaving, setRescheduleSaving] = useState(false);
   const [rescheduleError, setRescheduleError] = useState<string | null>(null);
   const [scheduleData, setScheduleData] = useState<ScheduleData | null>(null);
+  const [rescheduleConvertToPrivate, setRescheduleConvertToPrivate] = useState(false);
 
   // Time Change state
   const [tcResult, setTcResult] = useState<{ changesFound: { session: string; oldTime: string; newTime: string; count: number }[]; totalEmailsSent: number; totalSmsSent: number } | null>(null);
@@ -748,6 +770,7 @@ export default function AdminPage() {
     setReschedulingId(r.id);
     setRescheduleStep("edit");
     setRescheduleError(null);
+    setRescheduleConvertToPrivate(false);
     // For weekly/camp we start the picker blank so the admin actively selects
     // from real sheet options rather than pre-filling with the (possibly
     // stale) current label. Private sessions still start pre-filled since
@@ -765,7 +788,8 @@ export default function AdminPage() {
 
   function reviewReschedule() {
     const r = registrations.find((x) => x.id === reschedulingId);
-    const needsGroup = r?.type === "weekly" || r?.type === "camp";
+    const convertingToPrivate = r?.type === "weekly" && rescheduleConvertToPrivate;
+    const needsGroup = (r?.type === "weekly" && !convertingToPrivate) || r?.type === "camp";
     if ((needsGroup && !rescheduleForm.group.trim()) || !rescheduleForm.date.trim() || !rescheduleForm.start.trim() || !rescheduleForm.end.trim() || !rescheduleForm.location.trim()) {
       setRescheduleError("Please select all fields.");
       return;
@@ -781,9 +805,15 @@ export default function AdminPage() {
     setRescheduleSaving(true);
     setRescheduleError(null);
 
+    const convertingToPrivate = r.type === "weekly" && rescheduleConvertToPrivate;
+
     let bookedGroup: string | undefined;
     let sessionLabelPrefix: string | undefined;
-    if (r.type === "weekly") {
+    let newType: string | undefined;
+    if (convertingToPrivate) {
+      sessionLabelPrefix = "Private Session";
+      newType = "private";
+    } else if (r.type === "weekly") {
       bookedGroup = rescheduleForm.group;
       sessionLabelPrefix = rescheduleForm.group;
     } else if (r.type === "camp" && scheduleData) {
@@ -808,6 +838,7 @@ export default function AdminPage() {
         bookedGroup,
         bookedTrainer: rescheduleForm.trainer || undefined,
         sessionLabelPrefix,
+        newType,
       }),
     });
     const data = await res.json();
@@ -819,15 +850,22 @@ export default function AdminPage() {
     const id = reschedulingId;
     setRegistrations((prev) => prev.map((reg) => (reg.id === id ? {
       ...reg,
+      type: data.newType || reg.type,
       booked_date: rescheduleForm.date.trim(),
       booked_start_time: rescheduleForm.start.trim(),
       booked_end_time: rescheduleForm.end.trim(),
       booked_location: rescheduleForm.location.trim(),
-      booked_group: bookedGroup ?? reg.booked_group,
+      booked_group: convertingToPrivate ? null : (bookedGroup ?? reg.booked_group),
       booked_trainer: rescheduleForm.trainer || reg.booked_trainer,
+      session_price: typeof data.newSessionPrice === "number" ? data.newSessionPrice : reg.session_price,
       session_details: data.sessionDetails || reg.session_details,
     } : reg)));
     setReschedulingId(null);
+    if (data.creditGranted > 0) {
+      alert(`Rescheduled. $${data.creditGranted} was credited to ${r.parent_name}'s account (new price is lower and they'd already paid).`);
+    } else if (data.amountDue > 0) {
+      alert(`Rescheduled. $${data.amountDue} additional is now due from ${r.parent_name} (already paid at the old, lower price) — there's no auto-charge yet, so collect this manually.`);
+    }
   }
 
   const upcoming = useMemo(() => {
@@ -1471,13 +1509,17 @@ export default function AdminPage() {
         const r = registrations.find((x) => x.id === reschedulingId);
         if (!r) return null;
 
-        // For the confirm-step "To" label: weekly uses the group name as-is;
-        // camp needs to resolve the picked option key back to "Name — GradeGroup".
-        const toGroupLabel = r.type === "weekly"
-          ? rescheduleForm.group
-          : r.type === "camp" && scheduleData
-            ? campOptions(scheduleData.camps).find((o) => o.key === rescheduleForm.group)?.label
-            : undefined;
+        // For the confirm-step "To" label: converting clears the group in favor
+        // of "Private Session"; weekly uses the group name as-is; camp resolves
+        // the picked option key back to "Name — GradeGroup".
+        const convertingToPrivate = r.type === "weekly" && rescheduleConvertToPrivate;
+        const toGroupLabel = convertingToPrivate
+          ? "Private Session"
+          : r.type === "weekly"
+            ? rescheduleForm.group
+            : r.type === "camp" && scheduleData
+              ? campOptions(scheduleData.camps).find((o) => o.key === rescheduleForm.group)?.label
+              : undefined;
 
         if (rescheduleStep === "confirm") {
           return (
@@ -1499,6 +1541,40 @@ export default function AdminPage() {
                     <p className="text-mesa-accent">{rescheduleForm.location}</p>
                   </div>
                 </div>
+                {(() => {
+                  if (r.is_free || r.used_referral_credit) {
+                    return (
+                      <p className="text-[11px] text-amber-400 mt-2">
+                        This booking has a discount/credit applied — price will not be auto-adjusted. Check pricing manually if needed.
+                      </p>
+                    );
+                  }
+                  let newPrice: number | undefined;
+                  if (convertingToPrivate) {
+                    const durationMins = Math.max(60, parseTimeToMinsClient(rescheduleForm.end) - parseTimeToMinsClient(rescheduleForm.start));
+                    newPrice = calcPrivatePricePreview(durationMins, r.total_participants || 1);
+                  } else if (r.type === "weekly" && typeof rescheduleForm.price === "number") {
+                    newPrice = Math.round(rescheduleForm.price * (r.total_participants || 1));
+                  }
+                  if (newPrice === undefined) return null;
+                  const oldPrice = r.session_price ?? 0;
+                  const delta = newPrice - oldPrice;
+                  return (
+                    <div className="rounded-lg border border-brown-700 bg-brown-950 p-3 mt-2 text-xs">
+                      <p className="text-brown-500 uppercase tracking-wider text-[10px] mb-1">Price</p>
+                      <p className="text-brown-300">${oldPrice} → <span className="text-white font-medium">${newPrice}</span></p>
+                      {delta !== 0 ? (
+                        <p className={`mt-1 font-medium ${delta > 0 ? "text-orange-400" : "text-green-400"}`}>
+                          {delta > 0
+                            ? `$${delta} more ${r.is_paid ? "due from the client" : "will be owed"}`
+                            : `$${-delta} ${r.is_paid ? "will be credited to their account" : "less will be owed"}`}
+                        </p>
+                      ) : (
+                        <p className="text-brown-500 mt-1">No price change.</p>
+                      )}
+                    </div>
+                  );
+                })()}
                 {rescheduleError && <p className="text-xs text-red-400 mt-2">{rescheduleError}</p>}
                 <p className="text-[11px] text-brown-500 mt-3">No late fee is charged. The client will get an email/text about the change.</p>
                 <div className="flex gap-3 mt-4">
@@ -1522,11 +1598,29 @@ export default function AdminPage() {
             <div className="w-full max-w-sm rounded-xl bg-brown-900 border border-brown-700 p-5" onClick={(e) => e.stopPropagation()}>
               <h3 className="text-sm font-semibold text-white mb-1">Reschedule Session</h3>
               <p className="text-xs text-brown-400 mb-3">{r.parent_name} — {athleteNames(r.kids || "")}</p>
+              {r.type === "weekly" && (
+                <div className="flex rounded-lg border border-brown-700 overflow-hidden mb-3 text-xs font-medium">
+                  <button
+                    onClick={() => { setRescheduleConvertToPrivate(false); setRescheduleForm({ group: "", date: "", start: "", end: "", location: "", trainer: "" }); }}
+                    className={`flex-1 py-1.5 transition ${!rescheduleConvertToPrivate ? "bg-mesa-accent text-white" : "bg-brown-950 text-brown-400 hover:text-white"}`}
+                  >
+                    Group Session
+                  </button>
+                  <button
+                    onClick={() => { setRescheduleConvertToPrivate(true); setRescheduleForm({ group: "", date: "", start: "", end: "", location: "", trainer: "" }); }}
+                    className={`flex-1 py-1.5 transition ${rescheduleConvertToPrivate ? "bg-mesa-accent text-white" : "bg-brown-950 text-brown-400 hover:text-white"}`}
+                  >
+                    Convert to Private
+                  </button>
+                </div>
+              )}
               <div className="space-y-2">
                 {!scheduleData ? (
                   <p className="text-xs text-brown-500">Loading available sessions…</p>
                 ) : (scheduleData.weeklySchedule.length === 0 && scheduleData.camps.length === 0 && scheduleData.privateSlots.length === 0) ? (
                   renderManualRescheduleFields(rescheduleForm, setRescheduleForm)
+                ) : r.type === "weekly" && rescheduleConvertToPrivate ? (
+                  renderPrivateRescheduleFields(scheduleData.privateSlots, rescheduleForm, setRescheduleForm)
                 ) : r.type === "weekly" ? (
                   renderWeeklyRescheduleFields(scheduleData.weeklySchedule, rescheduleForm, setRescheduleForm)
                 ) : r.type === "camp" ? (
@@ -1535,6 +1629,9 @@ export default function AdminPage() {
                   renderPrivateRescheduleFields(scheduleData.privateSlots, rescheduleForm, setRescheduleForm)
                 )}
               </div>
+              {rescheduleConvertToPrivate && (
+                <p className="text-[11px] text-amber-400 mt-2">Price will be recalculated for a private session based on duration and player count.</p>
+              )}
               {rescheduleError && <p className="text-xs text-red-400 mt-2">{rescheduleError}</p>}
               <p className="text-[11px] text-brown-500 mt-3">No late fee is charged — this updates the client&apos;s existing booking and notifies them by email/text.</p>
               <div className="flex gap-3 mt-4">
