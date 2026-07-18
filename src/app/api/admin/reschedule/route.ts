@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { id, bookedDate, bookedStartTime, bookedEndTime, bookedLocation } = await req.json();
+  const { id, bookedDate, bookedStartTime, bookedEndTime, bookedLocation, bookedGroup, bookedTrainer, sessionLabelPrefix } = await req.json();
   if (!id || !bookedDate || !bookedStartTime || !bookedEndTime || !bookedLocation) {
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
   }
@@ -55,14 +55,19 @@ export async function POST(req: NextRequest) {
   const oldSessionDetails: string = reg.session_details;
   const oldBookedDate: string | null = reg.booked_date;
   const oldBookedStartTime: string | null = reg.booked_start_time;
+  const oldSessionLabel: string = reg.booked_group || "";
 
   // Rebuild session_details by swapping only the trailing "date time at location"
-  // segment. The group/camp label prefix is preserved verbatim — it may itself
-  // contain " — " (e.g. "High School Girls — Grades 9-12"), so we must not
-  // naively split on that separator and reconstruct from the first piece.
-  const parts = (oldSessionDetails || "").split(" — ");
-  const prefix = parts.length > 1 ? parts.slice(0, -1).join(" — ") : (parts[0] || "");
+  // segment. If the caller (the reschedule picker) already knows the exact new
+  // group/camp label — which may itself contain " — ", e.g. "High School Girls
+  // — Grades 9-12" — use that. Otherwise fall back to preserving whatever
+  // prefix the existing session_details already had.
+  const derivedParts = (oldSessionDetails || "").split(" — ");
+  const derivedPrefix = derivedParts.length > 1 ? derivedParts.slice(0, -1).join(" — ") : (derivedParts[0] || "");
+  const prefix = (typeof sessionLabelPrefix === "string" && sessionLabelPrefix) ? sessionLabelPrefix : derivedPrefix;
   const newSessionDetails = `${prefix} — ${bookedDate} ${bookedStartTime}-${bookedEndTime} at ${bookedLocation}`;
+
+  const newSessionLabel: string = (typeof bookedGroup === "string" && bookedGroup) ? bookedGroup : oldSessionLabel;
 
   const { error } = await supabase
     .from("registrations")
@@ -71,6 +76,8 @@ export async function POST(req: NextRequest) {
       booked_start_time: bookedStartTime,
       booked_end_time: bookedEndTime,
       booked_location: bookedLocation,
+      booked_group: newSessionLabel || reg.booked_group,
+      booked_trainer: (typeof bookedTrainer === "string" && bookedTrainer) ? bookedTrainer : reg.booked_trainer,
       session_details: newSessionDetails,
       admin_change_at: new Date().toISOString(),
     })
@@ -85,6 +92,7 @@ export async function POST(req: NextRequest) {
   // recompute the old slot (this registrant leaving) and the new slot (this
   // registrant arriving) from what's now in the DB.
   const isPrivate = reg.type === "private" || reg.type === "group-private";
+  const resolvedTrainer = (typeof bookedTrainer === "string" && bookedTrainer) ? bookedTrainer : (reg.booked_trainer || undefined);
   try {
     if (isPrivate) {
       if (oldBookedDate) {
@@ -99,14 +107,17 @@ export async function POST(req: NextRequest) {
         bookedStartTime,
         bookedEndTime,
         bookedLocation,
-        trainer: reg.booked_trainer || undefined,
+        trainer: resolvedTrainer,
       });
     } else {
-      const sessionLabel = reg.booked_group || prefix;
+      // Use the OLD label for the old slot (so that event's headcount drops
+      // correctly) and the NEW label for the new slot — these differ whenever
+      // the admin moved the client into a different group/camp, not just a
+      // different date/time within the same one.
       if (oldBookedDate && oldBookedStartTime) {
         await upsertGroupSessionCalendarEvent({
           sessionType: reg.type as "weekly" | "camp",
-          sessionLabel,
+          sessionLabel: oldSessionLabel || derivedPrefix,
           bookedDate: oldBookedDate,
           bookedStartTime: oldBookedStartTime,
           bookedEndTime: reg.booked_end_time || oldBookedStartTime,
@@ -117,7 +128,7 @@ export async function POST(req: NextRequest) {
       }
       await upsertGroupSessionCalendarEvent({
         sessionType: reg.type as "weekly" | "camp",
-        sessionLabel,
+        sessionLabel: newSessionLabel || prefix,
         bookedDate,
         bookedStartTime,
         bookedEndTime,
@@ -139,7 +150,7 @@ export async function POST(req: NextRequest) {
       newSessionDetails,
       manageToken: reg.manage_token,
       isLateReschedule: false,
-      newTrainer: reg.booked_trainer || undefined,
+      newTrainer: resolvedTrainer,
     });
     if (reg.sms_consent && reg.phone) {
       await sendSMS(

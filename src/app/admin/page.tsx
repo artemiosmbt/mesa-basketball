@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo, Fragment } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { authClient, ADMIN_EMAIL } from "@/lib/auth";
+import type { WeeklySession, Camp, PrivateSlot } from "@/lib/sheets";
 
 interface Registration {
   id: string;
@@ -36,6 +37,21 @@ interface PackageData {
   package_type: number;
   month_year: string;
   is_paid: boolean;
+}
+
+interface RescheduleForm {
+  group: string;
+  date: string;
+  start: string;
+  end: string;
+  location: string;
+  trainer: string;
+}
+
+interface ScheduleData {
+  weeklySchedule: WeeklySession[];
+  camps: Camp[];
+  privateSlots: PrivateSlot[];
 }
 
 const TYPE_LABELS: Record<string, string> = {
@@ -149,6 +165,258 @@ function daysAway(dateStr: string | null): { label: string; cls: string } | null
 
 function toDateKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// --- Reschedule dropdown helpers -------------------------------------------
+
+function splitCampTime(time: string): { start: string; end: string } {
+  const parts = time.split(/\s*[-–]\s*/);
+  return { start: parts[0]?.trim() || time, end: parts[1]?.trim() || parts[0]?.trim() || time };
+}
+
+function dateSortKey(d: string): number {
+  const t = new Date(d + " 12:00:00").getTime();
+  return isNaN(t) ? 0 : t;
+}
+
+function uniqueSorted(values: string[]): string[] {
+  return Array.from(new Set(values.filter(Boolean))).sort();
+}
+
+interface CampOption {
+  key: string;
+  label: string;
+  camp: Camp;
+}
+
+function campOptions(camps: Camp[]): CampOption[] {
+  return camps.map((c, i) => ({
+    key: `${i}`,
+    label: c.gradeGroup ? `${c.name} — ${c.gradeGroup}` : c.name,
+    camp: c,
+  }));
+}
+
+function campDayOptions(camp: Camp): string[] {
+  if (camp.campDays && camp.campDays.length > 0) {
+    return [...camp.campDays].sort((a, b) => dateSortKey(a) - dateSortKey(b));
+  }
+  return camp.startDate ? [camp.startDate] : [];
+}
+
+const RESCHEDULE_SELECT_CLASS = "mt-0.5 w-full rounded bg-brown-950 border border-brown-700 px-2 py-1.5 text-sm text-white";
+const RESCHEDULE_LABEL_CLASS = "text-[10px] uppercase tracking-wider text-brown-500";
+
+function renderWeeklyRescheduleFields(weeklySchedule: WeeklySession[], form: RescheduleForm, setForm: (f: RescheduleForm) => void) {
+  const groups = uniqueSorted(weeklySchedule.map((s) => s.group));
+  const sessionsForGroup = weeklySchedule.filter((s) => s.group === form.group);
+  const dates = uniqueSorted(sessionsForGroup.map((s) => s.date)).sort((a, b) => dateSortKey(a) - dateSortKey(b));
+  const sessionsForDate = sessionsForGroup.filter((s) => s.date === form.date);
+  const times = Array.from(new Set(sessionsForDate.map((s) => s.startTime)));
+  const sessionsForTime = sessionsForDate.filter((s) => s.startTime === form.start);
+  const locations = Array.from(new Set(sessionsForTime.map((s) => s.location)));
+
+  return (
+    <>
+      <div>
+        <label className={RESCHEDULE_LABEL_CLASS}>Group</label>
+        <select
+          value={form.group}
+          onChange={(e) => {
+            const group = e.target.value;
+            const first = weeklySchedule.find((s) => s.group === group);
+            setForm({ group, date: "", start: "", end: "", location: "", trainer: first?.trainer || "" });
+          }}
+          className={RESCHEDULE_SELECT_CLASS}
+        >
+          <option value="">Select a group…</option>
+          {groups.map((g) => <option key={g} value={g}>{g}</option>)}
+        </select>
+      </div>
+      {form.group && (
+        <div>
+          <label className={RESCHEDULE_LABEL_CLASS}>Date</label>
+          <select
+            value={form.date}
+            onChange={(e) => setForm({ ...form, date: e.target.value, start: "", end: "", location: "" })}
+            className={RESCHEDULE_SELECT_CLASS}
+          >
+            <option value="">Select a date…</option>
+            {dates.map((d) => <option key={d} value={d}>{d}</option>)}
+          </select>
+        </div>
+      )}
+      {form.date && (
+        <div>
+          <label className={RESCHEDULE_LABEL_CLASS}>Time</label>
+          <select
+            value={form.start}
+            onChange={(e) => {
+              const start = e.target.value;
+              const match = sessionsForDate.find((s) => s.startTime === start);
+              setForm({ ...form, start, end: match?.endTime || "", location: match?.location || form.location, trainer: match?.trainer || form.trainer });
+            }}
+            className={RESCHEDULE_SELECT_CLASS}
+          >
+            <option value="">Select a time…</option>
+            {times.map((t) => {
+              const match = sessionsForDate.find((s) => s.startTime === t);
+              return <option key={t} value={t}>{t}{match ? `-${match.endTime}` : ""}</option>;
+            })}
+          </select>
+        </div>
+      )}
+      {form.start && (
+        <div>
+          <label className={RESCHEDULE_LABEL_CLASS}>Location</label>
+          <select
+            value={form.location}
+            onChange={(e) => setForm({ ...form, location: e.target.value })}
+            className={RESCHEDULE_SELECT_CLASS}
+          >
+            <option value="">Select a location…</option>
+            {locations.map((l) => <option key={l} value={l}>{l}</option>)}
+          </select>
+        </div>
+      )}
+    </>
+  );
+}
+
+function renderCampRescheduleFields(camps: Camp[], form: RescheduleForm, setForm: (f: RescheduleForm) => void) {
+  const options = campOptions(camps);
+  const selected = options.find((o) => o.key === form.group);
+  const days = selected ? campDayOptions(selected.camp) : [];
+
+  return (
+    <>
+      <div>
+        <label className={RESCHEDULE_LABEL_CLASS}>Camp</label>
+        <select
+          value={form.group}
+          onChange={(e) => {
+            const key = e.target.value;
+            const opt = options.find((o) => o.key === key);
+            if (!opt) { setForm({ group: "", date: "", start: "", end: "", location: "", trainer: "" }); return; }
+            const { start, end } = splitCampTime(opt.camp.time);
+            setForm({ group: key, date: "", start, end, location: opt.camp.location, trainer: "" });
+          }}
+          className={RESCHEDULE_SELECT_CLASS}
+        >
+          <option value="">Select a camp…</option>
+          {options.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+        </select>
+      </div>
+      {selected && (
+        <div>
+          <label className={RESCHEDULE_LABEL_CLASS}>Day</label>
+          <select
+            value={form.date}
+            onChange={(e) => setForm({ ...form, date: e.target.value })}
+            className={RESCHEDULE_SELECT_CLASS}
+          >
+            <option value="">Select a day…</option>
+            {days.map((d) => <option key={d} value={d}>{d}</option>)}
+          </select>
+        </div>
+      )}
+      {selected && form.date && (
+        <div className="rounded-lg border border-brown-700 bg-brown-950 px-3 py-2 text-xs text-brown-300">
+          Fixed time/location for this camp: {form.start}-{form.end} at {form.location}
+        </div>
+      )}
+    </>
+  );
+}
+
+function renderPrivateRescheduleFields(privateSlots: PrivateSlot[], form: RescheduleForm, setForm: (f: RescheduleForm) => void) {
+  const dates = uniqueSorted(privateSlots.map((s) => s.date)).sort((a, b) => dateSortKey(a) - dateSortKey(b));
+  const slotsForDate = privateSlots.filter((s) => s.date === form.date);
+  const times = Array.from(new Set(slotsForDate.map((s) => s.startTime)));
+  const slotsForTime = slotsForDate.filter((s) => s.startTime === form.start);
+  const locations = Array.from(new Set(slotsForTime.map((s) => s.location)));
+
+  return (
+    <>
+      <div>
+        <label className={RESCHEDULE_LABEL_CLASS}>Date</label>
+        <select
+          value={form.date}
+          onChange={(e) => setForm({ ...form, date: e.target.value, start: "", end: "", location: "", trainer: "" })}
+          className={RESCHEDULE_SELECT_CLASS}
+        >
+          <option value="">Select a date…</option>
+          {dates.map((d) => <option key={d} value={d}>{d}</option>)}
+        </select>
+      </div>
+      {form.date && (
+        <div>
+          <label className={RESCHEDULE_LABEL_CLASS}>Time</label>
+          <select
+            value={form.start}
+            onChange={(e) => {
+              const start = e.target.value;
+              const match = slotsForDate.find((s) => s.startTime === start);
+              setForm({ ...form, start, end: match?.endTime || "", location: match?.location || "", trainer: match?.trainer || "" });
+            }}
+            className={RESCHEDULE_SELECT_CLASS}
+          >
+            <option value="">Select a time…</option>
+            {times.map((t) => {
+              const match = slotsForDate.find((s) => s.startTime === t);
+              return <option key={t} value={t}>{t}{match ? `-${match.endTime}` : ""}</option>;
+            })}
+          </select>
+        </div>
+      )}
+      {form.start && (
+        <div>
+          <label className={RESCHEDULE_LABEL_CLASS}>Location</label>
+          <select
+            value={form.location}
+            onChange={(e) => {
+              const location = e.target.value;
+              const match = slotsForTime.find((s) => s.location === location);
+              setForm({ ...form, location, trainer: match?.trainer || form.trainer });
+            }}
+            className={RESCHEDULE_SELECT_CLASS}
+          >
+            <option value="">Select a location…</option>
+            {locations.map((l) => {
+              const match = slotsForTime.find((s) => s.location === l);
+              return <option key={l} value={l}>{l}{match?.trainer ? ` (${match.trainer})` : ""}</option>;
+            })}
+          </select>
+        </div>
+      )}
+    </>
+  );
+}
+
+function renderManualRescheduleFields(form: RescheduleForm, setForm: (f: RescheduleForm) => void) {
+  return (
+    <>
+      <p className="text-[11px] text-amber-400 -mt-1">Couldn&apos;t load the schedule sheet — enter the new session manually.</p>
+      <div>
+        <label className={RESCHEDULE_LABEL_CLASS}>Date</label>
+        <input value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} placeholder="e.g. July 20, 2026" className={RESCHEDULE_SELECT_CLASS} />
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className={RESCHEDULE_LABEL_CLASS}>Start</label>
+          <input value={form.start} onChange={(e) => setForm({ ...form, start: e.target.value })} placeholder="e.g. 7:00 PM" className={RESCHEDULE_SELECT_CLASS} />
+        </div>
+        <div>
+          <label className={RESCHEDULE_LABEL_CLASS}>End</label>
+          <input value={form.end} onChange={(e) => setForm({ ...form, end: e.target.value })} placeholder="e.g. 8:00 PM" className={RESCHEDULE_SELECT_CLASS} />
+        </div>
+      </div>
+      <div>
+        <label className={RESCHEDULE_LABEL_CLASS}>Location</label>
+        <input value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} placeholder="Location" className={RESCHEDULE_SELECT_CLASS} />
+      </div>
+    </>
+  );
 }
 
 function formatDateHeader(d: string | null): string {
@@ -380,9 +648,10 @@ export default function AdminPage() {
   // Admin reschedule state
   const [reschedulingId, setReschedulingId] = useState<string | null>(null);
   const [rescheduleStep, setRescheduleStep] = useState<"edit" | "confirm">("edit");
-  const [rescheduleForm, setRescheduleForm] = useState({ date: "", start: "", end: "", location: "" });
+  const [rescheduleForm, setRescheduleForm] = useState<RescheduleForm>({ group: "", date: "", start: "", end: "", location: "", trainer: "" });
   const [rescheduleSaving, setRescheduleSaving] = useState(false);
   const [rescheduleError, setRescheduleError] = useState<string | null>(null);
+  const [scheduleData, setScheduleData] = useState<ScheduleData | null>(null);
 
   // Time Change state
   const [tcResult, setTcResult] = useState<{ changesFound: { session: string; oldTime: string; newTime: string; count: number }[]; totalEmailsSent: number; totalSmsSent: number } | null>(null);
@@ -422,6 +691,16 @@ export default function AdminPage() {
         if (syncResult?.changesFound?.length > 0) {
           setTcResult(syncResult);
         }
+      }).catch(() => {});
+
+      // Load the current schedule (groups/camps/private slots) so the reschedule
+      // modal can offer real dropdown options instead of free text.
+      fetch("/api/schedule").then((r) => r.json()).then((d) => {
+        setScheduleData({
+          weeklySchedule: d.weeklySchedule || [],
+          camps: d.camps || [],
+          privateSlots: d.privateSlots || [],
+        });
       }).catch(() => {});
     });
   }, [router]);
@@ -469,17 +748,26 @@ export default function AdminPage() {
     setReschedulingId(r.id);
     setRescheduleStep("edit");
     setRescheduleError(null);
+    // For weekly/camp we start the picker blank so the admin actively selects
+    // from real sheet options rather than pre-filling with the (possibly
+    // stale) current label. Private sessions still start pre-filled since
+    // there's no "group" step for them to reconsider.
+    const isGroupOrCamp = r.type === "weekly" || r.type === "camp";
     setRescheduleForm({
-      date: r.booked_date || "",
-      start: r.booked_start_time || "",
-      end: r.booked_end_time || "",
-      location: r.booked_location || "",
+      group: "",
+      date: isGroupOrCamp ? "" : (r.booked_date || ""),
+      start: isGroupOrCamp ? "" : (r.booked_start_time || ""),
+      end: isGroupOrCamp ? "" : (r.booked_end_time || ""),
+      location: isGroupOrCamp ? "" : (r.booked_location || ""),
+      trainer: r.booked_trainer || "",
     });
   }
 
   function reviewReschedule() {
-    if (!rescheduleForm.date.trim() || !rescheduleForm.start.trim() || !rescheduleForm.end.trim() || !rescheduleForm.location.trim()) {
-      setRescheduleError("All fields are required.");
+    const r = registrations.find((x) => x.id === reschedulingId);
+    const needsGroup = r?.type === "weekly" || r?.type === "camp";
+    if ((needsGroup && !rescheduleForm.group.trim()) || !rescheduleForm.date.trim() || !rescheduleForm.start.trim() || !rescheduleForm.end.trim() || !rescheduleForm.location.trim()) {
+      setRescheduleError("Please select all fields.");
       return;
     }
     setRescheduleError(null);
@@ -488,8 +776,26 @@ export default function AdminPage() {
 
   async function submitReschedule() {
     if (!token || !reschedulingId) return;
+    const r = registrations.find((x) => x.id === reschedulingId);
+    if (!r) return;
     setRescheduleSaving(true);
     setRescheduleError(null);
+
+    let bookedGroup: string | undefined;
+    let sessionLabelPrefix: string | undefined;
+    if (r.type === "weekly") {
+      bookedGroup = rescheduleForm.group;
+      sessionLabelPrefix = rescheduleForm.group;
+    } else if (r.type === "camp" && scheduleData) {
+      const opt = campOptions(scheduleData.camps).find((o) => o.key === rescheduleForm.group);
+      if (opt) {
+        bookedGroup = opt.camp.name;
+        sessionLabelPrefix = opt.camp.gradeGroup ? `${opt.camp.name} — ${opt.camp.gradeGroup}` : opt.camp.name;
+      }
+    } else {
+      sessionLabelPrefix = "Private Session";
+    }
+
     const res = await fetch("/api/admin/reschedule", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -499,6 +805,9 @@ export default function AdminPage() {
         bookedStartTime: rescheduleForm.start.trim(),
         bookedEndTime: rescheduleForm.end.trim(),
         bookedLocation: rescheduleForm.location.trim(),
+        bookedGroup,
+        bookedTrainer: rescheduleForm.trainer || undefined,
+        sessionLabelPrefix,
       }),
     });
     const data = await res.json();
@@ -508,14 +817,16 @@ export default function AdminPage() {
       return;
     }
     const id = reschedulingId;
-    setRegistrations((prev) => prev.map((r) => (r.id === id ? {
-      ...r,
+    setRegistrations((prev) => prev.map((reg) => (reg.id === id ? {
+      ...reg,
       booked_date: rescheduleForm.date.trim(),
       booked_start_time: rescheduleForm.start.trim(),
       booked_end_time: rescheduleForm.end.trim(),
       booked_location: rescheduleForm.location.trim(),
-      session_details: data.sessionDetails || r.session_details,
-    } : r)));
+      booked_group: bookedGroup ?? reg.booked_group,
+      booked_trainer: rescheduleForm.trainer || reg.booked_trainer,
+      session_details: data.sessionDetails || reg.session_details,
+    } : reg)));
     setReschedulingId(null);
   }
 
@@ -1160,6 +1471,14 @@ export default function AdminPage() {
         const r = registrations.find((x) => x.id === reschedulingId);
         if (!r) return null;
 
+        // For the confirm-step "To" label: weekly uses the group name as-is;
+        // camp needs to resolve the picked option key back to "Name — GradeGroup".
+        const toGroupLabel = r.type === "weekly"
+          ? rescheduleForm.group
+          : r.type === "camp" && scheduleData
+            ? campOptions(scheduleData.camps).find((o) => o.key === rescheduleForm.group)?.label
+            : undefined;
+
         if (rescheduleStep === "confirm") {
           return (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4" onClick={() => setReschedulingId(null)}>
@@ -1169,11 +1488,13 @@ export default function AdminPage() {
                 <div className="rounded-lg border border-brown-700 bg-brown-950 p-3 space-y-2 text-xs">
                   <div>
                     <p className="text-brown-500 uppercase tracking-wider text-[10px] mb-0.5">From</p>
+                    {r.booked_group && <p className="text-brown-300">{r.booked_group}</p>}
                     <p className="text-brown-300">{formatDate(r.booked_date)} · {r.booked_start_time}{r.booked_end_time ? `-${r.booked_end_time}` : ""}</p>
                     <p className="text-brown-400">{r.booked_location}</p>
                   </div>
                   <div className="border-t border-brown-800 pt-2">
                     <p className="text-brown-500 uppercase tracking-wider text-[10px] mb-0.5">To</p>
+                    {toGroupLabel && <p className="text-white font-medium">{toGroupLabel}</p>}
                     <p className="text-white font-medium">{rescheduleForm.date} · {rescheduleForm.start}-{rescheduleForm.end}</p>
                     <p className="text-mesa-accent">{rescheduleForm.location}</p>
                   </div>
@@ -1202,49 +1523,22 @@ export default function AdminPage() {
               <h3 className="text-sm font-semibold text-white mb-1">Reschedule Session</h3>
               <p className="text-xs text-brown-400 mb-3">{r.parent_name} — {athleteNames(r.kids || "")}</p>
               <div className="space-y-2">
-                <div>
-                  <label className="text-[10px] uppercase tracking-wider text-brown-500">Date</label>
-                  <input
-                    value={rescheduleForm.date}
-                    onChange={(e) => setRescheduleForm((f) => ({ ...f, date: e.target.value }))}
-                    placeholder="e.g. July 20, 2026"
-                    className="mt-0.5 w-full rounded bg-brown-950 border border-brown-700 px-2 py-1.5 text-sm text-white"
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-[10px] uppercase tracking-wider text-brown-500">Start</label>
-                    <input
-                      value={rescheduleForm.start}
-                      onChange={(e) => setRescheduleForm((f) => ({ ...f, start: e.target.value }))}
-                      placeholder="e.g. 7:00 PM"
-                      className="mt-0.5 w-full rounded bg-brown-950 border border-brown-700 px-2 py-1.5 text-sm text-white"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] uppercase tracking-wider text-brown-500">End</label>
-                    <input
-                      value={rescheduleForm.end}
-                      onChange={(e) => setRescheduleForm((f) => ({ ...f, end: e.target.value }))}
-                      placeholder="e.g. 8:00 PM"
-                      className="mt-0.5 w-full rounded bg-brown-950 border border-brown-700 px-2 py-1.5 text-sm text-white"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="text-[10px] uppercase tracking-wider text-brown-500">Location</label>
-                  <input
-                    value={rescheduleForm.location}
-                    onChange={(e) => setRescheduleForm((f) => ({ ...f, location: e.target.value }))}
-                    placeholder="Location"
-                    className="mt-0.5 w-full rounded bg-brown-950 border border-brown-700 px-2 py-1.5 text-sm text-white"
-                  />
-                </div>
+                {!scheduleData ? (
+                  <p className="text-xs text-brown-500">Loading available sessions…</p>
+                ) : (scheduleData.weeklySchedule.length === 0 && scheduleData.camps.length === 0 && scheduleData.privateSlots.length === 0) ? (
+                  renderManualRescheduleFields(rescheduleForm, setRescheduleForm)
+                ) : r.type === "weekly" ? (
+                  renderWeeklyRescheduleFields(scheduleData.weeklySchedule, rescheduleForm, setRescheduleForm)
+                ) : r.type === "camp" ? (
+                  renderCampRescheduleFields(scheduleData.camps, rescheduleForm, setRescheduleForm)
+                ) : (
+                  renderPrivateRescheduleFields(scheduleData.privateSlots, rescheduleForm, setRescheduleForm)
+                )}
               </div>
               {rescheduleError && <p className="text-xs text-red-400 mt-2">{rescheduleError}</p>}
               <p className="text-[11px] text-brown-500 mt-3">No late fee is charged — this updates the client&apos;s existing booking and notifies them by email/text.</p>
               <div className="flex gap-3 mt-4">
-                <button onClick={reviewReschedule} className="flex-1 rounded-lg bg-mesa-accent text-white text-sm font-semibold py-2">
+                <button onClick={reviewReschedule} disabled={!scheduleData} className="flex-1 rounded-lg bg-mesa-accent text-white text-sm font-semibold py-2 disabled:opacity-50">
                   Review Change
                 </button>
                 <button onClick={() => setReschedulingId(null)} className="rounded-lg border border-brown-700 text-brown-300 text-sm px-4 py-2">
