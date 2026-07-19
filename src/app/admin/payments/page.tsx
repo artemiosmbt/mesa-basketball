@@ -7,6 +7,7 @@ import { authClient, ADMIN_EMAIL } from "@/lib/auth";
 
 interface Registration {
   id: string;
+  created_at: string;
   parent_name: string;
   email: string;
   phone: string;
@@ -29,6 +30,7 @@ interface Registration {
   camp_day_late_fee: number | null;
   camp_drop_in_rate: number | null;
   applied_account_credit: number | null;
+  booking_batch_id: string | null;
 }
 
 interface PackageData {
@@ -69,6 +71,16 @@ function sessionLabel(r: Registration) {
 // booked_group (the camp's own name) disambiguates which specific camp this is.
 function campGroupKey(r: Registration): string {
   return `${r.referral_code ?? ""}::${r.booked_group ?? ""}`;
+}
+
+function timeAgo(dateStr: string): string {
+  const ms = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(ms / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
 }
 
 function daysAway(dateStr: string | null): { label: string; cls: string } | null {
@@ -211,6 +223,38 @@ export default function PaymentsPage() {
     }
     return result;
   }, [registrations, packages]);
+
+  // Stripe checkouts still in flight (or expired unused) — one card per
+  // booking_batch_id, not per session-date row, since a weekly/camp booking
+  // stamps the same batch id across every row created together.
+  function collapseByBatch(rows: Registration[]): Registration[] {
+    const seenBatches = new Set<string>();
+    const out: Registration[] = [];
+    for (const r of rows) {
+      if (r.booking_batch_id) {
+        if (seenBatches.has(r.booking_batch_id)) continue;
+        seenBatches.add(r.booking_batch_id);
+      }
+      out.push(r);
+    }
+    return out;
+  }
+
+  const pendingPayment = useMemo(() =>
+    collapseByBatch(
+      registrations
+        .filter((r) => r.status === "pending_payment")
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    ),
+  [registrations]);
+
+  const abandonedCheckouts = useMemo(() =>
+    collapseByBatch(
+      registrations
+        .filter((r) => r.status === "payment_abandoned")
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    ),
+  [registrations]);
 
   const unpaid = useMemo(() => {
     const seenCamps = new Set<string>();
@@ -407,6 +451,70 @@ export default function PaymentsPage() {
         </aside>
 
       <div className="flex-1 min-w-0 px-4 sm:px-6 py-8 space-y-12">
+
+        {/* Awaiting Stripe Payment — a client is mid-checkout right now (or the
+            webhook hasn't landed yet); nothing to do here but wait, unless one
+            sits stuck for a while. */}
+        {pendingPayment.length > 0 && (
+          <div>
+            <h2 className="font-[family-name:var(--font-oswald)] text-lg font-bold tracking-wide text-white mb-4">
+              AWAITING STRIPE PAYMENT
+              <span className="ml-2 rounded-full bg-blue-600 px-2 py-0.5 text-xs font-medium text-white">{pendingPayment.length}</span>
+            </h2>
+            <div className="space-y-2">
+              {pendingPayment.map((r) => (
+                <div key={r.booking_batch_id || r.id} className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-3 flex items-center justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                      <span className="font-medium text-sm">{r.parent_name}</span>
+                      <span className="rounded-full bg-amber-400 px-2 py-0.5 text-xs font-semibold text-blue-900 shrink-0">{TYPE_LABELS[r.type] || r.type}</span>
+                      <span className="rounded-full bg-blue-900/40 text-blue-400 px-2 py-0.5 text-xs font-medium shrink-0">checkout {timeAgo(r.created_at)}</span>
+                    </div>
+                    {r.kids && <div className="text-xs text-white mt-0.5 truncate">{r.kids.split(",").map((k) => k.split("(")[0].trim()).filter(Boolean).join(", ")}</div>}
+                    <div className="text-xs text-brown-400 mt-0.5 truncate">{sessionLabel(r)}</div>
+                    <div className="flex flex-wrap gap-x-3 mt-1 text-xs text-brown-500">
+                      <span>{formatDate(r.booked_date)}</span>
+                      <span>{r.phone}</span>
+                      <span className="ml-auto text-brown-400 font-medium">${r.session_price ?? "—"}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Abandoned Checkouts — the client never completed payment (closed the
+            tab, card declined, let it expire); the slot was released automatically.
+            Informational only — nothing to settle, just useful for follow-up. */}
+        {abandonedCheckouts.length > 0 && (
+          <div>
+            <h2 className="font-[family-name:var(--font-oswald)] text-lg font-bold tracking-wide text-white mb-4">
+              ABANDONED CHECKOUTS
+              <span className="ml-2 rounded-full bg-brown-600 px-2 py-0.5 text-xs font-medium text-white">{abandonedCheckouts.length}</span>
+            </h2>
+            <div className="space-y-2">
+              {abandonedCheckouts.map((r) => (
+                <div key={r.booking_batch_id || r.id} className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-3 flex items-center justify-between gap-3 opacity-70">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                      <span className="font-medium text-sm">{r.parent_name}</span>
+                      <span className="rounded-full bg-amber-400 px-2 py-0.5 text-xs font-semibold text-blue-900 shrink-0">{TYPE_LABELS[r.type] || r.type}</span>
+                      <span className="rounded-full bg-brown-700 text-brown-300 px-2 py-0.5 text-xs font-medium shrink-0">abandoned {timeAgo(r.created_at)}</span>
+                    </div>
+                    {r.kids && <div className="text-xs text-white mt-0.5 truncate">{r.kids.split(",").map((k) => k.split("(")[0].trim()).filter(Boolean).join(", ")}</div>}
+                    <div className="text-xs text-brown-400 mt-0.5 truncate">{sessionLabel(r)}</div>
+                    <div className="flex flex-wrap gap-x-3 mt-1 text-xs text-brown-500">
+                      <span>{formatDate(r.booked_date)}</span>
+                      <span>{r.phone}</span>
+                      <span className="ml-auto text-brown-400 font-medium">${r.session_price ?? "—"}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Unpaid */}
         <div>

@@ -171,6 +171,20 @@ function daysAway(dateStr: string | null): { label: string; cls: string } | null
   return { label: `${Math.abs(diff)} days ago`, cls: "bg-orange-900/40 text-orange-400" };
 }
 
+// Shared status badge styling/label — used everywhere a registration's
+// status is shown (client detail view, upcoming, past).
+function statusBadge(status: string, isPast?: boolean): { cls: string; label: string } {
+  if (status === "pending_payment") return { cls: "bg-blue-900/40 text-blue-400", label: "awaiting payment" };
+  if (status === "payment_abandoned") return { cls: "bg-brown-700 text-brown-300", label: "abandoned" };
+  if (status === "no_show") return { cls: "bg-orange-900/40 text-orange-400", label: "no show" };
+  if (status === "confirmed") {
+    return isPast
+      ? { cls: "bg-brown-800 text-brown-400", label: "completed" }
+      : { cls: "bg-green-900/40 text-green-400", label: isPast === undefined ? "confirmed" : "scheduled" };
+  }
+  return { cls: "bg-red-900/40 text-red-400", label: status };
+}
+
 function toDateKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
@@ -622,8 +636,8 @@ function CalendarView({ list, packageMembership, weeklyDiscountRates, cancelRegi
                     </div>
                   </div>
                   <div className="shrink-0 flex flex-col items-end gap-2">
-                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${r.status === "confirmed" ? "bg-green-900/40 text-green-400" : r.status === "no_show" ? "bg-orange-900/40 text-orange-400" : "bg-red-900/40 text-red-400"}`}>
-                      {r.status === "no_show" ? "no show" : r.status}
+                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusBadge(r.status).cls}`}>
+                      {statusBadge(r.status).label}
                     </span>
                     {!packageMembership.get(r.id)?.withinPackage && (
                       <span className="text-xs font-medium text-green-400">
@@ -948,7 +962,9 @@ export default function AdminPage() {
   const upcoming = useMemo(() => {
     const now = Date.now();
     return registrations
-      .filter((r) => r.status === "confirmed" && sessionMs(r.booked_date, r.booked_start_time) > now)
+      // pending_payment holds a real slot (someone's mid-checkout) — worth
+      // seeing here, not just hidden until the webhook confirms it.
+      .filter((r) => (r.status === "confirmed" || r.status === "pending_payment") && sessionMs(r.booked_date, r.booked_start_time) > now)
       .sort((a, b) => sessionMs(a.booked_date, a.booked_start_time) - sessionMs(b.booked_date, b.booked_start_time));
   }, [registrations]);
 
@@ -1088,8 +1104,8 @@ export default function AdminPage() {
                 <span className="rounded-full bg-teal-900/40 text-teal-400 px-2 py-0.5 text-xs font-medium">pkg</span>
               )}
               {(() => { const da = daysAway(r.booked_date); return da ? <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${da.cls}`}>{da.label}</span> : null; })()}
-              <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${r.status === "confirmed" && !isPast ? "bg-green-900/40 text-green-400" : r.status === "confirmed" && isPast ? "bg-brown-800 text-brown-400" : r.status === "no_show" ? "bg-orange-900/40 text-orange-400" : "bg-red-900/40 text-red-400"}`}>
-                {r.status === "confirmed" ? (isPast ? "completed" : "scheduled") : r.status === "no_show" ? "no show" : r.status}
+              <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusBadge(r.status, isPast).cls}`}>
+                {statusBadge(r.status, isPast).label}
               </span>
             </div>
             <div className="text-xs text-brown-300 mt-0.5 truncate">{athleteNames(r.kids || "")}</div>
@@ -1239,8 +1255,8 @@ export default function AdminPage() {
               <div className="whitespace-pre-line leading-relaxed">{r.session_details ? r.session_details.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim() : "—"}</div>
             </td>
             <td className="px-4 py-3 whitespace-nowrap">
-              <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${r.status === "confirmed" && !isPast ? "bg-green-900/40 text-green-400" : r.status === "confirmed" && isPast ? "bg-brown-800 text-brown-400" : r.status === "no_show" ? "bg-orange-900/40 text-orange-400" : "bg-red-900/40 text-red-400"}`}>
-                {r.status === "confirmed" ? (isPast ? "completed" : "scheduled") : r.status === "no_show" ? "no show" : r.status}
+              <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusBadge(r.status, isPast).cls}`}>
+                {statusBadge(r.status, isPast).label}
               </span>
             </td>
             <td className="px-4 py-3 whitespace-nowrap text-xs">
