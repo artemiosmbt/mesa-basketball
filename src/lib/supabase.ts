@@ -173,6 +173,15 @@ export async function cancelRegistration(token: string, isLateCancel = false, ca
   return !error;
 }
 
+/** Record a completed Stripe refund on the row it was issued for (bookkeeping only). */
+export async function recordStripeRefund(token: string, refundId: string): Promise<void> {
+  const supabase = getSupabase();
+  await supabase
+    .from("registrations")
+    .update({ stripe_refund_id: refundId })
+    .eq("manage_token", token);
+}
+
 /** Get every day-row sharing a referral_code for a full camp group, ordered by date. */
 // referral_code alone isn't a unique purchase ID — it's the client's own permanent
 // referral code, so it's identical across every full-camp purchase they've ever made.

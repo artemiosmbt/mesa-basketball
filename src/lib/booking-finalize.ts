@@ -1,6 +1,7 @@
 import { sendRegistrationNotification, sendReferralCreditNotification } from "@/lib/email";
 import { addPrivateSessionToCalendar, upsertGroupSessionCalendarEvent } from "@/lib/calendar";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
+import { getStripe } from "@/lib/stripe";
 import {
   addReferralCredit,
   addAccountCredit,
@@ -8,7 +9,43 @@ import {
   getActivePackage,
   setPackageSessions,
   countConfirmedPrivateSessions,
+  recordStripeRefund,
 } from "@/lib/supabase";
+
+/**
+ * Refunds a real Stripe charge for an on-time cancellation. On success,
+ * records the refund id on the row (bookkeeping) and returns true. On
+ * failure, does NOT fall back to account credit — silently substituting
+ * credit for a promised card refund would be an undisclosed policy change —
+ * instead it alerts the admin to refund manually and returns false so the
+ * caller can adjust what it tells the client.
+ */
+export async function issueCancellationRefund(params: {
+  email: string;
+  manageToken: string;
+  paymentIntentId: string;
+  amountDollars: number;
+  sessionLabel: string;
+}): Promise<boolean> {
+  if (params.amountDollars <= 0) return true;
+  try {
+    const stripe = getStripe();
+    const refund = await stripe.refunds.create({
+      payment_intent: params.paymentIntentId,
+      amount: Math.round(params.amountDollars * 100),
+    });
+    await recordStripeRefund(params.manageToken, refund.id).catch(() => {});
+    return true;
+  } catch (err) {
+    console.error("Stripe refund failed:", err);
+    try {
+      await sendAdminSMS(`REFUND FAILED — manual action needed\n${params.sessionLabel}\n${params.email}\n$${params.amountDollars} could not be refunded automatically. Refund manually in the Stripe dashboard.`);
+    } catch {
+      // non-critical
+    }
+    return false;
+  }
+}
 
 export interface FinalizePrivateBookingParams {
   parentName: string;

@@ -14,6 +14,7 @@ import {
   decrementReferralCredit,
   addAccountCredit,
 } from "@/lib/supabase";
+import { issueCancellationRefund } from "@/lib/booking-finalize";
 import {
   sendCancellationNotification,
   sendRescheduleNotification,
@@ -213,41 +214,74 @@ export async function DELETE(
       if (groupCredit > 0 && reg.email) {
         await addAccountCredit(reg.email, groupCredit).catch(() => {});
       }
-      // If they already paid, credit back what they paid in cash (not
-      // counting the applied-credit portion refunded above): full amount
-      // with 24+ hours notice, 50% if cancelled late — the pre-Stripe
-      // stand-in for the refund policy already locked in for when Stripe
-      // goes live (full refund vs 50% credit for a late cancel).
-      const wasPaid = reg.is_paid || group.some((r) => r.is_paid);
+      // If they already paid: full Stripe refund with 24+ hours notice, 50%
+      // account credit (charge kept) if cancelled late — the real-money
+      // version of the policy, now that Stripe charges exist. Bookings paid
+      // the old manual/cash way (is_paid, no Stripe charge on file) still
+      // fall back to account credit since there's no card to refund.
+      const groupPaymentIntentId = reg.stripe_payment_intent_id || group.find((r) => r.stripe_payment_intent_id)?.stripe_payment_intent_id;
+      const wasPaid = reg.is_paid || group.some((r) => r.is_paid) || !!groupPaymentIntentId;
       let cancelCredit = 0;
+      let wasStripeRefund = false;
       if (wasPaid && reg.email) {
         const paidAmount = Math.max(0, resolvedSessionPrice(reg) - groupCredit);
-        cancelCredit = isLateCancel ? Math.round(paidAmount * 0.5) : paidAmount;
-        if (cancelCredit > 0) {
-          await addAccountCredit(reg.email, cancelCredit).catch(() => {});
+        if (isLateCancel) {
+          cancelCredit = Math.round(paidAmount * 0.5);
+          if (cancelCredit > 0) await addAccountCredit(reg.email, cancelCredit).catch(() => {});
+        } else {
+          cancelCredit = paidAmount;
+          if (paidAmount > 0) {
+            if (groupPaymentIntentId) {
+              // Told to the client as a refund either way — if the automatic
+              // Stripe call fails, issueCancellationRefund has already alerted
+              // the admin to complete it manually, so the promise still holds.
+              wasStripeRefund = true;
+              await issueCancellationRefund({
+                email: reg.email,
+                manageToken: token,
+                paymentIntentId: groupPaymentIntentId,
+                amountDollars: paidAmount,
+                sessionLabel: campName,
+              });
+            } else {
+              await addAccountCredit(reg.email, paidAmount).catch(() => {});
+            }
+          }
         }
       }
       // Late fee wording only makes sense when nothing was paid — someone who
-      // already paid is being credited (possibly $0 if their existing account
-      // credit already covered the whole thing), never asked for more. Also
-      // subtract any credit already applied at booking time, so the fee
+      // already paid is being refunded/credited (possibly $0 if their existing
+      // account credit already covered the whole thing), never asked for more.
+      // Also subtract any credit already applied at booking time, so the fee
       // reflects what's actually still owed, not the full sticker price.
       const lateFeeAmount = isLateCancel && !wasPaid
         ? Math.round(Math.max(0, resolvedSessionPrice(reg) - groupCredit) * 0.5)
         : undefined;
-      await sendCancellationNotification({
-        parentName: reg.parent_name,
-        email: reg.email,
-        sessionDetails: campName,
-        sessionType: reg.type,
-        isLateCancel,
-        lateFeeAmount,
-        cancelCredit: wasPaid ? cancelCredit : undefined,
-      });
+      // Wrapped so an email provider hiccup can't crash the request after a
+      // real refund has already been issued — the SMS/calendar sync below
+      // must still run either way.
+      try {
+        await sendCancellationNotification({
+          parentName: reg.parent_name,
+          email: reg.email,
+          sessionDetails: campName,
+          sessionType: reg.type,
+          isLateCancel,
+          lateFeeAmount,
+          cancelCredit: wasPaid ? cancelCredit : undefined,
+          wasStripeRefund,
+        });
+      } catch (notifyErr) {
+        console.error("Cancellation email failed (full camp cancel, cancel/refund already applied):", notifyErr);
+      }
       if (reg.sms_consent && reg.phone) {
         const lateNote = wasPaid
           ? (cancelCredit > 0
-              ? (isLateCancel ? `\n$${cancelCredit} credited to your account (50% of what you paid — late cancellation).` : `\n$${cancelCredit} credited to your account for a future booking.`)
+              ? (wasStripeRefund
+                  ? `\n$${cancelCredit} refunded to your original payment method.`
+                  : isLateCancel
+                    ? `\n$${cancelCredit} credited to your account (50% of what you paid — late cancellation).`
+                    : `\n$${cancelCredit} credited to your account for a future booking.`)
               : "\nNothing additional is due — your account credit already covered this.")
           : isLateCancel ? "\nA late cancellation fee applies." : "";
         await sendSMS(reg.phone, `Mesa Basketball: ${campName} cancelled.${lateNote}\nmesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
@@ -294,31 +328,50 @@ export async function DELETE(
     // Late fees can never push the total above the original full-week price —
     // the family never pays more than they would have by keeping the full week.
     const finalAmount = Math.min(originalAmount, recomputedPrice + priorAccruedFees + thisDayLateFee);
-    const isPaid = !!reg.is_paid;
+    const isPaid = !!reg.is_paid || !!reg.stripe_payment_intent_id;
     const delta = finalAmount - originalAmount;
 
-    // If they already paid more than the new total, that difference becomes
-    // account credit toward a future booking instead of a cash refund.
+    // If they already paid more than the new total, that difference goes
+    // back — a real Stripe refund when this day's charge went through
+    // Stripe (the late-fee math above is already baked into the amount, so
+    // there's no separate "late keeps it all" branch needed here), account
+    // credit for the old manual/cash path.
     const creditGranted = isPaid && delta < 0 ? -delta : 0;
+    let wasStripeRefund = false;
     if (creditGranted > 0) {
-      await addAccountCredit(reg.email, creditGranted);
+      if (reg.stripe_payment_intent_id) {
+        wasStripeRefund = true;
+        await issueCancellationRefund({
+          email: reg.email,
+          manageToken: token,
+          paymentIntentId: reg.stripe_payment_intent_id,
+          amountDollars: creditGranted,
+          sessionLabel: campName,
+        });
+      } else {
+        await addAccountCredit(reg.email, creditGranted);
+      }
     }
 
-    await sendCancellationNotification({
-      parentName: reg.parent_name,
-      email: reg.email,
-      sessionDetails: campName,
-      sessionType: reg.type,
-      isLateCancel,
-      campAdjustment: { finalAmount, originalAmount, isPaid, creditGranted },
-    });
+    try {
+      await sendCancellationNotification({
+        parentName: reg.parent_name,
+        email: reg.email,
+        sessionDetails: campName,
+        sessionType: reg.type,
+        isLateCancel,
+        campAdjustment: { finalAmount, originalAmount, isPaid, creditGranted, wasStripeRefund },
+      });
+    } catch (notifyErr) {
+      console.error("Cancellation email failed (camp day cancel, cancel/refund already applied):", notifyErr);
+    }
     if (reg.phone) {
       const adjustmentLine = isPaid
-        ? creditGranted > 0 ? ` $${creditGranted} credited to your account for your next session.` : ""
+        ? creditGranted > 0 ? (wasStripeRefund ? ` $${creditGranted} refunded to your original payment method.` : ` $${creditGranted} credited to your account for your next session.`) : ""
         : ` Amount due: $${finalAmount}.`;
       await sendSMS(reg.phone, `Mesa Basketball: ${campName} — ${formatDateWithDay(reg.booked_date || "")} cancelled. New total: $${finalAmount} (was $${originalAmount}).${adjustmentLine}\nReply STOP to opt out.`);
     }
-    await sendAdminSMS(`CAMP DAY CANCELLED: ${reg.parent_name}\n${campName} — ${reg.booked_date}\nNew total: $${finalAmount} (was $${originalAmount})${isPaid ? (creditGranted > 0 ? ` — $${creditGranted} credited to their account` : "") : ` — due: $${finalAmount}`}`);
+    await sendAdminSMS(`CAMP DAY CANCELLED: ${reg.parent_name}\n${campName} — ${reg.booked_date}\nNew total: $${finalAmount} (was $${originalAmount})${isPaid ? (creditGranted > 0 ? ` — $${creditGranted} ${wasStripeRefund ? "refunded" : "credited to their account"}` : "") : ` — due: $${finalAmount}`}`);
 
     if (reg.booked_date && reg.booked_start_time) {
       try {
@@ -369,18 +422,34 @@ export async function DELETE(
     await addAccountCredit(reg.email, reg.applied_account_credit).catch(() => {});
   }
 
-  // If they already paid, credit back what they paid in cash (not counting
-  // the applied-credit portion refunded above): full amount with 24+ hours
-  // notice, 50% if cancelled late — the pre-Stripe stand-in for the refund
-  // policy already locked in for when Stripe goes live (full refund vs 50%
-  // credit for a late cancel).
-  const wasPaid = !!reg.is_paid;
+  // If they already paid: full Stripe refund with 24+ hours notice, 50%
+  // account credit (charge kept) if cancelled late. Bookings paid the old
+  // manual/cash way (is_paid, no Stripe charge on file) still fall back to
+  // account credit since there's no card to refund.
+  const wasPaid = !!reg.is_paid || !!reg.stripe_payment_intent_id;
   let cancelCredit = 0;
+  let wasStripeRefund = false;
   if (wasPaid && reg.email) {
     const paidAmount = Math.max(0, resolvedSessionPrice(reg) - (reg.applied_account_credit || 0));
-    cancelCredit = isLateCancel ? Math.round(paidAmount * 0.5) : paidAmount;
-    if (cancelCredit > 0) {
-      await addAccountCredit(reg.email, cancelCredit).catch(() => {});
+    if (isLateCancel) {
+      cancelCredit = Math.round(paidAmount * 0.5);
+      if (cancelCredit > 0) await addAccountCredit(reg.email, cancelCredit).catch(() => {});
+    } else {
+      cancelCredit = paidAmount;
+      if (paidAmount > 0) {
+        if (reg.stripe_payment_intent_id) {
+          wasStripeRefund = true;
+          await issueCancellationRefund({
+            email: reg.email,
+            manageToken: token,
+            paymentIntentId: reg.stripe_payment_intent_id,
+            amountDollars: paidAmount,
+            sessionLabel: reg.session_details,
+          });
+        } else {
+          await addAccountCredit(reg.email, paidAmount).catch(() => {});
+        }
+      }
     }
   }
 
@@ -426,15 +495,20 @@ export async function DELETE(
     }
   }
 
-  await sendCancellationNotification({
-    parentName: reg.parent_name,
-    email: reg.email,
-    sessionDetails: cancelSessionDetails,
-    sessionType: reg.type,
-    isLateCancel,
-    lateFeeAmount,
-    cancelCredit: wasPaid ? cancelCredit : undefined,
-  });
+  try {
+    await sendCancellationNotification({
+      parentName: reg.parent_name,
+      email: reg.email,
+      sessionDetails: cancelSessionDetails,
+      sessionType: reg.type,
+      isLateCancel,
+      lateFeeAmount,
+      cancelCredit: wasPaid ? cancelCredit : undefined,
+      wasStripeRefund,
+    });
+  } catch (notifyErr) {
+    console.error("Cancellation email failed (cancel/refund already applied):", notifyErr);
+  }
 
   if (reg.sms_consent && reg.phone) {
     const cancelLabel = cancelSessionDetails.split(" — ")[0] || "Session";
@@ -443,12 +517,16 @@ export async function DELETE(
       : "";
     const lateNote = wasPaid
       ? (cancelCredit > 0
-          ? (isLateCancel ? `\n$${cancelCredit} credited to your account (50% of what you paid — late cancellation).` : `\n$${cancelCredit} credited to your account for a future booking.`)
+          ? (wasStripeRefund
+              ? `\n$${cancelCredit} refunded to your original payment method.`
+              : isLateCancel
+                ? `\n$${cancelCredit} credited to your account (50% of what you paid — late cancellation).`
+                : `\n$${cancelCredit} credited to your account for a future booking.`)
           : "\nNothing additional is due — your account credit already covered this.")
       : isLateCancel ? "\nA late cancellation fee applies." : "";
     await sendSMS(reg.phone, `Mesa Basketball: ${cancelLabel} cancelled.${sessionLine}\nAthlete: ${reg.kids}${lateNote}\nmesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
   }
-  await sendAdminSMS(`CANCELLED: ${reg.parent_name}\n${cancelSessionDetails}${isLateCancel ? " (late)" : ""}${cancelCredit > 0 ? `\n$${cancelCredit} credited to their account` : ""}\nPlayers: ${reg.kids}`);
+  await sendAdminSMS(`CANCELLED: ${reg.parent_name}\n${cancelSessionDetails}${isLateCancel ? " (late)" : ""}${cancelCredit > 0 ? `\n$${cancelCredit} ${wasStripeRefund ? "refunded" : "credited to their account"}` : ""}\nPlayers: ${reg.kids}`);
 
   // Sync calendar after cancellation
   if (reg.booked_date && reg.booked_start_time) {

@@ -273,12 +273,15 @@ export async function sendCancellationNotification(data: {
   sessionType?: string;
   isLateCancel: boolean;
   lateFeeAmount?: number;
-  campAdjustment?: { finalAmount: number; originalAmount: number; isPaid: boolean; creditGranted: number };
-  // Set only when the client had already paid — the pre-Stripe stand-in for
-  // a refund. Full amount for 24+ hours notice, 50% for a late cancel. When
-  // this is set, the "fee still due" note below doesn't apply (they already
-  // paid; a credit is going out instead of a charge coming in).
+  campAdjustment?: { finalAmount: number; originalAmount: number; isPaid: boolean; creditGranted: number; wasStripeRefund?: boolean };
+  // Set only when the client had already paid. Full amount for 24+ hours
+  // notice, 50% for a late cancel. When this is set, the "fee still due"
+  // note below doesn't apply (they already paid; money is going back out
+  // instead of a charge coming in).
   cancelCredit?: number;
+  // True when cancelCredit is a real Stripe refund to their card rather than
+  // account credit (only possible for an on-time cancel of a Stripe-paid booking).
+  wasStripeRefund?: boolean;
 }) {
   const resend = getResend();
   const isPickupCancel = data.sessionDetails.toLowerCase().includes("pickup");
@@ -295,19 +298,23 @@ export async function sendCancellationNotification(data: {
     : "";
   const creditNote = !data.campAdjustment && data.cancelCredit !== undefined && data.cancelCredit > 0
     ? `<div style="background: #1e3a5f; border-left: 4px solid #3b82f6; border-radius: 6px; padding: 14px 16px; margin: 16px 0;">
-        <p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #ffffff;">Account Credit</p>
-        <p style="margin: 0; color: #ffffff; font-size: 14px;"><strong>$${data.cancelCredit}</strong> has been credited to your account for a future booking${data.isLateCancel ? " (50% of what you paid — this was a late cancellation, so the other half isn't refunded per our policy)" : ""}.</p>
+        <p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #ffffff;">${data.wasStripeRefund ? "Refund Issued" : "Account Credit"}</p>
+        <p style="margin: 0; color: #ffffff; font-size: 14px;">${data.wasStripeRefund
+          ? `<strong>$${data.cancelCredit}</strong> has been refunded to your original payment method.`
+          : `<strong>$${data.cancelCredit}</strong> has been credited to your account for a future booking${data.isLateCancel ? " (50% of what you paid — this was a late cancellation, so the other half isn't refunded per our policy)" : ""}.`}</p>
       </div>`
     : "";
 
-  // Camp day partial-cancel: recomputed total + credit/due, worded off the is_paid flag
+  // Camp day partial-cancel: recomputed total + credit/due, worded off the isPaid flag
   // rather than assuming payment happened (not every family pays at registration).
-  // Money already paid beyond the new total becomes account credit toward a future
-  // booking rather than a cash refund.
+  // Money already paid beyond the new total goes back as a real Stripe refund when
+  // that day's charge went through Stripe, account credit for the old manual/cash path.
   const campAdjustmentLine = data.campAdjustment
     ? data.campAdjustment.isPaid
       ? data.campAdjustment.creditGranted > 0
-        ? `<strong>$${data.campAdjustment.creditGranted}</strong> has been credited to your account for your next session.`
+        ? data.campAdjustment.wasStripeRefund
+          ? `<strong>$${data.campAdjustment.creditGranted}</strong> has been refunded to your original payment method.`
+          : `<strong>$${data.campAdjustment.creditGranted}</strong> has been credited to your account for your next session.`
         : ""
       : `<strong>$${data.campAdjustment.finalAmount}</strong> is due.`
     : "";
@@ -329,7 +336,7 @@ export async function sendCancellationNotification(data: {
       <p><strong>Parent:</strong> ${data.parentName}</p>
       <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails)}</p>
       ${data.isLateCancel && !data.campAdjustment && data.cancelCredit === undefined ? `<p><strong>⚠️ Late cancellation (within 24h) — 50% fee ($${lateFee}) applies</strong></p>` : ""}
-      ${data.cancelCredit !== undefined && data.cancelCredit > 0 ? `<p><strong>$${data.cancelCredit} credited to their account</strong>${data.isLateCancel ? " (late cancellation — 50% of what they paid)" : " (full refund as account credit — 24+ hours notice)"}</p>` : ""}
+      ${data.cancelCredit !== undefined && data.cancelCredit > 0 ? `<p><strong>$${data.cancelCredit} ${data.wasStripeRefund ? "refunded to their card" : "credited to their account"}</strong>${data.isLateCancel ? " (late cancellation — 50% of what they paid)" : data.wasStripeRefund ? " (full Stripe refund — 24+ hours notice)" : " (full refund as account credit — 24+ hours notice)"}</p>` : ""}
       ${data.campAdjustment ? `<p><strong>New total: $${data.campAdjustment.finalAmount} (was $${data.campAdjustment.originalAmount}).</strong> ${campAdjustmentLine.replace(/<\/?strong>/g, "")}</p>` : ""}
     `,
   });
