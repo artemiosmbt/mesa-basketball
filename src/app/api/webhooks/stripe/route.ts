@@ -6,6 +6,7 @@ import {
   finalizeConfirmedPrivateBooking,
   finalizeConfirmedWeeklyBooking,
   finalizeConfirmedCampBooking,
+  finalizeRescheduleTopup,
   expireAbandonedBookingBatch,
 } from "@/lib/booking-finalize";
 
@@ -70,6 +71,37 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
   if (confirmedRows.length === 0) return;
 
   const metadata = session.metadata || {};
+
+  // A reschedule that needed a Stripe topup (or, after a late reschedule's
+  // 50% fee, a fresh full charge) — the old booking was already cancelled
+  // synchronously when the reschedule was requested; this just announces
+  // the new one now that payment has actually gone through.
+  if (metadata.purpose === "reschedule_topup") {
+    const reg = confirmedRows[0];
+    if (!reg.booked_date || !reg.booked_start_time) return;
+    await finalizeRescheduleTopup({
+      parentName: reg.parent_name,
+      email: reg.email,
+      phone: reg.phone,
+      kids: reg.kids,
+      type: reg.type,
+      oldSessionDetails: metadata.old_session_details || "your previous session",
+      newSessionDetails: reg.session_details,
+      manageToken: reg.manage_token,
+      bookedDate: reg.booked_date,
+      bookedStartTime: reg.booked_start_time,
+      bookedEndTime: reg.booked_end_time || reg.booked_start_time,
+      bookedLocation: reg.booked_location || "",
+      bookedGroup: reg.booked_group || undefined,
+      bookedTrainer: reg.booked_trainer || undefined,
+      totalParticipants: reg.total_participants,
+      smsConsent: !!reg.sms_consent,
+      isLateReschedule: metadata.is_late_reschedule === "true",
+      amountCharged: metadata.topup_amount ? Number(metadata.topup_amount) : 0,
+    });
+    return;
+  }
+
   const isFirstTime = metadata.is_first_time === "true";
   const referrer = metadata.referrer_email
     ? { email: metadata.referrer_email, name: metadata.referrer_name || "" }

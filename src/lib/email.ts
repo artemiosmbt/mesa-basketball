@@ -698,16 +698,42 @@ export async function sendRescheduleNotification(data: {
   isLateReschedule?: boolean;
   lateFeeAmount?: number;
   newTrainer?: string;
+  // Set when the new session's price differs from what was already paid on
+  // the old one — "refund" for a real Stripe refund of the difference,
+  // "charge" for money collected via Stripe to cover the increase (either a
+  // topup on an on-time reschedule, or a fresh full charge after a late
+  // reschedule's 50% fee was kept).
+  priceAdjustment?: { kind: "refund" | "charge"; amount: number };
+  // Set when a late reschedule of a Stripe-paid booking credited 50% of the
+  // old payment to the account, but the new session didn't need a fresh
+  // Stripe charge (e.g. its price couldn't be determined automatically) —
+  // covers that edge case's messaging when priceAdjustment isn't also set.
+  lateFeeCredited?: number;
 }) {
   const resend = getResend();
 
-  const lateFeeNote = data.isLateReschedule
+  // The late-fee "still due" note only makes sense when nothing was
+  // collected/credited automatically for this reschedule at all.
+  const lateFeeNote = data.isLateReschedule && !data.priceAdjustment && !data.lateFeeCredited
     ? `<div style="background: #7c1d1d; border-left: 4px solid #ef4444; border-radius: 6px; padding: 14px 16px; margin: 16px 0;">
         <p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #ffffff;">⚠️ Late Fee</p>
         <p style="margin: 0; color: #ffffff; font-size: 14px;">This reschedule was made within 24 hours of the session. Per our policy, a <strong>50% fee${data.lateFeeAmount ? ` of $${data.lateFeeAmount}` : ""}</strong> is still due.</p>
         ${PAYMENT_LINES}
       </div>`
     : "";
+  const priceAdjustmentNote = data.priceAdjustment
+    ? `<div style="background: #1e3a5f; border-left: 4px solid #3b82f6; border-radius: 6px; padding: 14px 16px; margin: 16px 0;">
+        <p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #ffffff;">${data.priceAdjustment.kind === "refund" ? "Refund Issued" : "Payment Received"}</p>
+        <p style="margin: 0; color: #ffffff; font-size: 14px;">${data.priceAdjustment.kind === "refund"
+          ? `<strong>$${data.priceAdjustment.amount}</strong> has been refunded to your original payment method (new session is lower-priced).`
+          : `<strong>$${data.priceAdjustment.amount}</strong> was charged to complete your reschedule${data.isLateReschedule ? " (late reschedule — 50% of your original payment was kept as a fee, and credited to your account; the new session required full payment)" : " (new session is higher-priced)"}.`}</p>
+      </div>`
+    : !data.priceAdjustment && data.lateFeeCredited
+      ? `<div style="background: #1e3a5f; border-left: 4px solid #3b82f6; border-radius: 6px; padding: 14px 16px; margin: 16px 0;">
+          <p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #ffffff;">Account Credit</p>
+          <p style="margin: 0; color: #ffffff; font-size: 14px;"><strong>$${data.lateFeeCredited}</strong> has been credited to your account (50% of what you paid — this was a late reschedule, so the other half isn't refunded per our policy).</p>
+        </div>`
+      : "";
 
   // Email to Artemi
   await resend.emails.send({
@@ -720,6 +746,7 @@ export async function sendRescheduleNotification(data: {
       <p><strong>Old Session:</strong> ${formatSessionDetailsForEmail(data.oldSessionDetails)}</p>
       <p><strong>New Session:</strong> ${formatSessionDetailsForEmail(data.newSessionDetails)}</p>
       ${data.newTrainer ? `<p><strong>Trainer:</strong> ${data.newTrainer}</p>` : ""}
+      ${data.priceAdjustment ? `<p><strong>${data.priceAdjustment.kind === "refund" ? "Refunded" : "Charged"}: $${data.priceAdjustment.amount}</strong></p>` : data.lateFeeCredited ? `<p><strong>$${data.lateFeeCredited} credited to their account</strong> (late reschedule — 50% of what they paid)</p>` : ""}
       ${lateFeeNote}
     `,
   });
@@ -737,7 +764,8 @@ export async function sendRescheduleNotification(data: {
       <p><strong>Old Session:</strong> ${formatSessionDetailsForEmail(data.oldSessionDetails)}</p>
       <p><strong>New Session:</strong> ${formatSessionDetailsForEmail(data.newSessionDetails)}</p>
       ${data.newTrainer ? `<p><strong>Trainer:</strong> ${data.newTrainer}</p>` : ""}
-      ${data.isLateReschedule ? `<div style="background: #7c1d1d; border-left: 4px solid #ef4444; border-radius: 6px; padding: 14px 16px; margin: 16px 0;"><p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #ffffff;">⚠️ Late Fee</p><p style="margin: 0; color: #ffffff; font-size: 14px;">This reschedule was made within 24 hours of the session. Per our policy, a <strong>50% fee${data.lateFeeAmount ? ` of $${data.lateFeeAmount}` : ""}</strong> is still due.</p>${PAYMENT_LINES}</div>` : ""}
+      ${priceAdjustmentNote}
+      ${lateFeeNote}
       <p><a href="${BASE_URL}/my-bookings" style="color: #d4af37; font-weight: bold;">View My Bookings</a> — Manage all your sessions</p>
       <br/>
       <p>Questions? Contact Artemios at (631) 599-1280 or email <a href="mailto:artemios@mesabasketballtraining.com">artemios@mesabasketballtraining.com</a>.</p>

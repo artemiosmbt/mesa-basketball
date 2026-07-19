@@ -67,6 +67,17 @@ export async function addRegistration(data: {
   usedReferralCredit?: boolean;
   isFree?: boolean;
   sessionPrice?: number;
+  // Set when a reschedule needs real money to move before the new booking is
+  // confirmed (see the Stripe reschedule topup flow) — mirrors the same
+  // pending_payment/bookingBatchId pattern addRegistrationWithRewards uses.
+  status?: string;
+  bookingBatchId?: string;
+  // Set when a reschedule DIDN'T need a fresh Stripe charge (same price, or
+  // a refund of the difference) — carries the old booking's payment identity
+  // forward so a later cancellation/reschedule of the new booking still
+  // knows it was paid via Stripe and can refund it correctly.
+  stripePaymentIntentId?: string;
+  stripeCustomerId?: string;
 }): Promise<{ manageToken: string }> {
   const supabase = getSupabase();
   const { data: row, error } = await supabase
@@ -88,6 +99,10 @@ export async function addRegistration(data: {
       ...(data.usedReferralCredit ? { used_referral_credit: true } : {}),
       ...(data.isFree ? { is_free: true } : {}),
       ...(data.sessionPrice != null ? { session_price: data.sessionPrice } : {}),
+      ...(data.status ? { status: data.status } : {}),
+      ...(data.bookingBatchId ? { booking_batch_id: data.bookingBatchId } : {}),
+      ...(data.stripePaymentIntentId ? { stripe_payment_intent_id: data.stripePaymentIntentId } : {}),
+      ...(data.stripeCustomerId ? { stripe_customer_id: data.stripeCustomerId } : {}),
     })
     .select("manage_token")
     .single();

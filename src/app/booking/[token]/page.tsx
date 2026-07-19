@@ -561,6 +561,14 @@ export default function ManageBooking({
     });
     const data = await res.json();
     if (data.success) {
+      // Reschedules that need more money than what was already paid get sent
+      // to Stripe Checkout instead of being confirmed immediately — the old
+      // session is already cancelled, and the new one finalizes once payment
+      // succeeds via the webhook.
+      if (data.checkoutUrl) {
+        window.location.href = data.checkoutUrl;
+        return;
+      }
       setRescheduled(true);
       setIsLateReschedule(data.isLateReschedule ?? false);
     } else {

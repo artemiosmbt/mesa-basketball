@@ -1,4 +1,5 @@
-import { sendRegistrationNotification, sendReferralCreditNotification } from "@/lib/email";
+import Stripe from "stripe";
+import { sendRegistrationNotification, sendReferralCreditNotification, sendRescheduleNotification } from "@/lib/email";
 import { addPrivateSessionToCalendar, upsertGroupSessionCalendarEvent } from "@/lib/calendar";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import { getStripe } from "@/lib/stripe";
@@ -13,14 +14,23 @@ import {
 } from "@/lib/supabase";
 
 /**
- * Refunds a real Stripe charge for an on-time cancellation. On success,
- * records the refund id on the row (bookkeeping) and returns true. On
- * failure, does NOT fall back to account credit — silently substituting
+ * Refunds part or all of a real Stripe charge — used for on-time
+ * cancellations and for reschedules that move to a lower-priced session. On
+ * success, records the refund id on the row (bookkeeping) and returns true.
+ * On failure, does NOT fall back to account credit — silently substituting
  * credit for a promised card refund would be an undisclosed policy change —
  * instead it alerts the admin to refund manually and returns false so the
  * caller can adjust what it tells the client.
+ *
+ * One exception: a booking that went through a Stripe reschedule "topup"
+ * only has its *most recent* charge on file, so if this amount exceeds what
+ * that specific charge has left to refund (the rest came from an earlier,
+ * already-superseded charge), Stripe rejects it. That case refunds whatever
+ * IS still available and credits the shortfall to the account instead of
+ * failing outright — still real money back where it's due, just split
+ * across the refund and the credit ledger, with an admin alert either way.
  */
-export async function issueCancellationRefund(params: {
+export async function issueStripeRefund(params: {
   email: string;
   manageToken: string;
   paymentIntentId: string;
@@ -28,8 +38,8 @@ export async function issueCancellationRefund(params: {
   sessionLabel: string;
 }): Promise<boolean> {
   if (params.amountDollars <= 0) return true;
+  const stripe = getStripe();
   try {
-    const stripe = getStripe();
     const refund = await stripe.refunds.create({
       payment_intent: params.paymentIntentId,
       amount: Math.round(params.amountDollars * 100),
@@ -37,6 +47,33 @@ export async function issueCancellationRefund(params: {
     await recordStripeRefund(params.manageToken, refund.id).catch(() => {});
     return true;
   } catch (err) {
+    // Different Stripe API versions surface this differently — some set
+    // `code: "amount_too_large"`, this account's version leaves code
+    // undefined and only sets `param: "amount"` — so check both.
+    const isOverRefundError = err instanceof Stripe.errors.StripeInvalidRequestError
+      && (err.code === "amount_too_large" || err.param === "amount");
+    if (isOverRefundError) {
+      try {
+        const pi = await stripe.paymentIntents.retrieve(params.paymentIntentId, { expand: ["latest_charge"] });
+        const charge = pi.latest_charge as Stripe.Charge | null;
+        const refundableDollars = charge ? Math.max(0, charge.amount - charge.amount_refunded) / 100 : 0;
+        if (refundableDollars > 0) {
+          const partial = await stripe.refunds.create({
+            payment_intent: params.paymentIntentId,
+            amount: Math.round(refundableDollars * 100),
+          });
+          await recordStripeRefund(params.manageToken, partial.id).catch(() => {});
+        }
+        const shortfall = Math.round((params.amountDollars - refundableDollars) * 100) / 100;
+        if (shortfall > 0) {
+          await addAccountCredit(params.email, shortfall).catch(() => {});
+        }
+        await sendAdminSMS(`Partial refund: ${params.sessionLabel}\n${params.email}\n$${refundableDollars} refunded to card${shortfall > 0 ? `, $${shortfall} credited to account (an earlier reschedule already used up part of this charge)` : ""}.`).catch(() => {});
+        return true;
+      } catch (fallbackErr) {
+        console.error("Stripe refund fallback failed:", fallbackErr);
+      }
+    }
     console.error("Stripe refund failed:", err);
     try {
       await sendAdminSMS(`REFUND FAILED — manual action needed\n${params.sessionLabel}\n${params.email}\n$${params.amountDollars} could not be refunded automatically. Refund manually in the Stripe dashboard.`);
@@ -427,5 +464,90 @@ export async function expireAbandonedBookingBatch(bookingBatchId: string): Promi
     await sendAdminSMS(`Checkout expired unused: ${abandoned[0]?.parent_name || "unknown"}\n${abandoned[0]?.session_details || bookingBatchId}\nNo charge — booking not confirmed.`);
   } catch {
     // non-critical
+  }
+}
+
+export interface FinalizeRescheduleTopupParams {
+  parentName: string;
+  email: string;
+  phone: string;
+  kids: string;
+  type: string;
+  oldSessionDetails: string;
+  newSessionDetails: string;
+  manageToken: string;
+  bookedDate: string;
+  bookedStartTime: string;
+  bookedEndTime: string;
+  bookedLocation: string;
+  bookedGroup?: string;
+  bookedTrainer?: string;
+  totalParticipants: number;
+  smsConsent: boolean;
+  isLateReschedule: boolean;
+  amountCharged: number;
+}
+
+/**
+ * A reschedule needed real money to move (the new session costs more than
+ * what was already paid on the old one) — the client was sent to Stripe
+ * Checkout for just the difference (or, after a late reschedule's 50% fee
+ * was kept, the new session's full price) and the webhook calls this once
+ * that payment succeeds. The old booking was already cancelled synchronously
+ * when the reschedule was requested; this only confirms/announces the new
+ * one, mirroring how a brand-new paid booking is only announced once paid.
+ */
+export async function finalizeRescheduleTopup(params: FinalizeRescheduleTopupParams): Promise<void> {
+  const isPrivateType = params.type === "private" || params.type === "group-private";
+
+  try {
+    await sendRescheduleNotification({
+      parentName: params.parentName,
+      email: params.email,
+      oldSessionDetails: params.oldSessionDetails,
+      newSessionDetails: params.newSessionDetails,
+      manageToken: params.manageToken,
+      isLateReschedule: params.isLateReschedule,
+      newTrainer: params.bookedTrainer,
+      priceAdjustment: { kind: "charge", amount: params.amountCharged },
+    });
+  } catch (err) {
+    console.error("Reschedule email failed (topup booking was paid):", err);
+  }
+
+  if (params.smsConsent && params.phone) {
+    const trainerLine = params.bookedTrainer ? `\nTrainer: ${params.bookedTrainer}` : "";
+    await sendSMS(params.phone, `Mesa Basketball: Reschedule confirmed — $${params.amountCharged} charged!\n${formatDateWithDay(params.bookedDate)} | ${params.bookedStartTime}-${params.bookedEndTime}\nLocation: ${resolveLocationName(params.bookedLocation)}${trainerLine}\nAthlete: ${params.kids}\nManage: mesabasketballtraining.com/booking/${params.manageToken}\nReply STOP to opt out.`);
+  }
+
+  await sendAdminSMS(`RESCHEDULED (paid $${params.amountCharged}): ${params.parentName}\nFrom: ${params.oldSessionDetails}\nTo: ${params.newSessionDetails}\nPlayers: ${params.kids}`);
+
+  try {
+    if (isPrivateType) {
+      await addPrivateSessionToCalendar({
+        parentName: params.parentName,
+        email: params.email,
+        phone: params.phone,
+        kids: params.kids,
+        bookedDate: params.bookedDate,
+        bookedStartTime: params.bookedStartTime,
+        bookedEndTime: params.bookedEndTime,
+        bookedLocation: params.bookedLocation,
+        trainer: params.bookedTrainer,
+      });
+    } else {
+      await upsertGroupSessionCalendarEvent({
+        sessionType: "weekly",
+        sessionLabel: params.bookedGroup || "Group Session",
+        bookedDate: params.bookedDate,
+        bookedStartTime: params.bookedStartTime,
+        bookedEndTime: params.bookedEndTime,
+        bookedLocation: params.bookedLocation,
+        kidsJustRegistered: params.kids,
+        participantsJustRegistered: params.totalParticipants,
+      });
+    }
+  } catch (err) {
+    console.error("Calendar sync error (reschedule topup):", err);
   }
 }
