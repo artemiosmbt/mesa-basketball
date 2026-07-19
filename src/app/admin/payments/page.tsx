@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { authClient, ADMIN_EMAIL } from "@/lib/auth";
@@ -108,6 +108,10 @@ export default function PaymentsPage() {
   const [togglingPaid, setTogglingPaid] = useState<string | null>(null);
   const [settlingFee, setSettlingFee] = useState<string | null>(null);
   const [showAllPaid, setShowAllPaid] = useState(false);
+  const [creditEmail, setCreditEmail] = useState("");
+  const [creditAmount, setCreditAmount] = useState("");
+  const [addingCredit, setAddingCredit] = useState(false);
+  const [creditMessage, setCreditMessage] = useState<{ text: string; isError: boolean } | null>(null);
 
   useEffect(() => {
     authClient.auth.getSession().then(({ data: { session } }) => {
@@ -144,6 +148,44 @@ export default function PaymentsPage() {
       setRegistrations((prev) => prev.map((r) => (r.id === id ? { ...r, is_paid: !currentValue } : r)));
     }
     setTogglingPaid(null);
+  }
+
+  async function submitCreditAdjustment(e: FormEvent) {
+    e.preventDefault();
+    if (!token) return;
+    const email = creditEmail.trim().toLowerCase();
+    const amount = parseFloat(creditAmount);
+    if (!email || !amount) {
+      setCreditMessage({ text: "Enter an email and a non-zero dollar amount.", isError: true });
+      return;
+    }
+    setAddingCredit(true);
+    setCreditMessage(null);
+    const res = await fetch("/api/admin/account-credits", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ email, amount }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      setCreditMessage({ text: data?.error || "Failed to update credit.", isError: true });
+      setAddingCredit(false);
+      return;
+    }
+    setAccountCredits((prev) => {
+      const existing = prev.find((a) => a.email === email);
+      const newBalance = (existing?.balance ?? 0) + amount;
+      if (existing) {
+        return newBalance > 0
+          ? prev.map((a) => (a.email === email ? { ...a, balance: newBalance } : a))
+          : prev.filter((a) => a.email !== email);
+      }
+      return newBalance > 0 ? [...prev, { email, balance: newBalance }] : prev;
+    });
+    setCreditMessage({ text: `${amount > 0 ? "Added" : "Removed"} $${Math.abs(amount)} ${amount > 0 ? "to" : "from"} ${email}'s account credit.`, isError: false });
+    setCreditEmail("");
+    setCreditAmount("");
+    setAddingCredit(false);
   }
 
   async function settleFee(id: string, referralCode?: string | null, bookedGroup?: string | null) {
@@ -657,6 +699,40 @@ export default function PaymentsPage() {
             ACCOUNT CREDITS
             {accountCredits.length > 0 && <span className="ml-2 rounded-full bg-blue-600 px-2 py-0.5 text-xs font-medium text-white">{accountCredits.length}</span>}
           </h2>
+          <form onSubmit={submitCreditAdjustment} className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-3 mb-3 flex flex-wrap items-end gap-2">
+            <div className="flex-1 min-w-[180px]">
+              <label className="block text-xs text-brown-400 mb-1">Client email</label>
+              <input
+                type="email"
+                value={creditEmail}
+                onChange={(e) => setCreditEmail(e.target.value)}
+                placeholder="parent@example.com"
+                className="w-full rounded-lg border border-brown-700 bg-brown-950 px-3 py-2 text-sm text-white placeholder:text-brown-600"
+              />
+            </div>
+            <div className="w-28">
+              <label className="block text-xs text-brown-400 mb-1">Amount ($)</label>
+              <input
+                type="number"
+                step="0.01"
+                value={creditAmount}
+                onChange={(e) => setCreditAmount(e.target.value)}
+                placeholder="50"
+                className="w-full rounded-lg border border-brown-700 bg-brown-950 px-3 py-2 text-sm text-white placeholder:text-brown-600"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={addingCredit}
+              className="rounded-lg bg-mesa-accent hover:bg-yellow-600 px-4 py-2 text-sm font-medium text-white transition disabled:opacity-50"
+            >
+              {addingCredit ? "…" : "Apply"}
+            </button>
+            <p className="w-full text-xs text-brown-500">Positive amount adds credit (e.g. a prepayment), negative removes it.</p>
+            {creditMessage && (
+              <p className={`w-full text-xs ${creditMessage.isError ? "text-red-400" : "text-green-400"}`}>{creditMessage.text}</p>
+            )}
+          </form>
           {accountCredits.length === 0 ? (
             <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-6 py-8 text-center text-brown-500 text-sm">No outstanding account credits.</div>
           ) : (
