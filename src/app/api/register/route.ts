@@ -1,23 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
-import { sendRegistrationNotification, sendReferralCreditNotification } from "@/lib/email";
-import { addPrivateSessionToCalendar } from "@/lib/calendar";
-import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import { getStripe } from "@/lib/stripe";
-import { finalizeConfirmedPrivateBooking, finalizeConfirmedWeeklyBooking, finalizeConfirmedCampBooking } from "@/lib/booking-finalize";
+import {
+  finalizeConfirmedPrivateBooking,
+  finalizeConfirmedPrivateSeriesBooking,
+  finalizeConfirmedWeeklyBooking,
+  finalizeConfirmedCampBooking,
+} from "@/lib/booking-finalize";
 import {
   addRegistrationWithRewards,
   isNewClient,
   getReferralCredits,
   decrementReferralCredit,
-  addReferralCredit,
-  findReferrerByCode,
   findReferrerInfoByCode,
   generateUniqueReferralCode,
   checkGroupSessionCapacity,
   checkDuplicateRegistration,
-  getActivePackage,
-  setPackageSessions,
-  countConfirmedPrivateSessions,
   getAccountCreditBalance,
   deductAccountCredit,
   attachStripeCheckoutSession,
@@ -39,8 +36,6 @@ export async function POST(req: NextRequest) {
       bookedEndTime,
       bookedLocation,
       bookedTrainer,
-      skipEmail,
-      emailOnly,
       submittedReferralCode,
       smsConsent,
       // Weekly multi-session fields
@@ -51,21 +46,13 @@ export async function POST(req: NextRequest) {
       campTotalPrice,
       campTotalDays,
       campDropInRate,
+      // Recurring private multi-date fields — one row per date, one Stripe
+      // charge for the total (see the branch below).
+      privateSessions,
       // Referral credit opt-in
       useReferralCredit,
       // Account credit opt-in (dollar-value credit from e.g. a partial camp cancellation)
       applyAccountCredit,
-      // Set by the frontend on the consolidated emailOnly call for a recurring private
-      // series, echoing back whether the first dated call actually applied the referral
-      // — that call is the only one where isNewClient can still be true, so it's the
-      // only one that can know for sure.
-      referralWasApplied,
-      // True when this private/group-private call is one leg of a multi-date
-      // recurring booking (datesToBook.length > 1 on the frontend). Recurring
-      // bookings make several separate calls today, which doesn't map onto a
-      // single Stripe Checkout Session — they keep the pre-Stripe flow until
-      // that's consolidated into one batched call.
-      isRecurring,
     } = body;
 
     if (!parentName || !email || !phone || !kids || !type || !sessionDetails) {
@@ -400,11 +387,163 @@ export async function POST(req: NextRequest) {
       return Math.round(rate * (duration / 60) * 100) / 100;
     }
 
-    // Single-date private/group-private booking, paid via Stripe. Recurring
-    // bookings (isRecurring) and the emailOnly consolidated-email call for a
-    // recurring series fall through to the pre-Stripe flow below unchanged —
-    // see the comment on `isRecurring` above for why.
-    if (isPrivateType && !emailOnly && !isRecurring) {
+    // Multi-date recurring private/group-private booking — one row per
+    // selected date, one Stripe Checkout Session for the total. Replaces the
+    // old pattern of N separate /api/register calls plus a trailing
+    // emailOnly call just to send one combined email.
+    if (isPrivateType && privateSessions && privateSessions.length > 0) {
+      if (privateSessions.some((s: { date?: string; startTime?: string; endTime?: string; location?: string }) => !s.date || !s.startTime || !s.endTime || !s.location)) {
+        return NextResponse.json({ error: "Missing session details" }, { status: 400 });
+      }
+
+      const newClient = await isNewClient(email, phone);
+      let privateReferrer: { email: string; name: string } | null = null;
+      if (submittedReferralCode && newClient) {
+        const info = await findReferrerInfoByCode(submittedReferralCode);
+        if (info && info.email !== email) {
+          privateReferrer = info;
+        }
+      }
+
+      // Only the FIRST date in the series can carry the first-time discount
+      // or a redeemed referral credit — by the second date, isNewClient
+      // would already read false anyway (a row now exists for this email),
+      // so this just makes explicit that the discount is a one-time thing,
+      // not "free for every date in the series."
+      let isFirstTime = false;
+      let firstIsFree = false;
+      let usedReferralCredit = false;
+      if (newClient) {
+        firstIsFree = true;
+        isFirstTime = true;
+      } else if (useReferralCredit) {
+        const credits = await getReferralCredits(email);
+        if (credits > 0) {
+          firstIsFree = true;
+          usedReferralCredit = true;
+          await decrementReferralCredit(email);
+        }
+      }
+
+      const duplicateChecks = await Promise.all(
+        privateSessions.map((s: { date: string; startTime: string }) => checkDuplicateRegistration(email, s.date, s.startTime))
+      );
+      const duplicateSessions = privateSessions.filter((_: unknown, i: number) => duplicateChecks[i]);
+      if (duplicateSessions.length > 0) {
+        const dupDates = duplicateSessions.map((s: { date: string }) => s.date).join(", ");
+        return NextResponse.json(
+          { error: `This email is already registered for the following session${duplicateSessions.length > 1 ? "s" : ""}: ${dupDates}. Please deselect ${duplicateSessions.length > 1 ? "them" : "it"} and try again.` },
+          { status: 400 }
+        );
+      }
+
+      const pricedSessions = privateSessions.map((s: { date: string; startTime: string; endTime: string; location: string; trainer?: string }, i: number) => {
+        const fullPrice = calcPrivateSessionPrice(s.startTime, s.endTime, totalParticipants || 1) ?? 0;
+        const isFree = i === 0 && firstIsFree;
+        const effectivePrice = isFree ? Math.round(fullPrice * 0.5) : fullPrice;
+        return { ...s, fullPrice, effectivePrice, isFree };
+      });
+
+      const totalBeforeCredit = pricedSessions.reduce((sum: number, s: { effectivePrice: number }) => sum + s.effectivePrice, 0);
+
+      // Account credit is applied once, against the first date's row only —
+      // same convention as weekly/camp.
+      let accountCreditApplied = 0;
+      if (applyAccountCredit && pricedSessions[0]) {
+        const balance = await getAccountCreditBalance(email);
+        accountCreditApplied = Math.min(balance, pricedSessions[0].effectivePrice);
+        if (accountCreditApplied > 0) await deductAccountCredit(email, accountCreditApplied);
+      }
+
+      const amountToCharge = Math.max(0, totalBeforeCredit - accountCreditApplied);
+      const bookingBatchId = crypto.randomUUID();
+
+      for (const [i, s] of pricedSessions.entries()) {
+        await addRegistrationWithRewards({
+          parentName,
+          email,
+          phone,
+          kids,
+          type,
+          sessionDetails: `Private Session — ${s.date} ${s.startTime}-${s.endTime} at ${s.location}`,
+          totalParticipants: totalParticipants || 1,
+          bookedDate: s.date,
+          bookedStartTime: s.startTime,
+          bookedEndTime: s.endTime,
+          bookedLocation: s.location,
+          bookedTrainer: s.trainer,
+          referralCode,
+          isFree: s.isFree,
+          usedReferralCredit: i === 0 && usedReferralCredit,
+          smsConsent: !!smsConsent,
+          sessionPrice: s.fullPrice,
+          ...(i === 0 && accountCreditApplied > 0 ? { appliedAccountCredit: accountCreditApplied } : {}),
+          status: amountToCharge > 0 ? "pending_payment" : undefined,
+          bookingBatchId,
+        });
+      }
+
+      const seriesFinalizeParams = {
+        parentName,
+        email,
+        phone,
+        kids,
+        type,
+        privateSessions: pricedSessions as Array<{ date: string; startTime: string; endTime: string; location: string; trainer?: string; fullPrice: number; isFree: boolean }>,
+        totalParticipants: totalParticipants || 1,
+        referralCode,
+        privateReferrer,
+        submittedReferralCode: submittedReferralCode || undefined,
+        smsConsent: !!smsConsent,
+        isFirstTime,
+        accountCreditApplied,
+      };
+
+      if (amountToCharge === 0) {
+        // Fully covered by discount + credit — nothing to actually charge,
+        // so confirm immediately exactly like before Stripe existed.
+        await finalizeConfirmedPrivateSeriesBooking(seriesFinalizeParams);
+        return NextResponse.json({ success: true, count: privateSessions.length, referralApplied: !!privateReferrer });
+      }
+
+      // Real money is due — send them to Stripe instead of confirming yet.
+      const stripe = getStripe();
+      const origin = req.nextUrl.origin;
+      const session = await stripe.checkout.sessions.create({
+        mode: "payment",
+        payment_method_types: ["card"],
+        customer_creation: "always",
+        customer_email: email,
+        client_reference_id: bookingBatchId,
+        metadata: {
+          booking_batch_id: bookingBatchId,
+          is_first_time: String(isFirstTime),
+          referrer_email: privateReferrer?.email || "",
+          referrer_name: privateReferrer?.name || "",
+          submitted_referral_code: submittedReferralCode || "",
+        },
+        line_items: [
+          {
+            price_data: {
+              currency: "usd",
+              product_data: { name: `${pricedSessions.length} private session${pricedSessions.length !== 1 ? "s" : ""}` },
+              unit_amount: Math.round(amountToCharge * 100),
+            },
+            quantity: 1,
+          },
+        ],
+        success_url: `${origin}/booking-confirmed?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${origin}/schedule?checkout=cancelled`,
+        expires_at: Math.floor(Date.now() / 1000) + 30 * 60,
+      });
+
+      await attachStripeCheckoutSession(bookingBatchId, session.id);
+
+      return NextResponse.json({ success: true, checkoutUrl: session.url });
+    }
+
+    // Single-date private/group-private booking, paid via Stripe.
+    if (isPrivateType && !privateSessions) {
       if (!bookedDate || !bookedStartTime || !bookedEndTime || !bookedLocation) {
         return NextResponse.json({ error: "Missing session details" }, { status: 400 });
       }
@@ -543,206 +682,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true, checkoutUrl: session.url });
     }
 
-    let manageToken: string | undefined;
-    let isFree = false;
-    let isFirstTime = false;
-    let usedReferralCredit = false;
-    let packageSessionsRemaining: number | undefined;
-    let packageType: number | undefined;
-    let accountCreditApplied = 0;
-    let privateSessionPrice: number | undefined;
-    let privateReferrer: { email: string; name: string } | null = null;
-
-    // Save to Supabase (unless this is an email-only request)
-    if (!emailOnly) {
-      // Check new-client status and referral BEFORE saving
-      const newClient = await isNewClient(email, phone);
-      if (submittedReferralCode && newClient) {
-        const info = await findReferrerInfoByCode(submittedReferralCode);
-        if (info && info.email !== email) {
-          privateReferrer = info;
-        }
-      }
-
-      // Check first-time discount and referral credit
-      if (isPrivateType) {
-        if (newClient) {
-          isFree = true; // first-time 50% off
-          isFirstTime = true;
-        } else if (useReferralCredit) {
-          // User explicitly chose to apply a credit
-          const credits = await getReferralCredits(email);
-          if (credits > 0) {
-            isFree = true;
-            usedReferralCredit = true;
-            await decrementReferralCredit(email);
-          }
-        }
-      }
-
-      privateSessionPrice = isPrivateType
-        ? calcPrivateSessionPrice(bookedStartTime, bookedEndTime, totalParticipants || 1)
-        : undefined;
-
-      // Account credit is applied against the full computed price, same as the
-      // camp/weekly branches — never against a discounted amount, matching how
-      // isFree's 50% off is also always computed at display time, not stored here.
-      if (isPrivateType && applyAccountCredit && privateSessionPrice != null) {
-        const balance = await getAccountCreditBalance(email);
-        accountCreditApplied = Math.min(balance, privateSessionPrice);
-        if (accountCreditApplied > 0) await deductAccountCredit(email, accountCreditApplied);
-      }
-
-      const result = await addRegistrationWithRewards({
-        parentName,
-        email,
-        phone,
-        kids,
-        type,
-        sessionDetails,
-        totalParticipants: totalParticipants || 1,
-        bookedDate,
-        bookedStartTime,
-        bookedEndTime,
-        bookedLocation,
-        bookedTrainer: isPrivateType ? bookedTrainer : undefined,
-        referralCode,
-        isFree,
-        usedReferralCredit,
-        smsConsent: !!smsConsent,
-        sessionPrice: privateSessionPrice,
-        ...(accountCreditApplied > 0 ? { appliedAccountCredit: accountCreditApplied } : {}),
-      });
-      manageToken = result.manageToken;
-
-      // If booking a private session with a booked_date, check for active package
-      if (isPrivateType && bookedDate && !emailOnly) {
-        const d = new Date(bookedDate);
-        const bookingMonth = isNaN(d.getTime())
-          ? null
-          : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-        const activePkg = bookingMonth ? await getActivePackage(email, bookingMonth) : null;
-        if (activePkg && bookingMonth) {
-          const confirmedCount = await countConfirmedPrivateSessions(email, bookingMonth);
-          const newUsed = Math.min(activePkg.package_type, confirmedCount);
-          await setPackageSessions(activePkg.id, newUsed);
-          if (newUsed <= activePkg.package_type) {
-            packageSessionsRemaining = activePkg.package_type - newUsed;
-            packageType = activePkg.package_type;
-          }
-        }
-      }
-
-      // Award referral credit to referrer and notify them. Best-effort — the booking
-      // above already succeeded, so a failure here must not surface as a failed
-      // registration to the client (they'd retry and double-book).
-      if (privateReferrer) {
-        try {
-          await addReferralCredit(privateReferrer.email);
-          await sendReferralCreditNotification({ referrerName: privateReferrer.name, referrerEmail: privateReferrer.email, newClientName: parentName });
-        } catch (creditErr) {
-          console.error("Failed to award referral credit (private, booking was saved):", creditErr);
-        }
-      }
-    }
-
-    // Send emails (unless this registration should skip email)
-    if (!skipEmail) {
-      // For emailOnly consolidated recurring: look up active package to get remaining count
-      let effectivePkgRemaining = packageSessionsRemaining;
-      let effectivePkgType = packageType;
-      if (emailOnly && isPrivateType) {
-        const now = new Date();
-        const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-        const activePkg = await getActivePackage(email, currentMonth).catch(() => null);
-        if (activePkg) {
-          effectivePkgRemaining = activePkg.package_type - activePkg.sessions_used;
-          effectivePkgType = activePkg.package_type;
-        }
-      }
-
-      try {
-        await sendRegistrationNotification({
-          parentName,
-          email,
-          phone,
-          kids,
-          type,
-          sessionDetails,
-          totalParticipants: totalParticipants || 1,
-          manageToken,
-          isFree,
-          isFirstTime,
-          packageSessionsRemaining: effectivePkgRemaining,
-          packageType: effectivePkgType,
-          referralCode,
-          referredBy: privateReferrer?.name,
-          referralCodeUsed: submittedReferralCode || undefined,
-          trainer: isPrivateType ? bookedTrainer : undefined,
-          calendarEvent: bookedDate && bookedStartTime ? { date: bookedDate, startTime: bookedStartTime, endTime: bookedEndTime || bookedStartTime, location: bookedLocation || "" } : undefined,
-          accountCreditApplied,
-          fullPrice: privateSessionPrice,
-        });
-      } catch (notifyErr) {
-        console.error("Private booking email failed (booking was saved):", notifyErr);
-      }
-
-      // SMS runs independently so it always fires even if email throws.
-      // Also fires for emailOnly consolidated recurring calls (no bookedDate).
-      if (smsConsent && phone) {
-        const isSingle = !!bookedDate;
-        const typeStr = isSingle ? (isPrivateType ? "private session" : "session") : "sessions";
-        const verbStr = isSingle ? "is" : "are";
-        const dateLine = isSingle
-          ? `\n${formatDateWithDay(bookedDate!)} | ${bookedStartTime}${bookedEndTime ? `-${bookedEndTime}` : ""}${bookedLocation ? `\nLocation: ${resolveLocationName(bookedLocation)}` : ""}`
-          : `\n${sessionDetails.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim()}`;
-        const pkgNote = effectivePkgRemaining !== undefined
-          ? `\n${effectivePkgRemaining} session${effectivePkgRemaining !== 1 ? "s" : ""} remaining in your package.`
-          : "";
-        const privateTrainerLine = isPrivateType && bookedTrainer ? `\nTrainer: ${bookedTrainer}` : "";
-        const creditLine = accountCreditApplied > 0 ? `\n$${accountCreditApplied} account credit applied.` : "";
-        await sendSMS(phone, `Mesa Basketball: Your ${typeStr} ${verbStr} confirmed!${dateLine}${privateTrainerLine}${pkgNote}${creditLine}\nAthlete: ${kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
-      }
-      const adminDateLine = bookedDate
-        ? `${formatDateWithDay(bookedDate)} | ${bookedStartTime}${bookedEndTime ? `-${bookedEndTime}` : ""}${bookedLocation ? `\nLocation: ${resolveLocationName(bookedLocation)}` : ""}`
-        : sessionDetails.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim();
-      const pkgAdminNote = effectivePkgRemaining !== undefined
-        ? `\nPkg: ${effectivePkgRemaining}/${effectivePkgType} remaining`
-        : "";
-      const adminTrainerLine = isPrivateType && bookedTrainer ? `\nTrainer: ${bookedTrainer}` : "";
-      // Match the pickup/group/camp texts' "N x session(s):" header so the admin always
-      // sees the session type up front instead of jumping straight to the date.
-      const adminTypeLabel = type === "group-private" ? "group private" : "private";
-      const adminTypeHeader = bookedDate ? `1 ${adminTypeLabel} session:` : `${adminTypeLabel} sessions:`;
-      // emailOnly consolidated calls (recurring series) never compute privateReferrer
-      // themselves — isNewClient is already false by then — so trust the flag echoed
-      // back from the first dated call instead.
-      const referralWasAppliedForSms = emailOnly ? !!referralWasApplied : !!privateReferrer;
-      await sendAdminSMS(`NEW BOOKING: ${parentName}\n${adminTypeHeader}\n${adminDateLine}${adminTrainerLine}\nPlayers: ${kids}${pkgAdminNote}${submittedReferralCode ? `\nRef code: ${submittedReferralCode} ${referralWasAppliedForSms ? "✓ applied" : "✗ NOT applied"}` : ""}`);
-    }
-
-    // Add to Google Calendar (private sessions only; group/camp handled above)
-    if (!emailOnly && bookedDate && bookedStartTime && bookedEndTime) {
-      if (isPrivateType) {
-        try {
-          await addPrivateSessionToCalendar({
-            parentName,
-            email,
-            phone,
-            kids,
-            bookedDate,
-            bookedStartTime,
-            bookedEndTime,
-            bookedLocation: bookedLocation || "",
-            trainer: bookedTrainer || undefined,
-          });
-        } catch (err) {
-          console.error("Calendar sync error (private):", err);
-        }
-      }
-    }
-
-    return NextResponse.json({ success: true, isFree, referralApplied: !!privateReferrer });
+    return NextResponse.json({ error: "Unrecognized booking type or missing booking details" }, { status: 400 });
   } catch (error) {
     console.error("Registration error:", error);
     return NextResponse.json(

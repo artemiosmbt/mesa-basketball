@@ -4,6 +4,7 @@ import { getStripe } from "@/lib/stripe";
 import { finalizePaidBookingBatch } from "@/lib/supabase";
 import {
   finalizeConfirmedPrivateBooking,
+  finalizeConfirmedPrivateSeriesBooking,
   finalizeConfirmedWeeklyBooking,
   finalizeConfirmedCampBooking,
   finalizeRescheduleTopup,
@@ -113,31 +114,63 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
   const batchType = confirmedRows[0]?.type;
 
   if (batchType === "private" || batchType === "group-private") {
-    for (const reg of confirmedRows) {
-      if (!reg.booked_date || !reg.booked_start_time) continue;
-      await finalizeConfirmedPrivateBooking({
-        parentName: reg.parent_name,
-        email: reg.email,
-        phone: reg.phone,
-        kids: reg.kids,
-        type: reg.type,
-        sessionDetails: reg.session_details,
-        totalParticipants: reg.total_participants,
-        bookedDate: reg.booked_date,
-        bookedStartTime: reg.booked_start_time,
-        bookedEndTime: reg.booked_end_time || reg.booked_start_time,
-        bookedLocation: reg.booked_location || "",
-        bookedTrainer: reg.booked_trainer || undefined,
-        manageToken: reg.manage_token,
-        isFree: reg.is_free,
-        isFirstTime,
-        referralCode: reg.referral_code || "",
+    // A recurring series stamps the same booking_batch_id across every date's
+    // row — one consolidated finalize for those, same as weekly/camp. A
+    // single-date booking (the common case) keeps its own per-row finalize,
+    // which sends its own manage-this-booking link.
+    if (confirmedRows.length > 1) {
+      const first = confirmedRows[0];
+      const accountCreditApplied = confirmedRows.reduce((sum, r) => sum + (r.applied_account_credit || 0), 0);
+      await finalizeConfirmedPrivateSeriesBooking({
+        parentName: first.parent_name,
+        email: first.email,
+        phone: first.phone,
+        kids: first.kids,
+        type: first.type,
+        privateSessions: confirmedRows.map((r) => ({
+          date: r.booked_date || "",
+          startTime: r.booked_start_time || "",
+          endTime: r.booked_end_time || "",
+          location: r.booked_location || "",
+          trainer: r.booked_trainer || undefined,
+          fullPrice: r.session_price ?? 0,
+          isFree: r.is_free,
+        })),
+        totalParticipants: first.total_participants,
+        referralCode: first.referral_code || "",
         privateReferrer: referrer,
         submittedReferralCode,
-        smsConsent: !!reg.sms_consent,
-        accountCreditApplied: reg.applied_account_credit || 0,
-        fullPrice: reg.session_price ?? undefined,
+        smsConsent: !!first.sms_consent,
+        isFirstTime,
+        accountCreditApplied,
       });
+    } else {
+      for (const reg of confirmedRows) {
+        if (!reg.booked_date || !reg.booked_start_time) continue;
+        await finalizeConfirmedPrivateBooking({
+          parentName: reg.parent_name,
+          email: reg.email,
+          phone: reg.phone,
+          kids: reg.kids,
+          type: reg.type,
+          sessionDetails: reg.session_details,
+          totalParticipants: reg.total_participants,
+          bookedDate: reg.booked_date,
+          bookedStartTime: reg.booked_start_time,
+          bookedEndTime: reg.booked_end_time || reg.booked_start_time,
+          bookedLocation: reg.booked_location || "",
+          bookedTrainer: reg.booked_trainer || undefined,
+          manageToken: reg.manage_token,
+          isFree: reg.is_free,
+          isFirstTime,
+          referralCode: reg.referral_code || "",
+          privateReferrer: referrer,
+          submittedReferralCode,
+          smsConsent: !!reg.sms_consent,
+          accountCreditApplied: reg.applied_account_credit || 0,
+          fullPrice: reg.session_price ?? undefined,
+        });
+      }
     }
   } else if (batchType === "weekly") {
     const first = confirmedRows[0];

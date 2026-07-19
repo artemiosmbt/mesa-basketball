@@ -441,6 +441,164 @@ export async function finalizeConfirmedCampBooking(params: FinalizeCampBookingPa
   }
 }
 
+export interface FinalizePrivateSeriesBookingParams {
+  parentName: string;
+  email: string;
+  phone: string;
+  kids: string;
+  type: string;
+  privateSessions: Array<{
+    date: string;
+    startTime: string;
+    endTime: string;
+    location: string;
+    trainer?: string;
+    fullPrice: number;
+    isFree: boolean;
+  }>;
+  totalParticipants: number;
+  referralCode: string;
+  privateReferrer: { email: string; name: string } | null;
+  submittedReferralCode?: string;
+  smsConsent: boolean;
+  isFirstTime: boolean;
+  accountCreditApplied: number;
+}
+
+/**
+ * Same role as finalizeConfirmedPrivateBooking, but for a batch of recurring
+ * private-session rows created together (one row per selected date, one
+ * Stripe charge for the total). Sends a single consolidated email/SMS across
+ * all dates, same as the old N-calls-plus-emailOnly pattern did — but package
+ * usage still gets recomputed per row against ITS OWN booked month, since a
+ * series can span more than one calendar month.
+ */
+export async function finalizeConfirmedPrivateSeriesBooking(params: FinalizePrivateSeriesBookingParams): Promise<void> {
+  const { privateSessions } = params;
+  const isPrivateType = params.type === "private" || params.type === "group-private";
+
+  // Package usage is a per-month concept — recompute/persist it for every
+  // month touched by this series, not just once.
+  const touchedMonths = new Set<string>();
+  for (const s of privateSessions) {
+    const d = new Date(s.date);
+    if (isNaN(d.getTime())) continue;
+    const bookingMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    if (touchedMonths.has(bookingMonth)) continue;
+    touchedMonths.add(bookingMonth);
+    if (!isPrivateType) continue;
+    const activePkg = await getActivePackage(params.email, bookingMonth);
+    if (activePkg) {
+      const confirmedCount = await countConfirmedPrivateSessions(params.email, bookingMonth);
+      const newUsed = Math.min(activePkg.package_type, confirmedCount);
+      await setPackageSessions(activePkg.id, newUsed);
+    }
+  }
+
+  // The note in the consolidated email/SMS just reflects the CURRENT
+  // calendar month's package (matching the note the old emailOnly call
+  // showed) — a single "remaining" number doesn't map cleanly onto a series
+  // that might span several months' packages anyway.
+  let packageSessionsRemaining: number | undefined;
+  let packageType: number | undefined;
+  if (isPrivateType) {
+    const now = new Date();
+    const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    const activePkg = await getActivePackage(params.email, currentMonth).catch(() => null);
+    if (activePkg) {
+      packageSessionsRemaining = activePkg.package_type - activePkg.sessions_used;
+      packageType = activePkg.package_type;
+    }
+  }
+
+  // Best-effort — the series is already paid for and confirmed, so a
+  // failure here must not surface as a failed booking.
+  if (params.privateReferrer) {
+    try {
+      await addReferralCredit(params.privateReferrer.email);
+      await sendReferralCreditNotification({
+        referrerName: params.privateReferrer.name,
+        referrerEmail: params.privateReferrer.email,
+        newClientName: params.parentName,
+      });
+    } catch (creditErr) {
+      console.error("Failed to award referral credit (private series, booking was paid):", creditErr);
+    }
+  }
+
+  const allSessionsList = privateSessions
+    .map((s) => `${s.date} ${s.startTime}-${s.endTime} at ${s.location}`)
+    .join("<br/>");
+  const totalPaid = privateSessions.reduce((sum, s) => sum + (s.isFree ? Math.round(s.fullPrice * 0.5) : s.fullPrice), 0);
+  const priceNote = params.accountCreditApplied > 0
+    ? `<p><strong>Total:</strong> $${totalPaid} — $${params.accountCreditApplied} account credit applied — <strong>Due:</strong> $${Math.max(0, totalPaid - params.accountCreditApplied)}</p>`
+    : `<p><strong>Total:</strong> $${totalPaid}</p>`;
+
+  try {
+    await sendRegistrationNotification({
+      parentName: params.parentName,
+      email: params.email,
+      phone: params.phone,
+      kids: params.kids,
+      type: params.type,
+      sessionDetails: `Recurring Private Sessions (${privateSessions.length} dates):<br/>${allSessionsList}${priceNote ? "<br/>" + priceNote : ""}`,
+      totalParticipants: params.totalParticipants,
+      isFree: privateSessions[0]?.isFree ?? false,
+      isFirstTime: params.isFirstTime,
+      packageSessionsRemaining,
+      packageType,
+      referralCode: params.referralCode,
+      referredBy: params.privateReferrer?.name,
+      referralCodeUsed: params.submittedReferralCode || undefined,
+      trainer: privateSessions[0]?.trainer,
+      calendarEvent: privateSessions[0] ? { date: privateSessions[0].date, startTime: privateSessions[0].startTime, endTime: privateSessions[0].endTime, location: privateSessions[0].location } : undefined,
+      accountCreditApplied: params.accountCreditApplied,
+      fullPrice: totalPaid,
+    });
+  } catch (notifyErr) {
+    console.error("Private series booking email failed (booking was paid):", notifyErr);
+  }
+
+  if (params.smsConsent && params.phone) {
+    const sessionLines = privateSessions.map((s) =>
+      `${formatDateWithDay(s.date)} | ${s.startTime}-${s.endTime}\nLocation: ${resolveLocationName(s.location)}`
+    ).join("\n");
+    const pkgNote = packageSessionsRemaining !== undefined
+      ? `\n${packageSessionsRemaining} session${packageSessionsRemaining !== 1 ? "s" : ""} remaining in your package.`
+      : "";
+    const trainerLine = privateSessions[0]?.trainer ? `\nTrainer: ${privateSessions[0].trainer}` : "";
+    const creditLine = params.accountCreditApplied > 0 ? `\n$${params.accountCreditApplied} account credit applied.` : "";
+    await sendSMS(params.phone, `Mesa Basketball: ${privateSessions.length} private sessions confirmed!\n${sessionLines}${trainerLine}${pkgNote}${creditLine}\nAthlete: ${params.kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
+  }
+
+  const adminLines = privateSessions.map((s) =>
+    `${formatDateWithDay(s.date)} | ${s.startTime}-${s.endTime}\nLocation: ${resolveLocationName(s.location)}`
+  ).join("\n");
+  const trainerLine = privateSessions[0]?.trainer ? `\nTrainer: ${privateSessions[0].trainer}` : "";
+  const adminTypeLabel = params.type === "group-private" ? "group private" : "private";
+  await sendAdminSMS(`NEW BOOKING (paid): ${params.parentName}\n${privateSessions.length} ${adminTypeLabel} sessions:\n${adminLines}${trainerLine}\nPlayers: ${params.kids}${params.submittedReferralCode ? `\nRef code: ${params.submittedReferralCode} ${params.privateReferrer ? "✓ applied" : "✗ NOT applied"}` : ""}`);
+
+  if (isPrivateType) {
+    for (const s of privateSessions) {
+      try {
+        await addPrivateSessionToCalendar({
+          parentName: params.parentName,
+          email: params.email,
+          phone: params.phone,
+          kids: params.kids,
+          bookedDate: s.date,
+          bookedStartTime: s.startTime,
+          bookedEndTime: s.endTime,
+          bookedLocation: s.location,
+          trainer: s.trainer,
+        });
+      } catch (err) {
+        console.error("Calendar sync error (private series, post-payment):", err);
+      }
+    }
+  }
+}
+
 /**
  * A checkout was never completed — either Stripe told us the session
  * expired, or the abandonment-sweep cron caught one the webhook missed.

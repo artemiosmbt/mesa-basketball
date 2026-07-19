@@ -1199,13 +1199,13 @@ export default function Home() {
         })),
       ];
 
-      // Register each date (skip emails for all — we'll send one consolidated email)
       const isRecurring = datesToBook.length > 1;
-      // Only the first date's call can still see isNewClient === true, so it's the only
-      // one that can actually apply the referral — capture its result to report accurately.
-      let firstBookingReferralApplied = false;
-      for (let bIdx = 0; bIdx < datesToBook.length; bIdx++) {
-        const booking = datesToBook[bIdx];
+      const applyCredit = accountCreditBalance !== null && accountCreditBalance > 0 && applyAccountCredit;
+
+      // Multi-date recurring booking: one request covering every date, one
+      // Stripe charge for the total (or one confirmation if fully covered by
+      // a discount/credit) — the backend computes per-date pricing itself.
+      if (isRecurring) {
         const res = await fetch("/api/register", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1216,68 +1216,91 @@ export default function Home() {
             smsConsent,
             kids: kidsStr,
             type: bookingType,
-            sessionDetails: `Private Session — ${booking.date} ${booking.startTime}-${booking.endTime} at ${booking.location}`,
+            sessionDetails: "Recurring Private Sessions",
             sessionIndex: modal.sessionIndex,
             totalParticipants,
-            bookedDate: booking.date,
-            bookedStartTime: booking.startTime,
-            bookedEndTime: booking.endTime,
-            bookedLocation: booking.location,
-            bookedTrainer: booking.trainer,
-            skipEmail: isRecurring,
-            isRecurring,
+            privateSessions: datesToBook,
             submittedReferralCode: referralCode.trim() || undefined,
-            useReferralCredit: bIdx === 0 ? useReferralCredit : false,
-            applyAccountCredit: bIdx === 0 && accountCreditBalance !== null && accountCreditBalance > 0 && applyAccountCredit,
+            useReferralCredit,
+            applyAccountCredit: applyCredit,
           }),
         });
-        if (bIdx === 0) {
-          const result = await res.json().catch(() => null);
-          firstBookingReferralApplied = !!result?.referralApplied;
-          // Single-date private bookings that owe money get sent to Stripe
-          // Checkout instead of being confirmed immediately — nothing to
-          // show here yet, the booking finalizes once payment succeeds.
-          if (result?.checkoutUrl) {
-            window.location.href = result.checkoutUrl;
-            return;
-          }
+        const result = await res.json().catch(() => null);
+        if (!res.ok) {
+          setSubmitResult({ success: false, message: result?.error || "Registration failed." });
+          setSubmitting(false);
+          return;
         }
-      }
-
-      // Send one consolidated email listing all dates
-      if (isRecurring) {
-        const allSessionsList = datesToBook
-          .map((d) => `${d.date} ${d.startTime}-${d.endTime} at ${d.location}`)
-          .join("<br/>");
-        await fetch("/api/register", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            parentName,
-            email,
-            phone,
-            smsConsent,
-            kids: kidsStr,
-            type: bookingType,
-            sessionDetails: `Recurring Private Sessions:<br/>${allSessionsList}`,
-            sessionIndex: modal.sessionIndex,
-            totalParticipants,
-            emailOnly: true,
-            submittedReferralCode: referralCode.trim() || undefined,
-            referralWasApplied: firstBookingReferralApplied,
-          }),
+        // Owes money → sent to Stripe Checkout instead of being confirmed
+        // immediately; the booking finalizes once payment succeeds.
+        if (result?.checkoutUrl) {
+          window.location.href = result.checkoutUrl;
+          return;
+        }
+        setCalendarSessions(datesToBook.filter((b) => b.date && b.startTime).map((b) => ({
+          date: b.date!, startTime: b.startTime!, endTime: b.endTime || b.startTime!, location: b.location || "",
+          title: "Mesa Basketball — Private Session",
+        })));
+        setSubmitResult({
+          success: true,
+          message: `${datesToBook.length} sessions booked! A confirmation email has been sent to ${email}.` + referralNote(!!result?.referralApplied),
         });
+        saveProfile();
+        const fresh = await fetch("/api/schedule").then((r) => r.json());
+        setSchedule(fresh.weeklySchedule || []);
+        setCamps(fresh.camps || []);
+        setPrivateSlots(fresh.privateSlots || []);
+        setBookedSlots(fresh.bookedSlots || []);
+        setGroupEnrollment(fresh.groupEnrollment || {});
+        setSubmitting(false);
+        return;
       }
 
-      setCalendarSessions(datesToBook.filter((b) => b.date && b.startTime).map((b) => ({
-        date: b.date!, startTime: b.startTime!, endTime: b.endTime || b.startTime!, location: b.location || "",
+      // Single-date booking
+      const booking = datesToBook[0];
+      const res = await fetch("/api/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          parentName,
+          email,
+          phone,
+          smsConsent,
+          kids: kidsStr,
+          type: bookingType,
+          sessionDetails: `Private Session — ${booking.date} ${booking.startTime}-${booking.endTime} at ${booking.location}`,
+          sessionIndex: modal.sessionIndex,
+          totalParticipants,
+          bookedDate: booking.date,
+          bookedStartTime: booking.startTime,
+          bookedEndTime: booking.endTime,
+          bookedLocation: booking.location,
+          bookedTrainer: booking.trainer,
+          submittedReferralCode: referralCode.trim() || undefined,
+          useReferralCredit,
+          applyAccountCredit: applyCredit,
+        }),
+      });
+      const result = await res.json().catch(() => null);
+      if (!res.ok) {
+        setSubmitResult({ success: false, message: result?.error || "Registration failed." });
+        setSubmitting(false);
+        return;
+      }
+      // Single-date private bookings that owe money get sent to Stripe
+      // Checkout instead of being confirmed immediately — nothing to show
+      // here yet, the booking finalizes once payment succeeds.
+      if (result?.checkoutUrl) {
+        window.location.href = result.checkoutUrl;
+        return;
+      }
+      setCalendarSessions([{
+        date: booking.date!, startTime: booking.startTime!, endTime: booking.endTime || booking.startTime!, location: booking.location || "",
         title: "Mesa Basketball — Private Session",
-      })));
+      }]);
       setSubmitResult({
         success: true,
-        message: (datesToBook.length > 1
-          ? `${datesToBook.length} sessions booked! A confirmation email has been sent to ${email}.`
-          : `Booking confirmed! A confirmation email has been sent to ${email}.`) + referralNote(firstBookingReferralApplied),
+        message: `Booking confirmed! A confirmation email has been sent to ${email}.` + referralNote(!!result?.referralApplied),
       });
       saveProfile();
       const fresh = await fetch("/api/schedule").then((r) => r.json());
@@ -3393,7 +3416,7 @@ export default function Home() {
                 >
                   {submitting
                     ? "Submitting..."
-                    : ((modal.type === "private" || modal.type === "group-private") && !recurringWeeks.some((w) => w.selected)) || modal.type === "weekly" || modal.type === "camp"
+                    : modal.type === "private" || modal.type === "group-private" || modal.type === "weekly" || modal.type === "camp"
                       ? "Continue to Payment"
                       : "Confirm Registration"}
                 </button>
