@@ -3,6 +3,7 @@ import Link from "next/link";
 import Image from "next/image";
 import LandingNav from "./LandingNav";
 import { AppInstallSection } from "./AppInstall";
+import Testimonials from "./Testimonials";
 
 export const metadata: Metadata = {
   title: "Long Island Basketball Training | Mesa Basketball Training",
@@ -438,6 +439,8 @@ export default function LandingPage() {
           </div>
         </div>
       </section>
+
+      <Testimonials />
 
       {/* CTA Banner */}
       <section className="bg-mesa-accent py-16 md:py-20">
