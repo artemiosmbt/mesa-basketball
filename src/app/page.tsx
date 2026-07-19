@@ -240,6 +240,8 @@ export default function LandingPage() {
         </div>
       </section>
 
+      <Testimonials />
+
       {/* The Approach */}
       <section className="bg-brown-950 border-t border-brown-800 py-16 md:py-24">
         <div className="mx-auto max-w-4xl px-6">
@@ -439,8 +441,6 @@ export default function LandingPage() {
           </div>
         </div>
       </section>
-
-      <Testimonials />
 
       {/* CTA Banner */}
       <section className="bg-mesa-accent py-16 md:py-20">
