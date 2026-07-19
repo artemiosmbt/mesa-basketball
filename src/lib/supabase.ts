@@ -43,6 +43,11 @@ export interface Registration {
   camp_day_late_fee?: number;
   camp_drop_in_rate?: number | null;
   applied_account_credit?: number;
+  booking_batch_id?: string | null;
+  stripe_checkout_session_id?: string | null;
+  stripe_payment_intent_id?: string | null;
+  stripe_customer_id?: string | null;
+  stripe_refund_id?: string | null;
 }
 
 export async function addRegistration(data: {
@@ -500,7 +505,11 @@ export async function addRegistrationWithRewards(data: {
   isFullCamp?: boolean;
   campDropInRate?: number;
   appliedAccountCredit?: number;
-}): Promise<{ manageToken: string }> {
+  // Stripe checkout support. When omitted, status keeps the DB default
+  // ("confirmed") — only the new pay-via-Stripe path passes these.
+  status?: string;
+  bookingBatchId?: string;
+}): Promise<{ id: string; manageToken: string }> {
   const supabase = getSupabase();
   const { data: row, error } = await supabase
     .from("registrations")
@@ -526,11 +535,97 @@ export async function addRegistrationWithRewards(data: {
       is_full_camp: data.isFullCamp ?? false,
       camp_drop_in_rate: data.campDropInRate ?? null,
       applied_account_credit: data.appliedAccountCredit ?? 0,
+      ...(data.status ? { status: data.status } : {}),
+      ...(data.bookingBatchId ? { booking_batch_id: data.bookingBatchId } : {}),
     })
-    .select("manage_token")
+    .select("id, manage_token")
     .single();
   if (error) throw error;
-  return { manageToken: row.manage_token };
+  return { id: row.id, manageToken: row.manage_token };
+}
+
+// --- Stripe checkout batch helpers ---
+// A "batch" is every registrations row created together from one Stripe
+// Checkout Session (one private booking today; a multi-session weekly
+// booking or multi-day camp once those are wired up too). All rows in a
+// batch share `booking_batch_id` and, once paid, the same
+// `stripe_payment_intent_id`.
+
+/** Stamp the Checkout Session id onto every row in a batch, right after creating it. */
+export async function attachStripeCheckoutSession(bookingBatchId: string, checkoutSessionId: string): Promise<void> {
+  const supabase = getSupabase();
+  await supabase
+    .from("registrations")
+    .update({ stripe_checkout_session_id: checkoutSessionId })
+    .eq("booking_batch_id", bookingBatchId);
+}
+
+export async function getRegistrationsByBatchId(bookingBatchId: string): Promise<Registration[]> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("registrations")
+    .select("*")
+    .eq("booking_batch_id", bookingBatchId);
+  if (error || !data) return [];
+  return data as Registration[];
+}
+
+/**
+ * Webhook calls this once payment succeeds: flips the whole batch from
+ * pending_payment to confirmed and records the PaymentIntent (needed later
+ * for refunds) and Customer id. Idempotent — if the batch is already
+ * confirmed (a duplicate webhook delivery), this is a harmless no-op update.
+ */
+export async function finalizePaidBookingBatch(
+  bookingBatchId: string,
+  stripePaymentIntentId: string,
+  stripeCustomerId: string | null
+): Promise<Registration[]> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("registrations")
+    .update({
+      status: "confirmed",
+      stripe_payment_intent_id: stripePaymentIntentId,
+      ...(stripeCustomerId ? { stripe_customer_id: stripeCustomerId } : {}),
+    })
+    .eq("booking_batch_id", bookingBatchId)
+    .eq("status", "pending_payment")
+    .select("*");
+  if (error || !data) return [];
+  return data as Registration[];
+}
+
+/** Webhook calls this when a Checkout Session expires unused. */
+export async function abandonPendingBookingBatch(bookingBatchId: string): Promise<Registration[]> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("registrations")
+    .update({ status: "payment_abandoned" })
+    .eq("booking_batch_id", bookingBatchId)
+    .eq("status", "pending_payment")
+    .select("*");
+  if (error || !data) return [];
+  return data as Registration[];
+}
+
+/**
+ * Safety net for the cron sweep: batch ids still pending_payment older than
+ * the cutoff, in case a checkout.session.expired webhook delivery was
+ * missed. Distinct batch ids only — a batch can have multiple rows once
+ * weekly/camp bookings go through Stripe too.
+ */
+export async function getStalePendingBatchIds(olderThanMs: number): Promise<string[]> {
+  const supabase = getSupabase();
+  const cutoff = new Date(Date.now() - olderThanMs).toISOString();
+  const { data, error } = await supabase
+    .from("registrations")
+    .select("booking_batch_id")
+    .eq("status", "pending_payment")
+    .not("booking_batch_id", "is", null)
+    .lt("created_at", cutoff);
+  if (error || !data) return [];
+  return Array.from(new Set(data.map((r) => r.booking_batch_id as string)));
 }
 
 // --- Monthly Package Helpers ---

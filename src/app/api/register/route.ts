@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { sendRegistrationNotification, sendReferralCreditNotification } from "@/lib/email";
 import { addPrivateSessionToCalendar, upsertGroupSessionCalendarEvent } from "@/lib/calendar";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
+import { getStripe } from "@/lib/stripe";
+import { finalizeConfirmedPrivateBooking } from "@/lib/booking-finalize";
 import {
   addRegistrationWithRewards,
   isNewClient,
@@ -18,6 +20,7 @@ import {
   countConfirmedPrivateSessions,
   getAccountCreditBalance,
   deductAccountCredit,
+  attachStripeCheckoutSession,
 } from "@/lib/supabase";
 
 export async function POST(req: NextRequest) {
@@ -57,6 +60,12 @@ export async function POST(req: NextRequest) {
       // — that call is the only one where isNewClient can still be true, so it's the
       // only one that can know for sure.
       referralWasApplied,
+      // True when this private/group-private call is one leg of a multi-date
+      // recurring booking (datesToBook.length > 1 on the frontend). Recurring
+      // bookings make several separate calls today, which doesn't map onto a
+      // single Stripe Checkout Session — they keep the pre-Stripe flow until
+      // that's consolidated into one batched call.
+      isRecurring,
     } = body;
 
     if (!parentName || !email || !phone || !kids || !type || !sessionDetails) {
@@ -414,6 +423,7 @@ export async function POST(req: NextRequest) {
     }
 
     const isPrivateType = type === "private" || type === "group-private";
+    const referralCode = await generateUniqueReferralCode(parentName, email);
 
     // Compute the full (undiscounted) price for private sessions from the booked duration.
     // is_free flag handles the 50% discount at display time.
@@ -434,6 +444,149 @@ export async function POST(req: NextRequest) {
       return Math.round(rate * (duration / 60) * 100) / 100;
     }
 
+    // Single-date private/group-private booking, paid via Stripe. Recurring
+    // bookings (isRecurring) and the emailOnly consolidated-email call for a
+    // recurring series fall through to the pre-Stripe flow below unchanged —
+    // see the comment on `isRecurring` above for why.
+    if (isPrivateType && !emailOnly && !isRecurring) {
+      if (!bookedDate || !bookedStartTime || !bookedEndTime || !bookedLocation) {
+        return NextResponse.json({ error: "Missing session details" }, { status: 400 });
+      }
+
+      const newClient = await isNewClient(email, phone);
+      let privateReferrer: { email: string; name: string } | null = null;
+      if (submittedReferralCode && newClient) {
+        const info = await findReferrerInfoByCode(submittedReferralCode);
+        if (info && info.email !== email) {
+          privateReferrer = info;
+        }
+      }
+
+      let isFree = false;
+      let isFirstTime = false;
+      let usedReferralCredit = false;
+      if (newClient) {
+        isFree = true; // first-time 50% off
+        isFirstTime = true;
+      } else if (useReferralCredit) {
+        const credits = await getReferralCredits(email);
+        if (credits > 0) {
+          isFree = true;
+          usedReferralCredit = true;
+          await decrementReferralCredit(email);
+        }
+      }
+
+      const privateSessionPrice = calcPrivateSessionPrice(bookedStartTime, bookedEndTime, totalParticipants || 1);
+
+      let accountCreditApplied = 0;
+      if (applyAccountCredit && privateSessionPrice != null) {
+        const balance = await getAccountCreditBalance(email);
+        accountCreditApplied = Math.min(balance, privateSessionPrice);
+        if (accountCreditApplied > 0) await deductAccountCredit(email, accountCreditApplied);
+      }
+
+      const effectivePrice = isFree && privateSessionPrice != null
+        ? Math.round(privateSessionPrice * 0.5)
+        : (privateSessionPrice ?? 0);
+      const amountToCharge = Math.max(0, effectivePrice - accountCreditApplied);
+
+      const bookingBatchId = crypto.randomUUID();
+      const insertResult = await addRegistrationWithRewards({
+        parentName,
+        email,
+        phone,
+        kids,
+        type,
+        sessionDetails,
+        totalParticipants: totalParticipants || 1,
+        bookedDate,
+        bookedStartTime,
+        bookedEndTime,
+        bookedLocation,
+        bookedTrainer: isPrivateType ? bookedTrainer : undefined,
+        referralCode,
+        isFree,
+        usedReferralCredit,
+        smsConsent: !!smsConsent,
+        sessionPrice: privateSessionPrice,
+        ...(accountCreditApplied > 0 ? { appliedAccountCredit: accountCreditApplied } : {}),
+        status: amountToCharge > 0 ? "pending_payment" : undefined,
+        bookingBatchId,
+      });
+
+      if (amountToCharge === 0) {
+        // Fully covered by discount + credit — nothing to actually charge,
+        // so confirm immediately exactly like before Stripe existed.
+        await finalizeConfirmedPrivateBooking({
+          parentName,
+          email,
+          phone,
+          kids,
+          type,
+          sessionDetails,
+          totalParticipants: totalParticipants || 1,
+          bookedDate,
+          bookedStartTime,
+          bookedEndTime,
+          bookedLocation,
+          bookedTrainer: isPrivateType ? bookedTrainer : undefined,
+          manageToken: insertResult.manageToken,
+          isFree,
+          isFirstTime,
+          referralCode,
+          privateReferrer,
+          submittedReferralCode: submittedReferralCode || undefined,
+          smsConsent: !!smsConsent,
+          accountCreditApplied,
+          fullPrice: privateSessionPrice,
+        });
+        return NextResponse.json({ success: true, isFree, referralApplied: !!privateReferrer });
+      }
+
+      // Real money is due — send them to Stripe instead of confirming yet.
+      // The booking stays pending_payment until the webhook confirms payment.
+      const stripe = getStripe();
+      const plainSessionDetails = sessionDetails.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "").trim();
+      const origin = req.nextUrl.origin;
+      const session = await stripe.checkout.sessions.create({
+        mode: "payment",
+        payment_method_types: ["card"],
+        customer_creation: "always",
+        customer_email: email,
+        client_reference_id: bookingBatchId,
+        // The webhook runs in a separate request with no access to this
+        // request's body, so anything the finalize step needs beyond what's
+        // already stored on the pending row (referrer info, first-time vs
+        // referral-credit distinction) has to ride along in metadata —
+        // small facts only, not booking data, which stays in Supabase.
+        metadata: {
+          booking_batch_id: bookingBatchId,
+          is_first_time: String(isFirstTime),
+          referrer_email: privateReferrer?.email || "",
+          referrer_name: privateReferrer?.name || "",
+          submitted_referral_code: submittedReferralCode || "",
+        },
+        line_items: [
+          {
+            price_data: {
+              currency: "usd",
+              product_data: { name: plainSessionDetails || "Mesa Basketball Training Session" },
+              unit_amount: Math.round(amountToCharge * 100),
+            },
+            quantity: 1,
+          },
+        ],
+        success_url: `${origin}/booking-confirmed?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${origin}/schedule?checkout=cancelled`,
+        expires_at: Math.floor(Date.now() / 1000) + 30 * 60,
+      });
+
+      await attachStripeCheckoutSession(bookingBatchId, session.id);
+
+      return NextResponse.json({ success: true, checkoutUrl: session.url });
+    }
+
     let manageToken: string | undefined;
     let isFree = false;
     let isFirstTime = false;
@@ -442,7 +595,6 @@ export async function POST(req: NextRequest) {
     let packageType: number | undefined;
     let accountCreditApplied = 0;
     let privateSessionPrice: number | undefined;
-    const referralCode = await generateUniqueReferralCode(parentName, email);
     let privateReferrer: { email: string; name: string } | null = null;
 
     // Save to Supabase (unless this is an email-only request)

@@ -1211,6 +1211,7 @@ export default function Home() {
             bookedLocation: booking.location,
             bookedTrainer: booking.trainer,
             skipEmail: isRecurring,
+            isRecurring,
             submittedReferralCode: referralCode.trim() || undefined,
             useReferralCredit: bIdx === 0 ? useReferralCredit : false,
             applyAccountCredit: bIdx === 0 && accountCreditBalance !== null && accountCreditBalance > 0 && applyAccountCredit,
@@ -1219,6 +1220,13 @@ export default function Home() {
         if (bIdx === 0) {
           const result = await res.json().catch(() => null);
           firstBookingReferralApplied = !!result?.referralApplied;
+          // Single-date private bookings that owe money get sent to Stripe
+          // Checkout instead of being confirmed immediately — nothing to
+          // show here yet, the booking finalizes once payment succeeds.
+          if (result?.checkoutUrl) {
+            window.location.href = result.checkoutUrl;
+            return;
+          }
         }
       }
 
