@@ -41,6 +41,13 @@ function isPrivateType(type: string): boolean {
   return type === "private" || type === "group-private";
 }
 
+// Fallback when session_price is null (a real, common case — legacy rows)
+// rather than treating an unset price as $0, which would understate what's
+// actually owed. Mirrors fullPriceForType() in the admin dashboard.
+function fullPriceForType(type: string): number {
+  return type === "group-private" ? 250 : type === "private" ? 150 : 50;
+}
+
 // The DB always stores the FULL (undiscounted) session_price for private
 // sessions — the referral-credit / first-time 50% off is applied at display
 // and billing time via is_free, never baked into the stored price. Mirrors
@@ -133,6 +140,7 @@ export async function POST(req: NextRequest) {
   // Camp pricing is left untouched — too many variables (early-bird, drop-in
   // rate, referral discounts) to safely auto-recompute.
   let newFullPrice: number | undefined;
+  let priceLookupFailed = false;
   if (isNewPrivate) {
     const durationMins = Math.max(60, parseMinsFromTime(bookedEndTime) - parseMinsFromTime(bookedStartTime));
     newFullPrice = calcPrivatePrice(durationMins, reg.total_participants || 1);
@@ -142,9 +150,15 @@ export async function POST(req: NextRequest) {
       const match = sessions.find((s) => s.group === newSessionLabel && s.date === bookedDate && s.startTime === bookedStartTime);
       if (match) {
         newFullPrice = Math.round(match.price * (reg.total_participants || 1));
+      } else {
+        priceLookupFailed = true;
       }
     } catch {
       // Sheet lookup failed — leave the existing price untouched rather than guessing.
+      priceLookupFailed = true;
+    }
+    if (priceLookupFailed) {
+      console.error(`Admin reschedule: couldn't find "${newSessionLabel}" on ${bookedDate} ${bookedStartTime} in the live sheet — session_price left unchanged at $${reg.session_price}. Verify manually.`);
     }
   }
 
@@ -155,7 +169,7 @@ export async function POST(req: NextRequest) {
   // change the credit-granted/amount-due delta, but the displayed $ amounts
   // need to reflect what the client actually still owes, not the pre-credit rate.
   const appliedCredit = reg.applied_account_credit || 0;
-  const oldFullPrice = reg.session_price ?? 0;
+  const oldFullPrice = reg.session_price ?? fullPriceForType(reg.type);
   const oldAmount = Math.max(0, effectiveAmount(oldFullPrice, !!reg.is_free, wasPrivate) - appliedCredit);
   const newAmount = newFullPrice !== undefined ? Math.max(0, effectiveAmount(newFullPrice, newIsFree, isNewPrivate) - appliedCredit) : oldAmount;
   const priceDelta = newFullPrice !== undefined ? newAmount - oldAmount : 0;
@@ -310,7 +324,8 @@ export async function POST(req: NextRequest) {
             ? `\nPrice: $${oldAmount} -> $${newAmount}`
             : "";
     const adminCreditRefundNote = creditRefunded ? "\nReferral credit refunded (no longer applied)." : "";
-    await sendAdminSMS(`ADMIN RESCHEDULED: ${reg.parent_name}\nFrom: ${oldSessionDetails}\nTo: ${newSessionDetails}\nPlayers: ${reg.kids}${adminPriceNote}${adminCreditRefundNote}`);
+    const priceLookupFailedNote = priceLookupFailed ? `\n⚠️ Couldn't verify the new price on the schedule sheet — price left at $${reg.session_price}, double-check it manually.` : "";
+    await sendAdminSMS(`ADMIN RESCHEDULED: ${reg.parent_name}\nFrom: ${oldSessionDetails}\nTo: ${newSessionDetails}\nPlayers: ${reg.kids}${adminPriceNote}${adminCreditRefundNote}${priceLookupFailedNote}`);
   } catch (err) {
     console.error("Notification error (admin reschedule):", err);
   }
@@ -328,5 +343,6 @@ export async function POST(req: NextRequest) {
     creditRefunded,
     newIsFree,
     newUsedReferralCredit,
+    priceLookupFailed,
   });
 }

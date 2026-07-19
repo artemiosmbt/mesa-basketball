@@ -218,15 +218,23 @@ export async function DELETE(
       // with 24+ hours notice, 50% if cancelled late — the pre-Stripe
       // stand-in for the refund policy already locked in for when Stripe
       // goes live (full refund vs 50% credit for a late cancel).
+      const wasPaid = reg.is_paid || group.some((r) => r.is_paid);
       let cancelCredit = 0;
-      if ((reg.is_paid || group.some((r) => r.is_paid)) && reg.email) {
+      if (wasPaid && reg.email) {
         const paidAmount = Math.max(0, resolvedSessionPrice(reg) - groupCredit);
         cancelCredit = isLateCancel ? Math.round(paidAmount * 0.5) : paidAmount;
         if (cancelCredit > 0) {
           await addAccountCredit(reg.email, cancelCredit).catch(() => {});
         }
       }
-      const lateFeeAmount = isLateCancel ? Math.round(resolvedSessionPrice(reg) * 0.5) : undefined;
+      // Late fee wording only makes sense when nothing was paid — someone who
+      // already paid is being credited (possibly $0 if their existing account
+      // credit already covered the whole thing), never asked for more. Also
+      // subtract any credit already applied at booking time, so the fee
+      // reflects what's actually still owed, not the full sticker price.
+      const lateFeeAmount = isLateCancel && !wasPaid
+        ? Math.round(Math.max(0, resolvedSessionPrice(reg) - groupCredit) * 0.5)
+        : undefined;
       await sendCancellationNotification({
         parentName: reg.parent_name,
         email: reg.email,
@@ -234,11 +242,13 @@ export async function DELETE(
         sessionType: reg.type,
         isLateCancel,
         lateFeeAmount,
-        cancelCredit: cancelCredit > 0 ? cancelCredit : undefined,
+        cancelCredit: wasPaid ? cancelCredit : undefined,
       });
       if (reg.sms_consent && reg.phone) {
-        const lateNote = cancelCredit > 0
-          ? (isLateCancel ? `\n$${cancelCredit} credited to your account (50% of what you paid — late cancellation).` : `\n$${cancelCredit} credited to your account for a future booking.`)
+        const lateNote = wasPaid
+          ? (cancelCredit > 0
+              ? (isLateCancel ? `\n$${cancelCredit} credited to your account (50% of what you paid — late cancellation).` : `\n$${cancelCredit} credited to your account for a future booking.`)
+              : "\nNothing additional is due — your account credit already covered this.")
           : isLateCancel ? "\nA late cancellation fee applies." : "";
         await sendSMS(reg.phone, `Mesa Basketball: ${campName} cancelled.${lateNote}\nmesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
       }
@@ -364,8 +374,9 @@ export async function DELETE(
   // notice, 50% if cancelled late — the pre-Stripe stand-in for the refund
   // policy already locked in for when Stripe goes live (full refund vs 50%
   // credit for a late cancel).
+  const wasPaid = !!reg.is_paid;
   let cancelCredit = 0;
-  if (reg.is_paid && reg.email) {
+  if (wasPaid && reg.email) {
     const paidAmount = Math.max(0, resolvedSessionPrice(reg) - (reg.applied_account_credit || 0));
     cancelCredit = isLateCancel ? Math.round(paidAmount * 0.5) : paidAmount;
     if (cancelCredit > 0) {
@@ -396,7 +407,14 @@ export async function DELETE(
     }
   }
 
-  const lateFeeAmount = isLateCancel ? Math.round(resolvedSessionPrice(reg) * 0.5) : undefined;
+  // Late fee wording only makes sense when nothing was paid — someone who
+  // already paid is being credited (possibly $0 if their existing account
+  // credit already covered the whole thing), never asked for more. Also
+  // subtract any credit already applied at booking time, so the fee
+  // reflects what's actually still owed, not the full sticker price.
+  const lateFeeAmount = isLateCancel && !wasPaid
+    ? Math.round(Math.max(0, resolvedSessionPrice(reg) - (reg.applied_account_credit || 0)) * 0.5)
+    : undefined;
 
   let cancelSessionDetails = reg.session_details;
   let cancelLocation = reg.booked_location || "";
@@ -415,7 +433,7 @@ export async function DELETE(
     sessionType: reg.type,
     isLateCancel,
     lateFeeAmount,
-    cancelCredit: cancelCredit > 0 ? cancelCredit : undefined,
+    cancelCredit: wasPaid ? cancelCredit : undefined,
   });
 
   if (reg.sms_consent && reg.phone) {
@@ -423,8 +441,10 @@ export async function DELETE(
     const sessionLine = reg.booked_date && reg.booked_start_time
       ? `\n${formatDateWithDay(reg.booked_date)} | ${reg.booked_start_time}${reg.booked_end_time ? `-${reg.booked_end_time}` : ""}${cancelLocation ? `\nLocation: ${resolveLocationName(cancelLocation)}` : ""}`
       : "";
-    const lateNote = cancelCredit > 0
-      ? (isLateCancel ? `\n$${cancelCredit} credited to your account (50% of what you paid — late cancellation).` : `\n$${cancelCredit} credited to your account for a future booking.`)
+    const lateNote = wasPaid
+      ? (cancelCredit > 0
+          ? (isLateCancel ? `\n$${cancelCredit} credited to your account (50% of what you paid — late cancellation).` : `\n$${cancelCredit} credited to your account for a future booking.`)
+          : "\nNothing additional is due — your account credit already covered this.")
       : isLateCancel ? "\nA late cancellation fee applies." : "";
     await sendSMS(reg.phone, `Mesa Basketball: ${cancelLabel} cancelled.${sessionLine}\nAthlete: ${reg.kids}${lateNote}\nmesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
   }

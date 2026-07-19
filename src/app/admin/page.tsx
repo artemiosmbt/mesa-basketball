@@ -939,6 +939,9 @@ export default function AdminPage() {
     if (data.creditRefunded) {
       notes.push(`Their referral credit was refunded since it's no longer applied to this booking.`);
     }
+    if (data.priceLookupFailed) {
+      notes.push(`Couldn't verify the new price on the schedule sheet — the price was left unchanged, double-check it manually.`);
+    }
     if (notes.length > 0) alert(`Rescheduled. ${notes.join(" ")}`);
   }
 

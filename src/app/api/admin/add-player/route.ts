@@ -8,6 +8,7 @@ import {
   upsertGroupSessionCalendarEvent,
 } from "@/lib/calendar";
 import { sendAdminSMS, sendSMS } from "@/lib/sms";
+import { getWeeklySchedule } from "@/lib/sheets";
 
 async function verifyAdmin(req: NextRequest) {
   const token = req.headers.get("authorization")?.replace("Bearer ", "");
@@ -41,6 +42,13 @@ function isPrivateType(type: string): boolean {
 
 function effectiveAmount(fullPrice: number, isFree: boolean, isPriv: boolean): number {
   return isFree && isPriv ? Math.round(fullPrice * 0.5) : fullPrice;
+}
+
+// Fallback when session_price is null (a real, common case — legacy rows)
+// rather than treating an unset price as $0, which would understate what's
+// actually owed.
+function fullPriceForType(type: string): number {
+  return type === "group-private" ? 250 : type === "private" ? 150 : 50;
 }
 
 // Adds one player to an existing confirmed booking. Small, rarely-used admin
@@ -85,9 +93,19 @@ export async function POST(req: NextRequest) {
   if (isPriv && reg.booked_start_time && reg.booked_end_time) {
     const durationMins = Math.max(60, parseMinsFromTime(reg.booked_end_time) - parseMinsFromTime(reg.booked_start_time));
     newFullPrice = calcPrivatePrice(durationMins, newCount);
-  } else if (reg.type === "weekly" && reg.session_price != null) {
-    const perPlayerRate = reg.session_price / oldCount;
-    newFullPrice = Math.round(perPlayerRate * newCount);
+  } else if (reg.type === "weekly" && reg.booked_date && reg.booked_start_time) {
+    // Look up the group's actual live rate rather than scaling the stored
+    // price — different groups have different per-session rates (e.g. "HS
+    // Pickup" is $30, not $50), and this also sidesteps a null session_price.
+    try {
+      const sessions = await getWeeklySchedule();
+      const match = sessions.find((s) => s.group === reg.booked_group && s.date === reg.booked_date && s.startTime === reg.booked_start_time);
+      if (match) {
+        newFullPrice = Math.round(match.price * newCount);
+      }
+    } catch {
+      // Sheet lookup failed — leave the existing price untouched rather than guessing.
+    }
   }
   // camp (or missing price data): leave session_price untouched — pass null so
   // updateRegistrationPlayers doesn't overwrite it.
@@ -97,7 +115,7 @@ export async function POST(req: NextRequest) {
   // from both sides so the displayed/texted amounts reflect what's actually
   // still owed, not the pre-credit rate.
   const appliedCredit = reg.applied_account_credit || 0;
-  const oldFullPrice = reg.session_price ?? 0;
+  const oldFullPrice = reg.session_price ?? fullPriceForType(reg.type);
   const oldAmount = Math.max(0, effectiveAmount(oldFullPrice, !!reg.is_free, isPriv) - appliedCredit);
   const newAmount = newFullPrice !== null ? Math.max(0, effectiveAmount(newFullPrice, !!reg.is_free, isPriv) - appliedCredit) : oldAmount;
   const priceDelta = newFullPrice !== null ? newAmount - oldAmount : 0;
@@ -165,7 +183,7 @@ export async function POST(req: NextRequest) {
     if (reg.sms_consent && reg.phone) {
       await sendSMS(
         reg.phone,
-        `Mesa Basketball: ${playerName.trim()} was added to your booking (${reg.session_details.split(" — ")[0]}).${priceNote}\nManage: mesabasketballtraining.com/booking/${reg.manage_token}\nReply STOP to opt out.`
+        `Mesa Basketball: ${playerName.trim()} was added to your booking (${reg.booked_group || reg.session_details.split(" — ")[0]}).${priceNote}\nManage: mesabasketballtraining.com/booking/${reg.manage_token}\nReply STOP to opt out.`
       );
     }
     await sendAdminSMS(`PLAYER ADDED: ${reg.parent_name}\n${reg.session_details}\nAdded: ${playerName.trim()}\nNow: ${newKids}${priceNote}`);

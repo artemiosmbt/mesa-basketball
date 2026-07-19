@@ -649,8 +649,12 @@ export default function ManageBooking({
   // has loaded and a matching session is actually found; before then (or if
   // the group can't be matched at all) default to not-discounted rather than
   // guessing and blocking a legitimate cancellation.
+  // Falls back to parsing session_details the same way the server does, so
+  // legacy rows without a stored booked_group agree between client and
+  // server on whether this booking is discount-blocked.
+  const bookingGroupLabel = booking.bookedGroup || booking.sessionDetails.split(" — ")[0] || "";
   const matchingWeeklySession = booking.type === "weekly"
-    ? weeklySessions.find((s) => s.group === booking.bookedGroup && s.date === booking.bookedDate && s.startTime === booking.bookedStartTime)
+    ? weeklySessions.find((s) => s.group === bookingGroupLabel && s.date === booking.bookedDate && s.startTime === booking.bookedStartTime)
     : undefined;
   const isDiscountedGroup =
     booking.type === "weekly" &&
