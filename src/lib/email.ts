@@ -414,8 +414,20 @@ export async function sendNoShowNotification(data: {
   sessionDetails: string;
   sessionType?: string;
   feeAmount: number;
+  // True when the session was already paid for (Stripe or the old manual
+  // cash toggle) — no-shows keep the full charge per policy, so a paid
+  // client is told nothing further is due, never asked to pay again.
+  wasPaid: boolean;
 }) {
   const resend = getResend();
+  const alreadyPaidNote = data.wasPaid
+    ? `<p style="background: #1e3a5f; color: #ffffff; padding: 14px; border-radius: 8px; margin: 12px 0;">
+        Per our no-show policy, your <strong>$${data.feeAmount} payment is being kept</strong> as the session fee — no refund applies. Nothing further is due.
+      </p>`
+    : `<p style="background: #3b1515; color: #fca5a5; padding: 14px; border-radius: 8px; margin: 12px 0;">
+        Per our policy, <strong>no-shows without prior notice are charged the full session fee</strong>.<br/>
+        <strong>Amount due: $${data.feeAmount}</strong>
+      </p>`;
 
   // Email to Artemi
   await resend.emails.send({
@@ -426,7 +438,7 @@ export async function sendNoShowNotification(data: {
       <h2>No-Show Recorded</h2>
       <p><strong>Parent:</strong> ${data.parentName}</p>
       <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails)}</p>
-      <p><strong>Full fee due:</strong> $${data.feeAmount}</p>
+      <p><strong>${data.wasPaid ? "Already paid — fee kept" : "Full fee due"}:</strong> $${data.feeAmount}</p>
     `,
   });
 
@@ -435,17 +447,14 @@ export async function sendNoShowNotification(data: {
     from: FROM_EMAIL,
     to: data.email,
     replyTo: ARTEMI_EMAIL,
-    subject: `No-Show — Session Fee Due — Mesa Basketball Training`,
+    subject: data.wasPaid ? `No-Show on File — Mesa Basketball Training` : `No-Show — Session Fee Due — Mesa Basketball Training`,
     html: `
       <h2>No-Show on File</h2>
       <p>Hi ${data.parentName},</p>
       <p>You were marked as a <strong>no-show</strong> for the following session:</p>
       <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails)}</p>
-      <p style="background: #3b1515; color: #fca5a5; padding: 14px; border-radius: 8px; margin: 12px 0;">
-        Per our policy, <strong>no-shows without prior notice are charged the full session fee</strong>.<br/>
-        <strong>Amount due: $${data.feeAmount}</strong>
-      </p>
-      <p>Please send payment via ${PAYMENT_OPTIONS}.</p>
+      ${alreadyPaidNote}
+      ${!data.wasPaid ? `<p>Please send payment via ${PAYMENT_OPTIONS}.</p>` : ""}
       <p>If you believe this was marked in error, please reply to this email or contact Artemios directly.</p>
       <br/>
       <p>Questions? Contact Artemios at (631) 599-1280 or <a href="mailto:artemios@mesabasketballtraining.com">artemios@mesabasketballtraining.com</a>.</p>

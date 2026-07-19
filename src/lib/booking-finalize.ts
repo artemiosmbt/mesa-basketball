@@ -15,6 +15,54 @@ import {
 } from "@/lib/supabase";
 
 /**
+ * The actual price owed for a session, respecting the is_free 50%-off
+ * discount for privates (first-time clients / redeemed referral credit) —
+ * is_free is never baked into the stored session_price itself. Shared by
+ * every cancellation/reschedule/no-show path that needs to know what a
+ * client actually paid or owes.
+ */
+export function resolvedSessionPrice(reg: { session_price: number | null; is_free: boolean; type: string }): number {
+  const isPrivateType = reg.type === "private" || reg.type === "group-private";
+  const fullPrice = reg.type === "group-private" ? 250 : reg.type === "private" ? 150 : 50;
+  const basePrice = reg.session_price ?? fullPrice;
+  return reg.is_free && isPrivateType ? Math.round(basePrice * 0.5) : basePrice;
+}
+
+/**
+ * Describes what actually happened to money on a cancellation — a plain
+ * account credit (late cancel, or a non-Stripe/manual-paid booking), a real
+ * Stripe refund (possibly split refund+credit via issueStripeRefund's
+ * amount_too_large fallback), or (if the Stripe call failed outright) a
+ * pending note that doesn't claim money moved before it actually did.
+ */
+export function describeMoneyOutcome(
+  result: { refundedAmount: number; creditedAmount: number; failed: boolean } | undefined,
+  fallbackCredit: number,
+  isLateCancel: boolean,
+  forAdmin: boolean
+): string {
+  if (result) {
+    if (result.failed) {
+      return forAdmin
+        ? "REFUND FAILED, needs manual action"
+        : "Your refund is being processed — you'll receive a separate confirmation once it's complete.";
+    }
+    const parts: string[] = [];
+    if (result.refundedAmount > 0) parts.push(forAdmin ? `$${result.refundedAmount} refunded` : `$${result.refundedAmount} refunded to your original payment method`);
+    if (result.creditedAmount > 0) parts.push(forAdmin ? `$${result.creditedAmount} credited` : `$${result.creditedAmount} credited to your account`);
+    return parts.join(", ");
+  }
+  if (fallbackCredit > 0) {
+    return forAdmin
+      ? `$${fallbackCredit} credited to their account`
+      : isLateCancel
+        ? `$${fallbackCredit} credited to your account (50% of what you paid — late cancellation)`
+        : `$${fallbackCredit} credited to your account for a future booking`;
+  }
+  return "";
+}
+
+/**
  * Refunds part or all of a real Stripe charge — used for on-time
  * cancellations and for reschedules that move to a lower-priced session. On
  * success, records the refund id on the row (bookkeeping) and returns true.

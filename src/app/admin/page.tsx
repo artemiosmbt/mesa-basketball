@@ -779,14 +779,28 @@ export default function AdminPage() {
 
   async function cancelRegistration(id: string) {
     if (!token) return;
-    if (!confirm("Cancel this registration?")) return;
+    if (!confirm("Cancel this registration? If the client already paid, they'll be refunded in full automatically.")) return;
     setCancelling(id);
-    await fetch("/api/admin/cancel", {
+    const res = await fetch("/api/admin/cancel", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({ id }),
     });
-    setRegistrations((prev) => prev.map((r) => (r.id === id ? { ...r, status: "cancelled" } : r)));
+    const data = await res.json().catch(() => null);
+    if (res.ok) {
+      setRegistrations((prev) => prev.map((r) => (r.id === id ? { ...r, status: "cancelled" } : r)));
+      if (data?.refundFailed) {
+        alert("Cancelled, but the automatic refund failed — you'll need to refund this client manually in the Stripe dashboard.");
+      } else if (data?.refundedAmount > 0 || data?.creditedAmount > 0) {
+        const parts = [
+          data.refundedAmount > 0 ? `$${data.refundedAmount} refunded to their card` : "",
+          data.creditedAmount > 0 ? `$${data.creditedAmount} credited to their account` : "",
+        ].filter(Boolean).join(", ");
+        alert(`Cancelled. ${parts}.`);
+      }
+    } else {
+      alert(data?.error || "Failed to cancel.");
+    }
     setCancelling(null);
   }
 
@@ -794,12 +808,17 @@ export default function AdminPage() {
     if (!token) return;
     setNoShowing(id);
     setNoShowConfirm(null);
-    await fetch("/api/admin/no-show", {
+    const res = await fetch("/api/admin/no-show", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({ id }),
     });
-    setRegistrations((prev) => prev.map((r) => (r.id === id ? { ...r, status: "no_show" } : r)));
+    if (res.ok) {
+      setRegistrations((prev) => prev.map((r) => (r.id === id ? { ...r, status: "no_show" } : r)));
+    } else {
+      const data = await res.json().catch(() => null);
+      alert(data?.error || "Failed to mark as no-show.");
+    }
     setNoShowing(null);
   }
 
@@ -1216,7 +1235,11 @@ export default function AdminPage() {
                     </button>
                   </div>
                 )}
-                {(showDelete || isPast) && (
+                {/* Never offer Delete for a still-confirmed, upcoming booking — that
+                    silently removes it with no refund and no client notification.
+                    Cancel is the right tool for an active booking; Delete is only
+                    for cleaning up already-inactive (cancelled/no-show) or past rows. */}
+                {(showDelete || isPast) && !(r.status === "confirmed" && !isPast) && (
                   <button onClick={() => deleteRegistration(r.id)} disabled={deleting === r.id} className="text-xs text-brown-600 hover:text-red-500 transition disabled:opacity-50">
                     {deleting === r.id ? "Deleting..." : "Delete"}
                   </button>

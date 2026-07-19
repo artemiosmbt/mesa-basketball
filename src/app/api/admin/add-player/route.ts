@@ -122,11 +122,15 @@ export async function POST(req: NextRequest) {
 
   const ok = await updateRegistrationPlayers(reg.manage_token, newKids, newCount, newFullPrice);
   if (!ok) {
-    return NextResponse.json({ error: "Failed to add player" }, { status: 500 });
+    return NextResponse.json({ error: "This booking is no longer confirmed — it may have just been cancelled" }, { status: 409 });
   }
 
+  // "Already paid" covers both the old manual cash toggle AND a real Stripe
+  // charge — Stripe-paid rows never set is_paid, so checking that alone
+  // would miss every paying client since Stripe went live.
+  const wasPaid = !!reg.is_paid || !!reg.stripe_payment_intent_id;
   let creditGranted = 0;
-  if (reg.is_paid && priceDelta < 0) {
+  if (wasPaid && priceDelta < 0) {
     try {
       await addAccountCredit(reg.email, -priceDelta);
       creditGranted = -priceDelta;
@@ -134,7 +138,7 @@ export async function POST(req: NextRequest) {
       console.error("Failed to grant account credit (admin add-player):", err);
     }
   }
-  const amountDue = reg.is_paid && priceDelta > 0 ? priceDelta : 0;
+  const amountDue = wasPaid && priceDelta > 0 ? priceDelta : 0;
 
   try {
     if (isPriv) {

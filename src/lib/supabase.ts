@@ -157,6 +157,11 @@ export async function getRegistrationsByEmail(
   return (data || []) as Registration[];
 }
 
+// Returns true only if this call actually updated a row — same reasoning as
+// cancelRegistration: a WHERE-clause update matching zero rows (e.g. the
+// booking was cancelled a moment ago) isn't a Supabase error, so callers
+// must check the real row count before proceeding (granting credit,
+// sending notifications) as if the edit actually took effect.
 export async function updateRegistrationPlayers(
   token: string,
   kids: string,
@@ -166,12 +171,13 @@ export async function updateRegistrationPlayers(
   const supabase = getSupabase();
   const update: Record<string, unknown> = { kids, total_participants: totalParticipants };
   if (sessionPrice !== null) update.session_price = sessionPrice;
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("registrations")
     .update(update)
     .eq("manage_token", token)
-    .eq("status", "confirmed");
-  return !error;
+    .eq("status", "confirmed")
+    .select("id");
+  return !error && !!data && data.length > 0;
 }
 
 /**

@@ -15,7 +15,7 @@ import {
   addAccountCredit,
   attachStripeCheckoutSession,
 } from "@/lib/supabase";
-import { issueStripeRefund } from "@/lib/booking-finalize";
+import { issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome } from "@/lib/booking-finalize";
 import { getStripe } from "@/lib/stripe";
 import {
   sendCancellationNotification,
@@ -558,46 +558,6 @@ export async function DELETE(
   return NextResponse.json({ success: true, isLateCancel });
 }
 
-// Describes what actually happened to money on a cancellation — a plain
-// account credit (late cancel, or a non-Stripe/manual-paid booking), a real
-// Stripe refund (possibly split refund+credit via issueStripeRefund's
-// amount_too_large fallback), or (if the Stripe call failed outright) a
-// pending note that doesn't claim money moved before it actually did.
-function describeMoneyOutcome(
-  result: { refundedAmount: number; creditedAmount: number; failed: boolean } | undefined,
-  fallbackCredit: number,
-  isLateCancel: boolean,
-  forAdmin: boolean
-): string {
-  if (result) {
-    if (result.failed) {
-      return forAdmin
-        ? "REFUND FAILED, needs manual action"
-        : "Your refund is being processed — you'll receive a separate confirmation once it's complete.";
-    }
-    const parts: string[] = [];
-    if (result.refundedAmount > 0) parts.push(forAdmin ? `$${result.refundedAmount} refunded` : `$${result.refundedAmount} refunded to your original payment method`);
-    if (result.creditedAmount > 0) parts.push(forAdmin ? `$${result.creditedAmount} credited` : `$${result.creditedAmount} credited to your account`);
-    return parts.join(", ");
-  }
-  if (fallbackCredit > 0) {
-    return forAdmin
-      ? `$${fallbackCredit} credited to their account`
-      : isLateCancel
-        ? `$${fallbackCredit} credited to your account (50% of what you paid — late cancellation)`
-        : `$${fallbackCredit} credited to your account for a future booking`;
-  }
-  return "";
-}
-
-// Returns the actual price owed for a session, respecting is_free discounts for privates.
-function resolvedSessionPrice(reg: { session_price: number | null; is_free: boolean; type: string }): number {
-  const isPrivateType = reg.type === "private" || reg.type === "group-private";
-  const fullPrice = reg.type === "group-private" ? 250 : reg.type === "private" ? 150 : 50;
-  const basePrice = reg.session_price ?? fullPrice;
-  return reg.is_free && isPrivateType ? Math.round(basePrice * 0.5) : basePrice;
-}
-
 // Helpers for PATCH
 function parseKidsList(kidsStr: string): string[] {
   if (!kidsStr.trim()) return [];
@@ -693,7 +653,7 @@ export async function PATCH(
   }
 
   const ok = await updateRegistrationPlayers(token, newKidsStr, newCount, newPrice);
-  if (!ok) return NextResponse.json({ error: "Failed to update players" }, { status: 500 });
+  if (!ok) return NextResponse.json({ error: "This booking is no longer active — it may have just been cancelled" }, { status: 409 });
 
   try {
     await sendPlayerUpdateNotification({

@@ -207,14 +207,19 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // If the client already paid and the new amount owed is lower, credit the
-  // difference to their account for their next booking (same rule already
-  // used for partial camp-day cancellations elsewhere). If the new amount is
-  // higher, there's no Stripe charge to trigger yet — surface it in the
-  // response/notices instead so it doesn't get charged silently once Stripe
-  // is live.
+  // "Already paid" covers both the old manual cash toggle AND a real Stripe
+  // charge — Stripe-paid rows never set is_paid, so checking that alone would
+  // miss every paying client since Stripe went live. If the client already
+  // paid and the new amount owed is lower, credit the difference to their
+  // account for their next booking (same rule already used for partial
+  // camp-day cancellations elsewhere) — always account credit here, never a
+  // real Stripe refund, since this is a business-initiated change, not a
+  // client cancellation. If the new amount is higher, there's no charge
+  // triggered automatically — surface it in the response/notices instead so
+  // the admin can follow up.
+  const wasPaid = !!reg.is_paid || !!reg.stripe_payment_intent_id;
   let creditGranted = 0;
-  if (reg.is_paid && priceDelta < 0) {
+  if (wasPaid && priceDelta < 0) {
     try {
       await addAccountCredit(reg.email, -priceDelta);
       creditGranted = -priceDelta;
@@ -222,7 +227,7 @@ export async function POST(req: NextRequest) {
       console.error("Failed to grant account credit (admin reschedule):", err);
     }
   }
-  const amountDue = reg.is_paid && priceDelta > 0 ? priceDelta : 0;
+  const amountDue = wasPaid && priceDelta > 0 ? priceDelta : 0;
 
   // Sync calendar. Private sessions are a single event tied to the booking;
   // group/camp sessions are shared events keyed by date+time+label, so we
