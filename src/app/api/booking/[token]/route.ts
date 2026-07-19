@@ -209,7 +209,9 @@ export async function DELETE(
       // Last remaining day — cancel the whole (now-empty) group, same rule as before.
       const success = await cancelFullCampByReferralCode(reg.referral_code, reg.booked_group);
       if (!success) {
-        return NextResponse.json({ error: "Failed to cancel camp" }, { status: 500 });
+        // Zero rows matched — another request (double-click, retry) already
+        // cancelled this. Bail out here so the refund logic below never runs twice.
+        return NextResponse.json({ error: "This camp was already cancelled" }, { status: 409 });
       }
       // Refund any account credit that was applied to any day in this group
       const groupCredit = group.reduce((sum, r) => sum + (r.applied_account_credit || 0), 0);
@@ -224,7 +226,7 @@ export async function DELETE(
       const groupPaymentIntentId = reg.stripe_payment_intent_id || group.find((r) => r.stripe_payment_intent_id)?.stripe_payment_intent_id;
       const wasPaid = reg.is_paid || group.some((r) => r.is_paid) || !!groupPaymentIntentId;
       let cancelCredit = 0;
-      let wasStripeRefund = false;
+      let stripeRefundResult: { refundedAmount: number; creditedAmount: number; failed: boolean } | undefined;
       if (wasPaid && reg.email) {
         const paidAmount = Math.max(0, resolvedSessionPrice(reg) - groupCredit);
         if (isLateCancel) {
@@ -234,11 +236,7 @@ export async function DELETE(
           cancelCredit = paidAmount;
           if (paidAmount > 0) {
             if (groupPaymentIntentId) {
-              // Told to the client as a refund either way — if the automatic
-              // Stripe call fails, issueStripeRefund has already alerted
-              // the admin to complete it manually, so the promise still holds.
-              wasStripeRefund = true;
-              await issueStripeRefund({
+              stripeRefundResult = await issueStripeRefund({
                 email: reg.email,
                 manageToken: token,
                 paymentIntentId: groupPaymentIntentId,
@@ -270,25 +268,21 @@ export async function DELETE(
           sessionType: reg.type,
           isLateCancel,
           lateFeeAmount,
-          cancelCredit: wasPaid ? cancelCredit : undefined,
-          wasStripeRefund,
+          cancelCredit: wasPaid && isLateCancel ? cancelCredit : undefined,
+          stripeRefundResult,
         });
       } catch (notifyErr) {
         console.error("Cancellation email failed (full camp cancel, cancel/refund already applied):", notifyErr);
       }
       if (reg.sms_consent && reg.phone) {
+        const moneyOutcome = wasPaid ? describeMoneyOutcome(stripeRefundResult, cancelCredit, isLateCancel, false) : "";
         const lateNote = wasPaid
-          ? (cancelCredit > 0
-              ? (wasStripeRefund
-                  ? `\n$${cancelCredit} refunded to your original payment method.`
-                  : isLateCancel
-                    ? `\n$${cancelCredit} credited to your account (50% of what you paid — late cancellation).`
-                    : `\n$${cancelCredit} credited to your account for a future booking.`)
-              : "\nNothing additional is due — your account credit already covered this.")
+          ? (moneyOutcome ? `\n${moneyOutcome}.` : "\nNothing additional is due — your account credit already covered this.")
           : isLateCancel ? "\nA late cancellation fee applies." : "";
         await sendSMS(reg.phone, `Mesa Basketball: ${campName} cancelled.${lateNote}\nmesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
       }
-      await sendAdminSMS(`CANCELLED (Camp): ${reg.parent_name}\n${campName}${isLateCancel ? " (late)" : ""}\nPlayers: ${reg.kids}`);
+      const adminMoneyOutcome = describeMoneyOutcome(stripeRefundResult, cancelCredit, isLateCancel, true);
+      await sendAdminSMS(`CANCELLED (Camp): ${reg.parent_name}\n${campName}${isLateCancel ? " (late)" : ""}${adminMoneyOutcome ? ` — ${adminMoneyOutcome}` : ""}\nPlayers: ${reg.kids}`);
       if (reg.booked_date && reg.booked_start_time) {
         try {
           await upsertGroupSessionCalendarEvent({
@@ -313,7 +307,9 @@ export async function DELETE(
     const thisDayLateFee = isLateCancel ? Math.round(perDayRate * 0.5) : 0;
     const success = await cancelRegistration(token, isLateCancel, thisDayLateFee);
     if (!success) {
-      return NextResponse.json({ error: "Failed to cancel this day" }, { status: 500 });
+      // Zero rows matched — another request already cancelled this day.
+      // Bail out here so the refund logic below never runs twice.
+      return NextResponse.json({ error: "This day was already cancelled" }, { status: 409 });
     }
 
     // If this specific day was the one account credit was applied to, refund it —
@@ -339,11 +335,10 @@ export async function DELETE(
     // there's no separate "late keeps it all" branch needed here), account
     // credit for the old manual/cash path.
     const creditGranted = isPaid && delta < 0 ? -delta : 0;
-    let wasStripeRefund = false;
+    let stripeRefundResult: { refundedAmount: number; creditedAmount: number; failed: boolean } | undefined;
     if (creditGranted > 0) {
       if (reg.stripe_payment_intent_id) {
-        wasStripeRefund = true;
-        await issueStripeRefund({
+        stripeRefundResult = await issueStripeRefund({
           email: reg.email,
           manageToken: token,
           paymentIntentId: reg.stripe_payment_intent_id,
@@ -362,18 +357,20 @@ export async function DELETE(
         sessionDetails: campName,
         sessionType: reg.type,
         isLateCancel,
-        campAdjustment: { finalAmount, originalAmount, isPaid, creditGranted, wasStripeRefund },
+        campAdjustment: { finalAmount, originalAmount, isPaid, creditGranted, stripeRefundResult },
       });
     } catch (notifyErr) {
       console.error("Cancellation email failed (camp day cancel, cancel/refund already applied):", notifyErr);
     }
     if (reg.phone) {
+      const moneyOutcome = isPaid ? describeMoneyOutcome(stripeRefundResult, creditGranted, false, false) : "";
       const adjustmentLine = isPaid
-        ? creditGranted > 0 ? (wasStripeRefund ? ` $${creditGranted} refunded to your original payment method.` : ` $${creditGranted} credited to your account for your next session.`) : ""
+        ? (moneyOutcome ? ` ${moneyOutcome}.` : "")
         : ` Amount due: $${finalAmount}.`;
       await sendSMS(reg.phone, `Mesa Basketball: ${campName} — ${formatDateWithDay(reg.booked_date || "")} cancelled. New total: $${finalAmount} (was $${originalAmount}).${adjustmentLine}\nReply STOP to opt out.`);
     }
-    await sendAdminSMS(`CAMP DAY CANCELLED: ${reg.parent_name}\n${campName} — ${reg.booked_date}\nNew total: $${finalAmount} (was $${originalAmount})${isPaid ? (creditGranted > 0 ? ` — $${creditGranted} ${wasStripeRefund ? "refunded" : "credited to their account"}` : "") : ` — due: $${finalAmount}`}`);
+    const adminMoneyOutcome = isPaid ? describeMoneyOutcome(stripeRefundResult, creditGranted, false, true) : "";
+    await sendAdminSMS(`CAMP DAY CANCELLED: ${reg.parent_name}\n${campName} — ${reg.booked_date}\nNew total: $${finalAmount} (was $${originalAmount})${isPaid ? (adminMoneyOutcome ? ` — ${adminMoneyOutcome}` : "") : ` — due: $${finalAmount}`}`);
 
     if (reg.booked_date && reg.booked_start_time) {
       try {
@@ -408,9 +405,11 @@ export async function DELETE(
 
   const success = await cancelRegistration(token, isLateCancel);
   if (!success) {
+    // Zero rows matched — another request (double-click, retry) already
+    // cancelled this. Bail out here so the refund logic below never runs twice.
     return NextResponse.json(
-      { error: "Failed to cancel" },
-      { status: 500 }
+      { error: "This booking was already cancelled" },
+      { status: 409 }
     );
   }
 
@@ -430,7 +429,7 @@ export async function DELETE(
   // account credit since there's no card to refund.
   const wasPaid = !!reg.is_paid || !!reg.stripe_payment_intent_id;
   let cancelCredit = 0;
-  let wasStripeRefund = false;
+  let stripeRefundResult: { refundedAmount: number; creditedAmount: number; failed: boolean } | undefined;
   if (wasPaid && reg.email) {
     const paidAmount = Math.max(0, resolvedSessionPrice(reg) - (reg.applied_account_credit || 0));
     if (isLateCancel) {
@@ -440,8 +439,7 @@ export async function DELETE(
       cancelCredit = paidAmount;
       if (paidAmount > 0) {
         if (reg.stripe_payment_intent_id) {
-          wasStripeRefund = true;
-          await issueStripeRefund({
+          stripeRefundResult = await issueStripeRefund({
             email: reg.email,
             manageToken: token,
             paymentIntentId: reg.stripe_payment_intent_id,
@@ -505,8 +503,8 @@ export async function DELETE(
       sessionType: reg.type,
       isLateCancel,
       lateFeeAmount,
-      cancelCredit: wasPaid ? cancelCredit : undefined,
-      wasStripeRefund,
+      cancelCredit: wasPaid && isLateCancel ? cancelCredit : undefined,
+      stripeRefundResult,
     });
   } catch (notifyErr) {
     console.error("Cancellation email failed (cancel/refund already applied):", notifyErr);
@@ -517,18 +515,14 @@ export async function DELETE(
     const sessionLine = reg.booked_date && reg.booked_start_time
       ? `\n${formatDateWithDay(reg.booked_date)} | ${reg.booked_start_time}${reg.booked_end_time ? `-${reg.booked_end_time}` : ""}${cancelLocation ? `\nLocation: ${resolveLocationName(cancelLocation)}` : ""}`
       : "";
+    const moneyOutcome = wasPaid ? describeMoneyOutcome(stripeRefundResult, cancelCredit, isLateCancel, false) : "";
     const lateNote = wasPaid
-      ? (cancelCredit > 0
-          ? (wasStripeRefund
-              ? `\n$${cancelCredit} refunded to your original payment method.`
-              : isLateCancel
-                ? `\n$${cancelCredit} credited to your account (50% of what you paid — late cancellation).`
-                : `\n$${cancelCredit} credited to your account for a future booking.`)
-          : "\nNothing additional is due — your account credit already covered this.")
+      ? (moneyOutcome ? `\n${moneyOutcome}.` : "\nNothing additional is due — your account credit already covered this.")
       : isLateCancel ? "\nA late cancellation fee applies." : "";
     await sendSMS(reg.phone, `Mesa Basketball: ${cancelLabel} cancelled.${sessionLine}\nAthlete: ${reg.kids}${lateNote}\nmesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
   }
-  await sendAdminSMS(`CANCELLED: ${reg.parent_name}\n${cancelSessionDetails}${isLateCancel ? " (late)" : ""}${cancelCredit > 0 ? `\n$${cancelCredit} ${wasStripeRefund ? "refunded" : "credited to their account"}` : ""}\nPlayers: ${reg.kids}`);
+  const adminMoneyOutcome = describeMoneyOutcome(stripeRefundResult, cancelCredit, isLateCancel, true);
+  await sendAdminSMS(`CANCELLED: ${reg.parent_name}\n${cancelSessionDetails}${isLateCancel ? " (late)" : ""}${adminMoneyOutcome ? `\n${adminMoneyOutcome}` : ""}\nPlayers: ${reg.kids}`);
 
   // Sync calendar after cancellation
   if (reg.booked_date && reg.booked_start_time) {
@@ -562,6 +556,38 @@ export async function DELETE(
   }
 
   return NextResponse.json({ success: true, isLateCancel });
+}
+
+// Describes what actually happened to money on a cancellation — a plain
+// account credit (late cancel, or a non-Stripe/manual-paid booking), a real
+// Stripe refund (possibly split refund+credit via issueStripeRefund's
+// amount_too_large fallback), or (if the Stripe call failed outright) a
+// pending note that doesn't claim money moved before it actually did.
+function describeMoneyOutcome(
+  result: { refundedAmount: number; creditedAmount: number; failed: boolean } | undefined,
+  fallbackCredit: number,
+  isLateCancel: boolean,
+  forAdmin: boolean
+): string {
+  if (result) {
+    if (result.failed) {
+      return forAdmin
+        ? "REFUND FAILED, needs manual action"
+        : "Your refund is being processed — you'll receive a separate confirmation once it's complete.";
+    }
+    const parts: string[] = [];
+    if (result.refundedAmount > 0) parts.push(forAdmin ? `$${result.refundedAmount} refunded` : `$${result.refundedAmount} refunded to your original payment method`);
+    if (result.creditedAmount > 0) parts.push(forAdmin ? `$${result.creditedAmount} credited` : `$${result.creditedAmount} credited to your account`);
+    return parts.join(", ");
+  }
+  if (fallbackCredit > 0) {
+    return forAdmin
+      ? `$${fallbackCredit} credited to their account`
+      : isLateCancel
+        ? `$${fallbackCredit} credited to your account (50% of what you paid — late cancellation)`
+        : `$${fallbackCredit} credited to your account for a future booking`;
+  }
+  return "";
 }
 
 // Returns the actual price owed for a session, respecting is_free discounts for privates.
@@ -743,8 +769,15 @@ export async function PUT(
   const oldPaymentIntentId = reg.stripe_payment_intent_id || undefined;
   const oldPaidAmount = Math.max(0, resolvedSessionPrice(reg) - (reg.applied_account_credit || 0));
 
-  // Cancel old booking first so group enrollment counts reflect the cancellation
-  await cancelRegistration(token);
+  // Cancel old booking first so group enrollment counts reflect the cancellation.
+  // Zero rows matched means another request already cancelled/rescheduled this
+  // booking (double-click, retry, race) — bail out here, before any credit
+  // refund, Stripe refund, or new booking gets created against a booking that's
+  // no longer actually confirmed.
+  const oldCancelled = await cancelRegistration(token);
+  if (!oldCancelled) {
+    return NextResponse.json({ error: "This booking was already cancelled or rescheduled" }, { status: 409 });
+  }
 
   // Refund referral credit from the old booking (always — they'll re-apply to the new one if they want)
   if (reg.used_referral_credit && reg.email) {
@@ -799,14 +832,25 @@ export async function PUT(
     }
   }
 
-  // Preserve per-player discount rate when rescheduling to the same session type.
-  // Divide by original participant count to get per-player rate, then scale to new count.
+  // Compute the new session's price. Same-type reschedule: preserve the
+  // per-player discount rate (divide by original participant count, scale to
+  // new count). Type-switch reschedule (private <-> weekly, or group-private
+  // <-> private): compute a fresh price for the NEW type from scratch —
+  // this used to just leave newSessionPrice undefined for any type switch,
+  // which meant NO price reconciliation ever ran for it and a client
+  // downgrading e.g. private -> weekly silently never got the difference
+  // back.
   let newSessionPrice: number | undefined;
   if (reg.type === newType && reg.session_price != null && reg.total_participants > 0) {
     const perPlayerRate = reg.session_price / reg.total_participants;
     newSessionPrice = Math.round(perPlayerRate * kidCount);
+  } else if (newType === "weekly") {
+    newSessionPrice = kidCount * 50;
+  } else if (newType === "private" && bookedStartTime && bookedEndTime) {
+    const duration = Math.max(60, parseMins(bookedEndTime) - parseMins(bookedStartTime));
+    newSessionPrice = calcPrivatePrice(duration, kidCount);
   }
-  const newPriceKnown = reg.type === newType && newSessionPrice != null;
+  const newPriceKnown = newSessionPrice != null;
   const newEffectivePrice = newPriceKnown
     ? resolvedSessionPrice({ session_price: newSessionPrice ?? null, is_free: newIsFree, type: newType })
     : undefined;
@@ -903,8 +947,9 @@ export async function PUT(
   // No further payment needed (same price, a refund of the difference, or a
   // non-Stripe booking) — confirm the new booking immediately, same as
   // before Stripe existed.
+  let rescheduleRefundResult: { refundedAmount: number; creditedAmount: number; failed: boolean } | undefined;
   if (priceReconciliation?.kind === "refund") {
-    await issueStripeRefund({
+    rescheduleRefundResult = await issueStripeRefund({
       email: reg.email,
       manageToken: token, // old row — bookkeeping only, it's already cancelled
       paymentIntentId: oldPaymentIntentId!,
@@ -914,10 +959,15 @@ export async function PUT(
   }
 
   // Create new booking with updated type, kids, and session details. When
-  // the old booking was Stripe-paid and no fresh charge was needed here (or
-  // the difference was just refunded), carry its payment identity forward —
-  // its remaining captured amount now exactly matches this row's price, so
-  // a later cancellation/reschedule can still refund it correctly.
+  // the old booking was Stripe-paid AND we actually reconciled the price
+  // (newPriceKnown — same type, so the row's price is directly comparable),
+  // carry its payment identity forward: its remaining captured amount now
+  // exactly matches this row's price, so a later cancellation/reschedule can
+  // still refund it correctly. A type-switch reschedule (private<->weekly)
+  // never goes through price reconciliation at all, so carrying the old
+  // payment_intent forward there would let a later cancellation refund the
+  // wrong amount against a charge that was never adjusted for this switch —
+  // safer to leave it unlinked and fall back to account-credit treatment.
   const { manageToken: newToken } = await addRegistration({
     parentName: newParentName,
     email: reg.email,
@@ -935,8 +985,8 @@ export async function PUT(
     isFree: newIsFree,
     usedReferralCredit: newUsedReferralCredit,
     sessionPrice: newSessionPrice,
-    stripePaymentIntentId: oldPaymentIntentId,
-    stripeCustomerId: reg.stripe_customer_id || undefined,
+    stripePaymentIntentId: newPriceKnown ? oldPaymentIntentId : undefined,
+    stripeCustomerId: newPriceKnown ? (reg.stripe_customer_id || undefined) : undefined,
   });
 
   // Sync calendar for the new booking
@@ -973,6 +1023,10 @@ export async function PUT(
     ? Math.round(resolvedSessionPrice(reg) * 0.5)
     : undefined;
 
+  const refundAdjustment = priceReconciliation?.kind === "refund" && rescheduleRefundResult
+    ? { kind: "refund" as const, refundedAmount: rescheduleRefundResult.refundedAmount, creditedAmount: rescheduleRefundResult.creditedAmount, failed: rescheduleRefundResult.failed }
+    : undefined;
+
   try {
     await sendRescheduleNotification({
       parentName: newParentName,
@@ -983,7 +1037,7 @@ export async function PUT(
       isLateReschedule: !!isLateReschedule,
       lateFeeAmount,
       newTrainer: resolvedTrainer,
-      priceAdjustment: priceReconciliation?.kind === "refund" ? { kind: "refund", amount: priceReconciliation.amount } : undefined,
+      priceAdjustment: refundAdjustment,
       lateFeeCredited: lateFeeCredited || undefined,
     });
   } catch (notifyErr) {
@@ -991,14 +1045,16 @@ export async function PUT(
   }
 
   const rescheduleTrainerLine = resolvedTrainer ? `\nTrainer: ${resolvedTrainer}` : "";
+  const refundOutcomeText = refundAdjustment ? describeMoneyOutcome(refundAdjustment, 0, false, false) : "";
+  const refundOutcomeAdminText = refundAdjustment ? describeMoneyOutcome(refundAdjustment, 0, false, true) : "";
   if (reg.sms_consent && reg.phone) {
     const rescheduleLabel = newSessionDetails.split(" — ")[0] || "Session";
     const lateNote = isLateReschedule && !priceReconciliation && !lateFeeCredited ? "\nA late reschedule fee applies." : "";
     const creditNote = lateFeeCredited > 0 ? `\n$${lateFeeCredited} credited to your account (late reschedule fee).` : "";
-    const refundNote = priceReconciliation?.kind === "refund" ? `\n$${priceReconciliation.amount} refunded to your original payment method.` : "";
+    const refundNote = refundOutcomeText ? `\n${refundOutcomeText}.` : "";
     await sendSMS(reg.phone, `Mesa Basketball: ${rescheduleLabel} rescheduled!\n${formatDateWithDay(bookedDate)} | ${bookedStartTime}-${bookedEndTime}\nLocation: ${resolveLocationName(bookedLocation)}${rescheduleTrainerLine}\nAthlete: ${kidsToUse}${lateNote}${creditNote}${refundNote}\nManage: mesabasketballtraining.com/booking/${newToken}\nReply STOP to opt out.`);
   }
-  await sendAdminSMS(`RESCHEDULED: ${newParentName}\nFrom: ${reg.session_details}\nTo: ${newSessionDetails}${rescheduleTrainerLine}\nPlayers: ${kidsToUse}${priceReconciliation?.kind === "refund" ? `\n$${priceReconciliation.amount} refunded` : ""}${lateFeeCredited > 0 ? `\n$${lateFeeCredited} credited (late fee)` : ""}`);
+  await sendAdminSMS(`RESCHEDULED: ${newParentName}\nFrom: ${reg.session_details}\nTo: ${newSessionDetails}${rescheduleTrainerLine}\nPlayers: ${kidsToUse}${refundOutcomeAdminText ? `\n${refundOutcomeAdminText}` : ""}${lateFeeCredited > 0 ? `\n$${lateFeeCredited} credited (late fee)` : ""}`);
 
   return NextResponse.json({ success: true, newToken, isLateReschedule: !!isLateReschedule });
 }

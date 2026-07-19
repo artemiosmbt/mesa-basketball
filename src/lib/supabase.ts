@@ -174,18 +174,27 @@ export async function updateRegistrationPlayers(
   return !error;
 }
 
+/**
+ * Returns true only if THIS call actually flipped the row — a WHERE-clause
+ * update matching zero rows (e.g. someone/something already cancelled it a
+ * moment ago) is not a Supabase error, so callers MUST check the returned
+ * row count, not just the absence of an error, or a double-cancel (double
+ * click, retry, race with another request) will silently re-run the full
+ * refund flow a second time.
+ */
 export async function cancelRegistration(token: string, isLateCancel = false, campDayLateFee = 0): Promise<boolean> {
   const supabase = getSupabase();
   // applied_account_credit is zeroed here because the caller is responsible for
   // refunding that amount back to the account_credits balance right after this
   // call succeeds — zeroing it prevents the same credit being refunded twice if
   // this row is later swept up by a bulk cancellation (e.g. the full-camp fallback).
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("registrations")
     .update({ status: "cancelled", is_late_cancel: isLateCancel, camp_day_late_fee: campDayLateFee, applied_account_credit: 0 })
     .eq("manage_token", token)
-    .eq("status", "confirmed");
-  return !error;
+    .eq("status", "confirmed")
+    .select("id");
+  return !error && !!data && data.length > 0;
 }
 
 /** Record a completed Stripe refund on the row it was issued for (bookkeeping only). */
@@ -215,7 +224,13 @@ export async function getCampGroupByReferralCode(referralCode: string, bookedGro
   return data as Registration[];
 }
 
-/** Cancel all confirmed camp days sharing the same referral_code AND camp (full camp cancellation). */
+/**
+ * Cancel all confirmed camp days sharing the same referral_code AND camp
+ * (full camp cancellation). Returns true only if this call actually flipped
+ * at least one row — see cancelRegistration's doc comment for why callers
+ * must check row count, not just the absence of an error, before running
+ * refund logic.
+ */
 export async function cancelFullCampByReferralCode(referralCode: string, bookedGroup: string | null): Promise<boolean> {
   const supabase = getSupabase();
   let query = supabase
@@ -226,8 +241,8 @@ export async function cancelFullCampByReferralCode(referralCode: string, bookedG
     .eq("is_full_camp", true)
     .eq("status", "confirmed");
   query = bookedGroup ? query.eq("booked_group", bookedGroup) : query.is("booked_group", null);
-  const { error } = await query;
-  return !error;
+  const { data, error } = await query.select("id");
+  return !error && !!data && data.length > 0;
 }
 
 // --- Rewards & Referral Helpers ---
@@ -300,43 +315,79 @@ export async function getAccountCreditBalance(email: string): Promise<number> {
   return data.balance || 0;
 }
 
-/** Add dollars to an email's account credit balance (upsert) */
+/**
+ * Add dollars to an email's account credit balance (upsert). Uses an
+ * optimistic compare-and-swap (update only succeeds if the balance is still
+ * what we just read) with a few retries instead of a plain read-then-write,
+ * so two concurrent credits to the same email (e.g. two refunds landing at
+ * once) can't silently clobber each other and lose one side's credit.
+ */
 export async function addAccountCredit(email: string, amount: number): Promise<void> {
   if (amount <= 0) return;
   const supabase = getSupabase();
-  const { data } = await supabase
-    .from("account_credits")
-    .select("balance")
-    .eq("email", email)
-    .single();
 
-  if (data) {
-    await supabase
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const { data } = await supabase
       .from("account_credits")
-      .update({ balance: (data.balance || 0) + amount, updated_at: new Date().toISOString() })
-      .eq("email", email);
-  } else {
-    await supabase
+      .select("balance")
+      .eq("email", email)
+      .single();
+
+    if (!data) {
+      // No row yet — insert wins the race outright, or fails with a unique
+      // violation if another request just created it; either way, retry.
+      const { error } = await supabase
+        .from("account_credits")
+        .insert({ email, balance: amount });
+      if (!error) return;
+      continue;
+    }
+
+    const currentBalance = data.balance || 0;
+    const { data: updated, error } = await supabase
       .from("account_credits")
-      .insert({ email, balance: amount });
+      .update({ balance: currentBalance + amount, updated_at: new Date().toISOString() })
+      .eq("email", email)
+      .eq("balance", currentBalance)
+      .select("balance");
+    if (!error && updated && updated.length > 0) return;
+    // Someone else updated the balance between our read and write — retry with a fresh read.
   }
+  console.error(`addAccountCredit: gave up after retries (email=${email}, amount=${amount}) — concurrent writes kept colliding`);
 }
 
-/** Deduct dollars from an email's account credit balance. Returns false if balance is insufficient. */
+/**
+ * Deduct dollars from an email's account credit balance. Returns false if
+ * balance is insufficient. Same optimistic compare-and-swap as
+ * addAccountCredit — a plain read-then-write here would let two concurrent
+ * bookings both read the same balance and both apply a discount that only
+ * one of them should have gotten.
+ */
 export async function deductAccountCredit(email: string, amount: number): Promise<boolean> {
   if (amount <= 0) return true;
   const supabase = getSupabase();
-  const { data } = await supabase
-    .from("account_credits")
-    .select("balance")
-    .eq("email", email)
-    .single();
-  if (!data || (data.balance || 0) < amount) return false;
-  await supabase
-    .from("account_credits")
-    .update({ balance: data.balance - amount, updated_at: new Date().toISOString() })
-    .eq("email", email);
-  return true;
+
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const { data } = await supabase
+      .from("account_credits")
+      .select("balance")
+      .eq("email", email)
+      .single();
+    if (!data || (data.balance || 0) < amount) return false;
+
+    const { data: updated, error } = await supabase
+      .from("account_credits")
+      .update({ balance: data.balance - amount, updated_at: new Date().toISOString() })
+      .eq("email", email)
+      .eq("balance", data.balance)
+      .select("balance");
+    if (!error && updated && updated.length > 0) return true;
+    // Someone else updated the balance concurrently — retry with a fresh read
+    // rather than deduct against a balance that's no longer accurate.
+  }
+  // Gave up after retries — safer to reject the credit than risk deducting
+  // against a stale balance.
+  return false;
 }
 
 /** Check if email OR phone has any previous registrations (fraud-resistant new client check) */
@@ -357,11 +408,18 @@ export async function isNewClient(email: string, phone: string): Promise<boolean
     }
   }
 
-  // Check by email in registrations
+  // Check by email in registrations — only rows that represent a REAL past
+  // booking count (confirmed at some point, later cancelled, or a no-show).
+  // pending_payment/payment_abandoned rows are created the instant someone
+  // starts a Stripe Checkout, before any payment happens — a closed tab or a
+  // declined card must not permanently disqualify that email from the
+  // first-time discount or a referral-code redemption.
+  const REAL_STATUSES = ["confirmed", "cancelled", "no_show"];
   const { count: emailCount } = await supabase
     .from("registrations")
     .select("*", { count: "exact", head: true })
-    .eq("email", normalizedEmail);
+    .eq("email", normalizedEmail)
+    .in("status", REAL_STATUSES);
 
   if ((emailCount || 0) > 0) return false;
 
@@ -369,6 +427,7 @@ export async function isNewClient(email: string, phone: string): Promise<boolean
   const { data: phoneRows } = await supabase
     .from("registrations")
     .select("phone")
+    .in("status", REAL_STATUSES)
     .limit(500);
 
   if (phoneRows) {
@@ -639,17 +698,29 @@ export async function abandonPendingBookingBatch(bookingBatchId: string): Promis
  * missed. Distinct batch ids only — a batch can have multiple rows once
  * weekly/camp bookings go through Stripe too.
  */
-export async function getStalePendingBatchIds(olderThanMs: number): Promise<string[]> {
+/**
+ * Batches still pending_payment past the cutoff, along with the Stripe
+ * Checkout Session id each one is tied to — the cron uses this id to ask
+ * Stripe directly whether the session actually completed before assuming
+ * it's abandoned (a missed/delayed webhook must not cause a real payment
+ * to get marked "no charge" a couple hours later).
+ */
+export async function getStalePendingBatches(olderThanMs: number): Promise<{ bookingBatchId: string; checkoutSessionId: string | null }[]> {
   const supabase = getSupabase();
   const cutoff = new Date(Date.now() - olderThanMs).toISOString();
   const { data, error } = await supabase
     .from("registrations")
-    .select("booking_batch_id")
+    .select("booking_batch_id, stripe_checkout_session_id")
     .eq("status", "pending_payment")
     .not("booking_batch_id", "is", null)
     .lt("created_at", cutoff);
   if (error || !data) return [];
-  return Array.from(new Set(data.map((r) => r.booking_batch_id as string)));
+  const seen = new Map<string, string | null>();
+  for (const row of data) {
+    const batchId = row.booking_batch_id as string;
+    if (!seen.has(batchId)) seen.set(batchId, row.stripe_checkout_session_id ?? null);
+  }
+  return Array.from(seen.entries()).map(([bookingBatchId, checkoutSessionId]) => ({ bookingBatchId, checkoutSessionId }));
 }
 
 // --- Monthly Package Helpers ---

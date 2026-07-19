@@ -246,8 +246,17 @@ export async function POST(req: NextRequest) {
         );
       }
 
+      // A camp booking always has a real price — if it's ever missing or
+      // unparseable, reject rather than silently letting amountToCharge fall
+      // to 0 and confirming a paid camp for free.
+      if (!campTotalPrice) {
+        return NextResponse.json({ error: "Missing camp price" }, { status: 400 });
+      }
       // Parse total price string (e.g. "$290" or "$290 (Early Bird)") to a number
-      const campTotalNum = campTotalPrice ? parseInt(String(campTotalPrice).replace(/\D/g, "")) || 0 : 0;
+      const campTotalNum = parseInt(String(campTotalPrice).replace(/\D/g, "")) || 0;
+      if (campTotalNum <= 0) {
+        return NextResponse.json({ error: "Invalid camp price" }, { status: 400 });
+      }
 
       // Determine if this is a full camp purchase or drop-in days
       // campSessions comes from the selected days; we need the total available days to compare.
@@ -256,21 +265,29 @@ export async function POST(req: NextRequest) {
         ? campSessions.length === campTotalDays
         : false;
 
-      // Full camp: store total price paid (for 50% fee on full cancel).
-      // Drop-in: store per-day price (for 50% fee on individual day cancel).
-      const sessionPrice = campTotalNum > 0
-        ? isFullCamp
-          ? campTotalNum
-          : Math.round(campTotalNum / campSessions.length)
-        : undefined;
+      // Splits `total` across `days` so every day's share sums EXACTLY back to
+      // the total — Math.round(total/days) applied identically to every day
+      // can round the same way on every row (e.g. $11 over 2 days -> $6 and
+      // $6), and since each drop-in day is later refunded independently,
+      // that would let cumulative refunds exceed what was actually charged.
+      function dropInDayPrice(index: number, total: number, days: number): number {
+        return Math.round((total * (index + 1)) / days) - Math.round((total * index) / days);
+      }
 
-      // Account credit is applied once, against the first day's row only — never
-      // against sessionPrice itself, since every row in a full-camp group must
-      // agree on the same "original" price for the per-day-cancellation cap math.
+      // Full camp: every row stores the SAME total price (the per-day
+      // cancellation cap math and the 50% full-cancel fee both need every row
+      // in the group to agree on the same "original" price). Drop-in: each
+      // day gets its own share via the exact split above.
+      const firstDayPrice = isFullCamp ? campTotalNum : dropInDayPrice(0, campTotalNum, campSessions.length);
+
+      // Account credit is applied once, against the first day's row only —
+      // never against the full total, since every row in a full-camp group
+      // must agree on the same "original" price for the per-day-cancellation
+      // cap math.
       let campCreditApplied = 0;
-      if (applyAccountCredit && sessionPrice != null) {
+      if (applyAccountCredit) {
         const balance = await getAccountCreditBalance(email);
-        campCreditApplied = Math.min(balance, sessionPrice);
+        campCreditApplied = Math.min(balance, firstDayPrice);
         if (campCreditApplied > 0) await deductAccountCredit(email, campCreditApplied);
       }
 
@@ -278,6 +295,7 @@ export async function POST(req: NextRequest) {
       const bookingBatchId = crypto.randomUUID();
 
       for (const [i, session] of campSessions.entries()) {
+        const dayPrice = isFullCamp ? campTotalNum : dropInDayPrice(i, campTotalNum, campSessions.length);
         await addRegistrationWithRewards({
           parentName,
           email,
@@ -294,7 +312,7 @@ export async function POST(req: NextRequest) {
           referralCode,
           isFree: false,
           smsConsent: !!smsConsent,
-          sessionPrice,
+          sessionPrice: dayPrice,
           isFullCamp,
           ...(isFullCamp && campDropInRate != null ? { campDropInRate: parseInt(String(campDropInRate)) || undefined } : {}),
           ...(i === 0 && campCreditApplied > 0 ? { appliedAccountCredit: campCreditApplied } : {}),
@@ -316,8 +334,9 @@ export async function POST(req: NextRequest) {
         submittedReferralCode: submittedReferralCode || undefined,
         smsConsent: !!smsConsent,
         campTotalPrice: campTotalPrice ? String(campTotalPrice) : undefined,
+        campTotalNum,
         campCreditApplied,
-        sessionPrice,
+        sessionPrice: firstDayPrice,
       };
 
       if (amountToCharge === 0) {
