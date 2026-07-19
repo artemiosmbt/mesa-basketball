@@ -22,14 +22,14 @@ const testimonials: Testimonial[] = [
     text: "We are so lucky to have found Artemios. Not only is he a great trainer, he's a great person and role model for our son. He takes the time to get to know his players, identify strengths and weaknesses and work on both the physical skills and mind set.",
   },
   {
-    name: "Rex Espineli",
-    color: "bg-purple-600",
-    text: "Coach A brings professional basketball experience to guide young athletes on their basketball journey building skills & confidence.",
-  },
-  {
     name: "Chris Katerinakis",
     color: "bg-teal-600",
     text: "Artemios has completely changed my relationship with basketball. I started as someone who struggled just to handle the ball confidently, and through his coaching, I've developed the skills and confidence to soon play in a men's pickup league. What I appreciate most is that he never just taught basketball skills. He taught me how to believe in my ability to improve. Watching him coach other athletes has only increased my respect for him. His skill level as a player is obvious, but what truly stands out is his ability to communicate, motivate, and connect with each athlete. I'm incredibly thankful for everything he's invested in me and would recommend Mesa Basketball Training, especially for athletes looking to take their game to the next level.",
+  },
+  {
+    name: "Rex Espineli",
+    color: "bg-purple-600",
+    text: "Coach A brings professional basketball experience to guide young athletes on their basketball journey building skills & confidence.",
   },
 ];
 
