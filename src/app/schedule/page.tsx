@@ -3377,7 +3377,11 @@ export default function Home() {
                   disabled={submitting || (modal.type === "camp" && camps[modal.sessionIndex]?.campDays?.length > 0 && campSelectedDays.size === 0)}
                   className="w-full rounded-lg bg-mesa-accent py-3 font-semibold text-white transition hover:bg-yellow-600 disabled:opacity-50"
                 >
-                  {submitting ? "Submitting..." : "Confirm Registration"}
+                  {submitting
+                    ? "Submitting..."
+                    : (modal.type === "private" || modal.type === "group-private") && !recurringWeeks.some((w) => w.selected)
+                      ? "Continue to Payment"
+                      : "Confirm Registration"}
                 </button>
               </form>
             )}
