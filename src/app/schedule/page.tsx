@@ -1081,6 +1081,13 @@ export default function Home() {
           setSubmitting(false);
           return;
         }
+        // Weekly bookings that owe money get sent to Stripe Checkout instead
+        // of being confirmed immediately — the booking finalizes once payment
+        // succeeds via the webhook.
+        if (result?.checkoutUrl) {
+          window.location.href = result.checkoutUrl;
+          return;
+        }
         setCalendarSessions((modal.selectedGroupSessions || []).map((s) => ({
           date: s.date, startTime: s.startTime, endTime: s.endTime, location: s.location,
           title: `Mesa Basketball — ${s.group}`,
@@ -1141,6 +1148,13 @@ export default function Home() {
           if (!res.ok) {
             setSubmitResult({ success: false, message: result.error || "Registration failed." });
             setSubmitting(false);
+            return;
+          }
+          // Camp bookings that owe money get sent to Stripe Checkout instead
+          // of being confirmed immediately — the booking finalizes once
+          // payment succeeds via the webhook.
+          if (result?.checkoutUrl) {
+            window.location.href = result.checkoutUrl;
             return;
           }
           setCalendarSessions(campSessions.map((s) => ({
@@ -3379,7 +3393,7 @@ export default function Home() {
                 >
                   {submitting
                     ? "Submitting..."
-                    : (modal.type === "private" || modal.type === "group-private") && !recurringWeeks.some((w) => w.selected)
+                    : ((modal.type === "private" || modal.type === "group-private") && !recurringWeeks.some((w) => w.selected)) || modal.type === "weekly" || modal.type === "camp"
                       ? "Continue to Payment"
                       : "Confirm Registration"}
                 </button>

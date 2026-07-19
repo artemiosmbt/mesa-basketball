@@ -1,5 +1,5 @@
 import { sendRegistrationNotification, sendReferralCreditNotification } from "@/lib/email";
-import { addPrivateSessionToCalendar } from "@/lib/calendar";
+import { addPrivateSessionToCalendar, upsertGroupSessionCalendarEvent } from "@/lib/calendar";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import {
   addReferralCredit,
@@ -140,6 +140,229 @@ export async function finalizeConfirmedPrivateBooking(params: FinalizePrivateBoo
       });
     } catch (err) {
       console.error("Calendar sync error (private, post-payment):", err);
+    }
+  }
+}
+
+export interface FinalizeWeeklyBookingParams {
+  parentName: string;
+  email: string;
+  phone: string;
+  kids: string;
+  weeklySessions: Array<{
+    date: string;
+    startTime: string;
+    endTime: string;
+    location: string;
+    group: string;
+    trainer?: string;
+    maxSpots?: number;
+  }>;
+  totalParticipants: number;
+  referralCode: string;
+  weeklyReferrer: { email: string; name: string } | null;
+  submittedReferralCode?: string;
+  smsConsent: boolean;
+  weeklyTotalPrice?: number;
+  weeklyCreditApplied: number;
+}
+
+/**
+ * Same role as finalizeConfirmedPrivateBooking, but for a batch of weekly
+ * group-session rows created together (one row per selected date). Sends a
+ * single consolidated email/SMS across all sessions, same as before Stripe.
+ */
+export async function finalizeConfirmedWeeklyBooking(params: FinalizeWeeklyBookingParams): Promise<void> {
+  const { weeklySessions, weeklyReferrer, weeklyCreditApplied, weeklyTotalPrice } = params;
+
+  const isPickupBooking = weeklySessions[0]?.group?.toLowerCase().includes("pickup");
+  const allSessionsList = weeklySessions
+    .map((s) => `${s.date} ${s.startTime}-${s.endTime} at ${s.location}`)
+    .join("<br/>");
+
+  const priceNote = weeklyTotalPrice
+    ? weeklyCreditApplied > 0
+      ? `<p><strong>Total:</strong> $${weeklyTotalPrice} — $${weeklyCreditApplied} account credit applied — <strong>Due:</strong> $${weeklyTotalPrice - weeklyCreditApplied}</p>`
+      : `<p><strong>Total:</strong> $${weeklyTotalPrice}</p>`
+    : "";
+
+  // Best-effort — the sessions are already paid for and confirmed, so a
+  // failure here must not surface as a failed booking.
+  if (weeklyReferrer) {
+    try {
+      await addReferralCredit(weeklyReferrer.email);
+    } catch (creditErr) {
+      console.error("Failed to award referral credit (weekly, booking was paid):", creditErr);
+    }
+  }
+
+  try {
+    await sendRegistrationNotification({
+      parentName: params.parentName,
+      email: params.email,
+      phone: params.phone,
+      kids: params.kids,
+      type: "weekly",
+      sessionDetails: `${isPickupBooking ? "Pickup" : "Group"} Session${weeklySessions.length !== 1 ? "s" : ""} (${weeklySessions.length} ${weeklySessions.length !== 1 ? "dates" : "date"}):<br/>${allSessionsList}${priceNote ? "<br/>" + priceNote : ""}`,
+      totalParticipants: params.totalParticipants,
+      referralCode: params.referralCode,
+      referredBy: weeklyReferrer?.name,
+      referralCodeUsed: params.submittedReferralCode || undefined,
+      trainer: weeklySessions[0]?.trainer,
+      calendarEvent: weeklySessions[0] ? { date: weeklySessions[0].date, startTime: weeklySessions[0].startTime, endTime: weeklySessions[0].endTime, location: weeklySessions[0].location } : undefined,
+    });
+
+    if (weeklyReferrer) {
+      await sendReferralCreditNotification({ referrerName: weeklyReferrer.name, referrerEmail: weeklyReferrer.email, newClientName: params.parentName });
+    }
+  } catch (notifyErr) {
+    console.error("Weekly booking email failed (booking was paid):", notifyErr);
+  }
+
+  const groupNames: string[] = Array.from(new Set(
+    weeklySessions.map((s) => s.group).filter((g): g is string => !!g)
+  ));
+  const sessionTypeSMS = isPickupBooking ? "pickup" : (groupNames.length === 1 ? groupNames[0] : "group");
+  const weeklyTrainerLine = weeklySessions[0]?.trainer ? `\nTrainer: ${weeklySessions[0].trainer}` : "";
+  if (params.smsConsent && params.phone) {
+    const sessionLines = weeklySessions.map((s) =>
+      `${formatDateWithDay(s.date)} | ${s.startTime}-${s.endTime}\nLocation: ${resolveLocationName(s.location)}`
+    ).join("\n");
+    const count = weeklySessions.length;
+    const capitalizedType = sessionTypeSMS.charAt(0).toUpperCase() + sessionTypeSMS.slice(1);
+    const confirmLabel = count === 1 ? `${capitalizedType} session` : `${count} ${sessionTypeSMS} sessions`;
+    const creditLine = weeklyCreditApplied > 0 ? `\n$${weeklyCreditApplied} account credit applied.` : "";
+    await sendSMS(params.phone, `Mesa Basketball: ${confirmLabel} confirmed!\n${sessionLines}${weeklyTrainerLine}\nAthlete: ${params.kids}${creditLine}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
+  }
+
+  const adminLines = weeklySessions.map((s) =>
+    `${formatDateWithDay(s.date)} | ${s.startTime}-${s.endTime}\nLocation: ${resolveLocationName(s.location)}`
+  ).join("\n");
+  await sendAdminSMS(`NEW BOOKING (paid): ${params.parentName}\n${weeklySessions.length} ${sessionTypeSMS} session${weeklySessions.length !== 1 ? "s" : ""}:\n${adminLines}${weeklyTrainerLine}\nPlayers: ${params.kids}${params.submittedReferralCode ? `\nRef code: ${params.submittedReferralCode} ${weeklyReferrer ? "✓ applied" : "✗ NOT applied"}` : ""}`);
+
+  for (const session of weeklySessions) {
+    try {
+      await upsertGroupSessionCalendarEvent({
+        sessionType: "weekly",
+        sessionLabel: session.group || "Group Session",
+        bookedDate: session.date,
+        bookedStartTime: session.startTime,
+        bookedEndTime: session.endTime,
+        bookedLocation: session.location,
+        maxSpots: session.maxSpots,
+        kidsJustRegistered: params.kids,
+        participantsJustRegistered: params.totalParticipants,
+      });
+    } catch (err) {
+      console.error("Calendar sync error (weekly, post-payment):", err);
+    }
+  }
+}
+
+export interface FinalizeCampBookingParams {
+  parentName: string;
+  email: string;
+  phone: string;
+  kids: string;
+  campSessions: Array<{
+    date: string;
+    startTime: string;
+    endTime?: string;
+    location: string;
+    campName: string;
+    gradeGroup?: string;
+  }>;
+  totalParticipants: number;
+  referralCode: string;
+  campReferrer: { email: string; name: string } | null;
+  submittedReferralCode?: string;
+  smsConsent: boolean;
+  campTotalPrice?: string;
+  campCreditApplied: number;
+  sessionPrice?: number;
+}
+
+/**
+ * Same role as finalizeConfirmedPrivateBooking, but for a batch of camp-day
+ * rows created together (one row per selected day).
+ */
+export async function finalizeConfirmedCampBooking(params: FinalizeCampBookingParams): Promise<void> {
+  const { campSessions, campReferrer, campCreditApplied, campTotalPrice, sessionPrice } = params;
+
+  const daysList = campSessions
+    .map((s) => `${s.date} ${s.startTime}${s.endTime ? `-${s.endTime}` : ""}`)
+    .join("<br/>");
+  const priceNote = campTotalPrice
+    ? campCreditApplied > 0
+      ? `<br/><strong>Total:</strong> ${campTotalPrice} — $${campCreditApplied} account credit applied — <strong>Due:</strong> $${(sessionPrice ?? 0) - campCreditApplied}`
+      : `<br/><strong>Total:</strong> ${campTotalPrice}`
+    : "";
+  const firstSession = campSessions[0];
+
+  // Best-effort — the days are already paid for and confirmed, so a failure
+  // here must not surface as a failed booking.
+  if (campReferrer) {
+    try {
+      await addReferralCredit(campReferrer.email);
+    } catch (creditErr) {
+      console.error("Failed to award referral credit (camp, booking was paid):", creditErr);
+    }
+  }
+
+  try {
+    await sendRegistrationNotification({
+      parentName: params.parentName,
+      email: params.email,
+      phone: params.phone,
+      kids: params.kids,
+      type: "camp",
+      sessionDetails: `${firstSession.campName}${firstSession.gradeGroup ? ` — ${firstSession.gradeGroup}` : ""}<br/>Days registered (${campSessions.length}):<br/>${daysList}${priceNote}`,
+      totalParticipants: params.totalParticipants,
+      referralCode: params.referralCode,
+      referredBy: campReferrer?.name,
+      referralCodeUsed: params.submittedReferralCode || undefined,
+      calendarEvent: { date: firstSession.date, startTime: firstSession.startTime, endTime: firstSession.endTime || firstSession.startTime, location: firstSession.location },
+    });
+
+    if (campReferrer) {
+      await sendReferralCreditNotification({ referrerName: campReferrer.name, referrerEmail: campReferrer.email, newClientName: params.parentName });
+    }
+  } catch (notifyErr) {
+    console.error("Camp booking email failed (booking was paid):", notifyErr);
+  }
+
+  if (params.smsConsent && params.phone) {
+    const campDayLines = campSessions.map((s) =>
+      `${formatDateWithDay(s.date)} | ${s.startTime}${s.endTime ? `-${s.endTime}` : ""}\nLocation: ${resolveLocationName(s.location)}`
+    ).join("\n");
+    const priceText = campTotalPrice
+      ? campCreditApplied > 0
+        ? ` Total: ${campTotalPrice}, $${campCreditApplied} credit applied.`
+        : ` Total: ${campTotalPrice}.`
+      : "";
+    await sendSMS(params.phone, `Mesa Basketball: Camp confirmed (${campSessions.length} day${campSessions.length !== 1 ? "s" : ""})!${priceText}\n${campDayLines}\nAthlete: ${params.kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
+  }
+
+  const adminCampLines = campSessions.map((s) =>
+    `${formatDateWithDay(s.date)} | ${s.startTime}${s.endTime ? `-${s.endTime}` : ""}\nLocation: ${resolveLocationName(s.location)}`
+  ).join("\n");
+  const campNameLine = `${firstSession.campName}${firstSession.gradeGroup ? ` — ${firstSession.gradeGroup}` : ""}`;
+  await sendAdminSMS(`NEW BOOKING (paid): ${params.parentName}\n${campNameLine}\n${campSessions.length} camp day${campSessions.length !== 1 ? "s" : ""}:\n${adminCampLines}\nPlayers: ${params.kids}${params.submittedReferralCode ? `\nRef code: ${params.submittedReferralCode} ${campReferrer ? "✓ applied" : "✗ NOT applied"}` : ""}`);
+
+  for (const session of campSessions) {
+    try {
+      await upsertGroupSessionCalendarEvent({
+        sessionType: "camp",
+        sessionLabel: session.campName || "Camp",
+        bookedDate: session.date,
+        bookedStartTime: session.startTime,
+        bookedEndTime: session.endTime || session.startTime,
+        bookedLocation: session.location,
+        kidsJustRegistered: params.kids,
+        participantsJustRegistered: params.totalParticipants,
+      });
+    } catch (err) {
+      console.error("Calendar sync error (camp, post-payment):", err);
     }
   }
 }

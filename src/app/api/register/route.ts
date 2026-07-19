@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sendRegistrationNotification, sendReferralCreditNotification } from "@/lib/email";
-import { addPrivateSessionToCalendar, upsertGroupSessionCalendarEvent } from "@/lib/calendar";
+import { addPrivateSessionToCalendar } from "@/lib/calendar";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import { getStripe } from "@/lib/stripe";
-import { finalizeConfirmedPrivateBooking } from "@/lib/booking-finalize";
+import { finalizeConfirmedPrivateBooking, finalizeConfirmedWeeklyBooking, finalizeConfirmedCampBooking } from "@/lib/booking-finalize";
 import {
   addRegistrationWithRewards,
   isNewClient,
@@ -139,6 +139,10 @@ export async function POST(req: NextRequest) {
         if (weeklyCreditApplied > 0) await deductAccountCredit(email, weeklyCreditApplied);
       }
 
+      const weeklyTotal = weeklyTotalPrice ?? (perSessionPrice != null ? perSessionPrice * weeklySessions.length : 0);
+      const amountToCharge = Math.max(0, weeklyTotal - weeklyCreditApplied);
+      const bookingBatchId = crypto.randomUUID();
+
       for (const [i, session] of weeklySessions.entries()) {
         await addRegistrationWithRewards({
           parentName,
@@ -159,101 +163,69 @@ export async function POST(req: NextRequest) {
           smsConsent: !!smsConsent,
           sessionPrice: perSessionPrice,
           ...(i === 0 && weeklyCreditApplied > 0 ? { appliedAccountCredit: weeklyCreditApplied } : {}),
+          status: amountToCharge > 0 ? "pending_payment" : undefined,
+          bookingBatchId,
         });
       }
 
-      // Send ONE consolidated email
+      const weeklyFinalizeParams = {
+        parentName,
+        email,
+        phone,
+        kids,
+        weeklySessions: weeklySessions as Array<{ date: string; startTime: string; endTime: string; location: string; group: string; trainer?: string; maxSpots?: number }>,
+        totalParticipants: totalParticipants || 1,
+        referralCode,
+        weeklyReferrer,
+        submittedReferralCode: submittedReferralCode || undefined,
+        smsConsent: !!smsConsent,
+        weeklyTotalPrice,
+        weeklyCreditApplied,
+      };
+
+      if (amountToCharge === 0) {
+        // Fully covered by account credit — nothing to actually charge, so
+        // confirm immediately exactly like before Stripe existed.
+        await finalizeConfirmedWeeklyBooking(weeklyFinalizeParams);
+        return NextResponse.json({ success: true, count: weeklySessions.length, referralApplied: !!weeklyReferrer });
+      }
+
+      // Real money is due — send them to Stripe instead of confirming yet.
+      const stripe = getStripe();
+      const origin = req.nextUrl.origin;
       const isPickupBooking = weeklySessions[0]?.group?.toLowerCase().includes("pickup");
-      const allSessionsList = weeklySessions
-        .map((s: { date: string; startTime: string; endTime: string; location: string }) =>
-          `${s.date} ${s.startTime}-${s.endTime} at ${s.location}`
-        )
-        .join("<br/>");
+      const groupLabel = weeklySessions[0]?.group || (isPickupBooking ? "Pickup" : "Group");
+      const session = await stripe.checkout.sessions.create({
+        mode: "payment",
+        payment_method_types: ["card"],
+        customer_creation: "always",
+        customer_email: email,
+        client_reference_id: bookingBatchId,
+        metadata: {
+          booking_batch_id: bookingBatchId,
+          referrer_email: weeklyReferrer?.email || "",
+          referrer_name: weeklyReferrer?.name || "",
+          submitted_referral_code: submittedReferralCode || "",
+          total_price: String(weeklyTotal),
+        },
+        line_items: [
+          {
+            price_data: {
+              currency: "usd",
+              product_data: { name: `${groupLabel} — ${weeklySessions.length} session${weeklySessions.length !== 1 ? "s" : ""}` },
+              unit_amount: Math.round(amountToCharge * 100),
+            },
+            quantity: 1,
+          },
+        ],
+        success_url: `${origin}/booking-confirmed?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${origin}/schedule?checkout=cancelled`,
+        expires_at: Math.floor(Date.now() / 1000) + 30 * 60,
+      });
 
-      const priceNote = weeklyTotalPrice
-        ? weeklyCreditApplied > 0
-          ? `<p><strong>Total:</strong> $${weeklyTotalPrice} — $${weeklyCreditApplied} account credit applied — <strong>Due:</strong> $${weeklyTotalPrice - weeklyCreditApplied}</p>`
-          : `<p><strong>Total:</strong> $${weeklyTotalPrice}</p>`
-        : "";
+      await attachStripeCheckoutSession(bookingBatchId, session.id);
 
-      // Award referral credit unconditionally — must not depend on the confirmation
-      // email succeeding below, or a Resend hiccup silently drops the referrer's credit.
-      // Wrapped so a failure here (the sessions are already booked) can't surface as a
-      // failed registration to the client.
-      if (weeklyReferrer) {
-        try {
-          await addReferralCredit(weeklyReferrer.email);
-        } catch (creditErr) {
-          console.error("Failed to award referral credit (weekly, booking was saved):", creditErr);
-        }
-      }
-
-      try {
-        await sendRegistrationNotification({
-          parentName,
-          email,
-          phone,
-          kids,
-          type: "weekly",
-          sessionDetails: `${isPickupBooking ? "Pickup" : "Group"} Session${weeklySessions.length !== 1 ? "s" : ""} (${weeklySessions.length} ${weeklySessions.length !== 1 ? "dates" : "date"}):<br/>${allSessionsList}${priceNote ? "<br/>" + priceNote : ""}`,
-          totalParticipants: totalParticipants || 1,
-          referralCode,
-          referredBy: weeklyReferrer?.name,
-          referralCodeUsed: submittedReferralCode || undefined,
-          trainer: weeklySessions[0]?.trainer,
-          calendarEvent: weeklySessions[0] ? { date: weeklySessions[0].date, startTime: weeklySessions[0].startTime, endTime: weeklySessions[0].endTime, location: weeklySessions[0].location } : undefined,
-        });
-
-        if (weeklyReferrer) {
-          await sendReferralCreditNotification({ referrerName: weeklyReferrer.name, referrerEmail: weeklyReferrer.email, newClientName: parentName });
-        }
-      } catch (notifyErr) {
-        console.error("Weekly booking email failed (booking was saved):", notifyErr);
-      }
-
-      // SMS runs independently so it always fires even if email throws.
-      // Label uses the actual group name (e.g. "High School Boys") rather than the generic
-      // word "group" — a plain "session" label doesn't tell the admin which group booked.
-      const groupNames: string[] = Array.from(new Set(
-        weeklySessions.map((s: { group?: string }) => s.group).filter((g: string | undefined): g is string => !!g)
-      ));
-      const sessionTypeSMS = isPickupBooking ? "pickup" : (groupNames.length === 1 ? groupNames[0] : "group");
-      const weeklyTrainerLine = weeklySessions[0]?.trainer ? `\nTrainer: ${weeklySessions[0].trainer}` : "";
-      if (smsConsent) {
-        const sessionLines = weeklySessions.map((s: { date: string; startTime: string; endTime: string; location: string }) =>
-          `${formatDateWithDay(s.date)} | ${s.startTime}-${s.endTime}\nLocation: ${resolveLocationName(s.location)}`
-        ).join("\n");
-        const count = weeklySessions.length;
-        const capitalizedType = sessionTypeSMS.charAt(0).toUpperCase() + sessionTypeSMS.slice(1);
-        const confirmLabel = count === 1 ? `${capitalizedType} session` : `${count} ${sessionTypeSMS} sessions`;
-        const creditLine = weeklyCreditApplied > 0 ? `\n$${weeklyCreditApplied} account credit applied.` : "";
-        await sendSMS(phone, `Mesa Basketball: ${confirmLabel} confirmed!\n${sessionLines}${weeklyTrainerLine}\nAthlete: ${kids}${creditLine}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
-      }
-      const adminLines = weeklySessions.map((s: { date: string; startTime: string; endTime: string; location: string }) =>
-        `${formatDateWithDay(s.date)} | ${s.startTime}-${s.endTime}\nLocation: ${resolveLocationName(s.location)}`
-      ).join("\n");
-      await sendAdminSMS(`NEW BOOKING: ${parentName}\n${weeklySessions.length} ${sessionTypeSMS} session${weeklySessions.length !== 1 ? "s" : ""}:\n${adminLines}${weeklyTrainerLine}\nPlayers: ${kids}${submittedReferralCode ? `\nRef code: ${submittedReferralCode} ${weeklyReferrer ? "✓ applied" : "✗ NOT applied"}` : ""}`);
-
-      // Update Google Calendar for each weekly session
-      for (const session of weeklySessions) {
-        try {
-          await upsertGroupSessionCalendarEvent({
-            sessionType: "weekly",
-            sessionLabel: session.group || "Group Session",
-            bookedDate: session.date,
-            bookedStartTime: session.startTime,
-            bookedEndTime: session.endTime,
-            bookedLocation: session.location,
-            maxSpots: session.maxSpots,
-            kidsJustRegistered: kids,
-            participantsJustRegistered: totalParticipants || 1,
-          });
-        } catch (err) {
-          console.error("Calendar sync error (weekly):", err);
-        }
-      }
-
-      return NextResponse.json({ success: true, count: weeklySessions.length, referralApplied: !!weeklyReferrer });
+      return NextResponse.json({ success: true, checkoutUrl: session.url });
     }
 
     // Handle camp multi-day registration
@@ -315,6 +287,9 @@ export async function POST(req: NextRequest) {
         if (campCreditApplied > 0) await deductAccountCredit(email, campCreditApplied);
       }
 
+      const amountToCharge = Math.max(0, campTotalNum - campCreditApplied);
+      const bookingBatchId = crypto.randomUUID();
+
       for (const [i, session] of campSessions.entries()) {
         await addRegistrationWithRewards({
           parentName,
@@ -336,90 +311,71 @@ export async function POST(req: NextRequest) {
           isFullCamp,
           ...(isFullCamp && campDropInRate != null ? { campDropInRate: parseInt(String(campDropInRate)) || undefined } : {}),
           ...(i === 0 && campCreditApplied > 0 ? { appliedAccountCredit: campCreditApplied } : {}),
+          status: amountToCharge > 0 ? "pending_payment" : undefined,
+          bookingBatchId,
         });
       }
 
-      const daysList = campSessions
-        .map((s: { date: string; startTime: string; endTime: string }) => `${s.date} ${s.startTime}${s.endTime ? `-${s.endTime}` : ""}`)
-        .join("<br/>");
-      const priceNote = campTotalPrice
-        ? campCreditApplied > 0
-          ? `<br/><strong>Total:</strong> ${campTotalPrice} — $${campCreditApplied} account credit applied — <strong>Due:</strong> $${(sessionPrice ?? 0) - campCreditApplied}`
-          : `<br/><strong>Total:</strong> ${campTotalPrice}`
-        : "";
       const firstSession = campSessions[0];
+      const campFinalizeParams = {
+        parentName,
+        email,
+        phone,
+        kids,
+        campSessions: campSessions as Array<{ date: string; startTime: string; endTime?: string; location: string; campName: string; gradeGroup?: string }>,
+        totalParticipants: totalParticipants || 1,
+        referralCode,
+        campReferrer,
+        submittedReferralCode: submittedReferralCode || undefined,
+        smsConsent: !!smsConsent,
+        campTotalPrice: campTotalPrice ? String(campTotalPrice) : undefined,
+        campCreditApplied,
+        sessionPrice,
+      };
 
-      // Award referral credit unconditionally — must not depend on the confirmation
-      // email succeeding below, or a Resend hiccup silently drops the referrer's credit.
-      // Wrapped so a failure here (the days are already booked) can't surface as a
-      // failed registration to the client.
-      if (campReferrer) {
-        try {
-          await addReferralCredit(campReferrer.email);
-        } catch (creditErr) {
-          console.error("Failed to award referral credit (camp, booking was saved):", creditErr);
-        }
+      if (amountToCharge === 0) {
+        // Fully covered by account credit — nothing to actually charge, so
+        // confirm immediately exactly like before Stripe existed.
+        await finalizeConfirmedCampBooking(campFinalizeParams);
+        return NextResponse.json({ success: true, count: campSessions.length, referralApplied: !!campReferrer });
       }
 
-      try {
-        await sendRegistrationNotification({
-          parentName,
-          email,
-          phone,
-          kids,
-          type: "camp",
-          sessionDetails: `${firstSession.campName}${firstSession.gradeGroup ? ` — ${firstSession.gradeGroup}` : ""}<br/>Days registered (${campSessions.length}):<br/>${daysList}${priceNote}`,
-          totalParticipants: totalParticipants || 1,
-          referralCode,
-          referredBy: campReferrer?.name,
-          referralCodeUsed: submittedReferralCode || undefined,
-          calendarEvent: { date: firstSession.date, startTime: firstSession.startTime, endTime: firstSession.endTime || firstSession.startTime, location: firstSession.location },
-        });
-
-        if (campReferrer) {
-          await sendReferralCreditNotification({ referrerName: campReferrer.name, referrerEmail: campReferrer.email, newClientName: parentName });
-        }
-      } catch (notifyErr) {
-        console.error("Camp booking email failed (booking was saved):", notifyErr);
-      }
-
-      // SMS runs independently so it always fires even if email throws
-      if (smsConsent) {
-        const campDayLines = campSessions.map((s: { date: string; startTime: string; endTime?: string; location: string }) =>
-          `${formatDateWithDay(s.date)} | ${s.startTime}${s.endTime ? `-${s.endTime}` : ""}\nLocation: ${resolveLocationName(s.location)}`
-        ).join("\n");
-        const priceText = campTotalPrice
-          ? campCreditApplied > 0
-            ? ` Total: ${campTotalPrice}, $${campCreditApplied} credit applied.`
-            : ` Total: ${campTotalPrice}.`
-          : "";
-        await sendSMS(phone, `Mesa Basketball: Camp confirmed (${campSessions.length} day${campSessions.length !== 1 ? "s" : ""})!${priceText}\n${campDayLines}\nAthlete: ${kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
-      }
-      const adminCampLines = campSessions.map((s: { date: string; startTime: string; endTime?: string; location: string }) =>
-        `${formatDateWithDay(s.date)} | ${s.startTime}${s.endTime ? `-${s.endTime}` : ""}\nLocation: ${resolveLocationName(s.location)}`
-      ).join("\n");
+      // Real money is due — send them to Stripe instead of confirming yet.
+      const stripe = getStripe();
+      const origin = req.nextUrl.origin;
       const campNameLine = `${firstSession.campName}${firstSession.gradeGroup ? ` — ${firstSession.gradeGroup}` : ""}`;
-      await sendAdminSMS(`NEW BOOKING: ${parentName}\n${campNameLine}\n${campSessions.length} camp day${campSessions.length !== 1 ? "s" : ""}:\n${adminCampLines}\nPlayers: ${kids}${submittedReferralCode ? `\nRef code: ${submittedReferralCode} ${campReferrer ? "✓ applied" : "✗ NOT applied"}` : ""}`);
+      const session = await stripe.checkout.sessions.create({
+        mode: "payment",
+        payment_method_types: ["card"],
+        customer_creation: "always",
+        customer_email: email,
+        client_reference_id: bookingBatchId,
+        metadata: {
+          booking_batch_id: bookingBatchId,
+          referrer_email: campReferrer?.email || "",
+          referrer_name: campReferrer?.name || "",
+          submitted_referral_code: submittedReferralCode || "",
+          total_price: campTotalPrice ? String(campTotalPrice) : "",
+          camp_grade_group: firstSession.gradeGroup || "",
+        },
+        line_items: [
+          {
+            price_data: {
+              currency: "usd",
+              product_data: { name: `${campNameLine} — ${campSessions.length} day${campSessions.length !== 1 ? "s" : ""}` },
+              unit_amount: Math.round(amountToCharge * 100),
+            },
+            quantity: 1,
+          },
+        ],
+        success_url: `${origin}/booking-confirmed?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${origin}/schedule?checkout=cancelled`,
+        expires_at: Math.floor(Date.now() / 1000) + 30 * 60,
+      });
 
-      // Update Google Calendar for each camp day
-      for (const session of campSessions) {
-        try {
-          await upsertGroupSessionCalendarEvent({
-            sessionType: "camp",
-            sessionLabel: session.campName || "Camp",
-            bookedDate: session.date,
-            bookedStartTime: session.startTime,
-            bookedEndTime: session.endTime || session.startTime,
-            bookedLocation: session.location,
-            kidsJustRegistered: kids,
-            participantsJustRegistered: totalParticipants || 1,
-          });
-        } catch (err) {
-          console.error("Calendar sync error (camp):", err);
-        }
-      }
+      await attachStripeCheckoutSession(bookingBatchId, session.id);
 
-      return NextResponse.json({ success: true, count: campSessions.length, referralApplied: !!campReferrer });
+      return NextResponse.json({ success: true, checkoutUrl: session.url });
     }
 
     const isPrivateType = type === "private" || type === "group-private";

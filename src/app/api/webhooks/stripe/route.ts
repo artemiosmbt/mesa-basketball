@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { getStripe } from "@/lib/stripe";
 import { finalizePaidBookingBatch } from "@/lib/supabase";
-import { finalizeConfirmedPrivateBooking, expireAbandonedBookingBatch } from "@/lib/booking-finalize";
+import {
+  finalizeConfirmedPrivateBooking,
+  finalizeConfirmedWeeklyBooking,
+  finalizeConfirmedCampBooking,
+  expireAbandonedBookingBatch,
+} from "@/lib/booking-finalize";
 
 // Stripe needs the raw, unparsed request body to verify the signature —
 // same requirement as Twilio's webhook (see src/app/api/twilio/incoming),
@@ -66,35 +71,92 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
 
   const metadata = session.metadata || {};
   const isFirstTime = metadata.is_first_time === "true";
-  const privateReferrer = metadata.referrer_email
+  const referrer = metadata.referrer_email
     ? { email: metadata.referrer_email, name: metadata.referrer_name || "" }
     : null;
+  const submittedReferralCode = metadata.submitted_referral_code || undefined;
 
-  for (const reg of confirmedRows) {
-    if (reg.type !== "private" && reg.type !== "group-private") continue; // Phase 1 scope
-    if (!reg.booked_date || !reg.booked_start_time) continue;
-    await finalizeConfirmedPrivateBooking({
-      parentName: reg.parent_name,
-      email: reg.email,
-      phone: reg.phone,
-      kids: reg.kids,
-      type: reg.type,
-      sessionDetails: reg.session_details,
-      totalParticipants: reg.total_participants,
-      bookedDate: reg.booked_date,
-      bookedStartTime: reg.booked_start_time,
-      bookedEndTime: reg.booked_end_time || reg.booked_start_time,
-      bookedLocation: reg.booked_location || "",
-      bookedTrainer: reg.booked_trainer || undefined,
-      manageToken: reg.manage_token,
-      isFree: reg.is_free,
-      isFirstTime,
-      referralCode: reg.referral_code || "",
-      privateReferrer,
-      submittedReferralCode: metadata.submitted_referral_code || undefined,
-      smsConsent: !!reg.sms_consent,
-      accountCreditApplied: reg.applied_account_credit || 0,
-      fullPrice: reg.session_price ?? undefined,
+  // Every row in a batch was created together by the same /api/register
+  // branch, so they all share a type — safe to key off the first row.
+  const batchType = confirmedRows[0]?.type;
+
+  if (batchType === "private" || batchType === "group-private") {
+    for (const reg of confirmedRows) {
+      if (!reg.booked_date || !reg.booked_start_time) continue;
+      await finalizeConfirmedPrivateBooking({
+        parentName: reg.parent_name,
+        email: reg.email,
+        phone: reg.phone,
+        kids: reg.kids,
+        type: reg.type,
+        sessionDetails: reg.session_details,
+        totalParticipants: reg.total_participants,
+        bookedDate: reg.booked_date,
+        bookedStartTime: reg.booked_start_time,
+        bookedEndTime: reg.booked_end_time || reg.booked_start_time,
+        bookedLocation: reg.booked_location || "",
+        bookedTrainer: reg.booked_trainer || undefined,
+        manageToken: reg.manage_token,
+        isFree: reg.is_free,
+        isFirstTime,
+        referralCode: reg.referral_code || "",
+        privateReferrer: referrer,
+        submittedReferralCode,
+        smsConsent: !!reg.sms_consent,
+        accountCreditApplied: reg.applied_account_credit || 0,
+        fullPrice: reg.session_price ?? undefined,
+      });
+    }
+  } else if (batchType === "weekly") {
+    const first = confirmedRows[0];
+    const weeklyCreditApplied = confirmedRows.reduce((sum, r) => sum + (r.applied_account_credit || 0), 0);
+    const weeklyTotalPrice = metadata.total_price ? Number(metadata.total_price) : undefined;
+    await finalizeConfirmedWeeklyBooking({
+      parentName: first.parent_name,
+      email: first.email,
+      phone: first.phone,
+      kids: first.kids,
+      weeklySessions: confirmedRows.map((r) => ({
+        date: r.booked_date || "",
+        startTime: r.booked_start_time || "",
+        endTime: r.booked_end_time || "",
+        location: r.booked_location || "",
+        group: r.booked_group || "",
+        trainer: r.booked_trainer || undefined,
+      })),
+      totalParticipants: first.total_participants,
+      referralCode: first.referral_code || "",
+      weeklyReferrer: referrer,
+      submittedReferralCode,
+      smsConsent: !!first.sms_consent,
+      weeklyTotalPrice,
+      weeklyCreditApplied,
+    });
+  } else if (batchType === "camp") {
+    const first = confirmedRows[0];
+    const campCreditApplied = confirmedRows.reduce((sum, r) => sum + (r.applied_account_credit || 0), 0);
+    const campGradeGroup = metadata.camp_grade_group || undefined;
+    await finalizeConfirmedCampBooking({
+      parentName: first.parent_name,
+      email: first.email,
+      phone: first.phone,
+      kids: first.kids,
+      campSessions: confirmedRows.map((r) => ({
+        date: r.booked_date || "",
+        startTime: r.booked_start_time || "",
+        endTime: r.booked_end_time || undefined,
+        location: r.booked_location || "",
+        campName: r.booked_group || "",
+        gradeGroup: campGradeGroup,
+      })),
+      totalParticipants: first.total_participants,
+      referralCode: first.referral_code || "",
+      campReferrer: referrer,
+      submittedReferralCode,
+      smsConsent: !!first.sms_consent,
+      campTotalPrice: metadata.total_price || undefined,
+      campCreditApplied,
+      sessionPrice: first.session_price ?? undefined,
     });
   }
 }

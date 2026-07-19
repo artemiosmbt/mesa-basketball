@@ -803,11 +803,13 @@ export async function checkGroupSessionCapacity(
   maxSpots: number
 ): Promise<{ available: boolean; enrolled: number }> {
   const supabase = getSupabase();
+  // Count pending_payment alongside confirmed — otherwise two people could
+  // grab the same last spot while one of them is still mid-Stripe-checkout.
   const { count, error } = await supabase
     .from("registrations")
     .select("*", { count: "exact", head: true })
     .eq("type", "weekly")
-    .eq("status", "confirmed")
+    .in("status", ["confirmed", "pending_payment"])
     .eq("booked_date", date)
     .eq("booked_start_time", startTime)
     .eq("booked_group", group || "");
@@ -844,7 +846,7 @@ export async function checkDuplicateRegistration(
     .eq("email", email)
     .eq("booked_date", date)
     .eq("booked_start_time", startTime)
-    .eq("status", "confirmed");
+    .in("status", ["confirmed", "pending_payment"]);
   return !error && (count ?? 0) > 0;
 }
 
