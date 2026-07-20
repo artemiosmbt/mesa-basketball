@@ -1,5 +1,5 @@
 import { Resend } from "resend";
-import { SERVICE_FEE, SERVICE_FEE_LABEL } from "./pricing";
+import { SERVICE_FEE, fmtMoney } from "./pricing";
 
 const ARTEMI_EMAIL = "artemios@mesabasketballtraining.com";
 const FROM_EMAIL = "Mesa Basketball <noreply@mesabasketballtraining.com>";
@@ -151,8 +151,8 @@ export async function sendRegistrationNotification(data: {
       <p><strong>Total Participants:</strong> ${data.totalParticipants}</p>
       ${isPackageBooking ? `<p><strong>Package:</strong> ${data.packageType}-session monthly plan — ${data.packageSessionsRemaining} session${data.packageSessionsRemaining !== 1 ? "s" : ""} remaining after this booking</p>` : ""}
       ${data.isFree && !isPackageBooking ? `<p><strong style="color: #d4af37;">${data.isFirstTime ? "First-Time Discount" : "Referral Credit"}: 50% off applied</strong></p>` : ""}
-      ${data.accountCreditApplied && data.accountCreditApplied > 0 ? `<p><strong style="color: #93c5fd;">Account credit applied: $${data.accountCreditApplied}</strong></p>` : ""}
-      ${data.amountCharged != null && data.amountCharged > 0 ? `<p><strong>Charged: $${Math.round((data.amountCharged + SERVICE_FEE) * 100) / 100}</strong> ($${data.amountCharged} + ${SERVICE_FEE_LABEL} fee)</p>` : ""}
+      ${data.accountCreditApplied && data.accountCreditApplied > 0 ? `<p><strong style="color: #93c5fd;">Account credit applied: $${fmtMoney(data.accountCreditApplied)}</strong></p>` : ""}
+      ${data.amountCharged != null && data.amountCharged > 0 ? `<p><strong>Charged: $${fmtMoney(data.amountCharged + SERVICE_FEE)}</strong></p>` : ""}
       ${data.referredBy ? `<p><strong>Referred by:</strong> ${data.referredBy}</p>` : ""}
       ${data.referralCodeUsed ? `<p><strong>Referral code used:</strong> ${data.referralCodeUsed}</p>` : ""}
     `,
@@ -195,11 +195,11 @@ export async function sendRegistrationNotification(data: {
   // statement, so it's shown plainly rather than folded into the other
   // price notes above (which describe the session's rate, not the charge).
   const chargedNote = data.amountCharged != null && data.amountCharged > 0
-    ? `<p style="background: #162d5a; color: #d4af37; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">Charged to your card: $${Math.round((data.amountCharged + SERVICE_FEE) * 100) / 100} ($${data.amountCharged} + ${SERVICE_FEE_LABEL} service fee)</p>`
+    ? `<p style="background: #162d5a; color: #d4af37; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">Charged to your card: $${fmtMoney(data.amountCharged + SERVICE_FEE)}</p>`
     : "";
 
   const accountCreditNote = data.accountCreditApplied && data.accountCreditApplied > 0 && data.fullPrice != null
-    ? `<p style="background: #1e3a5f; color: #93c5fd; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">$${data.accountCreditApplied} account credit applied</p>`
+    ? `<p style="background: #1e3a5f; color: #93c5fd; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">$${fmtMoney(data.accountCreditApplied)} account credit applied</p>`
     : "";
 
   const manageSection = `<p><a href="${BASE_URL}/my-bookings" style="color: #d4af37; font-weight: bold;">View My Bookings</a> — Manage, cancel, or reschedule your sessions</p>`;
@@ -321,7 +321,7 @@ export async function sendCancellationNotification(data: {
   const lateNote = data.isLateCancel && !data.campAdjustment && !somethingWasAttempted
     ? `<div style="background: #7c1d1d; border-left: 4px solid #ef4444; border-radius: 6px; padding: 14px 16px; margin: 16px 0;">
         <p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #ffffff;">⚠️ Late Fee</p>
-        <p style="margin: 0; color: #ffffff; font-size: 14px;">This cancellation was made within 24 hours of the session. Per our policy, a <strong>50% fee of $${lateFee}</strong> is still due.</p>
+        <p style="margin: 0; color: #ffffff; font-size: 14px;">This cancellation was made within 24 hours of the session. Per our policy, a <strong>50% fee of $${fmtMoney(lateFee)}</strong> is still due.</p>
         ${PAYMENT_LINES}
       </div>`
     : "";
@@ -338,8 +338,8 @@ export async function sendCancellationNotification(data: {
         </div>`;
       }
       const parts: string[] = [];
-      if (refundResult.refundedAmount > 0) parts.push(`<strong>$${refundResult.refundedAmount}</strong> has been refunded to your original payment method`);
-      if (refundResult.creditedAmount > 0) parts.push(`<strong>$${refundResult.creditedAmount}</strong> has been credited to your account`);
+      if (refundResult.refundedAmount > 0) parts.push(`<strong>$${fmtMoney(refundResult.refundedAmount)}</strong> has been refunded to your original payment method`);
+      if (refundResult.creditedAmount > 0) parts.push(`<strong>$${fmtMoney(refundResult.creditedAmount)}</strong> has been credited to your account`);
       if (parts.length === 0) return "";
       return `<div style="background: #1e3a5f; border-left: 4px solid #3b82f6; border-radius: 6px; padding: 14px 16px; margin: 16px 0;">
         <p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #ffffff;">${refundResult.refundedAmount > 0 ? "Refund Issued" : "Account Credit"}</p>
@@ -349,7 +349,7 @@ export async function sendCancellationNotification(data: {
     if (plainCredit !== undefined && plainCredit > 0) {
       return `<div style="background: #1e3a5f; border-left: 4px solid #3b82f6; border-radius: 6px; padding: 14px 16px; margin: 16px 0;">
         <p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #ffffff;">Account Credit</p>
-        <p style="margin: 0; color: #ffffff; font-size: 14px;"><strong>$${plainCredit}</strong> has been credited to your account for a future booking${lateCreditNote}.</p>
+        <p style="margin: 0; color: #ffffff; font-size: 14px;"><strong>$${fmtMoney(plainCredit)}</strong> has been credited to your account for a future booking${lateCreditNote}.</p>
       </div>`;
     }
     return "";
@@ -367,12 +367,12 @@ export async function sendCancellationNotification(data: {
     ? moneyOutcomeHtml(data.campAdjustment.stripeRefundResult, data.campAdjustment.creditGranted > 0 ? data.campAdjustment.creditGranted : undefined, "")
     : "";
   const campAdjustmentLine = data.campAdjustment && !data.campAdjustment.isPaid
-    ? `<strong>$${data.campAdjustment.finalAmount}</strong> is due.`
+    ? `<strong>$${fmtMoney(data.campAdjustment.finalAmount)}</strong> is due.`
     : "";
   const campAdjustmentNote = data.campAdjustment
     ? `<div style="background: #1e3a5f; border-left: 4px solid #3b82f6; border-radius: 6px; padding: 14px 16px; margin: 16px 0;">
         <p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #ffffff;">Updated Camp Total</p>
-        <p style="margin: 0; color: #ffffff; font-size: 14px;">New total: <strong>$${data.campAdjustment.finalAmount}</strong> (was $${data.campAdjustment.originalAmount}). ${campAdjustmentLine}</p>
+        <p style="margin: 0; color: #ffffff; font-size: 14px;">New total: <strong>$${fmtMoney(data.campAdjustment.finalAmount)}</strong> (was $${fmtMoney(data.campAdjustment.originalAmount)}). ${campAdjustmentLine}</p>
         ${!data.campAdjustment.isPaid ? PAYMENT_LINES : ""}
       </div>${campMoneyHtml}`
     : "";
@@ -382,11 +382,11 @@ export async function sendCancellationNotification(data: {
     if (refundResult) {
       if (refundResult.failed) return "refund FAILED — needs manual action";
       const parts: string[] = [];
-      if (refundResult.refundedAmount > 0) parts.push(`$${refundResult.refundedAmount} refunded to their card`);
-      if (refundResult.creditedAmount > 0) parts.push(`$${refundResult.creditedAmount} credited to their account`);
+      if (refundResult.refundedAmount > 0) parts.push(`$${fmtMoney(refundResult.refundedAmount)} refunded to their card`);
+      if (refundResult.creditedAmount > 0) parts.push(`$${fmtMoney(refundResult.creditedAmount)} credited to their account`);
       return parts.join(", ");
     }
-    return plainCredit !== undefined && plainCredit > 0 ? `$${plainCredit} credited to their account` : "";
+    return plainCredit !== undefined && plainCredit > 0 ? `$${fmtMoney(plainCredit)} credited to their account` : "";
   }
   const adminCancelSummary = adminMoneySummary(data.stripeRefundResult, data.cancelCredit);
   const adminCampSummary = data.campAdjustment?.isPaid
@@ -402,9 +402,9 @@ export async function sendCancellationNotification(data: {
       <h2>${isPickupCancel ? "Pickup " : ""}Session Cancelled</h2>
       <p><strong>Parent:</strong> ${data.parentName}</p>
       <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails)}</p>
-      ${data.isLateCancel && !data.campAdjustment && !somethingWasAttempted ? `<p><strong>⚠️ Late cancellation (within 24h) — 50% fee ($${lateFee}) applies</strong></p>` : ""}
+      ${data.isLateCancel && !data.campAdjustment && !somethingWasAttempted ? `<p><strong>⚠️ Late cancellation (within 24h) — 50% fee ($${fmtMoney(lateFee)}) applies</strong></p>` : ""}
       ${!data.campAdjustment && adminCancelSummary ? `<p><strong>${adminCancelSummary}</strong>${data.isLateCancel ? " (late cancellation — 50% of what they paid)" : ""}</p>` : ""}
-      ${data.campAdjustment ? `<p><strong>New total: $${data.campAdjustment.finalAmount} (was $${data.campAdjustment.originalAmount}).</strong> ${data.campAdjustment.isPaid ? adminCampSummary : `Due: $${data.campAdjustment.finalAmount}`}</p>` : ""}
+      ${data.campAdjustment ? `<p><strong>New total: $${fmtMoney(data.campAdjustment.finalAmount)} (was $${fmtMoney(data.campAdjustment.originalAmount)}).</strong> ${data.campAdjustment.isPaid ? adminCampSummary : `Due: $${fmtMoney(data.campAdjustment.finalAmount)}`}</p>` : ""}
     `,
   });
 
@@ -444,11 +444,11 @@ export async function sendNoShowNotification(data: {
   const resend = getResend();
   const alreadyPaidNote = data.wasPaid
     ? `<p style="background: #1e3a5f; color: #ffffff; padding: 14px; border-radius: 8px; margin: 12px 0;">
-        Per our no-show policy, your <strong>$${data.feeAmount} payment is being kept</strong> as the session fee — no refund applies. Nothing further is due.
+        Per our no-show policy, your <strong>$${fmtMoney(data.feeAmount)} payment is being kept</strong> as the session fee — no refund applies. Nothing further is due.
       </p>`
     : `<p style="background: #3b1515; color: #fca5a5; padding: 14px; border-radius: 8px; margin: 12px 0;">
         Per our policy, <strong>no-shows without prior notice are charged the full session fee</strong>.<br/>
-        <strong>Amount due: $${data.feeAmount}</strong>
+        <strong>Amount due: $${fmtMoney(data.feeAmount)}</strong>
       </p>`;
 
   // Email to Artemi
@@ -460,7 +460,7 @@ export async function sendNoShowNotification(data: {
       <h2>No-Show Recorded</h2>
       <p><strong>Parent:</strong> ${data.parentName}</p>
       <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails)}</p>
-      <p><strong>${data.wasPaid ? "Already paid — fee kept" : "Full fee due"}:</strong> $${data.feeAmount}</p>
+      <p><strong>${data.wasPaid ? "Already paid — fee kept" : "Full fee due"}:</strong> $${fmtMoney(data.feeAmount)}</p>
     `,
   });
 
@@ -527,7 +527,7 @@ export async function sendPackageConfirmation(data: {
       <p><strong>Phone:</strong> ${data.phone}</p>
       <p><strong>Package:</strong> ${data.packageType} sessions / month</p>
       <p><strong>Month:</strong> ${monthLabel}</p>
-      <p><strong>Charged:</strong> $${totalWithFee} ($${data.totalPrice} + ${SERVICE_FEE_LABEL} fee)</p>
+      <p><strong>Charged:</strong> $${fmtMoney(totalWithFee)}</p>
       ${data.kids ? `<p><strong>Player(s):</strong> ${data.kids}</p>` : ""}
       ${data.referralCode ? `<p><strong>Referral Code:</strong> ${data.referralCode}</p>` : ""}
     `,
@@ -548,7 +548,7 @@ export async function sendPackageConfirmation(data: {
         <li><strong>Month:</strong> ${monthLabel}</li>
         <li><strong>Sessions expire:</strong> ${expiry} — unused sessions do not carry over</li>
       </ul>
-      <p style="background: #162d5a; color: #d4af37; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">Charged to your card: $${totalWithFee} ($${data.totalPrice} + ${SERVICE_FEE_LABEL} service fee)</p>
+      <p style="background: #162d5a; color: #d4af37; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">Charged to your card: $${fmtMoney(totalWithFee)}</p>
       <p>Your next ${data.packageType} private session bookings this month are already covered — nothing further will be charged when you book them at <a href="${BASE_URL}/schedule" style="color: #d4af37; font-weight: bold;">mesabasketballtraining.com/schedule</a>, up to your package total.</p>
       <h3>Cancellation &amp; Rescheduling Policy</h3>
       <p>Cancellations and reschedules within 24 hours of a scheduled session incur a <strong>$75 fee</strong> (50% of the standard $150 private rate). <strong>No-shows without prior notice will be charged the full session fee.</strong></p>
@@ -629,14 +629,14 @@ export async function sendPlayerUpdateNotification(data: {
   const lateBlock = data.isLate && data.removedPlayers.length > 0
     ? `<div style="background:#7c1d1d;border-left:4px solid #ef4444;border-radius:6px;padding:14px 16px;margin:16px 0;">
         <p style="margin:0 0 6px 0;font-size:15px;font-weight:bold;color:#fff;">⚠️ Late Removal — Fee Applies</p>
-        <p style="margin:0;color:#fff;font-size:14px;">This player was removed within 24 hours of the session. Per our policy${data.lateFeeDue ? `, a fee of <strong>$${data.lateFeeDue}</strong> is still due` : ", a late cancellation fee still applies"}.</p>
+        <p style="margin:0;color:#fff;font-size:14px;">This player was removed within 24 hours of the session. Per our policy${data.lateFeeDue ? `, a fee of <strong>$${fmtMoney(data.lateFeeDue)}</strong> is still due` : ", a late cancellation fee still applies"}.</p>
         ${PAYMENT_LINES}
       </div>`
     : "";
 
   const priceBlock = data.priceChanged && data.newPrice !== null
     ? `<p style="background:#162d5a;padding:12px;border-radius:8px;color:#fff;">
-        <strong style="color:#d4af37;">Updated Session Rate: $${data.newPrice}</strong>
+        <strong style="color:#d4af37;">Updated Session Rate: $${fmtMoney(data.newPrice)}</strong>
         ${data.isLate && (data.sessionType === "private" || data.sessionType === "group-private")
           ? `<br/><span style="font-size:13px;opacity:0.85;">Because this change was made within 24 hours, only half the price difference was applied.</span>`
           : ""}
@@ -653,8 +653,8 @@ export async function sendPlayerUpdateNotification(data: {
       <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails)}</p>
       ${removedList}${addedList}
       <p><strong>Current Players:</strong> ${data.newKids}</p>
-      ${data.priceChanged ? `<p><strong>Price:</strong> $${data.oldPrice ?? "—"} → $${data.newPrice ?? "—"}</p>` : ""}
-      ${data.isLate && data.removedPlayers.length > 0 ? `<p style="color:#ef4444;"><strong>⚠️ Late removal${data.lateFeeDue ? ` — $${data.lateFeeDue} fee due` : ""}</strong></p>` : ""}
+      ${data.priceChanged ? `<p><strong>Price:</strong> $${data.oldPrice != null ? fmtMoney(data.oldPrice) : "—"} → $${data.newPrice != null ? fmtMoney(data.newPrice) : "—"}</p>` : ""}
+      ${data.isLate && data.removedPlayers.length > 0 ? `<p style="color:#ef4444;"><strong>⚠️ Late removal${data.lateFeeDue ? ` — $${fmtMoney(data.lateFeeDue)} fee due` : ""}</strong></p>` : ""}
     `,
   });
 
@@ -807,15 +807,15 @@ export async function sendRescheduleNotification(data: {
   const lateFeeNote = data.isLateReschedule && !data.priceAdjustment && !data.lateFeeCredited
     ? `<div style="background: #7c1d1d; border-left: 4px solid #ef4444; border-radius: 6px; padding: 14px 16px; margin: 16px 0;">
         <p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #ffffff;">⚠️ Late Fee</p>
-        <p style="margin: 0; color: #ffffff; font-size: 14px;">This reschedule was made within 24 hours of the session. Per our policy, a <strong>50% fee${data.lateFeeAmount ? ` of $${data.lateFeeAmount}` : ""}</strong> is still due.</p>
+        <p style="margin: 0; color: #ffffff; font-size: 14px;">This reschedule was made within 24 hours of the session. Per our policy, a <strong>50% fee${data.lateFeeAmount ? ` of $${fmtMoney(data.lateFeeAmount)}` : ""}</strong> is still due.</p>
         ${PAYMENT_LINES}
       </div>`
     : "";
   function refundAdjustmentBody(adj: { refundedAmount: number; creditedAmount: number; failed: boolean }): string {
     if (adj.failed) return "Your refund is being processed — you'll receive a separate confirmation once it's complete.";
     const parts: string[] = [];
-    if (adj.refundedAmount > 0) parts.push(`<strong>$${adj.refundedAmount}</strong> has been refunded to your original payment method`);
-    if (adj.creditedAmount > 0) parts.push(`<strong>$${adj.creditedAmount}</strong> has been credited to your account`);
+    if (adj.refundedAmount > 0) parts.push(`<strong>$${fmtMoney(adj.refundedAmount)}</strong> has been refunded to your original payment method`);
+    if (adj.creditedAmount > 0) parts.push(`<strong>$${fmtMoney(adj.creditedAmount)}</strong> has been credited to your account`);
     return parts.length > 0 ? `${parts.join(", ")} (new session is lower-priced).` : "";
   }
   const leftoverLateFeeCredit = Math.max(0, (data.lateFeeCredited || 0) - (data.lateFeeCreditApplied || 0));
@@ -825,15 +825,15 @@ export async function sendRescheduleNotification(data: {
         <p style="margin: 0; color: #ffffff; font-size: 14px;">${data.priceAdjustment.kind === "refund"
           ? refundAdjustmentBody(data.priceAdjustment)
           : data.isLateReschedule
-            ? `50% of your original payment${data.lateFeeCredited ? ` ($${data.lateFeeCredited})` : ""} was kept as a late reschedule fee${data.lateFeeCreditApplied ? `, <strong>$${data.lateFeeCreditApplied}</strong> of which was applied directly to your new session` : ""}, and <strong>$${Math.round((data.priceAdjustment.amount + SERVICE_FEE) * 100) / 100}</strong> ($${data.priceAdjustment.amount} + ${SERVICE_FEE_LABEL} service fee) was charged to cover the rest.`
-            : `<strong>$${Math.round((data.priceAdjustment.amount + SERVICE_FEE) * 100) / 100}</strong> ($${data.priceAdjustment.amount} + ${SERVICE_FEE_LABEL} service fee) was charged to complete your reschedule (new session is higher-priced).`}</p>
+            ? `50% of your original payment${data.lateFeeCredited ? ` ($${fmtMoney(data.lateFeeCredited)})` : ""} was kept as a late reschedule fee${data.lateFeeCreditApplied ? `, <strong>$${fmtMoney(data.lateFeeCreditApplied)}</strong> of which was applied directly to your new session` : ""}, and <strong>$${fmtMoney(data.priceAdjustment.amount + SERVICE_FEE)}</strong> was charged to cover the rest.`
+            : `<strong>$${fmtMoney(data.priceAdjustment.amount + SERVICE_FEE)}</strong> was charged to complete your reschedule (new session is higher-priced).`}</p>
       </div>`
     : !data.priceAdjustment && data.lateFeeCredited
       ? `<div style="background: #1e3a5f; border-left: 4px solid #3b82f6; border-radius: 6px; padding: 14px 16px; margin: 16px 0;">
           <p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #ffffff;">Account Credit</p>
           <p style="margin: 0; color: #ffffff; font-size: 14px;">${data.lateFeeCreditApplied
-            ? `<strong>$${data.lateFeeCreditApplied}</strong> of your late reschedule fee credit was applied directly to your new session — fully covering it, nothing further charged.${leftoverLateFeeCredit > 0 ? ` The remaining <strong>$${leftoverLateFeeCredit}</strong> is in your account balance for next time.` : ""}`
-            : `<strong>$${data.lateFeeCredited}</strong> has been credited to your account (50% of what you paid — this was a late reschedule, so the other half isn't refunded per our policy).`}</p>
+            ? `<strong>$${fmtMoney(data.lateFeeCreditApplied)}</strong> of your late reschedule fee credit was applied directly to your new session — fully covering it, nothing further charged.${leftoverLateFeeCredit > 0 ? ` The remaining <strong>$${fmtMoney(leftoverLateFeeCredit)}</strong> is in your account balance for next time.` : ""}`
+            : `<strong>$${fmtMoney(data.lateFeeCredited)}</strong> has been credited to your account (50% of what you paid — this was a late reschedule, so the other half isn't refunded per our policy).`}</p>
         </div>`
       : "";
 
@@ -850,12 +850,12 @@ export async function sendRescheduleNotification(data: {
       ${data.newTrainer ? `<p><strong>Trainer:</strong> ${data.newTrainer}</p>` : ""}
       ${data.priceAdjustment
         ? data.priceAdjustment.kind === "refund"
-          ? `<p><strong>${data.priceAdjustment.failed ? "REFUND FAILED — needs manual action" : [data.priceAdjustment.refundedAmount > 0 ? `$${data.priceAdjustment.refundedAmount} refunded` : "", data.priceAdjustment.creditedAmount > 0 ? `$${data.priceAdjustment.creditedAmount} credited` : ""].filter(Boolean).join(", ")}</strong></p>`
-          : `<p><strong>Charged: $${Math.round((data.priceAdjustment.amount + SERVICE_FEE) * 100) / 100}</strong> ($${data.priceAdjustment.amount} + ${SERVICE_FEE_LABEL} fee)${data.lateFeeCreditApplied ? ` (plus $${data.lateFeeCreditApplied} late-fee credit applied)` : ""}</p>`
+          ? `<p><strong>${data.priceAdjustment.failed ? "REFUND FAILED — needs manual action" : [data.priceAdjustment.refundedAmount > 0 ? `$${fmtMoney(data.priceAdjustment.refundedAmount)} refunded` : "", data.priceAdjustment.creditedAmount > 0 ? `$${fmtMoney(data.priceAdjustment.creditedAmount)} credited` : ""].filter(Boolean).join(", ")}</strong></p>`
+          : `<p><strong>Charged: $${fmtMoney(data.priceAdjustment.amount + SERVICE_FEE)}</strong>${data.lateFeeCreditApplied ? ` (plus $${fmtMoney(data.lateFeeCreditApplied)} late-fee credit applied)` : ""}</p>`
         : data.lateFeeCredited
           ? data.lateFeeCreditApplied
-            ? `<p><strong>$${data.lateFeeCreditApplied} late-fee credit applied to new session</strong>${leftoverLateFeeCredit > 0 ? ` ($${leftoverLateFeeCredit} left in account)` : ""}</p>`
-            : `<p><strong>$${data.lateFeeCredited} credited to their account</strong> (late reschedule — 50% of what they paid)</p>`
+            ? `<p><strong>$${fmtMoney(data.lateFeeCreditApplied)} late-fee credit applied to new session</strong>${leftoverLateFeeCredit > 0 ? ` ($${fmtMoney(leftoverLateFeeCredit)} left in account)` : ""}</p>`
+            : `<p><strong>$${fmtMoney(data.lateFeeCredited)} credited to their account</strong> (late reschedule — 50% of what they paid)</p>`
           : ""}
       ${lateFeeNote}
     `,
@@ -898,7 +898,7 @@ export async function sendAbandonedCheckoutEmail(data: {
 }) {
   const resend = getResend();
   const sessionsHtml = data.sessions
-    .map((s) => `<p style="margin:4px 0;">${formatSessionDetailsForEmail(s.sessionDetails)}${s.sessionPrice ? ` — $${s.sessionPrice}` : ""}</p>`)
+    .map((s) => `<p style="margin:4px 0;">${formatSessionDetailsForEmail(s.sessionDetails)}${s.sessionPrice ? ` — $${fmtMoney(s.sessionPrice)}` : ""}</p>`)
     .join("");
   await resend.emails.send({
     from: FROM_EMAIL,

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { authClient } from "@/lib/auth";
+import { fmtMoney } from "@/lib/pricing";
 
 const LOCATION_NAMES: Record<string, string> = {
   "St. Pauls": "St. Paul's Cathedral",
@@ -130,8 +131,8 @@ export default function MyBookings() {
           message: data.refundFailed
             ? "Your package has been cancelled. Your refund is being processed — you'll get a separate confirmation once it's complete."
             : data.creditedAmount > 0
-              ? `Your package has been cancelled and $${data.creditedAmount} has been credited to your account (the $4.50 service fee isn't refundable).`
-              : `Your package has been cancelled and $${data.refundedAmount} has been refunded to your original payment method (the $4.50 service fee isn't refundable).`,
+              ? `Your package has been cancelled and $${fmtMoney(data.creditedAmount)} has been credited to your account (the $4.50 service fee isn't refundable).`
+              : `Your package has been cancelled and $${fmtMoney(data.refundedAmount)} has been refunded to your original payment method (the $4.50 service fee isn't refundable).`,
         });
         setActivePackage(null);
       } else {

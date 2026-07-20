@@ -4,6 +4,7 @@ import { ADMIN_EMAIL } from "@/lib/auth";
 import { sendNoShowNotification } from "@/lib/email";
 import { sendSMS, sendAdminSMS } from "@/lib/sms";
 import { countPackageSessionsUsed, setPackageSessions } from "@/lib/supabase";
+import { fmtMoney } from "@/lib/pricing";
 
 async function verifyAdmin(req: NextRequest) {
   const token = req.headers.get("authorization")?.replace("Bearer ", "");
@@ -110,11 +111,11 @@ export async function POST(req: NextRequest) {
   if (reg.sms_consent && reg.phone) {
     const noShowLabel = reg.session_details.split(" — ")[0] || "session";
     const message = wasPaid
-      ? `Mesa Basketball: You were marked as a no-show for today's ${noShowLabel}. Per our policy, your $${feeAmount} payment is being kept as the session fee — no refund applies, nothing further is due. Reply here with any questions. Reply STOP to opt out.`
-      : `Mesa Basketball: You were marked as a no-show for today's ${noShowLabel}. The full session fee of $${feeAmount} is due. Reply here with any questions. Reply STOP to opt out.`;
+      ? `Mesa Basketball: You were marked as a no-show for today's ${noShowLabel}. Per our policy, your $${fmtMoney(feeAmount)} payment is being kept as the session fee — no refund applies, nothing further is due. Reply here with any questions. Reply STOP to opt out.`
+      : `Mesa Basketball: You were marked as a no-show for today's ${noShowLabel}. The full session fee of $${fmtMoney(feeAmount)} is due. Reply here with any questions. Reply STOP to opt out.`;
     await sendSMS(reg.phone, message);
   }
-  await sendAdminSMS(`NO-SHOW: ${reg.parent_name} — ${reg.session_details} | ${wasPaid ? "Already paid — fee kept" : "Fee due"}: $${feeAmount}`);
+  await sendAdminSMS(`NO-SHOW: ${reg.parent_name} — ${reg.session_details} | ${wasPaid ? "Already paid — fee kept" : "Fee due"}: $${fmtMoney(feeAmount)}`);
 
   return NextResponse.json({ ok: true, feeAmount, wasPaid });
 }

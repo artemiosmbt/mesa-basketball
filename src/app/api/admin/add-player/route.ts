@@ -10,7 +10,7 @@ import {
 import { sendAdminSMS, sendSMS } from "@/lib/sms";
 import { getWeeklySchedule } from "@/lib/sheets";
 import { resolveOffSessionPaymentSource, chargeSavedCardOffSession, issueStripeRefund } from "@/lib/booking-finalize";
-import { SERVICE_FEE, SERVICE_FEE_LABEL } from "@/lib/pricing";
+import { SERVICE_FEE, SERVICE_FEE_LABEL, fmtMoney } from "@/lib/pricing";
 
 async function verifyAdmin(req: NextRequest) {
   const token = req.headers.get("authorization")?.replace("Bearer ", "");
@@ -223,11 +223,11 @@ export async function POST(req: NextRequest) {
     const priceNote = newFullPrice === null
       ? ""
       : creditGranted > 0
-        ? ` $${oldAmount} -> $${newAmount}, $${creditGranted} credited for their next booking.`
+        ? ` $${fmtMoney(oldAmount)} -> $${fmtMoney(newAmount)}, $${fmtMoney(creditGranted)} credited for their next booking.`
         : autoChargedAmount > 0
-          ? ` $${oldAmount} -> $${newAmount}, $${Math.round((autoChargedAmount + SERVICE_FEE) * 100) / 100} ($${autoChargedAmount} + ${SERVICE_FEE_LABEL} fee) charged to the card on file.`
+          ? ` $${fmtMoney(oldAmount)} -> $${fmtMoney(newAmount)}, $${fmtMoney(autoChargedAmount + SERVICE_FEE)} charged to the card on file.`
           : priceDelta !== 0
-            ? ` $${oldAmount} -> $${newAmount}.`
+            ? ` $${fmtMoney(oldAmount)} -> $${fmtMoney(newAmount)}.`
             : "";
     if (reg.sms_consent && reg.phone) {
       await sendSMS(

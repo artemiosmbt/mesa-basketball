@@ -8,3 +8,10 @@
 // fully covered by a discount or account credit).
 export const SERVICE_FEE = 4.5;
 export const SERVICE_FEE_LABEL = `$${SERVICE_FEE.toFixed(2)}`;
+
+// Always renders a dollar amount with two decimal places (e.g. 154.5 ->
+// "154.50") — used anywhere a price appears in client-facing copy so it
+// never looks truncated/wrong next to genuinely-even amounts like "$150".
+export function fmtMoney(n: number): string {
+  return n.toFixed(2);
+}

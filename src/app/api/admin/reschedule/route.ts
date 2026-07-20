@@ -11,7 +11,7 @@ import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@
 import { getWeeklySchedule } from "@/lib/sheets";
 import { addAccountCredit, deductAccountCredit, addReferralCredit, logLateFeeEvent } from "@/lib/supabase";
 import { isLateAction, resolveOffSessionPaymentSource, chargeSavedCardOffSession } from "@/lib/booking-finalize";
-import { SERVICE_FEE, SERVICE_FEE_LABEL } from "@/lib/pricing";
+import { SERVICE_FEE, SERVICE_FEE_LABEL, fmtMoney } from "@/lib/pricing";
 
 async function verifyAdmin(req: NextRequest) {
   const token = req.headers.get("authorization")?.replace("Bearer ", "");
@@ -389,15 +389,15 @@ export async function POST(req: NextRequest) {
   // part of the shared template) since only this admin flow needs to say
   // "no change" vs "credited" vs "due".
   const priceNote = chargeLateFee
-    ? `\nLate reschedule fee: $${lateFeeCredited} (50% of what you paid) credited to your account${lateFeeCreditApplied > 0 ? `, $${lateFeeCreditApplied} applied to your new session` : ""}.${autoChargedAmount > 0 ? ` $${Math.round((autoChargedAmount + SERVICE_FEE) * 100) / 100} ($${autoChargedAmount} + ${SERVICE_FEE_LABEL} fee) was charged to your card on file to cover the rest.` : ""}`
+    ? `\nLate reschedule fee: $${fmtMoney(lateFeeCredited)} (50% of what you paid) credited to your account${lateFeeCreditApplied > 0 ? `, $${fmtMoney(lateFeeCreditApplied)} applied to your new session` : ""}.${autoChargedAmount > 0 ? ` $${fmtMoney(autoChargedAmount + SERVICE_FEE)} was charged to your card on file to cover the rest.` : ""}`
     : newFullPrice === undefined
       ? ""
       : creditGranted > 0
-        ? `\n$${oldAmount} → $${newAmount}. $${creditGranted} credited to your account for your next booking.`
+        ? `\n$${fmtMoney(oldAmount)} → $${fmtMoney(newAmount)}. $${fmtMoney(creditGranted)} credited to your account for your next booking.`
         : autoChargedAmount > 0
-          ? `\n$${oldAmount} → $${newAmount}. $${Math.round((autoChargedAmount + SERVICE_FEE) * 100) / 100} ($${autoChargedAmount} + ${SERVICE_FEE_LABEL} fee) was charged to your card on file.`
+          ? `\n$${fmtMoney(oldAmount)} → $${fmtMoney(newAmount)}. $${fmtMoney(autoChargedAmount + SERVICE_FEE)} was charged to your card on file.`
           : priceDelta !== 0
-            ? `\n$${oldAmount} → $${newAmount}.`
+            ? `\n$${fmtMoney(oldAmount)} → $${fmtMoney(newAmount)}.`
             : "";
   const creditRefundNote = creditRefunded ? "\nYour referral credit was refunded since it's no longer applied to this booking." : "";
 
@@ -429,18 +429,18 @@ export async function POST(req: NextRequest) {
       );
     }
     const adminPriceNote = chargeLateFee
-      ? `\nLate fee charged: $${lateFeeCredited} credited (50% of $${oldAmount} paid)${lateFeeCreditApplied > 0 ? `, $${lateFeeCreditApplied} applied to new session ($${newAmount})` : ""}.${autoChargedAmount > 0 ? ` $${Math.round((autoChargedAmount + SERVICE_FEE) * 100) / 100} auto-charged to their card on file (${autoChargePaymentIntentId}).` : ""}`
+      ? `\nLate fee charged: $${fmtMoney(lateFeeCredited)} credited (50% of $${fmtMoney(oldAmount)} paid)${lateFeeCreditApplied > 0 ? `, $${fmtMoney(lateFeeCreditApplied)} applied to new session ($${fmtMoney(newAmount)})` : ""}.${autoChargedAmount > 0 ? ` $${fmtMoney(autoChargedAmount + SERVICE_FEE)} auto-charged to their card on file (${autoChargePaymentIntentId}).` : ""}`
       : newFullPrice === undefined
         ? ""
         : creditGranted > 0
-          ? `\n$${oldAmount} -> $${newAmount}: $${creditGranted} credited to their account (already paid)`
+          ? `\n$${fmtMoney(oldAmount)} -> $${fmtMoney(newAmount)}: $${fmtMoney(creditGranted)} credited to their account (already paid)`
           : autoChargedAmount > 0
-            ? `\n$${oldAmount} -> $${newAmount}: $${Math.round((autoChargedAmount + SERVICE_FEE) * 100) / 100} auto-charged to their card on file (${autoChargePaymentIntentId}).`
+            ? `\n$${fmtMoney(oldAmount)} -> $${fmtMoney(newAmount)}: $${fmtMoney(autoChargedAmount + SERVICE_FEE)} auto-charged to their card on file (${autoChargePaymentIntentId}).`
             : priceDelta !== 0
-              ? `\nPrice: $${oldAmount} -> $${newAmount}`
+              ? `\nPrice: $${fmtMoney(oldAmount)} -> $${fmtMoney(newAmount)}`
               : "";
     const adminCreditRefundNote = creditRefunded ? "\nReferral credit refunded (no longer applied)." : "";
-    const priceLookupFailedNote = priceLookupFailed ? `\n⚠️ Couldn't verify the new price on the schedule sheet — price left at $${reg.session_price}, double-check it manually.` : "";
+    const priceLookupFailedNote = priceLookupFailed ? `\n⚠️ Couldn't verify the new price on the schedule sheet — price left at $${fmtMoney(reg.session_price ?? 0)}, double-check it manually.` : "";
     await sendAdminSMS(`ADMIN RESCHEDULED: ${reg.parent_name}\nFrom: ${oldSessionDetails}\nTo: ${newSessionDetails}\nPlayers: ${reg.kids}${adminPriceNote}${adminCreditRefundNote}${priceLookupFailedNote}`);
   } catch (err) {
     console.error("Notification error (admin reschedule):", err);

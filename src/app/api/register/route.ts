@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getStripe } from "@/lib/stripe";
-import { SERVICE_FEE } from "@/lib/pricing";
+import { SERVICE_FEE, fmtMoney } from "@/lib/pricing";
 import { getWeeklySchedule, getCamps } from "@/lib/sheets";
 import {
   finalizeConfirmedPrivateBooking,
@@ -503,7 +503,7 @@ export async function POST(req: NextRequest) {
         campReferrer,
         submittedReferralCode: submittedReferralCode || undefined,
         smsConsent: !!smsConsent,
-        campTotalPrice: `$${campTotalNum}`,
+        campTotalPrice: `$${fmtMoney(campTotalNum)}`,
         campTotalNum,
         campCreditApplied,
         sessionPrice: firstDayPrice,
@@ -535,7 +535,7 @@ export async function POST(req: NextRequest) {
           referrer_email: campReferrer?.email || "",
           referrer_name: campReferrer?.name || "",
           submitted_referral_code: submittedReferralCode || "",
-          total_price: `$${campTotalNum}`,
+          total_price: `$${fmtMoney(campTotalNum)}`,
           camp_grade_group: firstSession.gradeGroup || "",
         },
         line_items: [

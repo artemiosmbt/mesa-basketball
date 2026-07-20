@@ -19,7 +19,7 @@ import {
 } from "@/lib/supabase";
 import { issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome, isLateAction, parseSessionDateTimeET } from "@/lib/booking-finalize";
 import { getStripe } from "@/lib/stripe";
-import { SERVICE_FEE } from "@/lib/pricing";
+import { SERVICE_FEE, fmtMoney } from "@/lib/pricing";
 import {
   sendCancellationNotification,
   sendRescheduleNotification,
@@ -364,11 +364,11 @@ export async function DELETE(
       const moneyOutcome = isPaid ? describeMoneyOutcome(stripeRefundResult, creditGranted, false, false) : "";
       const adjustmentLine = isPaid
         ? (moneyOutcome ? ` ${moneyOutcome}.` : "")
-        : ` Amount due: $${finalAmount}.`;
-      await sendSMS(reg.phone, `Mesa Basketball: ${campName} — ${formatDateWithDay(reg.booked_date || "")} cancelled. New total: $${finalAmount} (was $${originalAmount}).${adjustmentLine}\nReply STOP to opt out.`);
+        : ` Amount due: $${fmtMoney(finalAmount)}.`;
+      await sendSMS(reg.phone, `Mesa Basketball: ${campName} — ${formatDateWithDay(reg.booked_date || "")} cancelled. New total: $${fmtMoney(finalAmount)} (was $${fmtMoney(originalAmount)}).${adjustmentLine}\nReply STOP to opt out.`);
     }
     const adminMoneyOutcome = isPaid ? describeMoneyOutcome(stripeRefundResult, creditGranted, false, true) : "";
-    await sendAdminSMS(`CAMP DAY CANCELLED: ${reg.parent_name}\n${campName} — ${reg.booked_date}\nNew total: $${finalAmount} (was $${originalAmount})${isPaid ? (adminMoneyOutcome ? ` — ${adminMoneyOutcome}` : "") : ` — due: $${finalAmount}`}`);
+    await sendAdminSMS(`CAMP DAY CANCELLED: ${reg.parent_name}\n${campName} — ${reg.booked_date}\nNew total: $${fmtMoney(finalAmount)} (was $${fmtMoney(originalAmount)})${isPaid ? (adminMoneyOutcome ? ` — ${adminMoneyOutcome}` : "") : ` — due: $${fmtMoney(finalAmount)}`}`);
 
     if (reg.booked_date && reg.booked_start_time) {
       try {
@@ -603,7 +603,7 @@ export async function DELETE(
     const moneyOutcome = wasPaid ? describeMoneyOutcome(stripeRefundResult, cancelCredit, isLateCancel, false) : "";
     const lateNote = reg.package_id
       ? (packageLateFeeCheckoutUrl
-          ? `\nLate cancellation fee: $${Math.round(((packageLateFeeAmount || 0) + SERVICE_FEE) * 100) / 100}. Finish payment here: ${packageLateFeeCheckoutUrl}`
+          ? `\nLate cancellation fee: $${fmtMoney((packageLateFeeAmount || 0) + SERVICE_FEE)}. Finish payment here: ${packageLateFeeCheckoutUrl}`
           : isLateCancel ? "\nA late cancellation fee applies — we'll be in touch." : "\nYour package session is available for you to rebook.")
       : wasPaid
         ? (moneyOutcome ? `\n${moneyOutcome}.` : "\nNothing additional is due — your account credit already covered this.")
@@ -613,7 +613,7 @@ export async function DELETE(
   const adminMoneyOutcome = describeMoneyOutcome(stripeRefundResult, cancelCredit, isLateCancel, true);
   const adminPackageNote = reg.package_id
     ? packageLateFeeCheckoutUrl
-      ? `\nPackage session — late fee checkout sent: $${Math.round(((packageLateFeeAmount || 0) + SERVICE_FEE) * 100) / 100}`
+      ? `\nPackage session — late fee checkout sent: $${fmtMoney((packageLateFeeAmount || 0) + SERVICE_FEE)}`
       : "\nPackage session — on-time, no fee, slot freed"
     : "";
   await sendAdminSMS(`CANCELLED: ${reg.parent_name}\n${cancelSessionDetails}${isLateCancel ? " (late)" : ""}${adminMoneyOutcome ? `\n${adminMoneyOutcome}` : ""}${adminPackageNote}\nPlayers: ${reg.kids}`);
@@ -769,7 +769,7 @@ export async function PATCH(
       removedPlayers.length > 0 ? `Removed: ${removedPlayers.join(", ")}` : "",
     ].filter(Boolean).join(" | ");
     const sessionLabel = reg.session_details.split(" — ")[0] || reg.session_details;
-    const priceNote = priceChanged ? ` | New price: $${newPrice}` : "";
+    const priceNote = priceChanged ? ` | New price: $${newPrice != null ? fmtMoney(newPrice) : "—"}` : "";
     await sendAdminSMS(`PLAYERS UPDATED (${sessionLabel}): ${reg.parent_name}\n${changeNote || "Roster order/details changed"}\nNow: ${newKidsStr}${priceNote}`);
   } catch (err) {
     console.error("Player update email/SMS error:", err);
@@ -1263,25 +1263,25 @@ export async function PUT(
     const rescheduleLabel = newSessionDetails.split(" — ")[0] || "Session";
     const lateNote = reg.package_id
       ? (packageLateFeeCheckoutUrl
-          ? `\nLate reschedule fee: $${packageFeeTotal}. Finish payment here: ${packageLateFeeCheckoutUrl}`
+          ? `\nLate reschedule fee: $${fmtMoney(packageFeeTotal!)}. Finish payment here: ${packageLateFeeCheckoutUrl}`
           : isLateReschedule ? "\nA late reschedule fee applies — we'll be in touch." : "")
       : isLateReschedule && !priceReconciliation && !lateFeeCredited ? "\nA late reschedule fee applies." : "";
     const creditNote = lateFeeCreditApplied > 0
-      ? `\n$${lateFeeCreditApplied} of your late fee credit covered your new session${leftoverLateFeeCredit > 0 ? ` ($${leftoverLateFeeCredit} left in your account)` : ""} — nothing further charged.`
+      ? `\n$${fmtMoney(lateFeeCreditApplied)} of your late fee credit covered your new session${leftoverLateFeeCredit > 0 ? ` ($${fmtMoney(leftoverLateFeeCredit)} left in your account)` : ""} — nothing further charged.`
       : lateFeeCredited > 0
-        ? `\n$${lateFeeCredited} credited to your account (late reschedule fee).`
+        ? `\n$${fmtMoney(lateFeeCredited)} credited to your account (late reschedule fee).`
         : "";
     const refundNote = refundOutcomeText ? `\n${refundOutcomeText}.` : "";
     await sendSMS(reg.phone, `Mesa Basketball: ${rescheduleLabel} rescheduled!\n${formatDateWithDay(bookedDate)} | ${bookedStartTime}-${bookedEndTime}\nLocation: ${resolveLocationName(bookedLocation)}${rescheduleTrainerLine}\nAthlete: ${kidsToUse}${lateNote}${creditNote}${refundNote}\nManage: mesabasketballtraining.com/booking/${newToken}\nReply STOP to opt out.`);
   }
   const adminCreditNote = lateFeeCreditApplied > 0
-    ? `\n$${lateFeeCreditApplied} late-fee credit applied to new session${leftoverLateFeeCredit > 0 ? ` ($${leftoverLateFeeCredit} left in account)` : ""}`
+    ? `\n$${fmtMoney(lateFeeCreditApplied)} late-fee credit applied to new session${leftoverLateFeeCredit > 0 ? ` ($${fmtMoney(leftoverLateFeeCredit)} left in account)` : ""}`
     : lateFeeCredited > 0
-      ? `\n$${lateFeeCredited} credited (late fee)`
+      ? `\n$${fmtMoney(lateFeeCredited)} credited (late fee)`
       : "";
   const adminPackageNote = reg.package_id
     ? packageLateFeeCheckoutUrl
-      ? `\nPackage session — late fee checkout sent: $${packageFeeTotal}`
+      ? `\nPackage session — late fee checkout sent: $${fmtMoney(packageFeeTotal!)}`
       : "\nPackage session — slot moved, no fee"
     : "";
   await sendAdminSMS(`RESCHEDULED: ${newParentName}\nFrom: ${reg.session_details}\nTo: ${newSessionDetails}${rescheduleTrainerLine}\nPlayers: ${kidsToUse}${refundOutcomeAdminText ? `\n${refundOutcomeAdminText}` : ""}${adminCreditNote}${adminPackageNote}`);
