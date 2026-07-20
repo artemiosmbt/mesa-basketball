@@ -16,6 +16,7 @@ import {
   deductAccountCredit,
   attachStripeCheckoutSession,
   logLateFeeEvent,
+  recordCampDayRefund,
 } from "@/lib/supabase";
 import { issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome, isLateAction, parseSessionDateTimeET } from "@/lib/booking-finalize";
 import { getStripe } from "@/lib/stripe";
@@ -187,10 +188,17 @@ export async function DELETE(
       // fall back to account credit since there's no card to refund.
       const groupPaymentIntentId = reg.stripe_payment_intent_id || group.find((r) => r.stripe_payment_intent_id)?.stripe_payment_intent_id;
       const wasPaid = reg.is_paid || group.some((r) => r.is_paid) || !!groupPaymentIntentId;
+      // Every day in this group still carries the ORIGINAL full-camp
+      // session_price (cancelling a day never rewrites it) — so anything
+      // computed against it must net out whatever earlier individual
+      // day-cancellations in this same group already refunded/credited, or
+      // cancelling the last day would refund the ENTIRE original camp price
+      // all over again on top of those earlier partial refunds.
+      const priorRefundedTotal = group.reduce((sum, r) => sum + (r.camp_day_refund_issued || 0), 0);
       let cancelCredit = 0;
       let stripeRefundResult: { refundedAmount: number; creditedAmount: number; failed: boolean } | undefined;
       if (wasPaid && reg.email) {
-        const paidAmount = Math.max(0, resolvedSessionPrice(reg) - groupCredit);
+        const paidAmount = Math.max(0, resolvedSessionPrice(reg) - groupCredit - priorRefundedTotal);
         if (isLateCancel) {
           cancelCredit = Math.round(paidAmount * 0.5);
           if (cancelCredit > 0) await addAccountCredit(reg.email, cancelCredit).catch(() => {});
@@ -220,7 +228,7 @@ export async function DELETE(
         ? Math.round(Math.max(0, resolvedSessionPrice(reg) - groupCredit) * 0.5)
         : undefined;
       if (wasPaid && isLateCancel) {
-        const paidAmount = Math.max(0, resolvedSessionPrice(reg) - groupCredit);
+        const paidAmount = Math.max(0, resolvedSessionPrice(reg) - groupCredit - priorRefundedTotal);
         await logLateFeeEvent({
           registrationId: reg.id,
           parentName: reg.parent_name,
@@ -325,14 +333,20 @@ export async function DELETE(
     // the family never pays more than they would have by keeping the full week.
     const finalAmount = Math.min(originalAmount, recomputedPrice + priorAccruedFees + thisDayLateFee);
     const isPaid = !!reg.is_paid || !!reg.stripe_payment_intent_id;
-    const delta = finalAmount - originalAmount;
 
-    // If they already paid more than the new total, that difference goes
-    // back — a real Stripe refund when this day's charge went through
-    // Stripe (the late-fee math above is already baked into the amount, so
-    // there's no separate "late keeps it all" branch needed here), account
-    // credit for the old manual/cash path.
-    const creditGranted = isPaid && delta < 0 ? -delta : 0;
+    // How much has ALREADY been refunded/credited from previously-cancelled
+    // days in this same camp group — the incremental refund due right now is
+    // measured from there, never from the original full-camp price again.
+    // Diffing straight against originalAmount every time (the old bug) would
+    // re-refund ground already covered on every subsequent day cancelled:
+    // e.g. a $500/5-day camp cancelling one day at a time would compute
+    // "$500 -> $400" (refund $100), then "$500 -> $300" (refund $200) instead
+    // of the correct incremental $100 — a real, compounding over-refund.
+    const priorRefundedTotal = group
+      .filter((r) => r.status === "cancelled" && r.id !== reg.id)
+      .reduce((sum, r) => sum + (r.camp_day_refund_issued || 0), 0);
+    const effectiveAlreadyPaid = originalAmount - priorRefundedTotal;
+    const creditGranted = isPaid && effectiveAlreadyPaid > finalAmount ? effectiveAlreadyPaid - finalAmount : 0;
     let stripeRefundResult: { refundedAmount: number; creditedAmount: number; failed: boolean } | undefined;
     if (creditGranted > 0) {
       if (reg.stripe_payment_intent_id) {
@@ -346,6 +360,7 @@ export async function DELETE(
       } else {
         await addAccountCredit(reg.email, creditGranted);
       }
+      await recordCampDayRefund(token, creditGranted);
     }
 
     try {
@@ -396,7 +411,6 @@ export async function DELETE(
       finalAmount,
       originalAmount,
       isPaid,
-      delta,
       creditGranted,
     });
   }
@@ -501,6 +515,25 @@ export async function DELETE(
     packageLateFeeAmount = Math.round(liveFullPrice * 0.5 * 100) / 100;
     if (packageLateFeeAmount > 0) {
       try {
+        // Logged BEFORE the checkout exists, deliberately with no charged
+        // amount yet — this fee isn't real until the client actually pays
+        // it via the separate Checkout below. The event gets updated with
+        // the real amount only once the webhook confirms that payment
+        // (finalizePaidCheckoutSession's package_late_fee branch), so an
+        // abandoned checkout never shows up in the admin activity feed as
+        // money that was never actually collected.
+        const eventId = await logLateFeeEvent({
+          registrationId: reg.id,
+          parentName: reg.parent_name,
+          email: reg.email,
+          kids: reg.kids,
+          sessionType: reg.type,
+          sessionDetails: reg.session_details,
+          bookedDate: reg.booked_date,
+          bookedStartTime: reg.booked_start_time,
+          action: "cancel",
+          initiatedBy: "client",
+        });
         const stripe = getStripe();
         const origin = req.nextUrl.origin;
         const plainDetails = reg.session_details.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "").trim();
@@ -514,6 +547,7 @@ export async function DELETE(
             action: "cancel",
             parent_name: reg.parent_name,
             session_details: plainDetails,
+            late_fee_event_id: eventId || "",
           },
           line_items: [
             {
@@ -538,19 +572,6 @@ export async function DELETE(
           expires_at: Math.floor(Date.now() / 1000) + 30 * 60,
         });
         packageLateFeeCheckoutUrl = feeSession.url ?? undefined;
-        await logLateFeeEvent({
-          registrationId: reg.id,
-          parentName: reg.parent_name,
-          email: reg.email,
-          kids: reg.kids,
-          sessionType: reg.type,
-          sessionDetails: reg.session_details,
-          bookedDate: reg.booked_date,
-          bookedStartTime: reg.booked_start_time,
-          action: "cancel",
-          initiatedBy: "client",
-          amountChargedExtra: Math.round((packageLateFeeAmount + SERVICE_FEE) * 100) / 100,
-        });
       } catch (err) {
         console.error("Failed to create package late-cancellation fee checkout:", err);
       }
@@ -717,6 +738,11 @@ export async function PATCH(
   let newPrice: number | null = reg.session_price;
   let lateFeeDue: number | undefined;
   let priceChanged = false;
+  // A late weekly removal owes this as a SEPARATE fee on top of whatever the
+  // roster-size price change works out to (unlike private, where the late
+  // penalty is already baked directly into newPrice via the blended tier
+  // price below) — this is what actually gets collected via Stripe for it.
+  let additionalLateFee = 0;
   const isPrivate = reg.type === "private" || reg.type === "group-private";
 
   if (isPrivate && reg.booked_start_time && reg.booked_end_time) {
@@ -736,18 +762,116 @@ export async function PATCH(
       }
       priceChanged = true;
     }
-  } else if (reg.type === "weekly") {
-    const oldGroupPrice = reg.session_price ?? oldCount * 50;
-    const newGroupPrice = newCount * 50;
-    if (newGroupPrice !== oldGroupPrice) {
-      if (isLate && removedPlayers.length > 0) lateFeeDue = removedPlayers.length * 25;
-      newPrice = newGroupPrice;
-      priceChanged = true;
+  } else if (reg.type === "weekly" && reg.booked_group && reg.booked_date && reg.booked_start_time) {
+    // Live per-player price for THIS one session, looked up from the sheet
+    // — a flat $50/head estimate ignored the group's actual rate (e.g. a $30
+    // Pickup slot), the same bug class already fixed for reschedule. No
+    // volume-discount tier applies here — that discount is for booking
+    // several DIFFERENT sessions together in one order, not for how many
+    // players attend this one single session.
+    try {
+      const liveSessions = await getWeeklySchedule({ noCache: true });
+      const liveMatch = liveSessions.find((s) => s.group === reg.booked_group && s.date === reg.booked_date && s.startTime === reg.booked_start_time);
+      if (liveMatch) {
+        const newGroupPrice = Math.round(liveMatch.price * newCount * 100) / 100;
+        if (newGroupPrice !== reg.session_price) {
+          newPrice = newGroupPrice;
+          priceChanged = true;
+        }
+        if (isLate && removedPlayers.length > 0) {
+          lateFeeDue = removedPlayers.length * 25;
+          additionalLateFee = lateFeeDue;
+        }
+      } else {
+        console.error(`Player edit: couldn't find "${reg.booked_group}" on ${reg.booked_date} ${reg.booked_start_time} in the live sheet — price left unchanged. Verify manually.`);
+      }
+    } catch (err) {
+      console.error("Player edit: live price lookup failed — price left unchanged.", err);
     }
+  }
+
+  const wasPaid = !!reg.is_paid || !!reg.stripe_payment_intent_id;
+  const appliedCredit = reg.applied_account_credit || 0;
+  const oldAmount = Math.max(0, (reg.is_free ? Math.round((reg.session_price ?? 0) * 0.5) : (reg.session_price ?? 0)) - appliedCredit);
+  const newAmount = priceChanged
+    ? Math.max(0, (reg.is_free && isPrivate ? Math.round((newPrice ?? 0) * 0.5) : (newPrice ?? 0)) - appliedCredit)
+    : oldAmount;
+  const priceDelta = priceChanged ? Math.round((newAmount - oldAmount) * 100) / 100 : 0;
+  const totalOwedViaCheckout = Math.round((Math.max(0, priceDelta) + additionalLateFee) * 100) / 100;
+
+  // Money owed: send the client to a real Stripe Checkout for it, same as a
+  // reschedule topup — never an off-session charge, since there's no admin
+  // present here to catch a failed card and this only ever runs for the
+  // client's own action. The roster/price change only actually takes effect
+  // once payment confirms (finalizePlayerEditTopup), never before — nothing
+  // here updates the booking yet.
+  if (wasPaid && totalOwedViaCheckout > 0) {
+    const stripe = getStripe();
+    const origin = req.nextUrl.origin;
+    const plainSessionDetails = reg.session_details.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "").trim();
+    const checkoutSession = await stripe.checkout.sessions.create({
+      mode: "payment",
+      payment_method_types: ["card"],
+      customer_creation: "always",
+      customer_email: reg.email,
+      metadata: {
+        purpose: "player_edit_topup",
+        manage_token: token,
+        new_kids: newKidsStr,
+        new_count: String(newCount),
+        new_price: newPrice != null ? String(newPrice) : "",
+        old_price: reg.session_price != null ? String(reg.session_price) : "",
+        removed_players: JSON.stringify(removedPlayers),
+        added_players: JSON.stringify(addedPlayers),
+        is_late: String(isLate),
+        late_fee_due: lateFeeDue != null ? String(lateFeeDue) : "",
+        // The actual amount this checkout charges (net of any applied
+        // account credit) — passed through explicitly rather than
+        // re-derived from old_price/new_price at finalize time, since those
+        // are raw prices and re-deriving from them would ignore credit.
+        total_owed: String(totalOwedViaCheckout),
+      },
+      line_items: [
+        {
+          price_data: {
+            currency: "usd",
+            product_data: { name: `Roster change: ${plainSessionDetails || "Mesa Basketball Training Session"}` },
+            unit_amount: Math.round(totalOwedViaCheckout * 100),
+          },
+          quantity: 1,
+        },
+        {
+          price_data: {
+            currency: "usd",
+            product_data: { name: "Service Fee" },
+            unit_amount: Math.round(SERVICE_FEE * 100),
+          },
+          quantity: 1,
+        },
+      ],
+      success_url: `${origin}/booking-confirmed?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${origin}/booking/${token}`,
+      expires_at: Math.floor(Date.now() / 1000) + 30 * 60,
+    });
+    return NextResponse.json({ success: true, pendingPayment: true, checkoutUrl: checkoutSession.url });
   }
 
   const ok = await updateRegistrationPlayers(token, newKidsStr, newCount, newPrice);
   if (!ok) return NextResponse.json({ error: "This booking is no longer active — it may have just been cancelled" }, { status: 409 });
+
+  // A price DECREASE with nothing owed (no late fee, or the group gained no
+  // headcount-driven fee) — credit the difference back for their next
+  // booking, same as admin add-player's equivalent case. Real refunds are
+  // reserved for genuine reschedules/cancellations, not a roster tweak.
+  let creditGranted = 0;
+  if (wasPaid && priceDelta < 0) {
+    try {
+      await addAccountCredit(reg.email, -priceDelta);
+      creditGranted = -priceDelta;
+    } catch (err) {
+      console.error("Failed to grant account credit (player edit):", err);
+    }
+  }
 
   try {
     await sendPlayerUpdateNotification({
@@ -769,13 +893,17 @@ export async function PATCH(
       removedPlayers.length > 0 ? `Removed: ${removedPlayers.join(", ")}` : "",
     ].filter(Boolean).join(" | ");
     const sessionLabel = reg.session_details.split(" — ")[0] || reg.session_details;
-    const priceNote = priceChanged ? ` | New price: $${newPrice != null ? fmtMoney(newPrice) : "—"}` : "";
+    const priceNote = priceChanged
+      ? creditGranted > 0
+        ? ` | $${fmtMoney(creditGranted)} credited for their next booking.`
+        : ` | New price: $${newPrice != null ? fmtMoney(newPrice) : "—"}`
+      : "";
     await sendAdminSMS(`PLAYERS UPDATED (${sessionLabel}): ${reg.parent_name}\n${changeNote || "Roster order/details changed"}\nNow: ${newKidsStr}${priceNote}`);
   } catch (err) {
     console.error("Player update email/SMS error:", err);
   }
 
-  return NextResponse.json({ success: true, newKids: newKidsStr, newPrice, isLate, lateFeeDue });
+  return NextResponse.json({ success: true, newKids: newKidsStr, newPrice, isLate, lateFeeDue, creditGranted: creditGranted > 0 ? creditGranted : undefined });
 }
 
 // PUT — reschedule booking
@@ -886,20 +1014,29 @@ export async function PUT(
     }
   }
 
-  // Compute the new session's price. Same-type reschedule: preserve the
-  // per-player discount rate (divide by original participant count, scale to
-  // new count). Type-switch reschedule (private <-> weekly, or group-private
-  // <-> private): compute a fresh price for the NEW type from scratch —
-  // this used to just leave newSessionPrice undefined for any type switch,
-  // which meant NO price reconciliation ever ran for it and a client
-  // downgrading e.g. private -> weekly silently never got the difference
-  // back.
+  // Compute the new session's price. Weekly (whether staying weekly or
+  // switching into it) is ALWAYS looked up live from the sheet, never
+  // inferred by scaling the OLD group's per-player rate — different weekly
+  // groups can have very different rates (e.g. a $50 group session vs. its
+  // $30 companion Pickup slot), so a same-type reschedule that moves to a
+  // DIFFERENT group used to silently charge/credit using the wrong group's
+  // price entirely. Private (staying private or switching into it) is
+  // duration-based and needs no sheet lookup — its formula is exact either
+  // way. Camp is intentionally left unpriced here (too many variables —
+  // early-bird, drop-in rate, referral discounts — to safely auto-recompute).
   let newSessionPrice: number | undefined;
-  if (reg.type === newType && reg.session_price != null && reg.total_participants > 0) {
-    const perPlayerRate = reg.session_price / reg.total_participants;
-    newSessionPrice = Math.round(perPlayerRate * kidCount);
-  } else if (newType === "weekly") {
-    newSessionPrice = kidCount * 50;
+  if (newType === "weekly") {
+    try {
+      const liveSessions = await getWeeklySchedule({ noCache: true });
+      const liveMatch = liveSessions.find((s) => s.group === sessionGroup && s.date === bookedDate && s.startTime === bookedStartTime);
+      if (liveMatch) {
+        newSessionPrice = Math.round(liveMatch.price * kidCount);
+      } else {
+        console.error(`Client reschedule: couldn't find "${sessionGroup}" on ${bookedDate} ${bookedStartTime} in the live sheet — price reconciliation skipped for this reschedule. Verify manually.`);
+      }
+    } catch (err) {
+      console.error("Client reschedule: live price lookup failed — price reconciliation skipped.", err);
+    }
   } else if (newType === "private" && bookedStartTime && bookedEndTime) {
     const duration = Math.max(60, parseMins(bookedEndTime) - parseMins(bookedStartTime));
     newSessionPrice = calcPrivatePrice(duration, kidCount);
@@ -921,6 +1058,7 @@ export async function PUT(
   let priceReconciliation: { kind: "refund" | "charge"; amount: number } | null = null;
   let lateFeeCredited = 0;
   let lateFeeCreditApplied = 0;
+  let lateFeeEventId: string | null = null;
   if (oldPaymentIntentId) {
     if (isLateReschedule) {
       lateFeeCredited = Math.round(oldPaidAmount * 0.5);
@@ -945,7 +1083,14 @@ export async function PUT(
       }
     }
     if (isLateReschedule) {
-      await logLateFeeEvent({
+      // amountChargedExtra is deliberately omitted here — if priceReconciliation
+      // is a "charge", that money isn't real until the client actually pays
+      // the separate Checkout created further below. lateFeeEventId is
+      // threaded through that checkout's metadata so the webhook can fill
+      // the real amount in once payment actually confirms
+      // (finalizeRescheduleTopup), rather than this recording a charge that
+      // might never happen if they abandon it.
+      lateFeeEventId = await logLateFeeEvent({
         registrationId: reg.id,
         parentName: reg.parent_name,
         email: reg.email,
@@ -959,7 +1104,6 @@ export async function PUT(
         amountKept: Math.round((oldPaidAmount - lateFeeCredited) * 100) / 100,
         amountCredited: lateFeeCredited,
         amountApplied: lateFeeCreditApplied,
-        amountChargedExtra: priceReconciliation?.kind === "charge" ? Math.round((priceReconciliation.amount + SERVICE_FEE) * 100) / 100 : 0,
         newSessionDetails,
       });
     }
@@ -987,6 +1131,22 @@ export async function PUT(
       packageLateFeeAmount = Math.round(liveFullPrice * 0.5 * 100) / 100;
       if (packageLateFeeAmount > 0) {
         try {
+          // Logged BEFORE the checkout exists, with no charged amount yet —
+          // see the matching cancel-side comment above. Filled in by the
+          // webhook once payment actually confirms.
+          const packageFeeEventId = await logLateFeeEvent({
+            registrationId: reg.id,
+            parentName: reg.parent_name,
+            email: reg.email,
+            kids: reg.kids,
+            sessionType: reg.type,
+            sessionDetails: reg.session_details,
+            bookedDate: reg.booked_date,
+            bookedStartTime: reg.booked_start_time,
+            action: "reschedule",
+            initiatedBy: "client",
+            newSessionDetails,
+          });
           const stripe = getStripe();
           const origin = req.nextUrl.origin;
           const plainOldDetails = reg.session_details.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "").trim();
@@ -1000,6 +1160,7 @@ export async function PUT(
               action: "reschedule",
               parent_name: reg.parent_name,
               session_details: plainOldDetails,
+              late_fee_event_id: packageFeeEventId || "",
             },
             line_items: [
               {
@@ -1024,20 +1185,6 @@ export async function PUT(
             expires_at: Math.floor(Date.now() / 1000) + 30 * 60,
           });
           packageLateFeeCheckoutUrl = feeSession.url ?? undefined;
-          await logLateFeeEvent({
-            registrationId: reg.id,
-            parentName: reg.parent_name,
-            email: reg.email,
-            kids: reg.kids,
-            sessionType: reg.type,
-            sessionDetails: reg.session_details,
-            bookedDate: reg.booked_date,
-            bookedStartTime: reg.booked_start_time,
-            action: "reschedule",
-            initiatedBy: "client",
-            amountChargedExtra: Math.round((packageLateFeeAmount + SERVICE_FEE) * 100) / 100,
-            newSessionDetails,
-          });
         } catch (err) {
           console.error("Failed to create package late-reschedule fee checkout:", err);
         }
@@ -1111,6 +1258,21 @@ export async function PUT(
         topup_amount: String(priceReconciliation.amount),
         late_fee_credited: String(lateFeeCredited),
         late_fee_credit_applied: String(lateFeeCreditApplied),
+        // Only meaningful (and only ever acted on) for an ON-TIME reschedule
+        // — the old booking was already cancelled synchronously above with
+        // no refund, on the assumption this topup completes. If the client
+        // abandons it instead, expireAbandonedCheckoutSession uses these to
+        // refund the original charge back, since nothing was forfeited under
+        // on-time policy and the client would otherwise have no booking at
+        // all and no money back. A late reschedule's 50% forfeiture is
+        // already correct regardless of whether this topup ever completes,
+        // so these are simply ignored in that case.
+        old_payment_intent_id: oldPaymentIntentId || "",
+        old_paid_amount: String(oldPaidAmount),
+        // Only set for a LATE reschedule (see lateFeeEventId above) — lets
+        // the webhook fill in the real charged amount on the existing
+        // late_fee_events row once this topup actually gets paid.
+        late_fee_event_id: lateFeeEventId || "",
       },
       line_items: [
         {

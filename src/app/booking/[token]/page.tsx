@@ -463,6 +463,14 @@ export default function ManageBooking({
     });
     const data = await res.json();
     if (data.success) {
+      // Money is owed for this change (a price increase, or a late-removal
+      // fee) — the roster/price change doesn't actually take effect until
+      // this Stripe Checkout completes, so redirect instead of showing
+      // success yet, same as any other real Stripe charge in this app.
+      if (data.checkoutUrl) {
+        window.location.href = data.checkoutUrl;
+        return;
+      }
       setBooking((prev) => prev ? { ...prev, kids: data.newKids } : null);
       setShowEditPlayers(false);
       setShowPlayerConfirm(false);

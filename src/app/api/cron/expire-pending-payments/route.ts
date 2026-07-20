@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getStalePendingBatches, getStalePendingPackages } from "@/lib/supabase";
-import { expireAbandonedBookingBatch, expireAbandonedPackage, finalizePaidCheckoutSession } from "@/lib/booking-finalize";
+import { expireAbandonedBookingBatch, expireAbandonedCheckoutSession, expireAbandonedPackage, finalizePaidCheckoutSession } from "@/lib/booking-finalize";
 import { getStripe } from "@/lib/stripe";
 
 // Safety net for missed checkout.session.expired (or checkout.session.completed)
@@ -43,6 +43,15 @@ export async function GET(req: NextRequest) {
           skipped++;
           continue;
         }
+        // Route through the session-aware expiry, not just the batch id —
+        // an on-time reschedule's price-increase topup checkout carries
+        // metadata identifying the client's original (already-cancelled)
+        // charge, which needs a real refund on abandonment. Falling back to
+        // the plain batch-id path below would silently skip that refund
+        // whenever the webhook missed this expiry and the cron catches it.
+        await expireAbandonedCheckoutSession(session);
+        expired++;
+        continue;
       }
       await expireAbandonedBookingBatch(batch.bookingBatchId);
       expired++;

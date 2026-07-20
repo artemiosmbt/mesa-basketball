@@ -10,7 +10,7 @@ import { sendRescheduleNotification } from "@/lib/email";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import { getWeeklySchedule } from "@/lib/sheets";
 import { addAccountCredit, deductAccountCredit, addReferralCredit, logLateFeeEvent } from "@/lib/supabase";
-import { isLateAction, resolveOffSessionPaymentSource, chargeSavedCardOffSession } from "@/lib/booking-finalize";
+import { isLateAction, resolveOffSessionPaymentSource, chargeSavedCardOffSession, issueStripeRefund } from "@/lib/booking-finalize";
 import { SERVICE_FEE, SERVICE_FEE_LABEL, fmtMoney } from "@/lib/pricing";
 
 async function verifyAdmin(req: NextRequest) {
@@ -244,7 +244,15 @@ export async function POST(req: NextRequest) {
     autoChargePaymentIntentId = chargeResult.paymentIntentId;
   }
 
-  const { error } = await supabase
+  // Guarded on status still being "confirmed" — without this, two
+  // near-simultaneous submissions for the same booking (double-click, retry)
+  // could both pass the earlier confirmed-status check, both successfully
+  // auto-charge the card above, and both write here, charging the client
+  // twice for one reschedule. If the row already moved (this request lost
+  // the race), the charge that already went through above needs to come
+  // straight back rather than leaving them charged for a change that was
+  // never actually applied.
+  const { data: updatedRows, error } = await supabase
     .from("registrations")
     .update({
       type: effectiveType,
@@ -260,9 +268,35 @@ export async function POST(req: NextRequest) {
       used_referral_credit: newUsedReferralCredit,
       ...(newFullPrice !== undefined ? { session_price: newFullPrice } : {}),
     })
-    .eq("id", id);
+    .eq("id", id)
+    .eq("status", "confirmed")
+    .select("id");
+
+  if (!error && (!updatedRows || updatedRows.length === 0)) {
+    if (autoChargedAmount > 0 && autoChargePaymentIntentId) {
+      await issueStripeRefund({
+        email: reg.email,
+        paymentIntentId: autoChargePaymentIntentId,
+        amountDollars: Math.round((autoChargedAmount + SERVICE_FEE) * 100) / 100,
+        sessionLabel: reg.session_details || "",
+      }).catch((err) => console.error("Failed to refund admin reschedule charge after lost race:", err));
+    }
+    return NextResponse.json({ error: "This booking was already changed by another request — nothing was applied, and any charge was refunded." }, { status: 409 });
+  }
 
   if (error) {
+    // The charge above already succeeded, but the write that was supposed to
+    // apply it failed outright (network blip, constraint violation) — same
+    // reasoning as the lost-race case just above: refund rather than leave
+    // the client charged for a reschedule that never actually took effect.
+    if (autoChargedAmount > 0 && autoChargePaymentIntentId) {
+      await issueStripeRefund({
+        email: reg.email,
+        paymentIntentId: autoChargePaymentIntentId,
+        amountDollars: Math.round((autoChargedAmount + SERVICE_FEE) * 100) / 100,
+        sessionLabel: reg.session_details || "",
+      }).catch((err) => console.error("Failed to refund admin reschedule charge after DB update error:", err));
+    }
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 

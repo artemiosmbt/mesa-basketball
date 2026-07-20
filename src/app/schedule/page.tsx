@@ -282,18 +282,24 @@ function formatPrice(amount: number): string {
 // can span more than one group at once (e.g. a group skills session plus
 // its cross-sold companion pickup slot), each with its own price entirely.
 function calcWeeklyGroupBreakdown(sessions: { group: string; price: number }[], kidCount: number) {
-  const byGroup = new Map<string, { count: number; basePrice: number }>();
+  // Sums each session's OWN price rather than assuming every session in a
+  // group shares one flat rate — the sheet stores a price per row, so the
+  // same group can legitimately differ across dates (a holiday rate, a
+  // one-off adjustment). The server already prices each row independently
+  // this same way; this just keeps the client-side estimate matching it
+  // instead of quietly diverging whenever prices aren't uniform.
+  const byGroup = new Map<string, { count: number; totalBasePrice: number }>();
   for (const s of sessions) {
     const existing = byGroup.get(s.group);
-    if (existing) existing.count++;
-    else byGroup.set(s.group, { count: 1, basePrice: s.price });
+    if (existing) { existing.count++; existing.totalBasePrice += s.price; }
+    else byGroup.set(s.group, { count: 1, totalBasePrice: s.price });
   }
   const items: { group: string; count: number; unitPrice: number; subtotal: number; savings: number }[] = [];
-  for (const [group, { count, basePrice }] of byGroup) {
+  for (const [group, { count, totalBasePrice }] of byGroup) {
     const discountPct = count >= 8 ? 0.15 : count >= 4 ? 0.10 : 0;
-    const unitPrice = Math.round(basePrice * (1 - discountPct) * 100) / 100;
-    const subtotal = Math.round(unitPrice * count * kidCount * 100) / 100;
-    const fullSubtotal = Math.round(basePrice * count * kidCount * 100) / 100;
+    const subtotal = Math.round(totalBasePrice * (1 - discountPct) * kidCount * 100) / 100;
+    const fullSubtotal = Math.round(totalBasePrice * kidCount * 100) / 100;
+    const unitPrice = Math.round((totalBasePrice / count) * (1 - discountPct) * 100) / 100;
     items.push({ group, count, unitPrice, subtotal, savings: Math.round((fullSubtotal - subtotal) * 100) / 100 });
   }
   const total = Math.round(items.reduce((sum, it) => sum + it.subtotal, 0) * 100) / 100;

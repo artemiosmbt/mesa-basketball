@@ -50,11 +50,35 @@ function splitProportional(total: number, weights: number[]): number[] {
   let cumulativeShare = 0;
   return weights.map((w) => {
     cumulativeWeight += w;
-    const nextShare = Math.round((total * cumulativeWeight) / sumWeights);
-    const share = nextShare - cumulativeShare;
+    // Round to the nearest CENT, not the nearest dollar — weekly
+    // volume-discount pricing routinely lands on fractional dollars (e.g. a
+    // $30 session at the 15%-off tier is $25.50 exactly). Rounding to whole
+    // dollars here stamped a $0.50 phantom overage onto applied_account_credit
+    // for every such row, which then got refunded right back on cancellation
+    // — real money drift on every book-then-cancel cycle for any fractional
+    // total, even though nothing was ever actually charged wrong.
+    const nextShare = Math.round((total * cumulativeWeight * 100) / sumWeights) / 100;
+    const share = Math.round((nextShare - cumulativeShare) * 100) / 100;
     cumulativeShare = nextShare;
     return share;
   });
+}
+
+// Capacity/duplicate checks only ever look at what's already in the
+// database — they can't catch the SAME session appearing twice within this
+// one submission (a client-side bug, a replay, or a fast double-click before
+// the UI re-renders to hide an already-selected option). Both copies would
+// otherwise sail through those checks and get inserted, silently
+// double-booking/double-charging the same slot in one order.
+function findWithinRequestDuplicateDates(sessions: { date: string; startTime: string }[]): string[] {
+  const seen = new Set<string>();
+  const dupes: string[] = [];
+  for (const s of sessions) {
+    const key = `${s.date}|${s.startTime}`;
+    if (seen.has(key)) dupes.push(s.date);
+    else seen.add(key);
+  }
+  return dupes;
 }
 
 // A one-time, ad-hoc Stripe coupon so Checkout's own page shows the account
@@ -162,6 +186,14 @@ export async function POST(req: NextRequest) {
             weeklyReferrer = info;
           }
         }
+      }
+
+      const withinRequestDupes = findWithinRequestDuplicateDates(weeklySessions);
+      if (withinRequestDupes.length > 0) {
+        return NextResponse.json(
+          { error: `The same session was selected more than once: ${withinRequestDupes.join(", ")}. Please try again.` },
+          { status: 400 }
+        );
       }
 
       // Check capacity for all selected sessions
@@ -374,6 +406,14 @@ export async function POST(req: NextRequest) {
             campReferrer = info;
           }
         }
+      }
+
+      const withinRequestCampDupes = findWithinRequestDuplicateDates(campSessions);
+      if (withinRequestCampDupes.length > 0) {
+        return NextResponse.json(
+          { error: `The same camp day was selected more than once: ${withinRequestCampDupes.join(", ")}. Please try again.` },
+          { status: 400 }
+        );
       }
 
       // Check for duplicate camp day registrations
@@ -608,6 +648,14 @@ export async function POST(req: NextRequest) {
         if (info && info.email !== email) {
           privateReferrer = info;
         }
+      }
+
+      const withinRequestPrivateDupes = findWithinRequestDuplicateDates(privateSessions);
+      if (withinRequestPrivateDupes.length > 0) {
+        return NextResponse.json(
+          { error: `The same date was selected more than once: ${withinRequestPrivateDupes.join(", ")}. Please try again.` },
+          { status: 400 }
+        );
       }
 
       const duplicateChecks = await Promise.all(
@@ -880,18 +928,25 @@ export async function POST(req: NextRequest) {
 
       const privateSessionPrice = calcPrivateSessionPrice(bookedStartTime, bookedEndTime, totalParticipants || 1);
 
-      let accountCreditApplied = 0;
-      if (!packageCovered && applyAccountCredit && privateSessionPrice != null) {
-        const balance = await getAccountCreditBalance(email);
-        accountCreditApplied = Math.min(balance, privateSessionPrice);
-        if (accountCreditApplied > 0) await deductAccountCredit(email, accountCreditApplied);
-      }
-
       const effectivePrice = packageCovered
         ? 0
         : isFree && privateSessionPrice != null
           ? Math.round(privateSessionPrice * 0.5)
           : (privateSessionPrice ?? 0);
+
+      // Cap against the DISCOUNTED (effective) price, never the full
+      // undiscounted one — otherwise a first-time/referral-discount client
+      // with enough balance to exceed what the session actually costs after
+      // the discount gets that excess silently deducted from their real
+      // credit balance for nothing (amountToCharge would still floor at 0,
+      // so the card is never overcharged, but the balance vanishes anyway).
+      let accountCreditApplied = 0;
+      if (!packageCovered && applyAccountCredit && effectivePrice > 0) {
+        const balance = await getAccountCreditBalance(email);
+        accountCreditApplied = Math.min(balance, effectivePrice);
+        if (accountCreditApplied > 0) await deductAccountCredit(email, accountCreditApplied);
+      }
+
       const amountToCharge = Math.max(0, effectivePrice - accountCreditApplied);
 
       const bookingBatchId = crypto.randomUUID();

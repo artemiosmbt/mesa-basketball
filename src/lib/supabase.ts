@@ -41,6 +41,7 @@ export interface Registration {
   is_late_cancel?: boolean;
   cancel_fee_settled?: boolean;
   camp_day_late_fee?: number;
+  camp_day_refund_issued?: number;
   camp_drop_in_rate?: number | null;
   applied_account_credit?: number;
   booking_batch_id?: string | null;
@@ -222,6 +223,19 @@ export async function recordStripeRefund(token: string, refundId: string): Promi
   await supabase
     .from("registrations")
     .update({ stripe_refund_id: refundId })
+    .eq("manage_token", token);
+}
+
+// Stamps how much was actually refunded/credited when THIS camp day was
+// cancelled, so a later cancellation of another day in the same camp group
+// can sum this across already-cancelled days and refund only the
+// INCREMENTAL difference from here forward — never re-computing from the
+// original full-camp price and re-refunding ground already covered.
+export async function recordCampDayRefund(token: string, amount: number): Promise<void> {
+  const supabase = getSupabase();
+  await supabase
+    .from("registrations")
+    .update({ camp_day_refund_issued: Math.round(amount) })
     .eq("manage_token", token);
 }
 
@@ -433,10 +447,10 @@ export async function logLateFeeEvent(event: {
   amountApplied?: number;
   amountChargedExtra?: number;
   newSessionDetails?: string;
-}): Promise<void> {
+}): Promise<string | null> {
   try {
     const supabase = getSupabase();
-    await supabase.from("late_fee_events").insert({
+    const { data, error } = await supabase.from("late_fee_events").insert({
       registration_id: event.registrationId,
       parent_name: event.parentName,
       email: event.email || null,
@@ -453,9 +467,27 @@ export async function logLateFeeEvent(event: {
       amount_applied: event.amountApplied || 0,
       amount_charged_extra: event.amountChargedExtra || 0,
       new_session_details: event.newSessionDetails || null,
-    });
+    }).select("id").single();
+    if (error) throw error;
+    return data?.id ?? null;
   } catch (err) {
     console.error("Failed to log late fee event:", err);
+    return null;
+  }
+}
+
+// Fills in the actual charged amount on an existing late_fee_events row once
+// a separate Stripe Checkout for the remainder actually completes — the
+// initial log call deliberately omits amountChargedExtra for any path that
+// redirects to its own Checkout Session, since logging it at creation time
+// would record real money as "charged" before the client ever paid it (and
+// permanently overstate it if they abandon that checkout).
+export async function markLateFeeEventCharged(eventId: string, amountChargedExtra: number): Promise<void> {
+  try {
+    const supabase = getSupabase();
+    await supabase.from("late_fee_events").update({ amount_charged_extra: amountChargedExtra }).eq("id", eventId);
+  } catch (err) {
+    console.error("Failed to mark late fee event as charged:", err);
   }
 }
 

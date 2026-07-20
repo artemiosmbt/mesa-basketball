@@ -1,9 +1,9 @@
 import Stripe from "stripe";
-import { sendRegistrationNotification, sendReferralCreditNotification, sendRescheduleNotification, sendPackageConfirmation, sendAbandonedCheckoutEmail, sendAbandonedPackageEmail } from "@/lib/email";
-import { addPrivateSessionToCalendar, upsertGroupSessionCalendarEvent } from "@/lib/calendar";
+import { sendRegistrationNotification, sendReferralCreditNotification, sendRescheduleNotification, sendPackageConfirmation, sendAbandonedCheckoutEmail, sendAbandonedPackageEmail, sendPlayerUpdateNotification } from "@/lib/email";
+import { addPrivateSessionToCalendar, deletePrivateSessionFromCalendar, upsertGroupSessionCalendarEvent } from "@/lib/calendar";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import { getStripe } from "@/lib/stripe";
-import { SERVICE_FEE, fmtMoney } from "@/lib/pricing";
+import { SERVICE_FEE, fmtMoney, packagePrice } from "@/lib/pricing";
 import {
   addReferralCredit,
   addAccountCredit,
@@ -16,6 +16,9 @@ import {
   recordStripeRefund,
   finalizePaidPackage,
   abandonPendingPackage,
+  getRegistrationByToken,
+  updateRegistrationPlayers,
+  markLateFeeEventCharged,
 } from "@/lib/supabase";
 
 // Parse a session date + hours/mins (Eastern time) into a UTC Date for comparison.
@@ -856,7 +859,19 @@ export async function finalizeConfirmedPrivateSeriesBooking(params: FinalizePriv
  * than once for the same batch — abandonPendingBookingBatch only touches
  * rows still pending_payment, so a repeat call is a no-op.
  */
-export async function expireAbandonedBookingBatch(bookingBatchId: string): Promise<void> {
+export async function expireAbandonedBookingBatch(
+  bookingBatchId: string,
+  // Set only for an ON-TIME reschedule's price-increase topup checkout — the
+  // OLD (already-paid) booking was already cancelled synchronously when the
+  // reschedule was requested, on the assumption this topup completes. If the
+  // client abandons it instead, they end up with NO booking at all (old
+  // cancelled, new never confirmed) — under on-time policy nothing was ever
+  // supposed to be forfeited, so the original charge must come back to them
+  // here rather than being silently kept. A LATE reschedule's 50% "kept as
+  // fee" forfeiture is already correct regardless of whether the new
+  // session's topup ever completes, so callers never pass this for that case.
+  originalChargeRefund?: { paymentIntentId: string; amountDollars: number; sessionLabel: string }
+): Promise<void> {
   const abandoned = await abandonPendingBookingBatch(bookingBatchId);
   if (abandoned.length === 0) return;
 
@@ -871,10 +886,29 @@ export async function expireAbandonedBookingBatch(bookingBatchId: string): Promi
       await addReferralCredit(reg.email).catch(() => {});
     }
   }
-  // Informational, not urgent — an email instead of a text, since this
-  // happens constantly (someone starts checkout, backs out) and there's
-  // nothing to act on immediately.
   const first = abandoned[0];
+
+  let refundResult: StripeRefundResult | undefined;
+  if (originalChargeRefund && originalChargeRefund.amountDollars > 0) {
+    refundResult = await issueStripeRefund({
+      email: first.email,
+      paymentIntentId: originalChargeRefund.paymentIntentId,
+      amountDollars: originalChargeRefund.amountDollars,
+      sessionLabel: originalChargeRefund.sessionLabel,
+    });
+    if (refundResult.refundedAmount > 0 && first.sms_consent && first.phone) {
+      await sendSMS(
+        first.phone,
+        `Mesa Basketball: Your reschedule wasn't completed, so $${fmtMoney(refundResult.refundedAmount)} has been refunded to your original payment method for your previous session. Book anytime at mesabasketballtraining.com/schedule.\nReply STOP to opt out.`
+      ).catch(() => {});
+    }
+  }
+
+  // Informational, not urgent — an email instead of a text, since abandoned
+  // checkouts happen constantly (someone starts, backs out) and there's
+  // nothing to act on immediately. When a refund happened above, the copy
+  // says so explicitly — the usual "no charge was made" line would otherwise
+  // be flatly wrong here.
   try {
     await sendAbandonedCheckoutEmail({
       parentName: first.parent_name,
@@ -886,6 +920,8 @@ export async function expireAbandonedBookingBatch(bookingBatchId: string): Promi
         bookedDate: reg.booked_date,
         sessionPrice: reg.session_price,
       })),
+      refundedAmount: refundResult?.refundedAmount,
+      refundFailed: refundResult?.failed,
     });
   } catch (err) {
     console.error("Failed to send abandoned checkout email:", err);
@@ -920,9 +956,17 @@ export async function expireAbandonedCheckoutSession(session: Stripe.Checkout.Se
   if (!referenceId) return;
   if (session.metadata?.purpose === "package_enrollment") {
     await expireAbandonedPackage(referenceId);
-  } else {
-    await expireAbandonedBookingBatch(referenceId);
+    return;
   }
+  const isOnTimeRescheduleTopup = session.metadata?.purpose === "reschedule_topup" && session.metadata?.is_late_reschedule !== "true";
+  const originalChargeRefund = isOnTimeRescheduleTopup && session.metadata?.old_payment_intent_id && session.metadata?.old_paid_amount
+    ? {
+        paymentIntentId: session.metadata.old_payment_intent_id,
+        amountDollars: parseFloat(session.metadata.old_paid_amount),
+        sessionLabel: session.metadata.old_session_details || "your previous session",
+      }
+    : undefined;
+  await expireAbandonedBookingBatch(referenceId, originalChargeRefund);
 }
 
 export interface FinalizeRescheduleTopupParams {
@@ -1050,7 +1094,7 @@ async function finalizePaidPackageEnrollment(
   const kids = metadata.kids || "";
   const smsConsent = metadata.sms_consent === "true";
   const submittedReferralCode = metadata.submitted_referral_code || undefined;
-  const totalPrice = pkg.package_type === 4 ? 475 : 900;
+  const totalPrice = packagePrice(pkg.package_type);
 
   try {
     await sendPackageConfirmation({
@@ -1075,6 +1119,116 @@ async function finalizePaidPackageEnrollment(
 }
 
 /**
+ * A client's own player-roster edit (add/remove players) that increased the
+ * price, or a late removal that owes its own separate fee — the roster and
+ * price change is applied HERE, once Stripe confirms the topup actually got
+ * paid, never at the moment the checkout was created. There's no new
+ * registration row for this (it modifies an existing confirmed one), so
+ * everything needed is carried in the Checkout Session's own metadata rather
+ * than a booking_batch_id.
+ */
+async function finalizePlayerEditTopup(session: Stripe.Checkout.Session): Promise<void> {
+  const metadata = session.metadata || {};
+  const token = metadata.manage_token;
+  if (!token) return;
+  const reg = await getRegistrationByToken(token);
+  if (!reg) {
+    console.error(`Player-edit topup paid but booking for token ${token} no longer exists — manual follow-up needed.`);
+    return;
+  }
+
+  const newKids = metadata.new_kids || reg.kids;
+  const newCount = metadata.new_count ? parseInt(metadata.new_count, 10) : reg.total_participants;
+  const newPrice = metadata.new_price ? Math.round(parseFloat(metadata.new_price) * 100) / 100 : reg.session_price;
+  const removedPlayers: string[] = metadata.removed_players ? JSON.parse(metadata.removed_players) : [];
+  const addedPlayers: string[] = metadata.added_players ? JSON.parse(metadata.added_players) : [];
+  const isLate = metadata.is_late === "true";
+  const lateFeeDue = metadata.late_fee_due ? parseFloat(metadata.late_fee_due) : undefined;
+  const oldPrice = metadata.old_price ? parseFloat(metadata.old_price) : reg.session_price;
+
+  const ok = await updateRegistrationPlayers(token, newKids, newCount, newPrice);
+  if (!ok) {
+    // The booking stopped being confirmed between checkout creation and
+    // payment completing (e.g. the client cancelled in the meantime,
+    // extremely rare) — the charge already went through, so it needs to
+    // come straight back rather than leaving them charged for a roster
+    // change that never actually applied.
+    const paymentIntentId = typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent?.id;
+    const amountTotal = session.amount_total != null ? session.amount_total / 100 : 0;
+    if (paymentIntentId && amountTotal > 0) {
+      await issueStripeRefund({
+        email: reg.email,
+        paymentIntentId,
+        amountDollars: amountTotal,
+        sessionLabel: reg.session_details || "",
+      }).catch((err) => console.error("Failed to refund player-edit topup after failed update:", err));
+    }
+    console.error(`Player-edit topup paid but booking ${token} was no longer confirmed when finalizing — refunded and left unchanged.`);
+    return;
+  }
+
+  try {
+    if (reg.type === "private" || reg.type === "group-private") {
+      if (reg.booked_date) {
+        await deletePrivateSessionFromCalendar({ email: reg.email, bookedDate: reg.booked_date });
+      }
+      if (reg.booked_date && reg.booked_start_time && reg.booked_end_time && reg.booked_location) {
+        await addPrivateSessionToCalendar({
+          parentName: reg.parent_name,
+          email: reg.email,
+          phone: reg.phone,
+          kids: newKids,
+          bookedDate: reg.booked_date,
+          bookedStartTime: reg.booked_start_time,
+          bookedEndTime: reg.booked_end_time,
+          bookedLocation: reg.booked_location,
+          trainer: reg.booked_trainer || undefined,
+        });
+      }
+    } else if (reg.booked_date && reg.booked_start_time) {
+      await upsertGroupSessionCalendarEvent({
+        sessionType: reg.type as "weekly" | "camp",
+        sessionLabel: reg.booked_group || reg.session_details.split(" — ")[0] || "Group Session",
+        bookedDate: reg.booked_date,
+        bookedStartTime: reg.booked_start_time,
+        bookedEndTime: reg.booked_end_time || reg.booked_start_time,
+        bookedLocation: reg.booked_location || "",
+        kidsJustRegistered: newKids,
+        participantsJustRegistered: newCount,
+      });
+    }
+  } catch (err) {
+    console.error("Calendar sync error (player-edit topup):", err);
+  }
+
+  try {
+    await sendPlayerUpdateNotification({
+      parentName: reg.parent_name,
+      email: reg.email,
+      sessionDetails: reg.session_details,
+      removedPlayers,
+      addedPlayers,
+      newKids,
+      sessionType: reg.type,
+      isLate,
+      lateFeeDue,
+      oldPrice,
+      newPrice,
+      priceChanged: newPrice !== oldPrice,
+    });
+    const changeNote = [
+      addedPlayers.length > 0 ? `Added: ${addedPlayers.join(", ")}` : "",
+      removedPlayers.length > 0 ? `Removed: ${removedPlayers.join(", ")}` : "",
+    ].filter(Boolean).join(" | ");
+    const sessionLabel = reg.session_details.split(" — ")[0] || reg.session_details;
+    const totalOwed = metadata.total_owed ? parseFloat(metadata.total_owed) : 0;
+    await sendAdminSMS(`PLAYERS UPDATED & PAID (${sessionLabel}): ${reg.parent_name}\n${changeNote || "Roster order/details changed"}\nNow: ${newKids}\n$${fmtMoney(totalOwed + SERVICE_FEE)} charged (incl. service fee).`);
+  } catch (err) {
+    console.error("Player update notification error (paid topup):", err);
+  }
+}
+
+/**
  * Finalizes a Stripe Checkout Session that actually completed payment,
  * routing to the right per-type finalize function. Called from two places:
  * the Stripe webhook (the normal path), and the abandonment-sweep cron as a
@@ -1093,7 +1247,21 @@ export async function finalizePaidCheckoutSession(session: Stripe.Checkout.Sessi
   // has no client_reference_id and is checked before that's required below.
   if (metadata.purpose === "package_late_fee") {
     const amount = session.amount_total != null ? session.amount_total / 100 : undefined;
+    if (metadata.late_fee_event_id && amount != null) {
+      await markLateFeeEventCharged(metadata.late_fee_event_id, amount);
+    }
     await sendAdminSMS(`Package late fee PAID ($${amount != null ? fmtMoney(amount) : "?"}): ${metadata.parent_name || "unknown"}\n${metadata.session_details || ""} (${metadata.action || "cancel/reschedule"})`).catch(() => {});
+    return;
+  }
+
+  // A client editing their own player roster on an already-confirmed
+  // booking, where the change increases the price (or a late removal owes a
+  // separate fee) — same "no client_reference_id" shape as the package fee
+  // above, since this modifies an EXISTING registration row rather than
+  // creating a new batch. The roster/price change itself only actually
+  // applies here, after payment confirms, not when the checkout was created.
+  if (metadata.purpose === "player_edit_topup") {
+    await finalizePlayerEditTopup(session);
     return;
   }
 
@@ -1132,6 +1300,12 @@ export async function finalizePaidCheckoutSession(session: Stripe.Checkout.Sessi
   if (metadata.purpose === "reschedule_topup") {
     const reg = confirmedRows[0];
     if (!reg.booked_date || !reg.booked_start_time) return;
+    // Only set for a LATE reschedule's remainder charge — fills in the real
+    // charged amount on the late_fee_events row logged when the reschedule
+    // was first requested, now that this topup has actually been paid.
+    if (metadata.late_fee_event_id && session.amount_total != null) {
+      await markLateFeeEventCharged(metadata.late_fee_event_id, session.amount_total / 100);
+    }
     await finalizeRescheduleTopup({
       parentName: reg.parent_name,
       email: reg.email,

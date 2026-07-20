@@ -895,11 +895,23 @@ export async function sendAbandonedCheckoutEmail(data: {
   phone?: string | null;
   kids?: string | null;
   sessions: { sessionDetails: string; bookedDate?: string | null; sessionPrice?: number | null }[];
+  // Set only when this abandonment was a reschedule's price-increase topup —
+  // the client's OLD (already-paid) booking was already cancelled banking on
+  // this topup, so abandoning it meant refunding that original charge back
+  // rather than silently keeping it. Changes the closing line below, since
+  // the usual "no charge was made" claim would otherwise be false here.
+  refundedAmount?: number;
+  refundFailed?: boolean;
 }) {
   const resend = getResend();
   const sessionsHtml = data.sessions
     .map((s) => `<p style="margin:4px 0;">${formatSessionDetailsForEmail(s.sessionDetails)}${s.sessionPrice ? ` — $${fmtMoney(s.sessionPrice)}` : ""}</p>`)
     .join("");
+  const closingNote = data.refundFailed
+    ? `<p style="color: #ef4444; font-size: 13px;"><strong>⚠️ This was a reschedule's price-increase topup — the client's original charge for their previous session could NOT be automatically refunded. Refund manually in the Stripe dashboard.</strong></p>`
+    : data.refundedAmount != null && data.refundedAmount > 0
+      ? `<p style="color: #999; font-size: 13px;">This was a reschedule's price-increase topup — the client's original session was already cancelled, so <strong>$${fmtMoney(data.refundedAmount)} was automatically refunded</strong> back to their card for it. This booking was never confirmed and the slot has already been released.</p>`
+      : `<p style="color: #999; font-size: 13px;">They were sent to Stripe to pay but never finished — no charge was made, this booking was never confirmed, and the slot has already been released.</p>`;
   await resend.emails.send({
     from: FROM_EMAIL,
     to: ARTEMI_EMAIL,
@@ -912,7 +924,7 @@ export async function sendAbandonedCheckoutEmail(data: {
       ${data.kids ? `<p><strong>Players:</strong> ${data.kids}</p>` : ""}
       <p><strong>Session${data.sessions.length > 1 ? "s" : ""}:</strong></p>
       ${sessionsHtml}
-      <p style="color: #999; font-size: 13px;">They were sent to Stripe to pay but never finished — no charge was made, this booking was never confirmed, and the slot has already been released.</p>
+      ${closingNote}
     `,
   });
 }

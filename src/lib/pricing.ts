@@ -15,3 +15,13 @@ export const SERVICE_FEE_LABEL = `$${SERVICE_FEE.toFixed(2)}`;
 export function fmtMoney(n: number): string {
   return n.toFixed(2);
 }
+
+// Monthly private-session package price. Single source of truth — this used
+// to be the same `packageType === 4 ? 475 : 900` ternary hardcoded
+// separately in three different files (purchase, cancellation, and
+// confirmation-email logic); any future price change only needed to touch
+// one of them and the others would silently keep charging/refunding the old
+// amount.
+export function packagePrice(packageType: number): number {
+  return packageType === 4 ? 475 : 900;
+}

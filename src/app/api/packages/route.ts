@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { enrollInPackage, getActivePackage, hasPendingOrActivePackage, isNewClient, findReferrerInfoByCode, attachPackageCheckoutSession } from "@/lib/supabase";
 import { getStripe } from "@/lib/stripe";
-import { SERVICE_FEE } from "@/lib/pricing";
+import { SERVICE_FEE, packagePrice } from "@/lib/pricing";
 
 export async function POST(req: NextRequest) {
   try {
@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
 
     const { id } = await enrollInPackage({ email, parentName, phone, packageType, monthYear });
 
-    const totalPrice = packageType === 4 ? 475 : 900;
+    const totalPrice = packagePrice(packageType);
 
     // Real money is due — send them to Stripe. The package stays
     // pending_payment (unusable — getActivePackage won't return it) until
