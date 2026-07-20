@@ -1429,24 +1429,18 @@ export default function Home() {
     );
   }, [modal, hideUpsell]);
 
-  // Numeric total for whatever's currently selected in the modal, plus how
-  // much of it account credit could actually apply to — used only to guess
-  // whether credit will fully cover this booking (server has the final
-  // say), so the button and fee copy don't confusingly reference Stripe/a
-  // service fee for a booking that's actually going to be paid entirely
-  // with credit. Mirrors /api/register's real credit-application rules,
-  // which are NOT simply "credit up to the full total" for multi-session
-  // bookings: a multi-date weekly booking only ever lets credit cover one
-  // session's worth (never the full total across dates), and a drop-in/
-  // partial camp booking only lets it cover one day's share — a full-camp
-  // booking (every day selected) is the one camp case where credit CAN
-  // cover the whole thing. Recurring private bookings have no such cap.
+  // Numeric total for whatever's currently selected in the modal — used
+  // only to guess whether account credit will fully cover this booking
+  // (server has the final say), so the button and fee copy don't
+  // confusingly reference Stripe/a service fee for a booking that's
+  // actually going to be paid entirely with credit. Credit can cover a
+  // booking's WHOLE total, including multi-session weekly/camp/private
+  // bookings — /api/register splits it proportionally across every session
+  // row rather than capping it at just one.
   const creditEstimate = (() => {
     if (modal.type === "weekly") {
-      const numSessions = modal.selectedGroupSessions?.length || 1;
       const total = (modal.weeklyTotalPrice || 0) * kids.length;
-      const creditCap = numSessions > 1 ? Math.round(total / numSessions) : total;
-      return { total, creditCap };
+      return { total };
     }
     if (modal.type === "camp") {
       const camp = camps[modal.sessionIndex];
@@ -1454,9 +1448,7 @@ export default function Home() {
       const priceStr = calcCampPrice(campSelectedDays.size, camp.campDays.length, camp, kids.length);
       if (!priceStr) return null;
       const total = parseInt(priceStr.replace(/\D/g, "")) || 0;
-      const isFullCamp = campSelectedDays.size === camp.campDays.length;
-      const creditCap = isFullCamp ? total : Math.round(total / Math.max(1, campSelectedDays.size));
-      return { total, creditCap };
+      return { total };
     }
     if (modal.type === "private" || modal.type === "group-private") {
       const match = modal.sessionDetails.match(/\((\d+) min\)/);
@@ -1476,17 +1468,17 @@ export default function Home() {
         // this only ever errs toward showing the Stripe-bound copy, not
         // wrongly promising "no charge" for a booking that still needs one.
         const total = Math.round(totalPrice * numDates * 100) / 100;
-        return { total, creditCap: total };
+        return { total };
       }
       const total = useReferralCredit ? Math.round(totalPrice * 0.5 * 100) / 100 : totalPrice;
-      return { total, creditCap: totalPrice };
+      return { total };
     }
     return null;
   })();
 
   const willCoverWithCredit = accountCreditBalance !== null && accountCreditBalance > 0 && applyAccountCredit
     && creditEstimate !== null && creditEstimate.total > 0
-    && Math.min(accountCreditBalance, creditEstimate.creditCap) >= creditEstimate.total;
+    && accountCreditBalance >= creditEstimate.total;
 
   const priceLabel = (() => {
     if (modal.type !== "private" && modal.type !== "group-private") return null;

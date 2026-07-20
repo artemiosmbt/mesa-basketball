@@ -34,6 +34,28 @@ import {
 // sessions (up to 3 kids, $150/hr) — never group-private (4+, $250/hr):
 // a package slot is priced around the private rate, so a 4+ kid session
 // always charges normally regardless of remaining capacity.
+// Splits `total` across items weighted by `weights` so every item's share
+// sums EXACTLY back to `total` (e.g. $11 credit split 3 ways by equal
+// weight -> $4/$4/$3, never $4/$4/$4 = $12). Used to record account credit
+// on EVERY row of a multi-row booking (not just the first), proportional to
+// each row's own price — critical so that later cancelling any single row
+// independently refunds/credits exactly that row's fair share, never more
+// or less than what was actually applied to it. A weight of 0 (e.g. a
+// package-covered or already-free row) always gets exactly $0.
+function splitProportional(total: number, weights: number[]): number[] {
+  const sumWeights = weights.reduce((s, w) => s + w, 0);
+  if (total <= 0 || sumWeights <= 0) return weights.map(() => 0);
+  let cumulativeWeight = 0;
+  let cumulativeShare = 0;
+  return weights.map((w) => {
+    cumulativeWeight += w;
+    const nextShare = Math.round((total * cumulativeWeight) / sumWeights);
+    const share = nextShare - cumulativeShare;
+    cumulativeShare = nextShare;
+    return share;
+  });
+}
+
 async function allocatePackageCoverage(email: string, dates: string[], kidCount: number): Promise<Array<{ covered: boolean; packageId: string | null }>> {
   if (kidCount >= 4) {
     return dates.map(() => ({ covered: false, packageId: null }));
@@ -164,16 +186,23 @@ export async function POST(req: NextRequest) {
         ? Math.round(weeklyTotalPrice / weeklySessions.length)
         : (weeklySessions[0]?.price ? weeklySessions[0].price * (totalParticipants || 1) : undefined);
 
-      // Account credit is applied once, against the first session's row only —
-      // same convention as referral credit on recurring private bookings.
+      const weeklyTotal = weeklyTotalPrice ?? (perSessionPrice != null ? perSessionPrice * weeklySessions.length : 0);
+
+      // Account credit can cover the WHOLE booking, not just one session —
+      // split proportionally across every row (equal shares, since every row
+      // already carries the same flat perSessionPrice) so that cancelling
+      // any single session later refunds/credits exactly its own fair
+      // share, never more or less than what was actually applied to it.
       let weeklyCreditApplied = 0;
-      if (applyAccountCredit && perSessionPrice != null) {
+      if (applyAccountCredit && weeklyTotal > 0) {
         const balance = await getAccountCreditBalance(email);
-        weeklyCreditApplied = Math.min(balance, perSessionPrice);
+        weeklyCreditApplied = Math.min(balance, weeklyTotal);
         if (weeklyCreditApplied > 0) await deductAccountCredit(email, weeklyCreditApplied);
       }
+      const weeklyCreditShares = weeklyCreditApplied > 0
+        ? splitProportional(weeklyCreditApplied, weeklySessions.map(() => 1))
+        : [];
 
-      const weeklyTotal = weeklyTotalPrice ?? (perSessionPrice != null ? perSessionPrice * weeklySessions.length : 0);
       const amountToCharge = Math.max(0, weeklyTotal - weeklyCreditApplied);
       const bookingBatchId = crypto.randomUUID();
 
@@ -196,7 +225,7 @@ export async function POST(req: NextRequest) {
           isFree: false,
           smsConsent: !!smsConsent,
           sessionPrice: perSessionPrice,
-          ...(i === 0 && weeklyCreditApplied > 0 ? { appliedAccountCredit: weeklyCreditApplied } : {}),
+          ...(weeklyCreditShares[i] > 0 ? { appliedAccountCredit: weeklyCreditShares[i] } : {}),
           status: amountToCharge > 0 ? "pending_payment" : undefined,
           bookingBatchId,
         });
@@ -338,14 +367,22 @@ export async function POST(req: NextRequest) {
       // day gets its own share via the exact split above.
       const firstDayPrice = isFullCamp ? campTotalNum : dropInDayPrice(0, campTotalNum, campSessions.length);
 
-      // Account credit is applied once, against the first day's row only —
-      // never against the full total, since every row in a full-camp group
-      // must agree on the same "original" price for the per-day-cancellation
-      // cap math.
+      // Account credit can cover the whole registration (up to the full
+      // total), not just one day. Full camp keeps the existing convention of
+      // recording it all on the first day's row — the whole-group cancel
+      // path already aggregates credit across every row regardless of which
+      // one carries it, and cancelling one day while others remain
+      // deliberately leaves it "stranded" there until the group is
+      // eventually cancelled (unchanged, pre-existing behavior). Drop-in
+      // days are typically cancelled independently through the plain
+      // per-row cancel path though, so credit there is split proportionally
+      // across every selected day up front, the same way each day's own
+      // price already is — otherwise cancelling just one day on its own
+      // could strand or double-count credit actually spread across several.
       let campCreditApplied = 0;
       if (applyAccountCredit) {
         const balance = await getAccountCreditBalance(email);
-        campCreditApplied = Math.min(balance, firstDayPrice);
+        campCreditApplied = Math.min(balance, campTotalNum);
         if (campCreditApplied > 0) await deductAccountCredit(email, campCreditApplied);
       }
 
@@ -354,6 +391,9 @@ export async function POST(req: NextRequest) {
 
       for (const [i, session] of campSessions.entries()) {
         const dayPrice = isFullCamp ? campTotalNum : dropInDayPrice(i, campTotalNum, campSessions.length);
+        const dayCredit = campCreditApplied > 0
+          ? (isFullCamp ? (i === 0 ? campCreditApplied : 0) : dropInDayPrice(i, campCreditApplied, campSessions.length))
+          : 0;
         await addRegistrationWithRewards({
           parentName,
           email,
@@ -373,7 +413,7 @@ export async function POST(req: NextRequest) {
           sessionPrice: dayPrice,
           isFullCamp,
           ...(isFullCamp && campDropInRate != null ? { campDropInRate: parseInt(String(campDropInRate)) || undefined } : {}),
-          ...(i === 0 && campCreditApplied > 0 ? { appliedAccountCredit: campCreditApplied } : {}),
+          ...(dayCredit > 0 ? { appliedAccountCredit: dayCredit } : {}),
           status: amountToCharge > 0 ? "pending_payment" : undefined,
           bookingBatchId,
         });
@@ -543,21 +583,88 @@ export async function POST(req: NextRequest) {
         return { ...s, fullPrice, effectivePrice, isFree, packageCovered, packageId };
       });
 
-      const totalBeforeCredit = pricedSessions.reduce((sum: number, s: { effectivePrice: number }) => sum + s.effectivePrice, 0);
+      // Package-covered dates are already fully prepaid — split them out and
+      // confirm them immediately, completely independent of whatever happens
+      // with the rest of the series. Bundling them into the same
+      // pending_payment/Stripe batch as dates that DO need payment used to
+      // mean a package-covered date could get stuck waiting on (or even
+      // wiped out by) an unrelated Stripe checkout for a different date —
+      // if that checkout was abandoned, the whole batch — package-covered
+      // dates included — flipped to payment_abandoned, silently dropping a
+      // session that should've just been confirmed for free.
+      type PricedSession = (typeof pricedSessions)[number];
+      const coveredSessions = pricedSessions.filter((s: PricedSession) => s.packageCovered);
+      const uncoveredSessions = pricedSessions.filter((s: PricedSession) => !s.packageCovered);
 
-      // Account credit is applied once, against the series total (recorded
-      // on the first date's row) — same convention as weekly/camp.
+      if (coveredSessions.length > 0) {
+        const coveredBatchId = crypto.randomUUID();
+        for (const s of coveredSessions) {
+          await addRegistrationWithRewards({
+            parentName,
+            email,
+            phone,
+            kids,
+            type,
+            sessionDetails: `Private Session — ${s.date} ${s.startTime}-${s.endTime} at ${s.location}`,
+            totalParticipants: totalParticipants || 1,
+            bookedDate: s.date,
+            bookedStartTime: s.startTime,
+            bookedEndTime: s.endTime,
+            bookedLocation: s.location,
+            bookedTrainer: s.trainer,
+            referralCode,
+            isFree: false,
+            smsConsent: !!smsConsent,
+            sessionPrice: s.fullPrice,
+            bookingBatchId: coveredBatchId,
+            ...(s.packageId ? { packageId: s.packageId } : {}),
+          });
+        }
+        await finalizeConfirmedPrivateSeriesBooking({
+          parentName,
+          email,
+          phone,
+          kids,
+          type,
+          privateSessions: coveredSessions as Array<{ date: string; startTime: string; endTime: string; location: string; trainer?: string; fullPrice: number; isFree: boolean; packageCovered?: boolean }>,
+          totalParticipants: totalParticipants || 1,
+          referralCode,
+          privateReferrer: null,
+          submittedReferralCode: undefined,
+          smsConsent: !!smsConsent,
+          isFirstTime: false,
+          accountCreditApplied: 0,
+        });
+      }
+
+      if (uncoveredSessions.length === 0) {
+        // Every date was package-covered — nothing left to charge or send
+        // to Stripe at all.
+        return NextResponse.json({ success: true, count: privateSessions.length, referralApplied: !!privateReferrer });
+      }
+
+      const totalBeforeCredit = uncoveredSessions.reduce((sum: number, s: PricedSession) => sum + s.effectivePrice, 0);
+
+      // Account credit can cover the whole (non-package) portion of the
+      // series, up to its total. Split proportionally across every
+      // uncovered date by its own effectivePrice (so a first-time-free date
+      // correctly gets a half share) — not just recorded on the first row —
+      // so that cancelling any single date later refunds/credits exactly
+      // its own fair share.
       let accountCreditApplied = 0;
       if (applyAccountCredit && totalBeforeCredit > 0) {
         const balance = await getAccountCreditBalance(email);
         accountCreditApplied = Math.min(balance, totalBeforeCredit);
         if (accountCreditApplied > 0) await deductAccountCredit(email, accountCreditApplied);
       }
+      const accountCreditShares = accountCreditApplied > 0
+        ? splitProportional(accountCreditApplied, uncoveredSessions.map((s: PricedSession) => s.effectivePrice))
+        : [];
 
       const amountToCharge = Math.max(0, totalBeforeCredit - accountCreditApplied);
       const bookingBatchId = crypto.randomUUID();
 
-      for (const [i, s] of pricedSessions.entries()) {
+      for (const [i, s] of uncoveredSessions.entries()) {
         await addRegistrationWithRewards({
           parentName,
           email,
@@ -576,10 +683,9 @@ export async function POST(req: NextRequest) {
           usedReferralCredit: i === 0 && usedReferralCredit,
           smsConsent: !!smsConsent,
           sessionPrice: s.fullPrice,
-          ...(i === 0 && accountCreditApplied > 0 ? { appliedAccountCredit: accountCreditApplied } : {}),
+          ...(accountCreditShares[i] > 0 ? { appliedAccountCredit: accountCreditShares[i] } : {}),
           status: amountToCharge > 0 ? "pending_payment" : undefined,
           bookingBatchId,
-          ...(s.packageId ? { packageId: s.packageId } : {}),
         });
       }
 
@@ -589,7 +695,7 @@ export async function POST(req: NextRequest) {
         phone,
         kids,
         type,
-        privateSessions: pricedSessions as Array<{ date: string; startTime: string; endTime: string; location: string; trainer?: string; fullPrice: number; isFree: boolean; packageCovered?: boolean }>,
+        privateSessions: uncoveredSessions as Array<{ date: string; startTime: string; endTime: string; location: string; trainer?: string; fullPrice: number; isFree: boolean; packageCovered?: boolean }>,
         totalParticipants: totalParticipants || 1,
         referralCode,
         privateReferrer,
@@ -629,7 +735,7 @@ export async function POST(req: NextRequest) {
           {
             price_data: {
               currency: "usd",
-              product_data: { name: `${pricedSessions.length} private session${pricedSessions.length !== 1 ? "s" : ""}` },
+              product_data: { name: `${uncoveredSessions.length} private session${uncoveredSessions.length !== 1 ? "s" : ""}` },
               unit_amount: Math.round(amountToCharge * 100),
             },
             quantity: 1,
@@ -650,7 +756,7 @@ export async function POST(req: NextRequest) {
 
       await attachStripeCheckoutSession(bookingBatchId, session.id);
 
-      return NextResponse.json({ success: true, checkoutUrl: session.url });
+      return NextResponse.json({ success: true, checkoutUrl: session.url, packageCoveredCount: coveredSessions.length });
     }
 
     // Single-date private/group-private booking, paid via Stripe.
