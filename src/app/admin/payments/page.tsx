@@ -103,6 +103,9 @@ export default function PaymentsPage() {
   const [creditAmount, setCreditAmount] = useState("");
   const [addingCredit, setAddingCredit] = useState(false);
   const [creditMessage, setCreditMessage] = useState<{ text: string; isError: boolean } | null>(null);
+  const [editingCreditEmail, setEditingCreditEmail] = useState<string | null>(null);
+  const [editingCreditValue, setEditingCreditValue] = useState("");
+  const [savingCreditEdit, setSavingCreditEdit] = useState(false);
   const [now] = useState(() => Date.now());
 
   useEffect(() => {
@@ -178,6 +181,50 @@ export default function PaymentsPage() {
     setCreditEmail("");
     setCreditAmount("");
     setAddingCredit(false);
+  }
+
+  function startEditingCredit(email: string, currentBalance: number) {
+    setEditingCreditEmail(email);
+    setEditingCreditValue(String(currentBalance));
+    setCreditMessage(null);
+  }
+
+  // Lets the admin type the balance they want a client to end up at, rather
+  // than compute a delta by hand — reuses the same delta-based endpoint the
+  // Add form above already uses, just with the delta worked out here first.
+  async function submitCreditEdit(email: string, currentBalance: number) {
+    if (!token) return;
+    const newBalance = parseFloat(editingCreditValue);
+    if (isNaN(newBalance) || newBalance < 0) {
+      setCreditMessage({ text: "Enter a valid non-negative balance.", isError: true });
+      return;
+    }
+    const delta = Math.round((newBalance - currentBalance) * 100) / 100;
+    if (delta === 0) {
+      setEditingCreditEmail(null);
+      return;
+    }
+    setSavingCreditEdit(true);
+    setCreditMessage(null);
+    const res = await fetch("/api/admin/account-credits", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ email, amount: delta }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) {
+      setCreditMessage({ text: data?.error || "Failed to update credit.", isError: true });
+      setSavingCreditEdit(false);
+      return;
+    }
+    setAccountCredits((prev) =>
+      newBalance > 0
+        ? prev.map((a) => (a.email === email ? { ...a, balance: newBalance } : a))
+        : prev.filter((a) => a.email !== email)
+    );
+    setCreditMessage({ text: `${email}'s account credit set to $${newBalance}.`, isError: false });
+    setEditingCreditEmail(null);
+    setSavingCreditEdit(false);
   }
 
   async function settleFee(id: string, referralCode?: string | null, bookedGroup?: string | null) {
@@ -648,7 +695,45 @@ export default function PaymentsPage() {
               {accountCredits.map((a) => (
                 <div key={a.email} className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-3 flex items-center justify-between gap-3">
                   <span className="text-sm truncate">{a.email}</span>
-                  <span className="text-lg font-bold text-blue-400">${a.balance}</span>
+                  {editingCreditEmail === a.email ? (
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-brown-500 text-sm">$</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        autoFocus
+                        value={editingCreditValue}
+                        onChange={(e) => setEditingCreditValue(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") submitCreditEdit(a.email, a.balance); if (e.key === "Escape") setEditingCreditEmail(null); }}
+                        className="w-20 rounded-lg border border-brown-700 bg-brown-950 px-2 py-1 text-sm text-white"
+                      />
+                      <button
+                        onClick={() => submitCreditEdit(a.email, a.balance)}
+                        disabled={savingCreditEdit}
+                        className="text-xs text-green-400 hover:text-green-300 font-semibold transition disabled:opacity-50"
+                      >
+                        {savingCreditEdit ? "…" : "Save"}
+                      </button>
+                      <button
+                        onClick={() => setEditingCreditEmail(null)}
+                        disabled={savingCreditEdit}
+                        className="text-xs text-brown-500 hover:text-brown-300 transition disabled:opacity-50"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-lg font-bold text-blue-400">${a.balance}</span>
+                      <button
+                        onClick={() => startEditingCredit(a.email, a.balance)}
+                        className="text-brown-500 hover:text-white transition"
+                        title="Edit balance"
+                      >
+                        ✎
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
