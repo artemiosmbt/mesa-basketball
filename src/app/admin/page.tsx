@@ -227,6 +227,68 @@ function parseTimeToMinsClient(t: string): number {
   return h * 60 + min;
 }
 
+function formatTimeFromMinsClient(mins: number): string {
+  const h24 = Math.floor(mins / 60);
+  const m = mins % 60;
+  const period = h24 >= 12 ? "PM" : "AM";
+  const h12 = h24 === 0 ? 12 : h24 > 12 ? h24 - 12 : h24;
+  return `${h12}:${m.toString().padStart(2, "0")} ${period}`;
+}
+
+interface AdminTimeWindow {
+  location: string;
+  trainer: string;
+  startMins: number;
+  endMins: number;
+}
+
+// Mirrors buildTimeWindows() on the client booking page: the sheet lists
+// private availability as separate hour-long rows (e.g. 3-4pm, 4-5pm), so
+// adjacent rows for the same location/trainer get merged into one
+// contiguous window before generating start-time options from it — exactly
+// what the client-facing reschedule/booking flow already does, which is why
+// a client can pick any 15-minute mark but the admin reschedule tool
+// couldn't (it only ever exposed each raw row's own start time).
+function buildTimeWindowsClient(slots: PrivateSlot[]): AdminTimeWindow[] {
+  const groups: Record<string, PrivateSlot[]> = {};
+  slots.forEach((s) => {
+    const key = `${s.location}|${s.trainer}`;
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(s);
+  });
+  const windows: AdminTimeWindow[] = [];
+  Object.values(groups).forEach((group) => {
+    const sorted = [...group].sort((a, b) => parseTimeToMinsClient(a.startTime) - parseTimeToMinsClient(b.startTime));
+    let windowStart = parseTimeToMinsClient(sorted[0].startTime);
+    let windowEnd = parseTimeToMinsClient(sorted[0].endTime);
+    for (let i = 1; i < sorted.length; i++) {
+      const slotStart = parseTimeToMinsClient(sorted[i].startTime);
+      const slotEnd = parseTimeToMinsClient(sorted[i].endTime);
+      if (slotStart === windowEnd) {
+        windowEnd = slotEnd;
+      } else {
+        windows.push({ location: sorted[0].location, trainer: sorted[0].trainer, startMins: windowStart, endMins: windowEnd });
+        windowStart = slotStart;
+        windowEnd = slotEnd;
+      }
+    }
+    windows.push({ location: sorted[0].location, trainer: sorted[0].trainer, startMins: windowStart, endMins: windowEnd });
+  });
+  return windows;
+}
+
+// 15-min increment start times within a window, capped so at least
+// minDuration remains before the window ends (matches the client-side
+// booking flow's own getStartOptions()).
+function getStartOptionsClient(window: { startMins: number; endMins: number }, minDuration: number): number[] {
+  const options: number[] = [];
+  const latestStart = window.endMins - minDuration;
+  for (let t = window.startMins; t <= latestStart; t += 15) {
+    options.push(t);
+  }
+  return options;
+}
+
 function calcPrivatePricePreview(durationMins: number, kidCount: number): number {
   return Math.round((kidCount >= 4 ? 250 : 150) * (durationMins / 60) * 100) / 100;
 }
@@ -392,12 +454,21 @@ function renderCampRescheduleFields(camps: Camp[], form: RescheduleForm, setForm
   );
 }
 
-function renderPrivateRescheduleFields(privateSlots: PrivateSlot[], form: RescheduleForm, setForm: (f: RescheduleForm) => void) {
+function renderPrivateRescheduleFields(privateSlots: PrivateSlot[], form: RescheduleForm, setForm: (f: RescheduleForm) => void, preferredDurationMins: number = 60) {
   const dates = uniqueSorted(privateSlots.map((s) => s.date)).sort((a, b) => dateSortKey(a) - dateSortKey(b));
   const slotsForDate = privateSlots.filter((s) => s.date === form.date);
-  const times = Array.from(new Set(slotsForDate.map((s) => s.startTime)));
-  const slotsForTime = slotsForDate.filter((s) => s.startTime === form.start);
-  const locations = Array.from(new Set(slotsForTime.map((s) => s.location)));
+  const locations = Array.from(new Set(slotsForDate.map((s) => s.location)));
+  const slotsForLocation = slotsForDate.filter((s) => s.location === form.location);
+  // Merge adjacent hourly sheet rows into real windows, then offer every
+  // 15-minute mark within them — same granularity the client gets when
+  // booking/rescheduling themselves — while keeping at least
+  // preferredDurationMins free so the session is never compressed shorter
+  // than it started (defaults to 60 min; preserves the original booking's
+  // duration when one already exists).
+  const windowsForLocation = form.location ? buildTimeWindowsClient(slotsForLocation) : [];
+  const startOptions = Array.from(new Set(
+    windowsForLocation.flatMap((w) => getStartOptionsClient(w, preferredDurationMins))
+  )).sort((a, b) => a - b);
 
   return (
     <>
@@ -414,41 +485,45 @@ function renderPrivateRescheduleFields(privateSlots: PrivateSlot[], form: Resche
       </div>
       {form.date && (
         <div>
+          <label className={RESCHEDULE_LABEL_CLASS}>Location</label>
+          <select
+            value={form.location}
+            onChange={(e) => setForm({ ...form, location: e.target.value, start: "", end: "", trainer: "" })}
+            className={RESCHEDULE_SELECT_CLASS}
+          >
+            <option value="">Select a location…</option>
+            {locations.map((l) => <option key={l} value={l}>{l}</option>)}
+          </select>
+        </div>
+      )}
+      {form.location && (
+        <div>
           <label className={RESCHEDULE_LABEL_CLASS}>Time</label>
           <select
-            value={form.start}
+            value={form.start ? String(parseTimeToMinsClient(form.start)) : ""}
             onChange={(e) => {
-              const start = e.target.value;
-              const match = slotsForDate.find((s) => s.startTime === start);
-              setForm({ ...form, start, end: match?.endTime || "", location: match?.location || "", trainer: match?.trainer || "" });
+              const startMins = parseInt(e.target.value, 10);
+              const endMins = startMins + preferredDurationMins;
+              // Recover the trainer from whichever raw sheet row actually
+              // covers the full selected duration at this location.
+              const match = slotsForLocation.find((s) =>
+                parseTimeToMinsClient(s.startTime) <= startMins && parseTimeToMinsClient(s.endTime) >= endMins
+              );
+              setForm({
+                ...form,
+                start: formatTimeFromMinsClient(startMins),
+                end: formatTimeFromMinsClient(endMins),
+                trainer: match?.trainer || form.trainer,
+              });
             }}
             className={RESCHEDULE_SELECT_CLASS}
           >
             <option value="">Select a time…</option>
-            {times.map((t) => {
-              const match = slotsForDate.find((s) => s.startTime === t);
-              return <option key={t} value={t}>{t}{match ? `-${match.endTime}` : ""}</option>;
-            })}
-          </select>
-        </div>
-      )}
-      {form.start && (
-        <div>
-          <label className={RESCHEDULE_LABEL_CLASS}>Location</label>
-          <select
-            value={form.location}
-            onChange={(e) => {
-              const location = e.target.value;
-              const match = slotsForTime.find((s) => s.location === location);
-              setForm({ ...form, location, trainer: match?.trainer || form.trainer });
-            }}
-            className={RESCHEDULE_SELECT_CLASS}
-          >
-            <option value="">Select a location…</option>
-            {locations.map((l) => {
-              const match = slotsForTime.find((s) => s.location === l);
-              return <option key={l} value={l}>{l}{match?.trainer ? ` (${match.trainer})` : ""}</option>;
-            })}
+            {startOptions.map((mins) => (
+              <option key={mins} value={mins}>
+                {formatTimeFromMinsClient(mins)}-{formatTimeFromMinsClient(mins + preferredDurationMins)}
+              </option>
+            ))}
           </select>
         </div>
       )}
@@ -1851,7 +1926,16 @@ export default function AdminPage() {
                 ) : isPrivateTypeClient(r.type) && rescheduleConvertToGroup ? (
                   renderWeeklyRescheduleFields(scheduleData.weeklySchedule, rescheduleForm, setRescheduleForm)
                 ) : (
-                  renderPrivateRescheduleFields(scheduleData.privateSlots, rescheduleForm, setRescheduleForm)
+                  // Preserve the original booking's own duration (e.g. a 90
+                  // or 120-min session) rather than defaulting to 60 — the
+                  // time picker only offers starts that leave at least that
+                  // much room in the window.
+                  renderPrivateRescheduleFields(
+                    scheduleData.privateSlots,
+                    rescheduleForm,
+                    setRescheduleForm,
+                    Math.max(60, parseTimeToMinsClient(r.booked_end_time || "") - parseTimeToMinsClient(r.booked_start_time || ""))
+                  )
                 )}
               </div>
               {rescheduleConvertToPrivate && (
