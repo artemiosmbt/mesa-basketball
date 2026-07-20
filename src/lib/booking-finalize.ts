@@ -3,6 +3,7 @@ import { sendRegistrationNotification, sendReferralCreditNotification, sendResch
 import { addPrivateSessionToCalendar, upsertGroupSessionCalendarEvent } from "@/lib/calendar";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import { getStripe } from "@/lib/stripe";
+import { SERVICE_FEE, SERVICE_FEE_LABEL } from "@/lib/pricing";
 import {
   addReferralCredit,
   addAccountCredit,
@@ -245,6 +246,13 @@ export async function finalizeConfirmedPrivateBooking(params: FinalizePrivateBoo
     }
   }
 
+  // What actually got charged via Stripe, net of the first-time/referral
+  // discount and any account credit — 0 whenever nothing was charged (fully
+  // covered by credit). The service fee is added on top of this by the
+  // notification functions themselves, not baked in here, since fullPrice
+  // still needs to stay the nominal session price for refund/reschedule math.
+  const amountCharged = Math.max(0, (params.isFree ? Math.round((params.fullPrice ?? 0) * 0.5) : (params.fullPrice ?? 0)) - params.accountCreditApplied);
+
   try {
     await sendRegistrationNotification({
       parentName: params.parentName,
@@ -266,6 +274,7 @@ export async function finalizeConfirmedPrivateBooking(params: FinalizePrivateBoo
       calendarEvent: { date: params.bookedDate, startTime: params.bookedStartTime, endTime: params.bookedEndTime || params.bookedStartTime, location: params.bookedLocation || "" },
       accountCreditApplied: params.accountCreditApplied,
       fullPrice: params.fullPrice,
+      amountCharged,
     });
   } catch (notifyErr) {
     console.error("Private booking email failed (booking was paid):", notifyErr);
@@ -279,7 +288,8 @@ export async function finalizeConfirmedPrivateBooking(params: FinalizePrivateBoo
       : "";
     const privateTrainerLine = isPrivateType && params.bookedTrainer ? `\nTrainer: ${params.bookedTrainer}` : "";
     const creditLine = params.accountCreditApplied > 0 ? `\n$${params.accountCreditApplied} account credit applied.` : "";
-    await sendSMS(params.phone, `Mesa Basketball: Your ${typeStr} is confirmed!${dateLine}${privateTrainerLine}${pkgNote}${creditLine}\nAthlete: ${params.kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
+    const chargeLine = amountCharged > 0 ? `\nCharged: $${Math.round((amountCharged + SERVICE_FEE) * 100) / 100} ($${amountCharged} + ${SERVICE_FEE_LABEL} fee).` : "";
+    await sendSMS(params.phone, `Mesa Basketball: Your ${typeStr} is confirmed!${dateLine}${privateTrainerLine}${pkgNote}${creditLine}${chargeLine}\nAthlete: ${params.kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
   }
 
   const adminDateLine = `${formatDateWithDay(params.bookedDate)} | ${params.bookedStartTime}${params.bookedEndTime ? `-${params.bookedEndTime}` : ""}${params.bookedLocation ? `\nLocation: ${resolveLocationName(params.bookedLocation)}` : ""}`;
@@ -345,10 +355,13 @@ export async function finalizeConfirmedWeeklyBooking(params: FinalizeWeeklyBooki
     .map((s) => `${s.date} ${s.startTime}-${s.endTime} at ${s.location}`)
     .join("<br/>");
 
+  // What actually got charged via Stripe (net of credit) — 0 if fully
+  // covered by credit. Worded as "Charged," never "Due," since this only
+  // sends once the booking is already confirmed/paid.
+  const weeklyAmountCharged = weeklyTotalPrice ? Math.max(0, weeklyTotalPrice - weeklyCreditApplied) : 0;
+  const weeklyTotalWithFee = weeklyAmountCharged > 0 ? Math.round((weeklyAmountCharged + SERVICE_FEE) * 100) / 100 : 0;
   const priceNote = weeklyTotalPrice
-    ? weeklyCreditApplied > 0
-      ? `<p><strong>Total:</strong> $${weeklyTotalPrice} — $${weeklyCreditApplied} account credit applied — <strong>Due:</strong> $${weeklyTotalPrice - weeklyCreditApplied}</p>`
-      : `<p><strong>Total:</strong> $${weeklyTotalPrice}</p>`
+    ? `<p><strong>Total:</strong> $${weeklyTotalPrice}${weeklyCreditApplied > 0 ? ` — $${weeklyCreditApplied} account credit applied` : ""}${weeklyAmountCharged > 0 ? ` — <strong>Charged:</strong> $${weeklyTotalWithFee} ($${weeklyAmountCharged} + ${SERVICE_FEE_LABEL} fee)` : ""}</p>`
     : "";
 
   // Best-effort — the sessions are already paid for and confirmed, so a
@@ -397,7 +410,8 @@ export async function finalizeConfirmedWeeklyBooking(params: FinalizeWeeklyBooki
     const capitalizedType = sessionTypeSMS.charAt(0).toUpperCase() + sessionTypeSMS.slice(1);
     const confirmLabel = count === 1 ? `${capitalizedType} session` : `${count} ${sessionTypeSMS} sessions`;
     const creditLine = weeklyCreditApplied > 0 ? `\n$${weeklyCreditApplied} account credit applied.` : "";
-    await sendSMS(params.phone, `Mesa Basketball: ${confirmLabel} confirmed!\n${sessionLines}${weeklyTrainerLine}\nAthlete: ${params.kids}${creditLine}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
+    const chargeLine = weeklyAmountCharged > 0 ? `\nCharged: $${weeklyTotalWithFee} ($${weeklyAmountCharged} + ${SERVICE_FEE_LABEL} fee).` : "";
+    await sendSMS(params.phone, `Mesa Basketball: ${confirmLabel} confirmed!\n${sessionLines}${weeklyTrainerLine}\nAthlete: ${params.kids}${creditLine}${chargeLine}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
   }
 
   const adminLines = weeklySessions.map((s) =>
@@ -461,11 +475,10 @@ export async function finalizeConfirmedCampBooking(params: FinalizeCampBookingPa
   const daysList = campSessions
     .map((s) => `${s.date} ${s.startTime}${s.endTime ? `-${s.endTime}` : ""}`)
     .join("<br/>");
-  const dueAmount = (campTotalNum ?? sessionPrice ?? 0) - campCreditApplied;
+  const campAmountCharged = Math.max(0, (campTotalNum ?? sessionPrice ?? 0) - campCreditApplied);
+  const campTotalWithFee = campAmountCharged > 0 ? Math.round((campAmountCharged + SERVICE_FEE) * 100) / 100 : 0;
   const priceNote = campTotalPrice
-    ? campCreditApplied > 0
-      ? `<br/><strong>Total:</strong> ${campTotalPrice} — $${campCreditApplied} account credit applied — <strong>Due:</strong> $${dueAmount}`
-      : `<br/><strong>Total:</strong> ${campTotalPrice}`
+    ? `<br/><strong>Total:</strong> ${campTotalPrice}${campCreditApplied > 0 ? ` — $${campCreditApplied} account credit applied` : ""}${campAmountCharged > 0 ? ` — <strong>Charged:</strong> $${campTotalWithFee} ($${campAmountCharged} + ${SERVICE_FEE_LABEL} fee)` : ""}`
     : "";
   const firstSession = campSessions[0];
 
@@ -506,9 +519,7 @@ export async function finalizeConfirmedCampBooking(params: FinalizeCampBookingPa
       `${formatDateWithDay(s.date)} | ${s.startTime}${s.endTime ? `-${s.endTime}` : ""}\nLocation: ${resolveLocationName(s.location)}`
     ).join("\n");
     const priceText = campTotalPrice
-      ? campCreditApplied > 0
-        ? ` Total: ${campTotalPrice}, $${campCreditApplied} credit applied.`
-        : ` Total: ${campTotalPrice}.`
+      ? `${campCreditApplied > 0 ? ` Total: ${campTotalPrice}, $${campCreditApplied} credit applied.` : ` Total: ${campTotalPrice}.`}${campAmountCharged > 0 ? ` Charged: $${campTotalWithFee} ($${campAmountCharged} + ${SERVICE_FEE_LABEL} fee).` : ""}`
       : "";
     await sendSMS(params.phone, `Mesa Basketball: Camp confirmed (${campSessions.length} day${campSessions.length !== 1 ? "s" : ""})!${priceText}\n${campDayLines}\nAthlete: ${params.kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
   }
@@ -637,9 +648,9 @@ export async function finalizeConfirmedPrivateSeriesBooking(params: FinalizePriv
     .map((s) => `${s.date} ${s.startTime}-${s.endTime} at ${s.location}`)
     .join("<br/>");
   const totalPaid = privateSessions.reduce((sum, s) => sum + (s.isFree ? Math.round(s.fullPrice * 0.5) : s.fullPrice), 0);
-  const priceNote = params.accountCreditApplied > 0
-    ? `<p><strong>Total:</strong> $${totalPaid} — $${params.accountCreditApplied} account credit applied — <strong>Due:</strong> $${Math.max(0, totalPaid - params.accountCreditApplied)}</p>`
-    : `<p><strong>Total:</strong> $${totalPaid}</p>`;
+  const seriesAmountCharged = Math.max(0, totalPaid - params.accountCreditApplied);
+  const seriesTotalWithFee = seriesAmountCharged > 0 ? Math.round((seriesAmountCharged + SERVICE_FEE) * 100) / 100 : 0;
+  const priceNote = `<p><strong>Total:</strong> $${totalPaid}${params.accountCreditApplied > 0 ? ` — $${params.accountCreditApplied} account credit applied` : ""}${seriesAmountCharged > 0 ? ` — <strong>Charged:</strong> $${seriesTotalWithFee} ($${seriesAmountCharged} + ${SERVICE_FEE_LABEL} fee)` : ""}</p>`;
 
   try {
     await sendRegistrationNotification({
@@ -675,7 +686,8 @@ export async function finalizeConfirmedPrivateSeriesBooking(params: FinalizePriv
       : "";
     const trainerLine = privateSessions[0]?.trainer ? `\nTrainer: ${privateSessions[0].trainer}` : "";
     const creditLine = params.accountCreditApplied > 0 ? `\n$${params.accountCreditApplied} account credit applied.` : "";
-    await sendSMS(params.phone, `Mesa Basketball: ${privateSessions.length} private sessions confirmed!\n${sessionLines}${trainerLine}${pkgNote}${creditLine}\nAthlete: ${params.kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
+    const chargeLine = seriesAmountCharged > 0 ? `\nCharged: $${seriesTotalWithFee} ($${seriesAmountCharged} + ${SERVICE_FEE_LABEL} fee).` : "";
+    await sendSMS(params.phone, `Mesa Basketball: ${privateSessions.length} private sessions confirmed!\n${sessionLines}${trainerLine}${pkgNote}${creditLine}${chargeLine}\nAthlete: ${params.kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
   }
 
   const adminLines = privateSessions.map((s) =>
@@ -790,15 +802,16 @@ export async function finalizeRescheduleTopup(params: FinalizeRescheduleTopupPar
     console.error("Reschedule email failed (topup booking was paid):", err);
   }
 
+  const topupTotalWithFee = Math.round((params.amountCharged + SERVICE_FEE) * 100) / 100;
   const creditAppliedNote = params.lateFeeCreditApplied
     ? ` ($${params.lateFeeCreditApplied} late-fee credit applied, remainder charged)`
     : "";
   if (params.smsConsent && params.phone) {
     const trainerLine = params.bookedTrainer ? `\nTrainer: ${params.bookedTrainer}` : "";
-    await sendSMS(params.phone, `Mesa Basketball: Reschedule confirmed — $${params.amountCharged} charged${creditAppliedNote}!\n${formatDateWithDay(params.bookedDate)} | ${params.bookedStartTime}-${params.bookedEndTime}\nLocation: ${resolveLocationName(params.bookedLocation)}${trainerLine}\nAthlete: ${params.kids}\nManage: mesabasketballtraining.com/booking/${params.manageToken}\nReply STOP to opt out.`);
+    await sendSMS(params.phone, `Mesa Basketball: Reschedule confirmed — $${topupTotalWithFee} charged ($${params.amountCharged} + ${SERVICE_FEE_LABEL} fee)${creditAppliedNote}!\n${formatDateWithDay(params.bookedDate)} | ${params.bookedStartTime}-${params.bookedEndTime}\nLocation: ${resolveLocationName(params.bookedLocation)}${trainerLine}\nAthlete: ${params.kids}\nManage: mesabasketballtraining.com/booking/${params.manageToken}\nReply STOP to opt out.`);
   }
 
-  await sendAdminSMS(`RESCHEDULED (paid $${params.amountCharged}${creditAppliedNote}): ${params.parentName}\nFrom: ${params.oldSessionDetails}\nTo: ${params.newSessionDetails}\nPlayers: ${params.kids}`);
+  await sendAdminSMS(`RESCHEDULED (paid $${topupTotalWithFee}${creditAppliedNote}): ${params.parentName}\nFrom: ${params.oldSessionDetails}\nTo: ${params.newSessionDetails}\nPlayers: ${params.kids}`);
 
   try {
     if (isPrivateType) {

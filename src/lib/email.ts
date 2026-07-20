@@ -1,4 +1,5 @@
 import { Resend } from "resend";
+import { SERVICE_FEE, SERVICE_FEE_LABEL } from "./pricing";
 
 const ARTEMI_EMAIL = "artemios@mesabasketballtraining.com";
 const FROM_EMAIL = "Mesa Basketball <noreply@mesabasketballtraining.com>";
@@ -106,6 +107,13 @@ export async function sendRegistrationNotification(data: {
   calendarEvent?: { date: string; startTime: string; endTime: string; location: string; };
   accountCreditApplied?: number;
   fullPrice?: number;
+  // The actual dollar amount charged via Stripe for this booking (net of any
+  // discount/credit, before the service fee) — unset/0 for package sessions
+  // (already paid at enrollment) or a booking fully covered by credit, since
+  // neither one touches Stripe. Drives the "charged to your card" note below;
+  // this function only ever runs after payment already succeeded (or never
+  // needed to happen), so it must never claim payment is still "due."
+  amountCharged?: number;
 }) {
   const resend = getResend();
 
@@ -144,6 +152,7 @@ export async function sendRegistrationNotification(data: {
       ${isPackageBooking ? `<p><strong>Package:</strong> ${data.packageType}-session monthly plan — ${data.packageSessionsRemaining} session${data.packageSessionsRemaining !== 1 ? "s" : ""} remaining after this booking</p>` : ""}
       ${data.isFree && !isPackageBooking ? `<p><strong style="color: #d4af37;">${data.isFirstTime ? "First-Time Discount" : "Referral Credit"}: 50% off applied</strong></p>` : ""}
       ${data.accountCreditApplied && data.accountCreditApplied > 0 ? `<p><strong style="color: #93c5fd;">Account credit applied: $${data.accountCreditApplied}</strong></p>` : ""}
+      ${data.amountCharged != null && data.amountCharged > 0 ? `<p><strong>Charged: $${Math.round((data.amountCharged + SERVICE_FEE) * 100) / 100}</strong> ($${data.amountCharged} + ${SERVICE_FEE_LABEL} fee)</p>` : ""}
       ${data.referredBy ? `<p><strong>Referred by:</strong> ${data.referredBy}</p>` : ""}
       ${data.referralCodeUsed ? `<p><strong>Referral code used:</strong> ${data.referralCodeUsed}</p>` : ""}
     `,
@@ -166,19 +175,31 @@ export async function sendRegistrationNotification(data: {
         ? "<p><strong>Rate:</strong> $250 (4+ participants)</p>"
         : "";
 
+  // This function only ever runs once a booking is actually confirmed —
+  // either it was paid via Stripe already (webhook-triggered), or it never
+  // needed payment at all (free session, or fully covered by credit). Either
+  // way, payment is never still "due" by the time this sends, so this only
+  // states the cancellation/reschedule policy, not a payment method.
   const paymentNote = isPackageBooking || data.isFree
     ? ""
-    : `<p>Payment is due upon registration via ${PAYMENT_OPTIONS}. Please provide at least 24 hours' notice if you need to cancel or reschedule a session. Rescheduling or canceling within 24 hours of the scheduled session will result in a 50% charge of the session fee. <strong>No-shows without prior notice will be charged the full session fee.</strong></p>`;
+    : `<p>Please provide at least 24 hours' notice if you need to cancel or reschedule a session. Rescheduling or canceling within 24 hours of the scheduled session will result in a 50% charge of the session fee. <strong>No-shows without prior notice will be charged the full session fee.</strong></p>`;
 
-  const discountedPrice = data.type === "group-private" ? 125 : 75;
   const freeNote = !isPackageBooking && data.isFree && data.isFirstTime
-    ? `<p style="background: #162d5a; color: #d4af37; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">First Session Discount Applied — 50% Off! Payment due upon registration: $${discountedPrice} via Cash, Venmo, or Zelle.</p>`
+    ? `<p style="background: #162d5a; color: #d4af37; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">First Session Discount Applied — 50% Off!</p>`
     : !isPackageBooking && data.isFree
-    ? `<p style="background: #162d5a; color: #d4af37; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">Referral Credit Applied — 50% Off This Session! Payment due upon registration: $${discountedPrice} via Cash, Venmo, or Zelle.</p>`
+    ? `<p style="background: #162d5a; color: #d4af37; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">Referral Credit Applied — 50% Off This Session!</p>`
+    : "";
+
+  // The actual card charge, including the $4.50 service fee — this is the
+  // one number that should match what shows on the client's bank/card
+  // statement, so it's shown plainly rather than folded into the other
+  // price notes above (which describe the session's rate, not the charge).
+  const chargedNote = data.amountCharged != null && data.amountCharged > 0
+    ? `<p style="background: #162d5a; color: #d4af37; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">Charged to your card: $${Math.round((data.amountCharged + SERVICE_FEE) * 100) / 100} ($${data.amountCharged} + ${SERVICE_FEE_LABEL} service fee)</p>`
     : "";
 
   const accountCreditNote = data.accountCreditApplied && data.accountCreditApplied > 0 && data.fullPrice != null
-    ? `<p style="background: #1e3a5f; color: #93c5fd; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">$${data.accountCreditApplied} account credit applied — Due: $${data.fullPrice - data.accountCreditApplied}</p>`
+    ? `<p style="background: #1e3a5f; color: #93c5fd; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">$${data.accountCreditApplied} account credit applied</p>`
     : "";
 
   const manageSection = `<p><a href="${BASE_URL}/my-bookings" style="color: #d4af37; font-weight: bold;">View My Bookings</a> — Manage, cancel, or reschedule your sessions</p>`;
@@ -228,6 +249,7 @@ export async function sendRegistrationNotification(data: {
       ${packageNote}
       ${freeNote}
       ${accountCreditNote}
+      ${chargedNote}
       ${priceNote}
       ${calendarButtons}
       ${paymentNote}
@@ -800,8 +822,8 @@ export async function sendRescheduleNotification(data: {
         <p style="margin: 0; color: #ffffff; font-size: 14px;">${data.priceAdjustment.kind === "refund"
           ? refundAdjustmentBody(data.priceAdjustment)
           : data.isLateReschedule
-            ? `50% of your original payment${data.lateFeeCredited ? ` ($${data.lateFeeCredited})` : ""} was kept as a late reschedule fee${data.lateFeeCreditApplied ? `, <strong>$${data.lateFeeCreditApplied}</strong> of which was applied directly to your new session` : ""}, and <strong>$${data.priceAdjustment.amount}</strong> was charged to cover the rest.`
-            : `<strong>$${data.priceAdjustment.amount}</strong> was charged to complete your reschedule (new session is higher-priced).`}</p>
+            ? `50% of your original payment${data.lateFeeCredited ? ` ($${data.lateFeeCredited})` : ""} was kept as a late reschedule fee${data.lateFeeCreditApplied ? `, <strong>$${data.lateFeeCreditApplied}</strong> of which was applied directly to your new session` : ""}, and <strong>$${Math.round((data.priceAdjustment.amount + SERVICE_FEE) * 100) / 100}</strong> ($${data.priceAdjustment.amount} + ${SERVICE_FEE_LABEL} service fee) was charged to cover the rest.`
+            : `<strong>$${Math.round((data.priceAdjustment.amount + SERVICE_FEE) * 100) / 100}</strong> ($${data.priceAdjustment.amount} + ${SERVICE_FEE_LABEL} service fee) was charged to complete your reschedule (new session is higher-priced).`}</p>
       </div>`
     : !data.priceAdjustment && data.lateFeeCredited
       ? `<div style="background: #1e3a5f; border-left: 4px solid #3b82f6; border-radius: 6px; padding: 14px 16px; margin: 16px 0;">
@@ -826,7 +848,7 @@ export async function sendRescheduleNotification(data: {
       ${data.priceAdjustment
         ? data.priceAdjustment.kind === "refund"
           ? `<p><strong>${data.priceAdjustment.failed ? "REFUND FAILED — needs manual action" : [data.priceAdjustment.refundedAmount > 0 ? `$${data.priceAdjustment.refundedAmount} refunded` : "", data.priceAdjustment.creditedAmount > 0 ? `$${data.priceAdjustment.creditedAmount} credited` : ""].filter(Boolean).join(", ")}</strong></p>`
-          : `<p><strong>Charged: $${data.priceAdjustment.amount}</strong>${data.lateFeeCreditApplied ? ` (plus $${data.lateFeeCreditApplied} late-fee credit applied)` : ""}</p>`
+          : `<p><strong>Charged: $${Math.round((data.priceAdjustment.amount + SERVICE_FEE) * 100) / 100}</strong> ($${data.priceAdjustment.amount} + ${SERVICE_FEE_LABEL} fee)${data.lateFeeCreditApplied ? ` (plus $${data.lateFeeCreditApplied} late-fee credit applied)` : ""}</p>`
         : data.lateFeeCredited
           ? data.lateFeeCreditApplied
             ? `<p><strong>$${data.lateFeeCreditApplied} late-fee credit applied to new session</strong>${leftoverLateFeeCredit > 0 ? ` ($${leftoverLateFeeCredit} left in account)` : ""}</p>`
