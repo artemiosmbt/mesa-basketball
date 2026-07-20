@@ -9,7 +9,8 @@ import {
 import { sendRescheduleNotification } from "@/lib/email";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import { getWeeklySchedule } from "@/lib/sheets";
-import { addAccountCredit, addReferralCredit } from "@/lib/supabase";
+import { addAccountCredit, deductAccountCredit, addReferralCredit } from "@/lib/supabase";
+import { isLateAction } from "@/lib/booking-finalize";
 
 async function verifyAdmin(req: NextRequest) {
   const token = req.headers.get("authorization")?.replace("Bearer ", "");
@@ -60,16 +61,22 @@ function effectiveAmount(fullPrice: number, isFree: boolean, isPriv: boolean): n
 // Admin-initiated move of a single confirmed booking to a new day/time/location
 // (and optionally a new type, e.g. converting a group booking into a private
 // one). Unlike the client-facing reschedule, this updates the row in place
-// (same manage_token, same id) and never charges a late fee — the business
-// made the change, not the client.
+// (same manage_token, same id). On-time, this never charges a late fee — the
+// business made the change, not the client. If the OLD session is genuinely
+// within the late window, the admin explicitly chooses whether to waive the
+// fee (helping the client out) or charge the same fee the client would owe
+// themselves (e.g. they're having trouble using the site but still owe it).
 export async function POST(req: NextRequest) {
   if (!(await verifyAdmin(req))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { id, bookedDate, bookedStartTime, bookedEndTime, bookedLocation, bookedGroup, bookedTrainer, sessionLabelPrefix, newType, keepReferralCredit } = await req.json();
+  const { id, bookedDate, bookedStartTime, bookedEndTime, bookedLocation, bookedGroup, bookedTrainer, sessionLabelPrefix, newType, keepReferralCredit, feeChoice } = await req.json();
   if (!id || !bookedDate || !bookedStartTime || !bookedEndTime || !bookedLocation) {
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+  }
+  if (feeChoice && feeChoice !== "waive" && feeChoice !== "charge") {
+    return NextResponse.json({ error: "Invalid feeChoice" }, { status: 400 });
   }
 
   const supabase = createClient(
@@ -89,6 +96,18 @@ export async function POST(req: NextRequest) {
   if (reg.status !== "confirmed") {
     return NextResponse.json({ error: "Only confirmed bookings can be rescheduled" }, { status: 400 });
   }
+
+  // Same lateness rule a client-initiated reschedule uses, checked against
+  // the OLD (current) session time before it moves. Gate on the choice
+  // before any mutation happens, so a retry after the admin picks is clean.
+  const isLateReschedule = !!(reg.booked_date && reg.booked_start_time && isLateAction(reg.booked_date, reg.booked_start_time, reg.created_at, reg.admin_change_at));
+  if (isLateReschedule && !feeChoice) {
+    return NextResponse.json(
+      { error: "The current session is within the 24-hour window — choose how to handle the fee.", needsFeeChoice: true, isLateReschedule: true },
+      { status: 400 }
+    );
+  }
+  const chargeLateFee = isLateReschedule && feeChoice === "charge";
 
   const oldSessionDetails: string = reg.session_details;
   const oldBookedDate: string | null = reg.booked_date;
@@ -209,25 +228,55 @@ export async function POST(req: NextRequest) {
 
   // "Already paid" covers both the old manual cash toggle AND a real Stripe
   // charge — Stripe-paid rows never set is_paid, so checking that alone would
-  // miss every paying client since Stripe went live. If the client already
-  // paid and the new amount owed is lower, credit the difference to their
-  // account for their next booking (same rule already used for partial
-  // camp-day cancellations elsewhere) — always account credit here, never a
-  // real Stripe refund, since this is a business-initiated change, not a
-  // client cancellation. If the new amount is higher, there's no charge
-  // triggered automatically — surface it in the response/notices instead so
-  // the admin can follow up.
+  // miss every paying client since Stripe went live.
+  //
+  // On-time (or the admin chose to waive the fee): if the new amount owed is
+  // lower, credit the difference to their account for their next booking
+  // (same rule already used for partial camp-day cancellations elsewhere) —
+  // always account credit here, never a real Stripe refund, since this is a
+  // business-initiated change, not a client cancellation. If the new amount
+  // is higher, there's no charge triggered automatically — surface it in the
+  // response/notices instead so the admin can follow up.
+  //
+  // Late + the admin chose to charge the fee: same policy a client-initiated
+  // late reschedule pays — 50% of what they paid for the OLD session is
+  // credited, then immediately applied toward the new session's price
+  // (rather than sitting unused), and only any true remainder is surfaced as
+  // still owed. There's no automatic off-session Stripe charge for that
+  // remainder — same reasoning as everywhere else admin tools don't charge
+  // a card directly: nobody's present to fix it if it fails. The admin
+  // follows up for that piece, same as any other price-increase amountDue.
   const wasPaid = !!reg.is_paid || !!reg.stripe_payment_intent_id;
   let creditGranted = 0;
-  if (wasPaid && priceDelta < 0) {
+  let lateFeeCredited = 0;
+  let lateFeeCreditApplied = 0;
+  let amountDue = 0;
+  if (wasPaid && chargeLateFee) {
+    lateFeeCredited = Math.round(oldAmount * 0.5);
+    if (lateFeeCredited > 0) {
+      try {
+        await addAccountCredit(reg.email, lateFeeCredited);
+      } catch (err) {
+        console.error("Failed to grant late-fee account credit (admin reschedule):", err);
+      }
+      lateFeeCreditApplied = Math.min(lateFeeCredited, newAmount);
+      if (lateFeeCreditApplied > 0) {
+        const applied = await deductAccountCredit(reg.email, lateFeeCreditApplied).catch(() => false);
+        if (!applied) lateFeeCreditApplied = 0; // couldn't apply it (shouldn't happen right after crediting it) — leave it in their balance instead
+      }
+    }
+    creditGranted = lateFeeCredited - lateFeeCreditApplied;
+    amountDue = Math.max(0, Math.round((newAmount - lateFeeCreditApplied) * 100) / 100);
+  } else if (wasPaid && priceDelta < 0) {
     try {
       await addAccountCredit(reg.email, -priceDelta);
       creditGranted = -priceDelta;
     } catch (err) {
       console.error("Failed to grant account credit (admin reschedule):", err);
     }
+  } else if (wasPaid && priceDelta > 0) {
+    amountDue = priceDelta;
   }
-  const amountDue = wasPaid && priceDelta > 0 ? priceDelta : 0;
 
   // Sync calendar. Private sessions are a single event tied to the booking;
   // group/camp sessions are shared events keyed by date+time+label, so we
@@ -281,18 +330,23 @@ export async function POST(req: NextRequest) {
     console.error("Calendar sync error (admin reschedule):", err);
   }
 
-  // Notify the client — no late fee, this was the business's call. The price
-  // note is appended directly (not part of the shared template) since only
-  // this admin flow needs to say "no change" vs "credited" vs "due".
-  const priceNote = newFullPrice === undefined
-    ? ""
-    : creditGranted > 0
-      ? `\n$${oldAmount} → $${newAmount}. $${creditGranted} credited to your account for your next booking.`
-      : amountDue > 0
-        ? `\n$${oldAmount} → $${newAmount}. $${amountDue} additional due.`
-        : priceDelta !== 0
-          ? `\n$${oldAmount} → $${newAmount}.`
-          : "";
+  // Notify the client. On-time (or waived), this was the business's call —
+  // no fee. Late + charged: same policy a client-initiated late reschedule
+  // pays, so the note explains the 50% fee credit and how much of it (if
+  // any) covered the new session. The price note is appended directly (not
+  // part of the shared template) since only this admin flow needs to say
+  // "no change" vs "credited" vs "due".
+  const priceNote = chargeLateFee
+    ? `\nLate reschedule fee: $${lateFeeCredited} (50% of what you paid) credited to your account${lateFeeCreditApplied > 0 ? `, $${lateFeeCreditApplied} applied to your new session` : ""}.${amountDue > 0 ? ` $${amountDue} additional due.` : ""}`
+    : newFullPrice === undefined
+      ? ""
+      : creditGranted > 0
+        ? `\n$${oldAmount} → $${newAmount}. $${creditGranted} credited to your account for your next booking.`
+        : amountDue > 0
+          ? `\n$${oldAmount} → $${newAmount}. $${amountDue} additional due.`
+          : priceDelta !== 0
+            ? `\n$${oldAmount} → $${newAmount}.`
+            : "";
   const creditRefundNote = creditRefunded ? "\nYour referral credit was refunded since it's no longer applied to this booking." : "";
 
   // Spell out exactly what moved — which session type/name, on what day, at
@@ -310,7 +364,9 @@ export async function POST(req: NextRequest) {
       oldSessionDetails,
       newSessionDetails,
       manageToken: reg.manage_token,
-      isLateReschedule: false,
+      isLateReschedule: chargeLateFee,
+      lateFeeCredited: chargeLateFee ? lateFeeCredited : undefined,
+      lateFeeCreditApplied: chargeLateFee ? lateFeeCreditApplied : undefined,
       newTrainer: resolvedTrainer,
     });
     if (reg.sms_consent && reg.phone) {
@@ -319,15 +375,17 @@ export async function POST(req: NextRequest) {
         `Mesa Basketball: Your session has been rescheduled by your trainer.\n${fromLine ? `${fromLine}\n` : ""}${toLine}\nAthlete: ${reg.kids}${priceNote}${creditRefundNote}\nManage: mesabasketballtraining.com/booking/${reg.manage_token}\nReply STOP to opt out.`
       );
     }
-    const adminPriceNote = newFullPrice === undefined
-      ? ""
-      : creditGranted > 0
-        ? `\n$${oldAmount} -> $${newAmount}: $${creditGranted} credited to their account (already paid)`
-        : amountDue > 0
-          ? `\n$${oldAmount} -> $${newAmount}: $${amountDue} additional now due (already paid at the old price)`
-          : priceDelta !== 0
-            ? `\nPrice: $${oldAmount} -> $${newAmount}`
-            : "";
+    const adminPriceNote = chargeLateFee
+      ? `\nLate fee charged: $${lateFeeCredited} credited (50% of $${oldAmount} paid)${lateFeeCreditApplied > 0 ? `, $${lateFeeCreditApplied} applied to new session ($${newAmount})` : ""}.${amountDue > 0 ? ` $${amountDue} additional now due.` : ""}`
+      : newFullPrice === undefined
+        ? ""
+        : creditGranted > 0
+          ? `\n$${oldAmount} -> $${newAmount}: $${creditGranted} credited to their account (already paid)`
+          : amountDue > 0
+            ? `\n$${oldAmount} -> $${newAmount}: $${amountDue} additional now due (already paid at the old price)`
+            : priceDelta !== 0
+              ? `\nPrice: $${oldAmount} -> $${newAmount}`
+              : "";
     const adminCreditRefundNote = creditRefunded ? "\nReferral credit refunded (no longer applied)." : "";
     const priceLookupFailedNote = priceLookupFailed ? `\n⚠️ Couldn't verify the new price on the schedule sheet — price left at $${reg.session_price}, double-check it manually.` : "";
     await sendAdminSMS(`ADMIN RESCHEDULED: ${reg.parent_name}\nFrom: ${oldSessionDetails}\nTo: ${newSessionDetails}\nPlayers: ${reg.kids}${adminPriceNote}${adminCreditRefundNote}${priceLookupFailedNote}`);
@@ -349,5 +407,9 @@ export async function POST(req: NextRequest) {
     newIsFree,
     newUsedReferralCredit,
     priceLookupFailed,
+    isLateReschedule,
+    lateFeeCharged: chargeLateFee,
+    lateFeeCredited: chargeLateFee ? lateFeeCredited : undefined,
+    lateFeeCreditApplied: chargeLateFee ? lateFeeCreditApplied : undefined,
   });
 }

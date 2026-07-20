@@ -5,7 +5,7 @@ import { deletePrivateSessionFromCalendar, upsertGroupSessionCalendarEvent } fro
 import { sendCancellationNotification } from "@/lib/email";
 import { getCurrentSheetLocation } from "@/lib/sheets";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
-import { issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome } from "@/lib/booking-finalize";
+import { issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome, isLateAction } from "@/lib/booking-finalize";
 import { addAccountCredit, addReferralCredit } from "@/lib/supabase";
 
 async function verifyAdmin(req: NextRequest) {
@@ -24,8 +24,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { id } = await req.json();
+  const { id, feeChoice } = await req.json();
   if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
+  if (feeChoice && feeChoice !== "waive" && feeChoice !== "charge") {
+    return NextResponse.json({ error: "Invalid feeChoice" }, { status: 400 });
+  }
 
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -33,25 +36,43 @@ export async function POST(req: NextRequest) {
   );
 
   // Fetch registration details before cancelling — includes everything
-  // needed to refund the client in full, since this is a business-initiated
-  // cancellation (never the client's fault, so no late fee and no partial-keep).
+  // needed to refund the client, and to determine whether this counts as
+  // a late cancellation the same way a client-initiated one would.
   const { data: reg } = await supabase
     .from("registrations")
-    .select("manage_token, type, email, parent_name, booked_date, booked_start_time, booked_end_time, booked_location, booked_group, kids, session_details, total_participants, phone, sms_consent, is_paid, stripe_payment_intent_id, applied_account_credit, session_price, is_free, used_referral_credit")
+    .select("manage_token, type, email, parent_name, booked_date, booked_start_time, booked_end_time, booked_location, booked_group, kids, session_details, total_participants, phone, sms_consent, is_paid, stripe_payment_intent_id, applied_account_credit, session_price, is_free, used_referral_credit, created_at, admin_change_at")
     .eq("id", id)
     .single();
 
   if (!reg) return NextResponse.json({ error: "Registration not found" }, { status: 404 });
 
-  // Admin cancellations never apply a late fee regardless of timing. Only
-  // flips a row still actually confirmed — guards against double-cancelling
+  // Same lateness rule a client-initiated cancellation uses. Unlike a
+  // client cancelling their own booking, the admin gets to CHOOSE how to
+  // handle a late one rather than it being automatic — sometimes it's
+  // waiving the fee to help someone out with a real issue, sometimes it's
+  // charging the normal fee on the client's behalf (e.g. they're having
+  // trouble using the site themselves but still owe it). An on-time
+  // cancellation never needs a choice — it's always a full refund, same as
+  // if the client had done it themselves.
+  const isLate = !!(reg.booked_date && reg.booked_start_time && isLateAction(reg.booked_date, reg.booked_start_time, reg.created_at, reg.admin_change_at));
+
+  if (isLate && !feeChoice) {
+    return NextResponse.json(
+      { error: "This booking is within the 24-hour window — choose how to handle the fee.", needsFeeChoice: true, isLateCancel: true },
+      { status: 400 }
+    );
+  }
+
+  const chargeLateFee = isLate && feeChoice === "charge";
+
+  // Only flips a row still actually confirmed — guards against double-cancelling
   // (double click, retry) from running the refund flow below twice.
   // applied_account_credit is zeroed here (refunded back separately below)
   // to match cancelRegistration's convention, preventing it from being
   // double-refunded if this row is ever swept up elsewhere.
   const { data: updated, error } = await supabase
     .from("registrations")
-    .update({ status: "cancelled", is_late_cancel: false, applied_account_credit: 0 })
+    .update({ status: "cancelled", is_late_cancel: chargeLateFee, applied_account_credit: 0 })
     .eq("id", id)
     .eq("status", "confirmed")
     .select("id");
@@ -72,17 +93,21 @@ export async function POST(req: NextRequest) {
     await addAccountCredit(reg.email, reg.applied_account_credit).catch(() => {});
   }
 
-  // If they already paid, they get EVERYTHING back — a real Stripe refund if
-  // paid via Stripe, full account credit for the old manual/cash path. No
-  // late fee, no partial-keep: this cancellation is entirely the business's
-  // call, not the client's, so the policy that lets a late CLIENT
-  // cancellation keep 50% doesn't apply here at all.
+  // Full refund/credit unless the admin explicitly chose to charge the
+  // standard late fee — in which case it's exactly the client-initiated
+  // late-cancellation policy: half kept (no refund needed, it's already
+  // been captured), half credited. No new Stripe charge is ever needed
+  // here either way — this only decides how much of the EXISTING captured
+  // payment gets refunded back vs kept.
   const wasPaid = !!reg.is_paid || !!reg.stripe_payment_intent_id;
   let stripeRefundResult: { refundedAmount: number; creditedAmount: number; failed: boolean } | undefined;
   let creditIssued = 0;
   if (wasPaid && reg.email) {
     const paidAmount = Math.max(0, resolvedSessionPrice(reg) - (reg.applied_account_credit || 0));
-    if (paidAmount > 0) {
+    if (chargeLateFee) {
+      creditIssued = Math.round(paidAmount * 0.5);
+      if (creditIssued > 0) await addAccountCredit(reg.email, creditIssued).catch(() => {});
+    } else if (paidAmount > 0) {
       if (reg.stripe_payment_intent_id) {
         stripeRefundResult = await issueStripeRefund({
           email: reg.email,
@@ -125,7 +150,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Notify parent of admin-initiated cancellation (no late fee)
+  // Notify parent of admin-initiated cancellation
   if (reg?.email && reg?.parent_name) {
     try {
       let sessionDetails = reg.session_details || "";
@@ -142,7 +167,7 @@ export async function POST(req: NextRequest) {
         email: reg.email,
         sessionDetails,
         sessionType: reg.type,
-        isLateCancel: false,
+        isLateCancel: chargeLateFee,
         stripeRefundResult,
         cancelCredit: !stripeRefundResult && creditIssued > 0 ? creditIssued : undefined,
       });
@@ -150,12 +175,12 @@ export async function POST(req: NextRequest) {
         const sessionLine = reg.booked_date && reg.booked_start_time
           ? `\n${formatDateWithDay(reg.booked_date)} | ${reg.booked_start_time}${reg.booked_end_time ? `-${reg.booked_end_time}` : ""}${bookedLocation ? `\nLocation: ${resolveLocationName(bookedLocation)}` : ""}`
           : "";
-        const moneyOutcome = wasPaid ? describeMoneyOutcome(stripeRefundResult, creditIssued, false, false) : "";
+        const moneyOutcome = wasPaid ? describeMoneyOutcome(stripeRefundResult, creditIssued, chargeLateFee, false) : "";
         const moneyNote = moneyOutcome ? `\n${moneyOutcome}.` : "";
         await sendSMS(reg.phone, `Mesa Basketball: Session cancelled by your trainer.${sessionLine}\nAthlete: ${reg.kids}${moneyNote}\nQuestions? mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
       }
-      const adminMoneyOutcome = wasPaid ? describeMoneyOutcome(stripeRefundResult, creditIssued, false, true) : "";
-      await sendAdminSMS(`CANCELLED: ${reg.parent_name}\n${sessionDetails}\nPlayers: ${reg.kids}${adminMoneyOutcome ? `\n${adminMoneyOutcome}` : ""}`);
+      const adminMoneyOutcome = wasPaid ? describeMoneyOutcome(stripeRefundResult, creditIssued, chargeLateFee, true) : "";
+      await sendAdminSMS(`CANCELLED: ${reg.parent_name}\n${sessionDetails}\nPlayers: ${reg.kids}${chargeLateFee ? "\n(Late fee charged)" : isLate ? "\n(Late fee waived)" : ""}${adminMoneyOutcome ? `\n${adminMoneyOutcome}` : ""}`);
     } catch (err) {
       console.error("Email/SMS notification error (admin cancel):", err);
     }
@@ -163,7 +188,7 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     ok: true,
-    isLateCancel: false,
+    isLateCancel: chargeLateFee,
     wasPaid,
     refundedAmount: stripeRefundResult?.refundedAmount ?? 0,
     creditedAmount: (stripeRefundResult?.creditedAmount ?? 0) + creditIssued,

@@ -777,14 +777,14 @@ export default function AdminPage() {
     setDeleting(null);
   }
 
-  async function cancelRegistration(id: string) {
+  async function cancelRegistration(id: string, feeChoice?: "waive" | "charge") {
     if (!token) return;
-    if (!confirm("Cancel this registration? If the client already paid, they'll be refunded in full automatically.")) return;
+    if (!feeChoice && !confirm("Cancel this registration? If the client already paid, they'll be refunded in full automatically.")) return;
     setCancelling(id);
     const res = await fetch("/api/admin/cancel", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ id }),
+      body: JSON.stringify({ id, feeChoice }),
     });
     const data = await res.json().catch(() => null);
     if (res.ok) {
@@ -796,8 +796,14 @@ export default function AdminPage() {
           data.refundedAmount > 0 ? `$${data.refundedAmount} refunded to their card` : "",
           data.creditedAmount > 0 ? `$${data.creditedAmount} credited to their account` : "",
         ].filter(Boolean).join(", ");
-        alert(`Cancelled. ${parts}.`);
+        alert(`Cancelled${data.isLateCancel ? " (late fee charged)" : ""}. ${parts}.`);
       }
+    } else if (data?.needsFeeChoice) {
+      setCancelling(null);
+      const charge = confirm(
+        "This booking is within the 24-hour late-cancellation window.\n\nOK = CHARGE the standard late fee — half of what they paid is credited to their account, the other half is kept as the fee.\n\nCancel = WAIVE the fee — full refund back to their card, same as an on-time cancellation."
+      );
+      return cancelRegistration(id, charge ? "charge" : "waive");
     } else {
       alert(data?.error || "Failed to cancel.");
     }
@@ -890,7 +896,7 @@ export default function AdminPage() {
     setRescheduleStep("confirm");
   }
 
-  async function submitReschedule() {
+  async function submitReschedule(feeChoice?: "waive" | "charge") {
     if (!token || !reschedulingId) return;
     const r = registrations.find((x) => x.id === reschedulingId);
     if (!r) return;
@@ -939,11 +945,18 @@ export default function AdminPage() {
         sessionLabelPrefix,
         newType,
         keepReferralCredit: showCreditCheckbox ? rescheduleKeepCredit : undefined,
+        feeChoice,
       }),
     });
     const data = await res.json();
     setRescheduleSaving(false);
     if (!res.ok) {
+      if (data?.needsFeeChoice) {
+        const charge = confirm(
+          "The current session is within the 24-hour late-reschedule window.\n\nOK = CHARGE the standard late fee — half of what they paid is credited to their account and applied toward the new session, the other half is kept as the fee.\n\nCancel = WAIVE the fee — reschedule at no cost, same as an on-time reschedule."
+        );
+        return submitReschedule(charge ? "charge" : "waive");
+      }
       setRescheduleError(data.error || "Failed to reschedule.");
       return;
     }
@@ -964,7 +977,12 @@ export default function AdminPage() {
     } : reg)));
     setReschedulingId(null);
     const notes: string[] = [];
-    if (data.creditGranted > 0) {
+    if (data.lateFeeCharged) {
+      notes.push(`Late fee charged: $${data.lateFeeCredited} credited to ${r.parent_name}'s account (50% of what they paid)${data.lateFeeCreditApplied > 0 ? `, $${data.lateFeeCreditApplied} of it applied to the new session` : ""}.`);
+      if (data.amountDue > 0) {
+        notes.push(`$${data.amountDue} additional is now due — there's no auto-charge yet, so collect this manually.`);
+      }
+    } else if (data.creditGranted > 0) {
       notes.push(`$${data.creditGranted} was credited to ${r.parent_name}'s account (new price is lower and they'd already paid).`);
     } else if (data.amountDue > 0) {
       notes.push(`$${data.amountDue} additional is now due from ${r.parent_name} (already paid at the old, lower price) — there's no auto-charge yet, so collect this manually.`);
@@ -1727,9 +1745,9 @@ export default function AdminPage() {
                   );
                 })()}
                 {rescheduleError && <p className="text-xs text-red-400 mt-2">{rescheduleError}</p>}
-                <p className="text-[11px] text-brown-500 mt-3">No late fee is charged. The client will get an email/text about the change.</p>
+                <p className="text-[11px] text-brown-500 mt-3">If the current session is within 24 hours, you&apos;ll be asked whether to waive or charge the late fee. The client will get an email/text about the change.</p>
                 <div className="flex gap-3 mt-4">
-                  <button onClick={submitReschedule} disabled={rescheduleSaving} className="flex-1 rounded-lg bg-mesa-accent text-white text-sm font-semibold py-2 disabled:opacity-50">
+                  <button onClick={() => submitReschedule()} disabled={rescheduleSaving} className="flex-1 rounded-lg bg-mesa-accent text-white text-sm font-semibold py-2 disabled:opacity-50">
                     {rescheduleSaving ? "Sending..." : "Confirm & Send"}
                   </button>
                   <button onClick={() => setRescheduleStep("edit")} disabled={rescheduleSaving} className="rounded-lg border border-brown-700 text-brown-300 text-sm px-4 py-2 disabled:opacity-50">

@@ -16,7 +16,7 @@ import {
   deductAccountCredit,
   attachStripeCheckoutSession,
 } from "@/lib/supabase";
-import { issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome } from "@/lib/booking-finalize";
+import { issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome, isLateAction, parseSessionDateTimeET } from "@/lib/booking-finalize";
 import { getStripe } from "@/lib/stripe";
 import { SERVICE_FEE } from "@/lib/pricing";
 import {
@@ -31,47 +31,6 @@ import {
   deletePrivateSessionFromCalendar,
   upsertGroupSessionCalendarEvent,
 } from "@/lib/calendar";
-
-// Parse a session date + hours/mins (Eastern time) into a UTC Date for comparison.
-// The server runs UTC; without this, "2:00 PM" is treated as 2pm UTC instead of 2pm ET.
-function parseSessionDateTimeET(dateStr: string, hoursET: number, minsET: number): Date {
-  const ref = new Date(dateStr);
-  ref.setHours(12, 0, 0, 0); // use midday to safely determine DST offset
-  const utcMs = new Date(ref.toLocaleString("en-US", { timeZone: "UTC" })).getTime();
-  const nyMs  = new Date(ref.toLocaleString("en-US", { timeZone: "America/New_York" })).getTime();
-  const offsetMs = utcMs - nyMs; // e.g. 4h for EDT, 5h for EST
-  const sessionLocal = new Date(dateStr);
-  sessionLocal.setHours(hoursET, minsET, 0, 0);
-  return new Date(sessionLocal.getTime() + offsetMs);
-}
-
-// Returns true if this action is a late cancel/reschedule:
-// session is within 24h AND the 15-min grace period (from booking time, capped at session start) has expired.
-// Fee is waived if admin made a last-minute change (within 24h of session) — not the client's fault.
-function isLateAction(dateStr: string, timeStr: string, createdAt: string, adminChangeAt?: string | null): boolean {
-  const timeMatch = timeStr.match(/(\d+):(\d+)\s*(AM|PM)/i);
-  if (!timeMatch) return false;
-  let hours = parseInt(timeMatch[1]);
-  const mins = parseInt(timeMatch[2]);
-  const period = timeMatch[3].toUpperCase();
-  if (period === "PM" && hours !== 12) hours += 12;
-  if (period === "AM" && hours === 12) hours = 0;
-  const sessionStart = parseSessionDateTimeET(dateStr, hours, mins);
-  const now = Date.now();
-  const hoursUntil = (sessionStart.getTime() - now) / (1000 * 60 * 60);
-  if (hoursUntil < 0 || hoursUntil >= 24) return false;
-  // Waive fee if admin changed the session within 48h of its start time
-  if (adminChangeAt) {
-    const hoursFromChangeTo = (sessionStart.getTime() - new Date(adminChangeAt).getTime()) / (1000 * 60 * 60);
-    if (hoursFromChangeTo <= 48) return false;
-  }
-  // Within 24h — check grace: 15 min from booking time, capped at session start
-  const graceEnd = Math.min(
-    new Date(createdAt).getTime() + 15 * 60 * 1000,
-    sessionStart.getTime()
-  );
-  return now >= graceEnd;
-}
 
 // GET — fetch booking details
 export async function GET(
