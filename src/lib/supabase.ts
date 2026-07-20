@@ -1076,6 +1076,22 @@ export async function getGroupSessionEnrollment(): Promise<
   return counts;
 }
 
+// A pending_payment row only blocks a duplicate/capacity check while
+// there's a real chance someone is still mid-Stripe-checkout for it — Stripe
+// Checkout Sessions don't expire for a full 30 minutes (its own imposed
+// minimum), which is far longer than anyone actually takes to pay, and
+// there's no webhook for "the client hit back" — only for a genuine
+// expiration. Without a shorter cutoff here, someone who backs out of
+// checkout (or a browser back/forward) is wrongly locked out of re-booking
+// that same session for up to half an hour, even though nothing was ever
+// charged and no session was ever actually held for them.
+const PENDING_PAYMENT_GRACE_MS = 10 * 60 * 1000;
+
+function pendingPaymentGraceFilter(): string {
+  const cutoff = new Date(Date.now() - PENDING_PAYMENT_GRACE_MS).toISOString();
+  return `status.eq.confirmed,and(status.eq.pending_payment,created_at.gte.${cutoff})`;
+}
+
 /** Check if a specific group session has capacity */
 export async function checkGroupSessionCapacity(
   date: string,
@@ -1084,13 +1100,15 @@ export async function checkGroupSessionCapacity(
   maxSpots: number
 ): Promise<{ available: boolean; enrolled: number }> {
   const supabase = getSupabase();
-  // Count pending_payment alongside confirmed — otherwise two people could
-  // grab the same last spot while one of them is still mid-Stripe-checkout.
+  // Confirmed rows always count; a pending_payment row only counts while
+  // it's recent enough that someone could plausibly still be mid-checkout
+  // (see PENDING_PAYMENT_GRACE_MS) — otherwise an abandoned checkout would
+  // hold a "spot" for up to 30 minutes with nobody actually paying for it.
   const { count, error } = await supabase
     .from("registrations")
     .select("*", { count: "exact", head: true })
     .eq("type", "weekly")
-    .in("status", ["confirmed", "pending_payment"])
+    .or(pendingPaymentGraceFilter())
     .eq("booked_date", date)
     .eq("booked_start_time", startTime)
     .eq("booked_group", group || "");
@@ -1121,13 +1139,16 @@ export async function checkDuplicateRegistration(
   startTime: string
 ): Promise<boolean> {
   const supabase = getSupabase();
+  // Same grace-window reasoning as checkGroupSessionCapacity — a stale
+  // pending_payment row (backed out of checkout) must not permanently block
+  // the client from booking that same session again.
   const { count, error } = await supabase
     .from("registrations")
     .select("*", { count: "exact", head: true })
     .eq("email", email)
     .eq("booked_date", date)
     .eq("booked_start_time", startTime)
-    .in("status", ["confirmed", "pending_payment"]);
+    .or(pendingPaymentGraceFilter());
   return !error && (count ?? 0) > 0;
 }
 

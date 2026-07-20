@@ -185,6 +185,19 @@ function statusBadge(status: string, isPast?: boolean): { cls: string; label: st
   return { cls: "bg-red-900/40 text-red-400", label: status };
 }
 
+// A pending_payment/payment_abandoned row is safe to delete — nothing was
+// ever charged, no slot needs freeing — but a *just-created* pending_payment
+// row still has a small chance the client is mid-checkout right now, with
+// Stripe's webhook about to confirm it a few seconds later. payment_abandoned
+// is always safe (Stripe already told us that checkout genuinely expired);
+// pending_payment needs a few minutes' buffer first so deleting one can never
+// race a real, in-flight payment confirmation.
+function isDeletablePending(r: Registration): boolean {
+  if (r.status === "payment_abandoned") return true;
+  if (r.status !== "pending_payment") return false;
+  return Date.now() - new Date(r.created_at).getTime() > 3 * 60 * 1000;
+}
+
 function toDateKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
@@ -497,13 +510,15 @@ interface CalendarViewProps {
   cancelRegistration: (id: string) => Promise<void>;
   markNoShow: (id: string) => Promise<void>;
   openReschedule: (r: Registration) => void;
+  deleteRegistration: (id: string) => Promise<void>;
   cancelling: string | null;
   noShowing: string | null;
   noShowConfirm: string | null;
   setNoShowConfirm: (id: string | null) => void;
+  deleting: string | null;
 }
 
-function CalendarView({ list, packageMembership, weeklyDiscountRates, cancelRegistration, markNoShow, openReschedule, cancelling, noShowing, noShowConfirm, setNoShowConfirm }: CalendarViewProps) {
+function CalendarView({ list, packageMembership, weeklyDiscountRates, cancelRegistration, markNoShow, openReschedule, deleteRegistration, cancelling, noShowing, noShowConfirm, setNoShowConfirm, deleting }: CalendarViewProps) {
   const [currentMonth, setCurrentMonth] = useState(() => {
     const n = new Date();
     return new Date(n.getFullYear(), n.getMonth(), 1);
@@ -666,6 +681,13 @@ function CalendarView({ list, packageMembership, weeklyDiscountRates, cancelRegi
                           </div>
                         )}
                       </div>
+                    )}
+                    {isDeletablePending(r) && (
+                      // Never a real booking — nothing charged, no slot to
+                      // free — safe to delete right away.
+                      <button onClick={() => deleteRegistration(r.id)} disabled={deleting === r.id} className="text-xs text-brown-500 hover:text-red-400 transition disabled:opacity-50">
+                        {deleting === r.id ? "..." : "Delete"}
+                      </button>
                     )}
                   </div>
                 </div>
@@ -1230,7 +1252,7 @@ export default function AdminPage() {
             </div>
 
             {/* Actions */}
-            {(r.status === "confirmed" || isPast) && (
+            {(r.status === "confirmed" || isPast || isDeletablePending(r)) && (
               <div className="flex flex-wrap gap-3 pt-1 border-t border-brown-800">
                 {r.status === "confirmed" && !isPast && (
                   <button onClick={() => cancelRegistration(r.id)} disabled={cancelling === r.id} className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50">
@@ -1258,12 +1280,15 @@ export default function AdminPage() {
                     </button>
                   </div>
                 )}
-                {/* Delete only ever shows for a session whose start time has
-                    actually passed — never for a still-upcoming booking,
-                    confirmed or not, since that silently removes it with no
-                    refund and no client notification. Cancel is the right
-                    tool for an active, upcoming booking. */}
-                {isPast && (
+                {/* For a real (confirmed) booking, Delete only ever shows once
+                    its start time has passed — Cancel is the right tool for
+                    an active upcoming booking, and deleting one silently
+                    would mean no refund and no client notification. But a
+                    pending_payment/payment_abandoned row was never a real
+                    booking — nothing was charged, no slot needs freeing — so
+                    it's safe to delete right away, upcoming or not, rather
+                    than waiting on the automatic abandonment sweep. */}
+                {(isPast || isDeletablePending(r)) && (
                   <button onClick={() => deleteRegistration(r.id)} disabled={deleting === r.id} className="text-xs text-brown-600 hover:text-red-500 transition disabled:opacity-50">
                     {deleting === r.id ? "Deleting..." : "Delete"}
                   </button>
@@ -1325,21 +1350,26 @@ export default function AdminPage() {
                     {deleting === r.id ? "..." : "Delete"}
                   </button>
                 </div>
-              ) : (
-                r.status === "confirmed" && (
-                  <div className="flex items-center gap-3">
-                    <button onClick={() => cancelRegistration(r.id)} disabled={cancelling === r.id} className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50">
-                      {cancelling === r.id ? "..." : "Cancel"}
-                    </button>
-                    <button onClick={() => openReschedule(r)} className="text-xs text-blue-400 hover:text-blue-300 transition">
-                      Reschedule
-                    </button>
-                    <button onClick={() => { if (window.confirm("Mark as no show?")) markNoShow(r.id); }} disabled={noShowing === r.id} className="text-xs text-orange-400 hover:text-orange-300 transition disabled:opacity-50">
-                      {noShowing === r.id ? "..." : "No Show"}
-                    </button>
-                  </div>
-                )
-              )}
+              ) : r.status === "confirmed" ? (
+                <div className="flex items-center gap-3">
+                  <button onClick={() => cancelRegistration(r.id)} disabled={cancelling === r.id} className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50">
+                    {cancelling === r.id ? "..." : "Cancel"}
+                  </button>
+                  <button onClick={() => openReschedule(r)} className="text-xs text-blue-400 hover:text-blue-300 transition">
+                    Reschedule
+                  </button>
+                  <button onClick={() => { if (window.confirm("Mark as no show?")) markNoShow(r.id); }} disabled={noShowing === r.id} className="text-xs text-orange-400 hover:text-orange-300 transition disabled:opacity-50">
+                    {noShowing === r.id ? "..." : "No Show"}
+                  </button>
+                </div>
+              ) : isDeletablePending(r) ? (
+                // Never a real booking — nothing charged, no slot to free —
+                // so it's safe to delete immediately rather than waiting on
+                // the automatic abandonment sweep.
+                <button onClick={() => { if (window.confirm("Delete this record permanently?")) deleteRegistration(r.id); }} disabled={deleting === r.id} className="text-xs text-brown-500 hover:text-red-400 transition disabled:opacity-50">
+                  {deleting === r.id ? "..." : "Delete"}
+                </button>
+              ) : null}
             </td>
           </tr>
         ))}
@@ -1586,10 +1616,12 @@ export default function AdminPage() {
               cancelRegistration={cancelRegistration}
               markNoShow={markNoShow}
               openReschedule={openReschedule}
+              deleteRegistration={deleteRegistration}
               cancelling={cancelling}
               noShowing={noShowing}
               noShowConfirm={noShowConfirm}
               setNoShowConfirm={setNoShowConfirm}
+              deleting={deleting}
             />
           </div>
         )}
