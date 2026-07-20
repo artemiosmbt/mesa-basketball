@@ -1008,17 +1008,22 @@ export default function AdminPage() {
   const past = useMemo(() => {
     const now = Date.now();
     return registrations
+      // An abandoned checkout never became a real booking — nothing to see
+      // here once its date passes, same as it never shows as upcoming.
       .filter((r) => {
+        if (r.status === "payment_abandoned") return false;
         const ms = sessionMs(r.booked_date, r.booked_start_time);
         return ms > 0 && ms <= now;
       })
       .sort((a, b) => sessionMs(b.booked_date, b.booked_start_time) - sessionMs(a.booked_date, a.booked_start_time));
   }, [registrations]);
 
-  // Unique clients sorted by name
+  // Unique clients sorted by name — an abandoned checkout never counts
+  // toward a client's history (they never actually booked or paid).
   const clients = useMemo(() => {
     const map = new Map<string, { name: string; email: string; phone: string; kids: string; count: number; lastDate: number; videoConsent: boolean | null; referralsAvailable: number; referralsTotal: number }>();
     for (const r of registrations) {
+      if (r.status === "payment_abandoned") continue;
       const key = r.email || r.parent_name;
       const existing = map.get(key);
       const d = dateMs(r.booked_date);
@@ -1037,7 +1042,7 @@ export default function AdminPage() {
   const clientRegistrations = useMemo(() => {
     if (!selectedClient) return [];
     return registrations
-      .filter((r) => (r.email || r.parent_name) === selectedClient)
+      .filter((r) => (r.email || r.parent_name) === selectedClient && r.status !== "payment_abandoned")
       .sort((a, b) => dateMs(b.booked_date) - dateMs(a.booked_date));
   }, [registrations, selectedClient]);
 

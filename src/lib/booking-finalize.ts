@@ -871,24 +871,15 @@ export async function expireAbandonedBookingBatch(bookingBatchId: string): Promi
       await addReferralCredit(reg.email).catch(() => {});
     }
   }
-
-  try {
-    await sendAdminSMS(`Checkout expired unused: ${abandoned[0]?.parent_name || "unknown"}\n${abandoned[0]?.session_details || bookingBatchId}\nNo charge — booking not confirmed.`);
-  } catch {
-    // non-critical
-  }
+  // Deliberately no admin SMS here — someone starting checkout and then
+  // backing out or letting it expire isn't something that needs a text;
+  // it happens constantly and there's nothing to act on.
 }
 
 /** A monthly package's Checkout Session expired unused — mirrors
  *  expireAbandonedBookingBatch above, just for the monthly_packages table. */
 export async function expireAbandonedPackage(packageId: string): Promise<void> {
-  const pkg = await abandonPendingPackage(packageId);
-  if (!pkg) return;
-  try {
-    await sendAdminSMS(`Package checkout expired unused: ${pkg.parent_name}\n${pkg.package_type}-session package — ${pkg.month_year}\nNo charge — not confirmed.`);
-  } catch {
-    // non-critical
-  }
+  await abandonPendingPackage(packageId);
 }
 
 /**
