@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getStripe } from "@/lib/stripe";
 import { SERVICE_FEE } from "@/lib/pricing";
+import { getWeeklySchedule, getCamps } from "@/lib/sheets";
 import {
   finalizeConfirmedPrivateBooking,
   finalizeConfirmedPrivateSeriesBooking,
@@ -123,14 +124,14 @@ export async function POST(req: NextRequest) {
       bookedTrainer,
       submittedReferralCode,
       smsConsent,
-      // Weekly multi-session fields
+      // Weekly multi-session fields — the client's own price fields
+      // (weeklyTotalPrice) are intentionally NOT read here anymore; price
+      // is always re-verified against the live sheet instead (see below).
       weeklySessions,
-      weeklyTotalPrice,
-      // Camp multi-day fields
+      // Camp multi-day fields — likewise, campTotalPrice/campTotalDays/
+      // campDropInRate are intentionally not read; verified from the live
+      // sheet instead.
       campSessions,
-      campTotalPrice,
-      campTotalDays,
-      campDropInRate,
       // Recurring private multi-date fields — one row per date, one Stripe
       // charge for the total (see the branch below).
       privateSessions,
@@ -196,13 +197,34 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // Create one registration row per selected session
-      // Use weeklyTotalPrice / session count to capture any multi-session volume discounts
-      const perSessionPrice = weeklyTotalPrice && weeklySessions.length > 0
-        ? Math.round(weeklyTotalPrice / weeklySessions.length)
-        : (weeklySessions[0]?.price ? weeklySessions[0].price * (totalParticipants || 1) : undefined);
-
-      const weeklyTotal = weeklyTotalPrice ?? (perSessionPrice != null ? perSessionPrice * weeklySessions.length : 0);
+      // Re-verify pricing against the live sheet — never trust
+      // weeklyTotalPrice sent from the client. It reflects whatever price
+      // the browser happened to have loaded, which could be stale (the
+      // sheet changed since) or simply wrong if the request was tampered
+      // with, and this is the only place real money gets decided.
+      const liveWeeklySchedule = await getWeeklySchedule();
+      const liveWeeklyMatches = weeklySessions.map((s: { date: string; startTime: string; group: string }) =>
+        liveWeeklySchedule.find((ls) => ls.group === s.group && ls.date === s.date && ls.startTime === s.startTime)
+      );
+      const unmatchedSessions = weeklySessions.filter((_: unknown, i: number) => !liveWeeklyMatches[i]);
+      if (unmatchedSessions.length > 0) {
+        const dates = unmatchedSessions.map((s: { date: string }) => s.date).join(", ");
+        return NextResponse.json(
+          { error: `Couldn't verify current pricing for: ${dates}. The schedule may have changed — please refresh and try again.` },
+          { status: 400 }
+        );
+      }
+      // Same multi-session volume-discount tiers shown on the booking form
+      // (4+ sessions = 10% off, 8+ = 15% off), applied to the live rate of
+      // the first selected session — matches the frontend's own
+      // groupPricing calc exactly, just computed from verified data instead
+      // of trusted client input.
+      const liveBasePrice = liveWeeklyMatches[0]!.price;
+      const sessionCount = weeklySessions.length;
+      const volumeDiscountPct = sessionCount >= 8 ? 0.15 : sessionCount >= 4 ? 0.10 : 0;
+      const unitPrice = Math.round(liveBasePrice * (1 - volumeDiscountPct) * 100) / 100;
+      const perSessionPrice = Math.round(unitPrice * (totalParticipants || 1) * 100) / 100;
+      const weeklyTotal = Math.round(perSessionPrice * sessionCount * 100) / 100;
 
       // Account credit can cover the WHOLE booking, not just one session —
       // split proportionally across every row (equal shares, since every row
@@ -258,7 +280,7 @@ export async function POST(req: NextRequest) {
         weeklyReferrer,
         submittedReferralCode: submittedReferralCode || undefined,
         smsConsent: !!smsConsent,
-        weeklyTotalPrice,
+        weeklyTotalPrice: weeklyTotal,
         weeklyCreditApplied,
       };
 
@@ -358,24 +380,39 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // A camp booking always has a real price — if it's ever missing or
-      // unparseable, reject rather than silently letting amountToCharge fall
-      // to 0 and confirming a paid camp for free.
-      if (!campTotalPrice) {
-        return NextResponse.json({ error: "Missing camp price" }, { status: 400 });
+      // Re-verify pricing against the live sheet — never trust
+      // campTotalPrice/campTotalDays sent from the client, which reflect
+      // whatever the browser had loaded (possibly stale, or tampered with)
+      // rather than what's actually on the sheet right now. Mirrors
+      // calcCampPrice()/isEarlyBirdActive() on the booking form exactly, just
+      // computed from freshly-fetched data instead of trusted client input.
+      const liveCamps = await getCamps();
+      const firstCampSession = campSessions[0];
+      const liveCamp = liveCamps.find((c) =>
+        c.name === firstCampSession.campName && (firstCampSession.gradeGroup ? c.gradeGroup === firstCampSession.gradeGroup : true)
+      );
+      if (!liveCamp) {
+        return NextResponse.json(
+          { error: "Couldn't verify current pricing for this camp — it may no longer be on the schedule. Please refresh and try again." },
+          { status: 400 }
+        );
       }
-      // Parse total price string (e.g. "$290" or "$290 (Early Bird)") to a number
-      const campTotalNum = parseInt(String(campTotalPrice).replace(/\D/g, "")) || 0;
+      const liveTotalDays = liveCamp.campDays.length || campSessions.length;
+      const campKidCount = Math.max(1, totalParticipants || 1);
+      const earlyBirdActive = new Date() < new Date("2026-04-01T04:00:00Z");
+      const fullBaseStr = earlyBirdActive && liveCamp.earlyBirdPrice ? liveCamp.earlyBirdPrice : liveCamp.price;
+      const fullBase = (parseInt(fullBaseStr.replace(/\D/g, "")) || 0) * campKidCount;
+      const isFullCamp = campSessions.length === liveTotalDays;
+      let campTotalNum: number;
+      if (isFullCamp) {
+        campTotalNum = fullBase;
+      } else {
+        const perDay = parseInt((liveCamp.dropInPrice || "").replace(/\D/g, "")) || 100;
+        campTotalNum = Math.min(perDay * campSessions.length * campKidCount, fullBase);
+      }
       if (campTotalNum <= 0) {
         return NextResponse.json({ error: "Invalid camp price" }, { status: 400 });
       }
-
-      // Determine if this is a full camp purchase or drop-in days
-      // campSessions comes from the selected days; we need the total available days to compare.
-      // The frontend passes campTotalDays alongside campSessions for this check.
-      const isFullCamp = campTotalDays != null
-        ? campSessions.length === campTotalDays
-        : false;
 
       // Splits `total` across `days` so every day's share sums EXACTLY back to
       // the total — Math.round(total/days) applied identically to every day
@@ -433,7 +470,10 @@ export async function POST(req: NextRequest) {
           smsConsent: !!smsConsent,
           sessionPrice: dayPrice,
           isFullCamp,
-          ...(isFullCamp && campDropInRate != null ? { campDropInRate: parseInt(String(campDropInRate)) || undefined } : {}),
+          // Stored for later per-day cancellation math on a full-camp
+          // booking — sourced from the live sheet's drop-in rate, never the
+          // client, since it directly affects a future refund calculation.
+          ...(isFullCamp ? { campDropInRate: parseInt((liveCamp.dropInPrice || "").replace(/\D/g, "")) || undefined } : {}),
           ...(dayCredit > 0 ? { appliedAccountCredit: dayCredit } : {}),
           status: amountToCharge > 0 ? "pending_payment" : undefined,
           bookingBatchId,
@@ -452,7 +492,7 @@ export async function POST(req: NextRequest) {
         campReferrer,
         submittedReferralCode: submittedReferralCode || undefined,
         smsConsent: !!smsConsent,
-        campTotalPrice: campTotalPrice ? String(campTotalPrice) : undefined,
+        campTotalPrice: `$${campTotalNum}`,
         campTotalNum,
         campCreditApplied,
         sessionPrice: firstDayPrice,
@@ -484,7 +524,7 @@ export async function POST(req: NextRequest) {
           referrer_email: campReferrer?.email || "",
           referrer_name: campReferrer?.name || "",
           submitted_referral_code: submittedReferralCode || "",
-          total_price: campTotalPrice ? String(campTotalPrice) : "",
+          total_price: `$${campTotalNum}`,
           camp_grade_group: firstSession.gradeGroup || "",
         },
         line_items: [
