@@ -1,5 +1,5 @@
 import Stripe from "stripe";
-import { sendRegistrationNotification, sendReferralCreditNotification, sendRescheduleNotification, sendPackageConfirmation } from "@/lib/email";
+import { sendRegistrationNotification, sendReferralCreditNotification, sendRescheduleNotification, sendPackageConfirmation, sendAbandonedCheckoutEmail, sendAbandonedPackageEmail } from "@/lib/email";
 import { addPrivateSessionToCalendar, upsertGroupSessionCalendarEvent } from "@/lib/calendar";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import { getStripe } from "@/lib/stripe";
@@ -871,15 +871,43 @@ export async function expireAbandonedBookingBatch(bookingBatchId: string): Promi
       await addReferralCredit(reg.email).catch(() => {});
     }
   }
-  // Deliberately no admin SMS here — someone starting checkout and then
-  // backing out or letting it expire isn't something that needs a text;
-  // it happens constantly and there's nothing to act on.
+  // Informational, not urgent — an email instead of a text, since this
+  // happens constantly (someone starts checkout, backs out) and there's
+  // nothing to act on immediately.
+  const first = abandoned[0];
+  try {
+    await sendAbandonedCheckoutEmail({
+      parentName: first.parent_name,
+      email: first.email,
+      phone: first.phone,
+      kids: first.kids,
+      sessions: abandoned.map((reg) => ({
+        sessionDetails: reg.session_details,
+        bookedDate: reg.booked_date,
+        sessionPrice: reg.session_price,
+      })),
+    });
+  } catch (err) {
+    console.error("Failed to send abandoned checkout email:", err);
+  }
 }
 
 /** A monthly package's Checkout Session expired unused — mirrors
  *  expireAbandonedBookingBatch above, just for the monthly_packages table. */
 export async function expireAbandonedPackage(packageId: string): Promise<void> {
-  await abandonPendingPackage(packageId);
+  const pkg = await abandonPendingPackage(packageId);
+  if (!pkg) return;
+  try {
+    await sendAbandonedPackageEmail({
+      parentName: pkg.parent_name,
+      email: pkg.email,
+      phone: pkg.phone,
+      packageType: pkg.package_type,
+      monthYear: pkg.month_year,
+    });
+  } catch (err) {
+    console.error("Failed to send abandoned package checkout email:", err);
+  }
 }
 
 /**

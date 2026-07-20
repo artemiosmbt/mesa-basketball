@@ -883,3 +883,61 @@ export async function sendRescheduleNotification(data: {
     `,
   });
 }
+
+// Admin-only — a client started Stripe Checkout and never finished (backed
+// out, closed the tab, or just let it expire). No charge happened and the
+// booking was never confirmed; the slot/credit involved was already
+// released automatically. This is informational, not urgent, so it goes to
+// email rather than a text.
+export async function sendAbandonedCheckoutEmail(data: {
+  parentName: string;
+  email: string;
+  phone?: string | null;
+  kids?: string | null;
+  sessions: { sessionDetails: string; bookedDate?: string | null; sessionPrice?: number | null }[];
+}) {
+  const resend = getResend();
+  const sessionsHtml = data.sessions
+    .map((s) => `<p style="margin:4px 0;">${formatSessionDetailsForEmail(s.sessionDetails)}${s.sessionPrice ? ` — $${s.sessionPrice}` : ""}</p>`)
+    .join("");
+  await resend.emails.send({
+    from: FROM_EMAIL,
+    to: ARTEMI_EMAIL,
+    subject: `Abandoned Checkout: ${data.parentName}`,
+    html: `
+      <h2>Checkout Started, Never Completed</h2>
+      <p><strong>Parent:</strong> ${data.parentName}</p>
+      <p><strong>Email:</strong> ${data.email}</p>
+      ${data.phone ? `<p><strong>Phone:</strong> ${data.phone}</p>` : ""}
+      ${data.kids ? `<p><strong>Players:</strong> ${data.kids}</p>` : ""}
+      <p><strong>Session${data.sessions.length > 1 ? "s" : ""}:</strong></p>
+      ${sessionsHtml}
+      <p style="color: #999; font-size: 13px;">They were sent to Stripe to pay but never finished — no charge was made, this booking was never confirmed, and the slot has already been released.</p>
+    `,
+  });
+}
+
+// Admin-only — same as above, for a monthly package enrollment that never
+// completed checkout.
+export async function sendAbandonedPackageEmail(data: {
+  parentName: string;
+  email: string;
+  phone?: string | null;
+  packageType: number;
+  monthYear: string;
+}) {
+  const resend = getResend();
+  await resend.emails.send({
+    from: FROM_EMAIL,
+    to: ARTEMI_EMAIL,
+    subject: `Abandoned Package Checkout: ${data.parentName}`,
+    html: `
+      <h2>Package Checkout Started, Never Completed</h2>
+      <p><strong>Parent:</strong> ${data.parentName}</p>
+      <p><strong>Email:</strong> ${data.email}</p>
+      ${data.phone ? `<p><strong>Phone:</strong> ${data.phone}</p>` : ""}
+      <p><strong>Package:</strong> ${data.packageType}-session monthly plan — ${data.monthYear}</p>
+      <p style="color: #999; font-size: 13px;">No charge was made and this package was never activated.</p>
+    `,
+  });
+}
