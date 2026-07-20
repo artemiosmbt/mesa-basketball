@@ -3173,15 +3173,18 @@ export default function Home() {
             })()}
 
             {/* Cross-sell: an adjacent pickup/skills session right before or after this one */}
-            {modal.type === "weekly" && companionSessions.length > 0 && !submitResult?.success && (
+            {modal.type === "weekly" && companionSessions.length > 0 && !submitResult?.success && (() => {
+              const companionIsPickup = companionSessions[0].group.toLowerCase().includes("pickup");
+              const companionLabel = companionIsPickup ? companionSessions[0].group : `${companionSessions[0].group} Skills Session`;
+              return (
               <div className="mt-3 rounded-lg border-2 border-mesa-accent bg-mesa-accent/10 p-3">
                 <p className="text-sm font-bold text-mesa-accent">
-                  {companionSessions[0].group.toLowerCase().includes("pickup")
+                  {companionIsPickup
                     ? "Also sign up for Pickup after your session?"
-                    : `Sign up for ${companionSessions[0].group} before Pickup?`}
+                    : `Sign up for the ${companionLabel} before Pickup?`}
                 </p>
                 <p className="mt-1 text-xs font-bold text-brown-100">
-                  {companionSessions[0].group} &bull; {companionSessions[0].startTime}-{companionSessions[0].endTime} &bull; <LocationLink location={companionSessions[0].location} />
+                  {companionLabel} &bull; {fmtDateShort(companionSessions[0].date)} &bull; {companionSessions[0].startTime}-{companionSessions[0].endTime} &bull; <LocationLink location={companionSessions[0].location} />
                   {companionSessions.length > 1 ? ` — ${companionSessions.length} sessions` : ""}
                 </p>
                 <p className="mt-1 text-sm font-bold text-white">
@@ -3200,7 +3203,8 @@ export default function Home() {
                   Add to booking — ${companionBreakdown.total.toFixed(2)}
                 </button>
               </div>
-            )}
+              );
+            })()}
 
             {submitResult?.success ? (
               <div className="mt-6 rounded-lg bg-green-900/50 p-4 text-center">
