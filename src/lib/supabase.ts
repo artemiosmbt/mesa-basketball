@@ -78,6 +78,12 @@ export async function addRegistration(data: {
   // knows it was paid via Stripe and can refund it correctly.
   stripePaymentIntentId?: string;
   stripeCustomerId?: string;
+  // Set when part (or all) of this booking's price was covered by account
+  // credit rather than a fresh Stripe charge — e.g. a late reschedule's 50%
+  // fee applied straight to the new session. A later cancellation/reschedule
+  // of this row needs this to know how much to give back vs. how much (if
+  // any) to actually refund through Stripe.
+  appliedAccountCredit?: number;
 }): Promise<{ manageToken: string }> {
   const supabase = getSupabase();
   const { data: row, error } = await supabase
@@ -103,6 +109,7 @@ export async function addRegistration(data: {
       ...(data.bookingBatchId ? { booking_batch_id: data.bookingBatchId } : {}),
       ...(data.stripePaymentIntentId ? { stripe_payment_intent_id: data.stripePaymentIntentId } : {}),
       ...(data.stripeCustomerId ? { stripe_customer_id: data.stripeCustomerId } : {}),
+      ...(data.appliedAccountCredit ? { applied_account_credit: data.appliedAccountCredit } : {}),
     })
     .select("manage_token")
     .single();

@@ -757,6 +757,8 @@ export interface FinalizeRescheduleTopupParams {
   smsConsent: boolean;
   isLateReschedule: boolean;
   amountCharged: number;
+  lateFeeCredited?: number;
+  lateFeeCreditApplied?: number;
 }
 
 /**
@@ -781,17 +783,22 @@ export async function finalizeRescheduleTopup(params: FinalizeRescheduleTopupPar
       isLateReschedule: params.isLateReschedule,
       newTrainer: params.bookedTrainer,
       priceAdjustment: { kind: "charge", amount: params.amountCharged },
+      lateFeeCredited: params.lateFeeCredited,
+      lateFeeCreditApplied: params.lateFeeCreditApplied,
     });
   } catch (err) {
     console.error("Reschedule email failed (topup booking was paid):", err);
   }
 
+  const creditAppliedNote = params.lateFeeCreditApplied
+    ? ` ($${params.lateFeeCreditApplied} late-fee credit applied, remainder charged)`
+    : "";
   if (params.smsConsent && params.phone) {
     const trainerLine = params.bookedTrainer ? `\nTrainer: ${params.bookedTrainer}` : "";
-    await sendSMS(params.phone, `Mesa Basketball: Reschedule confirmed — $${params.amountCharged} charged!\n${formatDateWithDay(params.bookedDate)} | ${params.bookedStartTime}-${params.bookedEndTime}\nLocation: ${resolveLocationName(params.bookedLocation)}${trainerLine}\nAthlete: ${params.kids}\nManage: mesabasketballtraining.com/booking/${params.manageToken}\nReply STOP to opt out.`);
+    await sendSMS(params.phone, `Mesa Basketball: Reschedule confirmed — $${params.amountCharged} charged${creditAppliedNote}!\n${formatDateWithDay(params.bookedDate)} | ${params.bookedStartTime}-${params.bookedEndTime}\nLocation: ${resolveLocationName(params.bookedLocation)}${trainerLine}\nAthlete: ${params.kids}\nManage: mesabasketballtraining.com/booking/${params.manageToken}\nReply STOP to opt out.`);
   }
 
-  await sendAdminSMS(`RESCHEDULED (paid $${params.amountCharged}): ${params.parentName}\nFrom: ${params.oldSessionDetails}\nTo: ${params.newSessionDetails}\nPlayers: ${params.kids}`);
+  await sendAdminSMS(`RESCHEDULED (paid $${params.amountCharged}${creditAppliedNote}): ${params.parentName}\nFrom: ${params.oldSessionDetails}\nTo: ${params.newSessionDetails}\nPlayers: ${params.kids}`);
 
   try {
     if (isPrivateType) {
@@ -881,6 +888,8 @@ export async function finalizePaidCheckoutSession(session: Stripe.Checkout.Sessi
       smsConsent: !!reg.sms_consent,
       isLateReschedule: metadata.is_late_reschedule === "true",
       amountCharged: metadata.topup_amount ? Number(metadata.topup_amount) : 0,
+      lateFeeCredited: metadata.late_fee_credited ? Number(metadata.late_fee_credited) : undefined,
+      lateFeeCreditApplied: metadata.late_fee_credit_applied ? Number(metadata.late_fee_credit_applied) : undefined,
     });
     return;
   }

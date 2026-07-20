@@ -4,6 +4,7 @@ import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import Image from "next/image";
 import { authClient, ADMIN_EMAIL } from "@/lib/auth";
 import LandingNav from "@/app/LandingNav";
+import { SERVICE_FEE_LABEL } from "@/lib/pricing";
 
 const LOCATION_LINKS: Record<string, { name: string; url: string }> = {
   "St. Pauls": { name: "St. Paul's Cathedral", url: "https://share.google/kgiqMxAj2iAFEAGI6" },
@@ -1439,7 +1440,7 @@ export default function Home() {
     const tier = effectiveGroup ? "Group Private — 4+ participants" : "Private — up to 3 participants";
     const timeNote = totalDuration !== 60 ? ` (${totalDuration} min session)` : "";
     const savingsNote = upsellExtra > 0 ? ` — includes ${upsellExtra} min bonus at 50% off` : "";
-    return `${formatPrice(totalPrice)} (${tier})${timeNote}${savingsNote}`;
+    return `${formatPrice(totalPrice)} (${tier})${timeNote}${savingsNote} + ${SERVICE_FEE_LABEL} service fee`;
   })();
 
   // Dates that have available private slots (for calendar highlights)
@@ -2918,7 +2919,8 @@ export default function Home() {
                           Drop-in rate: {fmtPrice(camp.dropInPrice)}/day &bull; All {totalDays} days: {earlyBird && camp.earlyBirdPrice ? `${camp.earlyBirdPrice} (EB) / ${camp.price}` : camp.price}
                         </p>
                       )}
-                      <p className="text-xs text-brown-500 mt-1">Payment due upon registration — Cash, Venmo, or Zelle</p>
+                      <p className="text-xs text-brown-400 mt-0.5">+ {SERVICE_FEE_LABEL} service fee</p>
+                      <p className="text-xs text-brown-500 mt-1">Payment due upon registration — pay securely by card via Stripe</p>
                     </div>
                   )}
                   {selectedCount === 0 && (
@@ -2953,7 +2955,8 @@ export default function Home() {
                   {kids.length > 1 && (
                     <p className="text-xs text-brown-400 mt-0.5">${modal.weeklyTotalPrice} &times; {kids.length} athletes</p>
                   )}
-                  <p className="text-xs text-brown-500 mt-0.5">Payment due upon registration — Cash, Venmo, or Zelle</p>
+                  <p className="text-xs text-brown-400 mt-0.5">+ {SERVICE_FEE_LABEL} service fee</p>
+                  <p className="text-xs text-brown-500 mt-0.5">Payment due upon registration — pay securely by card via Stripe</p>
                 </div>
               </div>
             )}
@@ -3250,6 +3253,7 @@ export default function Home() {
                         <span className="ml-1 text-green-400"> — you save ${(modal.weeklySavings || 0) * kids.length}!</span>
                       )}
                     </p>
+                    <p className="mt-0.5 text-xs text-brown-500">+ {SERVICE_FEE_LABEL} service fee</p>
                   </div>
                 )}
 

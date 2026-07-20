@@ -347,7 +347,12 @@ export default function MyBookings() {
                       <span className="inline-block rounded-full bg-red-900/40 px-3 py-1 text-xs font-medium text-red-400">Cancelled</span>
                     )}
                     {!isConfirmed && !isCancelled && (
-                      <span className="inline-block rounded-full bg-brown-700 px-3 py-1 text-xs font-medium text-brown-300">{b.status}</span>
+                      <span className="inline-block rounded-full bg-brown-700 px-3 py-1 text-xs font-medium text-brown-300">
+                        {b.status === "no_show" ? "No-Show"
+                          : b.status === "payment_abandoned" ? "Payment Not Completed"
+                          : b.status === "pending_payment" ? "Payment Pending"
+                          : b.status}
+                      </span>
                     )}
                   </div>
                 </div>

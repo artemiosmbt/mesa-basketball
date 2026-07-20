@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getStripe } from "@/lib/stripe";
+import { SERVICE_FEE } from "@/lib/pricing";
 import {
   finalizeConfirmedPrivateBooking,
   finalizeConfirmedPrivateSeriesBooking,
@@ -204,6 +205,14 @@ export async function POST(req: NextRequest) {
             },
             quantity: 1,
           },
+          {
+            price_data: {
+              currency: "usd",
+              product_data: { name: "Service Fee" },
+              unit_amount: Math.round(SERVICE_FEE * 100),
+            },
+            quantity: 1,
+          },
         ],
         success_url: `${origin}/booking-confirmed?session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${origin}/schedule?checkout=cancelled`,
@@ -370,6 +379,14 @@ export async function POST(req: NextRequest) {
               currency: "usd",
               product_data: { name: `${campNameLine} — ${campSessions.length} day${campSessions.length !== 1 ? "s" : ""}` },
               unit_amount: Math.round(amountToCharge * 100),
+            },
+            quantity: 1,
+          },
+          {
+            price_data: {
+              currency: "usd",
+              product_data: { name: "Service Fee" },
+              unit_amount: Math.round(SERVICE_FEE * 100),
             },
             quantity: 1,
           },
@@ -550,6 +567,14 @@ export async function POST(req: NextRequest) {
             },
             quantity: 1,
           },
+          {
+            price_data: {
+              currency: "usd",
+              product_data: { name: "Service Fee" },
+              unit_amount: Math.round(SERVICE_FEE * 100),
+            },
+            quantity: 1,
+          },
         ],
         success_url: `${origin}/booking-confirmed?session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${origin}/schedule?checkout=cancelled`,
@@ -687,6 +712,14 @@ export async function POST(req: NextRequest) {
               currency: "usd",
               product_data: { name: plainSessionDetails || "Mesa Basketball Training Session" },
               unit_amount: Math.round(amountToCharge * 100),
+            },
+            quantity: 1,
+          },
+          {
+            price_data: {
+              currency: "usd",
+              product_data: { name: "Service Fee" },
+              unit_amount: Math.round(SERVICE_FEE * 100),
             },
             quantity: 1,
           },

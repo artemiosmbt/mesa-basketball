@@ -768,6 +768,12 @@ export async function sendRescheduleNotification(data: {
   // Stripe charge (e.g. its price couldn't be determined automatically) —
   // covers that edge case's messaging when priceAdjustment isn't also set.
   lateFeeCredited?: number;
+  // Portion of lateFeeCredited that was applied straight to the new
+  // session's price, rather than left sitting in the account balance. Set
+  // whenever any of it was applied — whether that fully covered the new
+  // session (priceAdjustment absent) or only partially, with the remainder
+  // charged via Stripe (priceAdjustment present).
+  lateFeeCreditApplied?: number;
 }) {
   const resend = getResend();
 
@@ -787,17 +793,22 @@ export async function sendRescheduleNotification(data: {
     if (adj.creditedAmount > 0) parts.push(`<strong>$${adj.creditedAmount}</strong> has been credited to your account`);
     return parts.length > 0 ? `${parts.join(", ")} (new session is lower-priced).` : "";
   }
+  const leftoverLateFeeCredit = Math.max(0, (data.lateFeeCredited || 0) - (data.lateFeeCreditApplied || 0));
   const priceAdjustmentNote = data.priceAdjustment
     ? `<div style="background: #1e3a5f; border-left: 4px solid #3b82f6; border-radius: 6px; padding: 14px 16px; margin: 16px 0;">
         <p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #ffffff;">${data.priceAdjustment.kind === "refund" ? (data.priceAdjustment.failed ? "Refund In Progress" : "Refund Issued") : "Payment Received"}</p>
         <p style="margin: 0; color: #ffffff; font-size: 14px;">${data.priceAdjustment.kind === "refund"
           ? refundAdjustmentBody(data.priceAdjustment)
-          : `<strong>$${data.priceAdjustment.amount}</strong> was charged to complete your reschedule${data.isLateReschedule ? " (late reschedule — 50% of your original payment was kept as a fee, and credited to your account; the new session required full payment)" : " (new session is higher-priced)"}.`}</p>
+          : data.isLateReschedule
+            ? `50% of your original payment${data.lateFeeCredited ? ` ($${data.lateFeeCredited})` : ""} was kept as a late reschedule fee${data.lateFeeCreditApplied ? `, <strong>$${data.lateFeeCreditApplied}</strong> of which was applied directly to your new session` : ""}, and <strong>$${data.priceAdjustment.amount}</strong> was charged to cover the rest.`
+            : `<strong>$${data.priceAdjustment.amount}</strong> was charged to complete your reschedule (new session is higher-priced).`}</p>
       </div>`
     : !data.priceAdjustment && data.lateFeeCredited
       ? `<div style="background: #1e3a5f; border-left: 4px solid #3b82f6; border-radius: 6px; padding: 14px 16px; margin: 16px 0;">
           <p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #ffffff;">Account Credit</p>
-          <p style="margin: 0; color: #ffffff; font-size: 14px;"><strong>$${data.lateFeeCredited}</strong> has been credited to your account (50% of what you paid — this was a late reschedule, so the other half isn't refunded per our policy).</p>
+          <p style="margin: 0; color: #ffffff; font-size: 14px;">${data.lateFeeCreditApplied
+            ? `<strong>$${data.lateFeeCreditApplied}</strong> of your late reschedule fee credit was applied directly to your new session — fully covering it, nothing further charged.${leftoverLateFeeCredit > 0 ? ` The remaining <strong>$${leftoverLateFeeCredit}</strong> is in your account balance for next time.` : ""}`
+            : `<strong>$${data.lateFeeCredited}</strong> has been credited to your account (50% of what you paid — this was a late reschedule, so the other half isn't refunded per our policy).`}</p>
         </div>`
       : "";
 
@@ -815,8 +826,12 @@ export async function sendRescheduleNotification(data: {
       ${data.priceAdjustment
         ? data.priceAdjustment.kind === "refund"
           ? `<p><strong>${data.priceAdjustment.failed ? "REFUND FAILED — needs manual action" : [data.priceAdjustment.refundedAmount > 0 ? `$${data.priceAdjustment.refundedAmount} refunded` : "", data.priceAdjustment.creditedAmount > 0 ? `$${data.priceAdjustment.creditedAmount} credited` : ""].filter(Boolean).join(", ")}</strong></p>`
-          : `<p><strong>Charged: $${data.priceAdjustment.amount}</strong></p>`
-        : data.lateFeeCredited ? `<p><strong>$${data.lateFeeCredited} credited to their account</strong> (late reschedule — 50% of what they paid)</p>` : ""}
+          : `<p><strong>Charged: $${data.priceAdjustment.amount}</strong>${data.lateFeeCreditApplied ? ` (plus $${data.lateFeeCreditApplied} late-fee credit applied)` : ""}</p>`
+        : data.lateFeeCredited
+          ? data.lateFeeCreditApplied
+            ? `<p><strong>$${data.lateFeeCreditApplied} late-fee credit applied to new session</strong>${leftoverLateFeeCredit > 0 ? ` ($${leftoverLateFeeCredit} left in account)` : ""}</p>`
+            : `<p><strong>$${data.lateFeeCredited} credited to their account</strong> (late reschedule — 50% of what they paid)</p>`
+          : ""}
       ${lateFeeNote}
     `,
   });

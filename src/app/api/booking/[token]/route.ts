@@ -13,10 +13,12 @@ import {
   getReferralCredits,
   decrementReferralCredit,
   addAccountCredit,
+  deductAccountCredit,
   attachStripeCheckoutSession,
 } from "@/lib/supabase";
 import { issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome } from "@/lib/booking-finalize";
 import { getStripe } from "@/lib/stripe";
+import { SERVICE_FEE } from "@/lib/pricing";
 import {
   sendCancellationNotification,
   sendRescheduleNotification,
@@ -820,16 +822,27 @@ export async function PUT(
   // today's behavior (the row's price updates, nothing collected/returned
   // automatically). On-time: refund or charge just the difference, so the
   // client's already-paid amount carries forward. Late: policy forfeits the
-  // old payment as a 50% fee (credited, not carried forward), so the new
-  // session needs a fresh full charge.
+  // old payment as a 50% fee — but that fee is credited straight back onto
+  // the new session (not left sitting unused in their balance), so the
+  // client only ever owes the remainder via Stripe, never the new session's
+  // full price on top of losing half their old payment.
   let priceReconciliation: { kind: "refund" | "charge"; amount: number } | null = null;
   let lateFeeCredited = 0;
+  let lateFeeCreditApplied = 0;
   if (oldPaymentIntentId) {
     if (isLateReschedule) {
       lateFeeCredited = Math.round(oldPaidAmount * 0.5);
       if (lateFeeCredited > 0) await addAccountCredit(reg.email, lateFeeCredited).catch(() => {});
       if (newPriceKnown && newEffectivePrice! > 0) {
-        priceReconciliation = { kind: "charge", amount: newEffectivePrice! };
+        lateFeeCreditApplied = Math.min(lateFeeCredited, newEffectivePrice!);
+        if (lateFeeCreditApplied > 0) {
+          const applied = await deductAccountCredit(reg.email, lateFeeCreditApplied).catch(() => false);
+          if (!applied) lateFeeCreditApplied = 0; // couldn't apply it (shouldn't happen right after crediting it) — leave it in their balance instead
+        }
+        const amountStillOwed = Math.round((newEffectivePrice! - lateFeeCreditApplied) * 100) / 100;
+        if (amountStillOwed > 0.005) {
+          priceReconciliation = { kind: "charge", amount: amountStillOwed };
+        }
       }
     } else if (newPriceKnown) {
       const delta = Math.round((newEffectivePrice! - oldPaidAmount) * 100) / 100;
@@ -864,6 +877,7 @@ export async function PUT(
       isFree: newIsFree,
       usedReferralCredit: newUsedReferralCredit,
       sessionPrice: newSessionPrice,
+      appliedAccountCredit: lateFeeCreditApplied || undefined,
       status: "pending_payment",
       bookingBatchId,
     });
@@ -883,6 +897,8 @@ export async function PUT(
         old_session_details: reg.session_details,
         is_late_reschedule: String(!!isLateReschedule),
         topup_amount: String(priceReconciliation.amount),
+        late_fee_credited: String(lateFeeCredited),
+        late_fee_credit_applied: String(lateFeeCreditApplied),
       },
       line_items: [
         {
@@ -890,6 +906,14 @@ export async function PUT(
             currency: "usd",
             product_data: { name: `Reschedule: ${plainSessionDetails || "Mesa Basketball Training Session"}` },
             unit_amount: Math.round(priceReconciliation.amount * 100),
+          },
+          quantity: 1,
+        },
+        {
+          price_data: {
+            currency: "usd",
+            product_data: { name: "Service Fee" },
+            unit_amount: Math.round(SERVICE_FEE * 100),
           },
           quantity: 1,
         },
@@ -904,30 +928,35 @@ export async function PUT(
     return NextResponse.json({ success: true, checkoutUrl: checkoutSession.url, isLateReschedule: !!isLateReschedule });
   }
 
-  // No further payment needed (same price, a refund of the difference, or a
+  // No further payment needed (same price, a price decrease, or a
   // non-Stripe booking) — confirm the new booking immediately, same as
-  // before Stripe existed.
+  // before Stripe existed. A price decrease is credited to the account
+  // rather than refunded back to the card: real Stripe refunds are reserved
+  // for actual cancellations (24h+ notice) where the client is leaving —
+  // a reschedule keeps the booking (and the relationship) going, so the
+  // difference stays with Mesa as credit toward a future session instead of
+  // round-tripping real money through Stripe.
   let rescheduleRefundResult: { refundedAmount: number; creditedAmount: number; failed: boolean } | undefined;
   if (priceReconciliation?.kind === "refund") {
-    rescheduleRefundResult = await issueStripeRefund({
-      email: reg.email,
-      manageToken: token, // old row — bookkeeping only, it's already cancelled
-      paymentIntentId: oldPaymentIntentId!,
-      amountDollars: priceReconciliation.amount,
-      sessionLabel: newSessionDetails,
-    });
+    await addAccountCredit(reg.email, priceReconciliation.amount).catch(() => {});
+    rescheduleRefundResult = { refundedAmount: 0, creditedAmount: priceReconciliation.amount, failed: false };
   }
 
   // Create new booking with updated type, kids, and session details. When
   // the old booking was Stripe-paid AND we actually reconciled the price
-  // (newPriceKnown — same type, so the row's price is directly comparable),
-  // carry its payment identity forward: its remaining captured amount now
-  // exactly matches this row's price, so a later cancellation/reschedule can
-  // still refund it correctly. A type-switch reschedule (private<->weekly)
-  // never goes through price reconciliation at all, so carrying the old
-  // payment_intent forward there would let a later cancellation refund the
-  // wrong amount against a charge that was never adjusted for this switch —
-  // safer to leave it unlinked and fall back to account-credit treatment.
+  // on-time (newPriceKnown — same type, so the row's price is directly
+  // comparable), carry its payment identity forward: its remaining captured
+  // amount now exactly matches this row's price, so a later cancellation/
+  // reschedule can still refund it correctly. A type-switch reschedule
+  // (private<->weekly) never goes through price reconciliation at all, so
+  // carrying the old payment_intent forward there would let a later
+  // cancellation refund the wrong amount against a charge that was never
+  // adjusted for this switch. A late reschedule never carries it forward
+  // either, even if the credit fully covered the new session — that old
+  // charge's money has already been fully spoken for (part kept as the late
+  // fee, part re-applied here as account credit via lateFeeCreditApplied
+  // below), so it no longer represents a live, refundable balance behind
+  // this new row.
   const { manageToken: newToken } = await addRegistration({
     parentName: newParentName,
     email: reg.email,
@@ -945,8 +974,9 @@ export async function PUT(
     isFree: newIsFree,
     usedReferralCredit: newUsedReferralCredit,
     sessionPrice: newSessionPrice,
-    stripePaymentIntentId: newPriceKnown ? oldPaymentIntentId : undefined,
-    stripeCustomerId: newPriceKnown ? (reg.stripe_customer_id || undefined) : undefined,
+    appliedAccountCredit: lateFeeCreditApplied || undefined,
+    stripePaymentIntentId: newPriceKnown && !isLateReschedule ? oldPaymentIntentId : undefined,
+    stripeCustomerId: newPriceKnown && !isLateReschedule ? (reg.stripe_customer_id || undefined) : undefined,
   });
 
   // Sync calendar for the new booking
@@ -999,6 +1029,7 @@ export async function PUT(
       newTrainer: resolvedTrainer,
       priceAdjustment: refundAdjustment,
       lateFeeCredited: lateFeeCredited || undefined,
+      lateFeeCreditApplied: lateFeeCreditApplied || undefined,
     });
   } catch (notifyErr) {
     console.error("Reschedule email failed (booking already updated):", notifyErr);
@@ -1007,14 +1038,24 @@ export async function PUT(
   const rescheduleTrainerLine = resolvedTrainer ? `\nTrainer: ${resolvedTrainer}` : "";
   const refundOutcomeText = refundAdjustment ? describeMoneyOutcome(refundAdjustment, 0, false, false) : "";
   const refundOutcomeAdminText = refundAdjustment ? describeMoneyOutcome(refundAdjustment, 0, false, true) : "";
+  const leftoverLateFeeCredit = Math.max(0, lateFeeCredited - lateFeeCreditApplied);
   if (reg.sms_consent && reg.phone) {
     const rescheduleLabel = newSessionDetails.split(" — ")[0] || "Session";
     const lateNote = isLateReschedule && !priceReconciliation && !lateFeeCredited ? "\nA late reschedule fee applies." : "";
-    const creditNote = lateFeeCredited > 0 ? `\n$${lateFeeCredited} credited to your account (late reschedule fee).` : "";
+    const creditNote = lateFeeCreditApplied > 0
+      ? `\n$${lateFeeCreditApplied} of your late fee credit covered your new session${leftoverLateFeeCredit > 0 ? ` ($${leftoverLateFeeCredit} left in your account)` : ""} — nothing further charged.`
+      : lateFeeCredited > 0
+        ? `\n$${lateFeeCredited} credited to your account (late reschedule fee).`
+        : "";
     const refundNote = refundOutcomeText ? `\n${refundOutcomeText}.` : "";
     await sendSMS(reg.phone, `Mesa Basketball: ${rescheduleLabel} rescheduled!\n${formatDateWithDay(bookedDate)} | ${bookedStartTime}-${bookedEndTime}\nLocation: ${resolveLocationName(bookedLocation)}${rescheduleTrainerLine}\nAthlete: ${kidsToUse}${lateNote}${creditNote}${refundNote}\nManage: mesabasketballtraining.com/booking/${newToken}\nReply STOP to opt out.`);
   }
-  await sendAdminSMS(`RESCHEDULED: ${newParentName}\nFrom: ${reg.session_details}\nTo: ${newSessionDetails}${rescheduleTrainerLine}\nPlayers: ${kidsToUse}${refundOutcomeAdminText ? `\n${refundOutcomeAdminText}` : ""}${lateFeeCredited > 0 ? `\n$${lateFeeCredited} credited (late fee)` : ""}`);
+  const adminCreditNote = lateFeeCreditApplied > 0
+    ? `\n$${lateFeeCreditApplied} late-fee credit applied to new session${leftoverLateFeeCredit > 0 ? ` ($${leftoverLateFeeCredit} left in account)` : ""}`
+    : lateFeeCredited > 0
+      ? `\n$${lateFeeCredited} credited (late fee)`
+      : "";
+  await sendAdminSMS(`RESCHEDULED: ${newParentName}\nFrom: ${reg.session_details}\nTo: ${newSessionDetails}${rescheduleTrainerLine}\nPlayers: ${kidsToUse}${refundOutcomeAdminText ? `\n${refundOutcomeAdminText}` : ""}${adminCreditNote}`);
 
   return NextResponse.json({ success: true, newToken, isLateReschedule: !!isLateReschedule });
 }
