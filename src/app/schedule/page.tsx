@@ -1429,6 +1429,65 @@ export default function Home() {
     );
   }, [modal, hideUpsell]);
 
+  // Numeric total for whatever's currently selected in the modal, plus how
+  // much of it account credit could actually apply to — used only to guess
+  // whether credit will fully cover this booking (server has the final
+  // say), so the button and fee copy don't confusingly reference Stripe/a
+  // service fee for a booking that's actually going to be paid entirely
+  // with credit. Mirrors /api/register's real credit-application rules,
+  // which are NOT simply "credit up to the full total" for multi-session
+  // bookings: a multi-date weekly booking only ever lets credit cover one
+  // session's worth (never the full total across dates), and a drop-in/
+  // partial camp booking only lets it cover one day's share — a full-camp
+  // booking (every day selected) is the one camp case where credit CAN
+  // cover the whole thing. Recurring private bookings have no such cap.
+  const creditEstimate = (() => {
+    if (modal.type === "weekly") {
+      const numSessions = modal.selectedGroupSessions?.length || 1;
+      const total = (modal.weeklyTotalPrice || 0) * kids.length;
+      const creditCap = numSessions > 1 ? Math.round(total / numSessions) : total;
+      return { total, creditCap };
+    }
+    if (modal.type === "camp") {
+      const camp = camps[modal.sessionIndex];
+      if (!camp?.campDays?.length) return null;
+      const priceStr = calcCampPrice(campSelectedDays.size, camp.campDays.length, camp, kids.length);
+      if (!priceStr) return null;
+      const total = parseInt(priceStr.replace(/\D/g, "")) || 0;
+      const isFullCamp = campSelectedDays.size === camp.campDays.length;
+      const creditCap = isFullCamp ? total : Math.round(total / Math.max(1, campSelectedDays.size));
+      return { total, creditCap };
+    }
+    if (modal.type === "private" || modal.type === "group-private") {
+      const match = modal.sessionDetails.match(/\((\d+) min\)/);
+      if (!match) return null;
+      const baseDuration = parseInt(match[1]);
+      const effectiveGroup = isGroupRate || kids.length >= 4;
+      const kidCount = effectiveGroup ? 4 : kids.length;
+      const basePrice = getPrivatePrice(baseDuration, kidCount);
+      const extraPrice = upsellExtra > 0 ? getPrivatePrice(upsellExtra, kidCount) * 0.5 : 0;
+      const totalPrice = basePrice + extraPrice;
+      const numDates = 1 + recurringWeeks.filter((w) => w.selected).length;
+      if (numDates > 1) {
+        // Recurring booking: server prices/discounts each date individually
+        // (and only ever discounts the very first one for a first-time-free
+        // client), which can't be predicted here — use the plain undiscounted
+        // total across all dates instead. That's never an underestimate, so
+        // this only ever errs toward showing the Stripe-bound copy, not
+        // wrongly promising "no charge" for a booking that still needs one.
+        const total = Math.round(totalPrice * numDates * 100) / 100;
+        return { total, creditCap: total };
+      }
+      const total = useReferralCredit ? Math.round(totalPrice * 0.5 * 100) / 100 : totalPrice;
+      return { total, creditCap: totalPrice };
+    }
+    return null;
+  })();
+
+  const willCoverWithCredit = accountCreditBalance !== null && accountCreditBalance > 0 && applyAccountCredit
+    && creditEstimate !== null && creditEstimate.total > 0
+    && Math.min(accountCreditBalance, creditEstimate.creditCap) >= creditEstimate.total;
+
   const priceLabel = (() => {
     if (modal.type !== "private" && modal.type !== "group-private") return null;
     const match = modal.sessionDetails.match(/\((\d+) min\)/);
@@ -1444,7 +1503,8 @@ export default function Home() {
     const tier = effectiveGroup ? "Group Private — 4+ participants" : "Private — up to 3 participants";
     const timeNote = totalDuration !== 60 ? ` (${totalDuration} min session)` : "";
     const savingsNote = upsellExtra > 0 ? ` — includes ${upsellExtra} min bonus at 50% off` : "";
-    return `${formatPrice(totalPrice)} (${tier})${timeNote}${savingsNote} + ${SERVICE_FEE_LABEL} service fee (non-refundable)`;
+    const feeNote = willCoverWithCredit ? "" : ` + ${SERVICE_FEE_LABEL} service fee (non-refundable)`;
+    return `${formatPrice(totalPrice)} (${tier})${timeNote}${savingsNote}${feeNote}`;
   })();
 
   // Dates that have available private slots (for calendar highlights)
@@ -2923,8 +2983,14 @@ export default function Home() {
                           Drop-in rate: {fmtPrice(camp.dropInPrice)}/day &bull; All {totalDays} days: {earlyBird && camp.earlyBirdPrice ? `${camp.earlyBirdPrice} (EB) / ${camp.price}` : camp.price}
                         </p>
                       )}
-                      <p className="text-xs text-brown-400 mt-0.5">+ {SERVICE_FEE_LABEL} service fee (non-refundable)</p>
-                      <p className="text-xs text-brown-500 mt-1">Payment due upon registration — pay securely by card via Stripe</p>
+                      {willCoverWithCredit ? (
+                        <p className="text-xs text-blue-400 mt-1">Fully covered by your account credit — no charge</p>
+                      ) : (
+                        <>
+                          <p className="text-xs text-brown-400 mt-0.5">+ {SERVICE_FEE_LABEL} service fee (non-refundable)</p>
+                          <p className="text-xs text-brown-500 mt-1">Payment due upon registration — pay securely by card via Stripe</p>
+                        </>
+                      )}
                     </div>
                   )}
                   {selectedCount === 0 && (
@@ -2959,8 +3025,14 @@ export default function Home() {
                   {kids.length > 1 && (
                     <p className="text-xs text-brown-400 mt-0.5">${modal.weeklyTotalPrice} &times; {kids.length} athletes</p>
                   )}
-                  <p className="text-xs text-brown-400 mt-0.5">+ {SERVICE_FEE_LABEL} service fee (non-refundable)</p>
-                  <p className="text-xs text-brown-500 mt-0.5">Payment due upon registration — pay securely by card via Stripe</p>
+                  {willCoverWithCredit ? (
+                    <p className="text-xs text-blue-400 mt-0.5">Fully covered by your account credit — no charge</p>
+                  ) : (
+                    <>
+                      <p className="text-xs text-brown-400 mt-0.5">+ {SERVICE_FEE_LABEL} service fee (non-refundable)</p>
+                      <p className="text-xs text-brown-500 mt-0.5">Payment due upon registration — pay securely by card via Stripe</p>
+                    </>
+                  )}
                 </div>
               </div>
             )}
@@ -3257,7 +3329,11 @@ export default function Home() {
                         <span className="ml-1 text-green-400"> — you save ${(modal.weeklySavings || 0) * kids.length}!</span>
                       )}
                     </p>
-                    <p className="mt-0.5 text-xs text-brown-500">+ {SERVICE_FEE_LABEL} service fee (non-refundable)</p>
+                    {willCoverWithCredit ? (
+                      <p className="mt-0.5 text-xs text-blue-400">Fully covered by your account credit — no charge</p>
+                    ) : (
+                      <p className="mt-0.5 text-xs text-brown-500">+ {SERVICE_FEE_LABEL} service fee (non-refundable)</p>
+                    )}
                   </div>
                 )}
 
@@ -3425,7 +3501,7 @@ export default function Home() {
                   {submitting
                     ? "Submitting..."
                     : modal.type === "private" || modal.type === "group-private" || modal.type === "weekly" || modal.type === "camp"
-                      ? "Continue to Payment"
+                      ? (willCoverWithCredit ? "Confirm Booking" : "Continue to Payment")
                       : "Confirm Registration"}
                 </button>
               </form>
