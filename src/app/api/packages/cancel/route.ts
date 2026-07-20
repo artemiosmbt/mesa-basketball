@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getPackageById, packageHasAnyBookedSession, cancelPackage, addAccountCredit } from "@/lib/supabase";
 import { issueStripeRefund } from "@/lib/booking-finalize";
-import { SERVICE_FEE } from "@/lib/pricing";
 import { sendSMS, sendAdminSMS } from "@/lib/sms";
 
 // Client-initiated package cancellation — only ever allowed before a single
@@ -39,8 +38,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "This package was already cancelled" }, { status: 409 });
     }
 
+    // The $4.50 service fee is never refunded, on any cancellation — it
+    // covers Stripe's own (also non-refundable) processing cut, so giving
+    // it back would mean paying that cut out of pocket. Only the package
+    // price itself is refunded/credited here.
     const totalPrice = pkg.package_type === 4 ? 475 : 900;
-    const totalCharged = Math.round((totalPrice + SERVICE_FEE) * 100) / 100;
 
     let refundResult: { refundedAmount: number; creditedAmount: number; failed: boolean } | undefined;
     let creditIssued = 0;
@@ -48,15 +50,15 @@ export async function POST(req: NextRequest) {
       refundResult = await issueStripeRefund({
         email: pkg.email,
         paymentIntentId: pkg.stripe_payment_intent_id,
-        amountDollars: totalCharged,
+        amountDollars: totalPrice,
         sessionLabel: `${pkg.package_type}-session package (${pkg.month_year})`,
       });
     } else {
       // Legacy package enrolled before Stripe existed for packages — no
       // card on file to refund, so it becomes account credit instead, same
       // fallback every other money-movement path in this app already uses.
-      await addAccountCredit(pkg.email, totalCharged).catch(() => {});
-      creditIssued = totalCharged;
+      await addAccountCredit(pkg.email, totalPrice).catch(() => {});
+      creditIssued = totalPrice;
     }
 
     const refundFailed = !!refundResult?.failed;
@@ -65,11 +67,11 @@ export async function POST(req: NextRequest) {
         const message = refundFailed
           ? `Mesa Basketball: Your ${pkg.package_type}-session package for ${pkg.month_year} has been cancelled. Your refund is being processed — you'll receive a separate confirmation once it's complete.`
           : creditIssued > 0
-            ? `Mesa Basketball: Your ${pkg.package_type}-session package for ${pkg.month_year} has been cancelled. $${creditIssued} has been credited to your account.`
-            : `Mesa Basketball: Your ${pkg.package_type}-session package for ${pkg.month_year} has been cancelled. $${totalCharged} has been refunded to your original payment method.`;
+            ? `Mesa Basketball: Your ${pkg.package_type}-session package for ${pkg.month_year} has been cancelled. $${creditIssued} has been credited to your account (the $4.50 service fee isn't refundable).`
+            : `Mesa Basketball: Your ${pkg.package_type}-session package for ${pkg.month_year} has been cancelled. $${totalPrice} has been refunded to your original payment method (the $4.50 service fee isn't refundable).`;
         await sendSMS(pkg.phone, message);
       }
-      const adminMoney = refundFailed ? "REFUND FAILED — needs manual action" : creditIssued > 0 ? `$${creditIssued} credited (no card on file)` : `$${totalCharged} refunded`;
+      const adminMoney = refundFailed ? "REFUND FAILED — needs manual action" : creditIssued > 0 ? `$${creditIssued} credited (no card on file)` : `$${totalPrice} refunded`;
       await sendAdminSMS(`PACKAGE CANCELLED (never used): ${pkg.parent_name}\n${pkg.package_type}-session package — ${pkg.month_year}\n${adminMoney}`);
     } catch (err) {
       console.error("Package cancellation notification error:", err);

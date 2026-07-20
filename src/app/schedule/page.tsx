@@ -1444,7 +1444,7 @@ export default function Home() {
     const tier = effectiveGroup ? "Group Private — 4+ participants" : "Private — up to 3 participants";
     const timeNote = totalDuration !== 60 ? ` (${totalDuration} min session)` : "";
     const savingsNote = upsellExtra > 0 ? ` — includes ${upsellExtra} min bonus at 50% off` : "";
-    return `${formatPrice(totalPrice)} (${tier})${timeNote}${savingsNote} + ${SERVICE_FEE_LABEL} service fee`;
+    return `${formatPrice(totalPrice)} (${tier})${timeNote}${savingsNote} + ${SERVICE_FEE_LABEL} service fee (non-refundable)`;
   })();
 
   // Dates that have available private slots (for calendar highlights)
@@ -2923,7 +2923,7 @@ export default function Home() {
                           Drop-in rate: {fmtPrice(camp.dropInPrice)}/day &bull; All {totalDays} days: {earlyBird && camp.earlyBirdPrice ? `${camp.earlyBirdPrice} (EB) / ${camp.price}` : camp.price}
                         </p>
                       )}
-                      <p className="text-xs text-brown-400 mt-0.5">+ {SERVICE_FEE_LABEL} service fee</p>
+                      <p className="text-xs text-brown-400 mt-0.5">+ {SERVICE_FEE_LABEL} service fee (non-refundable)</p>
                       <p className="text-xs text-brown-500 mt-1">Payment due upon registration — pay securely by card via Stripe</p>
                     </div>
                   )}
@@ -2959,7 +2959,7 @@ export default function Home() {
                   {kids.length > 1 && (
                     <p className="text-xs text-brown-400 mt-0.5">${modal.weeklyTotalPrice} &times; {kids.length} athletes</p>
                   )}
-                  <p className="text-xs text-brown-400 mt-0.5">+ {SERVICE_FEE_LABEL} service fee</p>
+                  <p className="text-xs text-brown-400 mt-0.5">+ {SERVICE_FEE_LABEL} service fee (non-refundable)</p>
                   <p className="text-xs text-brown-500 mt-0.5">Payment due upon registration — pay securely by card via Stripe</p>
                 </div>
               </div>
@@ -3257,7 +3257,7 @@ export default function Home() {
                         <span className="ml-1 text-green-400"> — you save ${(modal.weeklySavings || 0) * kids.length}!</span>
                       )}
                     </p>
-                    <p className="mt-0.5 text-xs text-brown-500">+ {SERVICE_FEE_LABEL} service fee</p>
+                    <p className="mt-0.5 text-xs text-brown-500">+ {SERVICE_FEE_LABEL} service fee (non-refundable)</p>
                   </div>
                 )}
 
@@ -3445,7 +3445,7 @@ export default function Home() {
               <button onClick={() => setPkgModal({ open: false, packageType: null })} className="text-2xl text-brown-400 hover:text-white">&times;</button>
             </div>
             <p className="mt-1 text-sm text-brown-400">
-              {pkgModal.packageType === 4 ? "$475" : "$900"} + {SERVICE_FEE_LABEL} service fee — paid securely by card via Stripe
+              {pkgModal.packageType === 4 ? "$475" : "$900"} + {SERVICE_FEE_LABEL} service fee (non-refundable) — paid securely by card via Stripe
             </p>
 
             {pkgResult?.success ? (

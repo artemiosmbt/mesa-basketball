@@ -130,8 +130,8 @@ export default function MyBookings() {
           message: data.refundFailed
             ? "Your package has been cancelled. Your refund is being processed — you'll get a separate confirmation once it's complete."
             : data.creditedAmount > 0
-              ? `Your package has been cancelled and $${data.creditedAmount} has been credited to your account.`
-              : `Your package has been cancelled and $${data.refundedAmount} has been refunded to your original payment method.`,
+              ? `Your package has been cancelled and $${data.creditedAmount} has been credited to your account (the $4.50 service fee isn't refundable).`
+              : `Your package has been cancelled and $${data.refundedAmount} has been refunded to your original payment method (the $4.50 service fee isn't refundable).`,
         });
         setActivePackage(null);
       } else {
@@ -272,7 +272,7 @@ export default function MyBookings() {
 
                       {showPackageCancelConfirm ? (
                         <div className="mt-4 rounded-lg border border-red-800/50 bg-red-900/10 p-3">
-                          <p className="text-xs text-brown-300 mb-3">Cancel this package and refund the full amount to your card?</p>
+                          <p className="text-xs text-brown-300 mb-3">Cancel this package and refund the package price to your card? (The $4.50 service fee isn&apos;t refundable.)</p>
                           <div className="flex gap-2">
                             <button
                               type="button"

@@ -195,7 +195,7 @@ export async function sendRegistrationNotification(data: {
   // statement, so it's shown plainly rather than folded into the other
   // price notes above (which describe the session's rate, not the charge).
   const chargedNote = data.amountCharged != null && data.amountCharged > 0
-    ? `<p style="background: #162d5a; color: #d4af37; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">Charged to your card: $${Math.round((data.amountCharged + SERVICE_FEE) * 100) / 100} ($${data.amountCharged} + ${SERVICE_FEE_LABEL} service fee)</p>`
+    ? `<p style="background: #162d5a; color: #d4af37; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">Charged to your card: $${Math.round((data.amountCharged + SERVICE_FEE) * 100) / 100} ($${data.amountCharged} + ${SERVICE_FEE_LABEL} service fee, non-refundable)</p>`
     : "";
 
   const accountCreditNote = data.accountCreditApplied && data.accountCreditApplied > 0 && data.fullPrice != null
@@ -548,7 +548,7 @@ export async function sendPackageConfirmation(data: {
         <li><strong>Month:</strong> ${monthLabel}</li>
         <li><strong>Sessions expire:</strong> ${expiry} — unused sessions do not carry over</li>
       </ul>
-      <p style="background: #162d5a; color: #d4af37; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">Charged to your card: $${totalWithFee} ($${data.totalPrice} + ${SERVICE_FEE_LABEL} service fee)</p>
+      <p style="background: #162d5a; color: #d4af37; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">Charged to your card: $${totalWithFee} ($${data.totalPrice} + ${SERVICE_FEE_LABEL} service fee, non-refundable)</p>
       <p>Your next ${data.packageType} private session bookings this month are already covered — nothing further will be charged when you book them at <a href="${BASE_URL}/schedule" style="color: #d4af37; font-weight: bold;">mesabasketballtraining.com/schedule</a>, up to your package total.</p>
       <h3>Cancellation &amp; Rescheduling Policy</h3>
       <p>Cancellations and reschedules within 24 hours of a scheduled session incur a <strong>$75 fee</strong> (50% of the standard $150 private rate). <strong>No-shows without prior notice will be charged the full session fee.</strong></p>
