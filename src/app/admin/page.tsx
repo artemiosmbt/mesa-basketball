@@ -1120,7 +1120,7 @@ export default function AdminPage() {
     return result;
   }, [registrations, packages]);
 
-  function RegCard({ r, showDelete = false, isPast = false }: { r: Registration; showDelete?: boolean; isPast?: boolean }) {
+  function RegCard({ r, isPast = false }: { r: Registration; isPast?: boolean }) {
     const [expanded, setExpanded] = useState(false);
     const fullSession = r.session_details
       ? r.session_details.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim()
@@ -1225,7 +1225,7 @@ export default function AdminPage() {
             </div>
 
             {/* Actions */}
-            {(r.status === "confirmed" || showDelete || isPast) && (
+            {(r.status === "confirmed" || isPast) && (
               <div className="flex flex-wrap gap-3 pt-1 border-t border-brown-800">
                 {r.status === "confirmed" && !isPast && (
                   <button onClick={() => cancelRegistration(r.id)} disabled={cancelling === r.id} className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50">
@@ -1253,11 +1253,12 @@ export default function AdminPage() {
                     </button>
                   </div>
                 )}
-                {/* Never offer Delete for a still-confirmed, upcoming booking — that
-                    silently removes it with no refund and no client notification.
-                    Cancel is the right tool for an active booking; Delete is only
-                    for cleaning up already-inactive (cancelled/no-show) or past rows. */}
-                {(showDelete || isPast) && !(r.status === "confirmed" && !isPast) && (
+                {/* Delete only ever shows for a session whose start time has
+                    actually passed — never for a still-upcoming booking,
+                    confirmed or not, since that silently removes it with no
+                    refund and no client notification. Cancel is the right
+                    tool for an active, upcoming booking. */}
+                {isPast && (
                   <button onClick={() => deleteRegistration(r.id)} disabled={deleting === r.id} className="text-xs text-brown-600 hover:text-red-500 transition disabled:opacity-50">
                     {deleting === r.id ? "Deleting..." : "Delete"}
                   </button>
@@ -1651,7 +1652,7 @@ export default function AdminPage() {
                 </div>
               )}
               <div className="space-y-3">
-                {clientRegistrations.map((r) => <RegCard key={r.id} r={r} showDelete />)}
+                {clientRegistrations.map((r) => <RegCard key={r.id} r={r} isPast={sessionMs(r.booked_date, r.booked_start_time) < Date.now()} />)}
                 {clientRegistrations.length === 0 && <p className="text-brown-500 text-sm">No registrations found.</p>}
               </div>
             </>
