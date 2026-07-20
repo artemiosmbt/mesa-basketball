@@ -9,6 +9,8 @@ import {
 } from "@/lib/calendar";
 import { sendAdminSMS, sendSMS } from "@/lib/sms";
 import { getWeeklySchedule } from "@/lib/sheets";
+import { resolveOffSessionPaymentSource, chargeSavedCardOffSession, issueStripeRefund } from "@/lib/booking-finalize";
+import { SERVICE_FEE, SERVICE_FEE_LABEL } from "@/lib/pricing";
 
 async function verifyAdmin(req: NextRequest) {
   const token = req.headers.get("authorization")?.replace("Bearer ", "");
@@ -120,15 +122,59 @@ export async function POST(req: NextRequest) {
   const newAmount = newFullPrice !== null ? Math.max(0, effectiveAmount(newFullPrice, !!reg.is_free, isPriv) - appliedCredit) : oldAmount;
   const priceDelta = newFullPrice !== null ? newAmount - oldAmount : 0;
 
-  const ok = await updateRegistrationPlayers(reg.manage_token, newKids, newCount, newFullPrice);
-  if (!ok) {
-    return NextResponse.json({ error: "This booking is no longer confirmed — it may have just been cancelled" }, { status: 409 });
-  }
-
   // "Already paid" covers both the old manual cash toggle AND a real Stripe
   // charge — Stripe-paid rows never set is_paid, so checking that alone
   // would miss every paying client since Stripe went live.
   const wasPaid = !!reg.is_paid || !!reg.stripe_payment_intent_id;
+
+  // Nothing gets confirmed with money still owed — an added player's cost
+  // is auto-charged to the card on file before the player is actually
+  // added. If there's no saved card, or the charge fails, the whole add is
+  // aborted before anything changes.
+  let autoChargedAmount = 0;
+  let autoChargePaymentIntentId: string | undefined;
+  if (wasPaid && priceDelta > 0) {
+    const source = await resolveOffSessionPaymentSource(reg);
+    if (!source) {
+      return NextResponse.json(
+        { error: `No saved card found for ${reg.parent_name} to auto-charge the $${priceDelta} owed for adding this player — nothing was changed. Have them update their payment method first.` },
+        { status: 402 }
+      );
+    }
+    const plainSessionDetails = (reg.session_details || "").replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "").trim();
+    const chargeResult = await chargeSavedCardOffSession({
+      customerId: source.customerId,
+      paymentMethodId: source.paymentMethodId,
+      amountDollars: Math.round((priceDelta + SERVICE_FEE) * 100) / 100,
+      description: `Added player: ${plainSessionDetails || "Mesa Basketball Training Session"}`,
+    });
+    if (!chargeResult.success) {
+      return NextResponse.json(
+        { error: `Couldn't automatically charge the $${priceDelta} owed (+ ${SERVICE_FEE_LABEL} fee) — ${chargeResult.reason} Nothing was changed.` },
+        { status: 402 }
+      );
+    }
+    autoChargedAmount = priceDelta;
+    autoChargePaymentIntentId = chargeResult.paymentIntentId;
+  }
+
+  const ok = await updateRegistrationPlayers(reg.manage_token, newKids, newCount, newFullPrice);
+  if (!ok) {
+    // The booking stopped being confirmed in the moment between our fetch
+    // and this write (e.g. the client cancelled) — extremely rare, but if
+    // we already charged them for the player above, that charge needs to
+    // come straight back rather than leaving them charged for nothing.
+    if (autoChargedAmount > 0 && autoChargePaymentIntentId) {
+      await issueStripeRefund({
+        email: reg.email,
+        paymentIntentId: autoChargePaymentIntentId,
+        amountDollars: Math.round((autoChargedAmount + SERVICE_FEE) * 100) / 100,
+        sessionLabel: reg.session_details || "",
+      }).catch((err) => console.error("Failed to refund add-player charge after failed update:", err));
+    }
+    return NextResponse.json({ error: "This booking is no longer confirmed — it may have just been cancelled" }, { status: 409 });
+  }
+
   let creditGranted = 0;
   if (wasPaid && priceDelta < 0) {
     try {
@@ -138,7 +184,6 @@ export async function POST(req: NextRequest) {
       console.error("Failed to grant account credit (admin add-player):", err);
     }
   }
-  const amountDue = wasPaid && priceDelta > 0 ? priceDelta : 0;
 
   try {
     if (isPriv) {
@@ -179,8 +224,8 @@ export async function POST(req: NextRequest) {
       ? ""
       : creditGranted > 0
         ? ` $${oldAmount} -> $${newAmount}, $${creditGranted} credited for their next booking.`
-        : amountDue > 0
-          ? ` $${oldAmount} -> $${newAmount}, $${amountDue} additional due.`
+        : autoChargedAmount > 0
+          ? ` $${oldAmount} -> $${newAmount}, $${Math.round((autoChargedAmount + SERVICE_FEE) * 100) / 100} ($${autoChargedAmount} + ${SERVICE_FEE_LABEL} fee) charged to the card on file.`
           : priceDelta !== 0
             ? ` $${oldAmount} -> $${newAmount}.`
             : "";
@@ -201,6 +246,6 @@ export async function POST(req: NextRequest) {
     totalParticipants: newCount,
     sessionPrice: newFullPrice !== null ? newFullPrice : reg.session_price,
     creditGranted,
-    amountDue,
+    autoChargedAmount: autoChargedAmount > 0 ? autoChargedAmount : undefined,
   });
 }

@@ -856,8 +856,8 @@ export default function AdminPage() {
     setAddPlayerName("");
     if (data.creditGranted > 0) {
       alert(`Player added. $${data.creditGranted} was credited to their account (already paid at the old, lower price).`);
-    } else if (data.amountDue > 0) {
-      alert(`Player added. $${data.amountDue} additional is now due (already paid at the old price) — collect this manually, no auto-charge yet.`);
+    } else if (data.autoChargedAmount > 0) {
+      alert(`Player added. $${data.autoChargedAmount} (+ service fee) was automatically charged to their card on file.`);
     }
   }
 
