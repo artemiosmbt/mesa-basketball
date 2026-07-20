@@ -6,7 +6,7 @@ import { sendCancellationNotification } from "@/lib/email";
 import { getCurrentSheetLocation } from "@/lib/sheets";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import { issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome, isLateAction } from "@/lib/booking-finalize";
-import { addAccountCredit, addReferralCredit } from "@/lib/supabase";
+import { addAccountCredit, addReferralCredit, logLateFeeEvent } from "@/lib/supabase";
 
 async function verifyAdmin(req: NextRequest) {
   const token = req.headers.get("authorization")?.replace("Bearer ", "");
@@ -120,6 +120,22 @@ export async function POST(req: NextRequest) {
         await addAccountCredit(reg.email, paidAmount).catch(() => {});
         creditIssued = paidAmount;
       }
+    }
+    if (chargeLateFee) {
+      await logLateFeeEvent({
+        registrationId: id,
+        parentName: reg.parent_name,
+        email: reg.email,
+        kids: reg.kids,
+        sessionType: reg.type,
+        sessionDetails: reg.session_details,
+        bookedDate: reg.booked_date,
+        bookedStartTime: reg.booked_start_time,
+        action: "cancel",
+        initiatedBy: "admin",
+        amountKept: Math.round((paidAmount - creditIssued) * 100) / 100,
+        amountCredited: creditIssued,
+      });
     }
   }
 

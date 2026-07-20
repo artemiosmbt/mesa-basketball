@@ -15,6 +15,7 @@ import {
   addAccountCredit,
   deductAccountCredit,
   attachStripeCheckoutSession,
+  logLateFeeEvent,
 } from "@/lib/supabase";
 import { issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome, isLateAction, parseSessionDateTimeET } from "@/lib/booking-finalize";
 import { getStripe } from "@/lib/stripe";
@@ -218,6 +219,23 @@ export async function DELETE(
       const lateFeeAmount = isLateCancel && !wasPaid
         ? Math.round(Math.max(0, resolvedSessionPrice(reg) - groupCredit) * 0.5)
         : undefined;
+      if (wasPaid && isLateCancel) {
+        const paidAmount = Math.max(0, resolvedSessionPrice(reg) - groupCredit);
+        await logLateFeeEvent({
+          registrationId: reg.id,
+          parentName: reg.parent_name,
+          email: reg.email,
+          kids: reg.kids,
+          sessionType: reg.type,
+          sessionDetails: campName,
+          bookedDate: reg.booked_date,
+          bookedStartTime: reg.booked_start_time,
+          action: "cancel",
+          initiatedBy: "client",
+          amountKept: Math.round((paidAmount - cancelCredit) * 100) / 100,
+          amountCredited: cancelCredit,
+        });
+      }
       // Wrapped so an email provider hiccup can't crash the request after a
       // real refund has already been issued — the SMS/calendar sync below
       // must still run either way.
@@ -271,6 +289,25 @@ export async function DELETE(
       // Zero rows matched — another request already cancelled this day.
       // Bail out here so the refund logic below never runs twice.
       return NextResponse.json({ error: "This day was already cancelled" }, { status: 409 });
+    }
+    if (isLateCancel && thisDayLateFee > 0) {
+      // This day's own late fee, cleanly attributable — the actual
+      // refund/credit below reflects the WHOLE camp's recomputed total
+      // (which can also include fees from other already-cancelled days), so
+      // it isn't a clean "kept vs credited" split for just this one day.
+      await logLateFeeEvent({
+        registrationId: reg.id,
+        parentName: reg.parent_name,
+        email: reg.email,
+        kids: reg.kids,
+        sessionType: reg.type,
+        sessionDetails: campName,
+        bookedDate: reg.booked_date,
+        bookedStartTime: reg.booked_start_time,
+        action: "cancel",
+        initiatedBy: "client",
+        amountKept: thisDayLateFee,
+      });
     }
 
     // If this specific day was the one account credit was applied to, refund it —
@@ -413,6 +450,23 @@ export async function DELETE(
       }
     }
   }
+  if (wasPaid && isLateCancel) {
+    const paidAmount = Math.max(0, resolvedSessionPrice(reg) - (reg.applied_account_credit || 0));
+    await logLateFeeEvent({
+      registrationId: reg.id,
+      parentName: reg.parent_name,
+      email: reg.email,
+      kids: reg.kids,
+      sessionType: reg.type,
+      sessionDetails: reg.session_details,
+      bookedDate: reg.booked_date,
+      bookedStartTime: reg.booked_start_time,
+      action: "cancel",
+      initiatedBy: "client",
+      amountKept: Math.round((paidAmount - cancelCredit) * 100) / 100,
+      amountCredited: cancelCredit,
+    });
+  }
 
   // Cancelling a package-covered session frees its slot back — recompute
   // straight from this row's own package_id (set only when this exact
@@ -484,6 +538,19 @@ export async function DELETE(
           expires_at: Math.floor(Date.now() / 1000) + 30 * 60,
         });
         packageLateFeeCheckoutUrl = feeSession.url ?? undefined;
+        await logLateFeeEvent({
+          registrationId: reg.id,
+          parentName: reg.parent_name,
+          email: reg.email,
+          kids: reg.kids,
+          sessionType: reg.type,
+          sessionDetails: reg.session_details,
+          bookedDate: reg.booked_date,
+          bookedStartTime: reg.booked_start_time,
+          action: "cancel",
+          initiatedBy: "client",
+          amountChargedExtra: Math.round((packageLateFeeAmount + SERVICE_FEE) * 100) / 100,
+        });
       } catch (err) {
         console.error("Failed to create package late-cancellation fee checkout:", err);
       }
@@ -877,6 +944,25 @@ export async function PUT(
         priceReconciliation = { kind: "charge", amount: Math.round(delta * 100) / 100 };
       }
     }
+    if (isLateReschedule) {
+      await logLateFeeEvent({
+        registrationId: reg.id,
+        parentName: reg.parent_name,
+        email: reg.email,
+        kids: reg.kids,
+        sessionType: reg.type,
+        sessionDetails: reg.session_details,
+        bookedDate: reg.booked_date,
+        bookedStartTime: reg.booked_start_time,
+        action: "reschedule",
+        initiatedBy: "client",
+        amountKept: Math.round((oldPaidAmount - lateFeeCredited) * 100) / 100,
+        amountCredited: lateFeeCredited,
+        amountApplied: lateFeeCreditApplied,
+        amountChargedExtra: priceReconciliation?.kind === "charge" ? Math.round((priceReconciliation.amount + SERVICE_FEE) * 100) / 100 : 0,
+        newSessionDetails,
+      });
+    }
   }
 
   // A package-covered session has no Stripe payment on this row (it was
@@ -938,6 +1024,20 @@ export async function PUT(
             expires_at: Math.floor(Date.now() / 1000) + 30 * 60,
           });
           packageLateFeeCheckoutUrl = feeSession.url ?? undefined;
+          await logLateFeeEvent({
+            registrationId: reg.id,
+            parentName: reg.parent_name,
+            email: reg.email,
+            kids: reg.kids,
+            sessionType: reg.type,
+            sessionDetails: reg.session_details,
+            bookedDate: reg.booked_date,
+            bookedStartTime: reg.booked_start_time,
+            action: "reschedule",
+            initiatedBy: "client",
+            amountChargedExtra: Math.round((packageLateFeeAmount + SERVICE_FEE) * 100) / 100,
+            newSessionDetails,
+          });
         } catch (err) {
           console.error("Failed to create package late-reschedule fee checkout:", err);
         }

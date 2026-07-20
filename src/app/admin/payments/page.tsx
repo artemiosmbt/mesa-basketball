@@ -47,6 +47,26 @@ interface AccountCreditData {
   balance: number;
 }
 
+interface LateFeeEvent {
+  id: string;
+  created_at: string;
+  parent_name: string;
+  email: string | null;
+  kids: string | null;
+  session_type: string | null;
+  session_details: string | null;
+  booked_date: string | null;
+  booked_start_time: string | null;
+  action: "cancel" | "reschedule";
+  initiated_by: "client" | "admin";
+  amount_kept: number;
+  amount_refunded: number;
+  amount_credited: number;
+  amount_applied: number;
+  amount_charged_extra: number;
+  new_session_details: string | null;
+}
+
 const TYPE_LABELS: Record<string, string> = {
   weekly: "Group",
   camp: "Camp",
@@ -59,6 +79,16 @@ function formatDate(d: string | null): string {
   const date = new Date(d);
   if (isNaN(date.getTime())) return d;
   return date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
+}
+
+function timeAgo(dateStr: string): string {
+  const ms = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(ms / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
 }
 
 function sessionLabel(r: Registration) {
@@ -95,9 +125,9 @@ export default function PaymentsPage() {
   const [registrations, setRegistrations] = useState<Registration[]>([]);
   const [packages, setPackages] = useState<PackageData[]>([]);
   const [accountCredits, setAccountCredits] = useState<AccountCreditData[]>([]);
+  const [lateFeeEvents, setLateFeeEvents] = useState<LateFeeEvent[]>([]);
   const [token, setToken] = useState<string | null>(null);
   const [togglingPaid, setTogglingPaid] = useState<string | null>(null);
-  const [settlingFee, setSettlingFee] = useState<string | null>(null);
   const [showAllPaid, setShowAllPaid] = useState(false);
   const [creditEmail, setCreditEmail] = useState("");
   const [creditAmount, setCreditAmount] = useState("");
@@ -123,6 +153,7 @@ export default function PaymentsPage() {
           setRegistrations(data.registrations || []);
           setPackages(data.packages || []);
           setAccountCredits(data.accountCredits || []);
+          setLateFeeEvents(data.lateFeeEvents || []);
         })
         .finally(() => setLoading(false));
     });
@@ -225,22 +256,6 @@ export default function PaymentsPage() {
     setCreditMessage({ text: `${email}'s account credit set to $${newBalance}.`, isError: false });
     setEditingCreditEmail(null);
     setSavingCreditEdit(false);
-  }
-
-  async function settleFee(id: string, referralCode?: string | null, bookedGroup?: string | null) {
-    if (!token) return;
-    setSettlingFee(id);
-    await fetch("/api/admin/update-payment", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ id, field: "cancel_fee_settled", value: true, ...(referralCode ? { referralCode, bookedGroup: bookedGroup ?? null } : {}) }),
-    });
-    if (referralCode) {
-      setRegistrations((prev) => prev.map((r) => r.referral_code === referralCode && r.booked_group === (bookedGroup ?? null) ? { ...r, cancel_fee_settled: true } : r));
-    } else {
-      setRegistrations((prev) => prev.map((r) => (r.id === id ? { ...r, cancel_fee_settled: true } : r)));
-    }
-    setSettlingFee(null);
   }
 
   function dateMs(d: string | null) {
@@ -417,36 +432,6 @@ export default function PaymentsPage() {
     return Math.max(0, discounted - (r.applied_account_credit || 0));
   }
 
-  const cancelFees = useMemo(() =>
-    // Full-camp rows are handled separately by campAdjustments below (recomputed
-    // per-group total, capped at the full-week price) instead of the flat 50% used here.
-    registrations.filter((r) => (r.is_late_cancel || r.status === "no_show") && !r.cancel_fee_settled && !r.is_full_camp),
-  [registrations]);
-
-  // Full-camp groups with some (not all) days cancelled — recomputed capped total,
-  // one card per family rather than per cancelled day. Groups cancelled down to zero
-  // days still go through the original whole-camp-cancel flow (email-only, unchanged).
-  const campAdjustments = useMemo(() => {
-    const groups = new Map<string, Registration[]>();
-    for (const r of registrations) {
-      if (!r.is_full_camp || !r.referral_code) continue;
-      const key = campGroupKey(r);
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key)!.push(r);
-    }
-    const out: { key: string; referralCode: string; bookedGroup: string | null; parentName: string; finalAmount: number; originalAmount: number; isPaid: boolean; kids: string }[] = [];
-    for (const [key, rows] of groups) {
-      const cancelled = rows.filter((r) => r.status === "cancelled");
-      const confirmed = rows.filter((r) => r.status === "confirmed");
-      if (cancelled.length === 0 || confirmed.length === 0) continue; // untouched, or fully cancelled (handled elsewhere)
-      if (cancelled.every((r) => r.cancel_fee_settled)) continue;
-      const originalAmount = rows[0].session_price ?? 0;
-      const finalAmount = campGroupFinalAmounts.get(key) ?? originalAmount;
-      if (finalAmount === originalAmount) continue; // nothing changed, no adjustment to show
-      out.push({ key, referralCode: rows[0].referral_code!, bookedGroup: rows[0].booked_group, parentName: rows[0].parent_name, finalAmount, originalAmount, isPaid: !!rows[0].is_paid, kids: rows[0].kids });
-    }
-    return out;
-  }, [registrations, campGroupFinalAmounts]);
 
   if (loading) {
     return (
@@ -562,91 +547,56 @@ export default function PaymentsPage() {
           )}
         </div>
 
-        {/* Cancellation Fees */}
+        {/* Late Fees — read-only activity feed of late cancellations/reschedules
+            that actually charged a fee. The money already moved automatically
+            (Stripe or account credit) the moment it happened, so there's
+            nothing to settle here, just a record for the last 7 days —
+            the /api/admin/data query itself only fetches that window, so
+            older events just stop appearing on their own. */}
         <div>
-          <h2 className="font-[family-name:var(--font-oswald)] text-lg font-bold tracking-wide text-white mb-4">
-            CANCELLATION FEES
-            {cancelFees.length > 0 && <span className="ml-2 rounded-full bg-red-500 px-2 py-0.5 text-xs font-medium text-white">{cancelFees.length}</span>}
+          <h2 className="font-[family-name:var(--font-oswald)] text-lg font-bold tracking-wide text-white mb-1">
+            LATE CANCELLATION / RESCHEDULE FEES
+            {lateFeeEvents.length > 0 && <span className="ml-2 rounded-full bg-red-500 px-2 py-0.5 text-xs font-medium text-white">{lateFeeEvents.length}</span>}
           </h2>
-          {cancelFees.length === 0 ? (
-            <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-6 py-8 text-center text-brown-500 text-sm">No outstanding cancellation fees.</div>
+          <p className="text-xs text-brown-500 mb-4">Last 7 days — the fee was already charged/credited automatically when it happened.</p>
+          {lateFeeEvents.length === 0 ? (
+            <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-6 py-8 text-center text-brown-500 text-sm">No late fees in the last 7 days.</div>
           ) : (
             <div className="space-y-2">
-              {cancelFees.map((r) => {
-                const sessionPrice = effectiveAmount(r);
-                const isNoShow = r.status === "no_show";
-                const fee = isNoShow ? sessionPrice : Math.round(sessionPrice * 0.5);
-                const owesRefund = r.is_paid;
+              {lateFeeEvents.map((e) => {
+                const moneyParts: string[] = [];
+                if (e.amount_kept > 0) moneyParts.push(`$${e.amount_kept} kept`);
+                if (e.amount_refunded > 0) moneyParts.push(`$${e.amount_refunded} refunded`);
+                if (e.amount_credited > 0) moneyParts.push(`$${e.amount_credited} credited`);
+                if (e.amount_applied > 0) moneyParts.push(`$${e.amount_applied} applied to new session`);
+                if (e.amount_charged_extra > 0) moneyParts.push(`$${e.amount_charged_extra} charged`);
                 return (
-                  <div key={r.id} className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-3 flex items-center justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                        <span className="font-medium text-sm">{r.parent_name}</span>
-                        <span className="text-lg font-bold text-mesa-accent">${fee}</span>
-                        {isNoShow && (
-                          <span className="rounded-full bg-orange-900/40 px-2 py-0.5 text-xs font-medium text-orange-400">no show</span>
-                        )}
-                        {owesRefund ? (
-                          <span className="rounded-full bg-blue-900/40 px-2 py-0.5 text-xs font-medium text-blue-400">You owe refund</span>
-                        ) : (
-                          <span className="rounded-full bg-red-900/40 px-2 py-0.5 text-xs font-medium text-red-400">Owes you</span>
-                        )}
-                      </div>
-                      <div className="text-xs text-brown-400 mt-0.5 truncate">{sessionLabel(r)}</div>
-                      <div className="text-xs text-brown-500 mt-1">{formatDate(r.booked_date)}</div>
+                  <div key={e.id} className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-3">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                      <span className="font-medium text-sm">{e.parent_name}</span>
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${e.action === "cancel" ? "bg-red-900/40 text-red-400" : "bg-blue-900/40 text-blue-400"}`}>
+                        {e.action === "cancel" ? "cancelled late" : "rescheduled late"}
+                      </span>
+                      <span className="rounded-full bg-brown-800 text-brown-400 px-2 py-0.5 text-xs font-medium">{e.initiated_by === "admin" ? "by you" : "by client"}</span>
+                      <span className="ml-auto text-xs text-brown-500 shrink-0">{timeAgo(e.created_at)}</span>
                     </div>
-                    <button
-                      onClick={() => settleFee(r.id)}
-                      disabled={settlingFee === r.id}
-                      className="shrink-0 rounded-lg bg-brown-700 hover:bg-brown-600 px-3 py-1.5 text-xs font-medium text-white transition disabled:opacity-50"
-                    >
-                      {settlingFee === r.id ? "…" : "Settled"}
-                    </button>
+                    {e.kids && <div className="text-xs text-white mt-1 truncate">{e.kids.split(",").map((k) => k.split("(")[0].trim()).filter(Boolean).join(", ")}</div>}
+                    <div className="text-xs text-brown-400 mt-0.5 truncate">
+                      {e.session_details ? e.session_details.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "") : "—"}
+                      {e.booked_date && ` — ${formatDate(e.booked_date)}${e.booked_start_time ? ` ${e.booked_start_time}` : ""}`}
+                    </div>
+                    {e.new_session_details && (
+                      <div className="text-xs text-brown-400 mt-0.5 truncate">→ {e.new_session_details.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "")}</div>
+                    )}
+                    {moneyParts.length > 0 && (
+                      <div className="text-xs text-mesa-accent font-medium mt-1.5">{moneyParts.join(" · ")}</div>
+                    )}
                   </div>
                 );
               })}
             </div>
           )}
         </div>
-
-        {/* Camp Adjustments — full-camp groups with some days cancelled, recomputed total */}
-        {campAdjustments.length > 0 && (
-          <div>
-            <h2 className="font-[family-name:var(--font-oswald)] text-lg font-bold tracking-wide text-white mb-4">
-              CAMP ADJUSTMENTS
-              <span className="ml-2 rounded-full bg-red-500 px-2 py-0.5 text-xs font-medium text-white">{campAdjustments.length}</span>
-            </h2>
-            <div className="space-y-2">
-              {campAdjustments.map((a) => {
-                const creditIssued = a.isPaid;
-                return (
-                  <div key={a.key} className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-3 flex items-center justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                        <span className="font-medium text-sm">{a.parentName}</span>
-                        <span className="text-lg font-bold text-mesa-accent">${a.finalAmount}</span>
-                        <span className="text-xs text-brown-500">(was ${a.originalAmount})</span>
-                        {creditIssued ? (
-                          <span className="rounded-full bg-blue-900/40 px-2 py-0.5 text-xs font-medium text-blue-400">Credit issued</span>
-                        ) : (
-                          <span className="rounded-full bg-red-900/40 px-2 py-0.5 text-xs font-medium text-red-400">Owes you</span>
-                        )}
-                      </div>
-                      <div className="text-xs text-white mt-0.5 truncate">{a.kids.split(",").map((k) => k.split("(")[0].trim()).filter(Boolean).join(", ")}</div>
-                    </div>
-                    <button
-                      onClick={() => settleFee(a.key, a.referralCode, a.bookedGroup)}
-                      disabled={settlingFee === a.key}
-                      className="shrink-0 rounded-lg bg-brown-700 hover:bg-brown-600 px-3 py-1.5 text-xs font-medium text-white transition disabled:opacity-50"
-                    >
-                      {settlingFee === a.key ? "…" : "Settled"}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
 
         {/* Account Credits */}
         <div>

@@ -9,7 +9,7 @@ import {
 import { sendRescheduleNotification } from "@/lib/email";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import { getWeeklySchedule } from "@/lib/sheets";
-import { addAccountCredit, deductAccountCredit, addReferralCredit } from "@/lib/supabase";
+import { addAccountCredit, deductAccountCredit, addReferralCredit, logLateFeeEvent } from "@/lib/supabase";
 import { isLateAction, resolveOffSessionPaymentSource, chargeSavedCardOffSession } from "@/lib/booking-finalize";
 import { SERVICE_FEE, SERVICE_FEE_LABEL } from "@/lib/pricing";
 
@@ -304,6 +304,23 @@ export async function POST(req: NextRequest) {
       }
     }
     creditGranted = lateFeeCredited - lateFeeCreditApplied;
+    await logLateFeeEvent({
+      registrationId: id,
+      parentName: reg.parent_name,
+      email: reg.email,
+      kids: reg.kids,
+      sessionType: reg.type,
+      sessionDetails: oldSessionDetails,
+      bookedDate: oldBookedDate,
+      bookedStartTime: oldBookedStartTime,
+      action: "reschedule",
+      initiatedBy: "admin",
+      amountKept: Math.round((oldAmount - lateFeeCredited) * 100) / 100,
+      amountCredited: lateFeeCredited,
+      amountApplied: lateFeeCreditApplied,
+      amountChargedExtra: autoChargedAmount > 0 ? Math.round((autoChargedAmount + SERVICE_FEE) * 100) / 100 : 0,
+      newSessionDetails,
+    });
   } else if (wasPaid && priceDelta < 0) {
     try {
       await addAccountCredit(reg.email, -priceDelta);

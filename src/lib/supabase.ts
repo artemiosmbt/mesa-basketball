@@ -409,6 +409,56 @@ export async function deductAccountCredit(email: string, amount: number): Promis
   return false;
 }
 
+/**
+ * Records a late cancellation/reschedule fee event for the admin payments
+ * page's recent-activity feed — purely informational, nothing else in the
+ * app reads this. Best-effort: a logging failure must never block the
+ * actual cancel/reschedule it's describing, which has already happened by
+ * the time this runs.
+ */
+export async function logLateFeeEvent(event: {
+  registrationId?: string;
+  parentName: string;
+  email?: string | null;
+  kids?: string | null;
+  sessionType?: string | null;
+  sessionDetails?: string | null;
+  bookedDate?: string | null;
+  bookedStartTime?: string | null;
+  action: "cancel" | "reschedule";
+  initiatedBy: "client" | "admin";
+  amountKept?: number;
+  amountRefunded?: number;
+  amountCredited?: number;
+  amountApplied?: number;
+  amountChargedExtra?: number;
+  newSessionDetails?: string;
+}): Promise<void> {
+  try {
+    const supabase = getSupabase();
+    await supabase.from("late_fee_events").insert({
+      registration_id: event.registrationId,
+      parent_name: event.parentName,
+      email: event.email || null,
+      kids: event.kids || null,
+      session_type: event.sessionType || null,
+      session_details: event.sessionDetails || null,
+      booked_date: event.bookedDate || null,
+      booked_start_time: event.bookedStartTime || null,
+      action: event.action,
+      initiated_by: event.initiatedBy,
+      amount_kept: event.amountKept || 0,
+      amount_refunded: event.amountRefunded || 0,
+      amount_credited: event.amountCredited || 0,
+      amount_applied: event.amountApplied || 0,
+      amount_charged_extra: event.amountChargedExtra || 0,
+      new_session_details: event.newSessionDetails || null,
+    });
+  } catch (err) {
+    console.error("Failed to log late fee event:", err);
+  }
+}
+
 /** Check if email OR phone has any previous registrations (fraud-resistant new client check) */
 export async function isNewClient(email: string, phone: string): Promise<boolean> {
   const supabase = getSupabase();
