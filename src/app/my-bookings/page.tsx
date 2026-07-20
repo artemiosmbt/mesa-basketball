@@ -61,10 +61,13 @@ export default function MyBookings() {
     referralCode: string | null;
   } | null>(null);
   const [accountCredit, setAccountCredit] = useState(0);
-  const [activePackage, setActivePackage] = useState<{ packageType: number; sessionsUsed: number; monthYear: string } | null>(null);
+  const [activePackage, setActivePackage] = useState<{ id: string; packageType: number; sessionsUsed: number; monthYear: string; cancellable: boolean } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState<"upcoming" | "past">("upcoming");
+  const [showPackageCancelConfirm, setShowPackageCancelConfirm] = useState(false);
+  const [cancellingPackage, setCancellingPackage] = useState(false);
+  const [packageCancelResult, setPackageCancelResult] = useState<{ success: boolean; message: string } | null>(null);
 
   // Load saved email and auto-lookup — prefer logged-in session
   useEffect(() => {
@@ -108,6 +111,37 @@ export default function MyBookings() {
       setError("Something went wrong. Please try again.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleCancelPackage() {
+    if (!activePackage) return;
+    setCancellingPackage(true);
+    try {
+      const res = await fetch("/api/packages/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ packageId: activePackage.id, email }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setPackageCancelResult({
+          success: true,
+          message: data.refundFailed
+            ? "Your package has been cancelled. Your refund is being processed — you'll get a separate confirmation once it's complete."
+            : data.creditedAmount > 0
+              ? `Your package has been cancelled and $${data.creditedAmount} has been credited to your account.`
+              : `Your package has been cancelled and $${data.refundedAmount} has been refunded to your original payment method.`,
+        });
+        setActivePackage(null);
+      } else {
+        setPackageCancelResult({ success: false, message: data.error || "Failed to cancel package." });
+      }
+    } catch {
+      setPackageCancelResult({ success: false, message: "Something went wrong. Please try again." });
+    } finally {
+      setCancellingPackage(false);
+      setShowPackageCancelConfirm(false);
     }
   }
 
@@ -235,9 +269,53 @@ export default function MyBookings() {
                       ) : (
                         <p className="mt-3 text-xs text-brown-500">Expires {expiry}.</p>
                       )}
+
+                      {showPackageCancelConfirm ? (
+                        <div className="mt-4 rounded-lg border border-red-800/50 bg-red-900/10 p-3">
+                          <p className="text-xs text-brown-300 mb-3">Cancel this package and refund the full amount to your card?</p>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={handleCancelPackage}
+                              disabled={cancellingPackage}
+                              className="flex-1 rounded-lg bg-red-800 py-2 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-50"
+                            >
+                              {cancellingPackage ? "Cancelling..." : "Yes, cancel & refund"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setShowPackageCancelConfirm(false)}
+                              disabled={cancellingPackage}
+                              className="flex-1 rounded-lg bg-brown-700 py-2 text-xs font-semibold text-white hover:bg-brown-600 disabled:opacity-50"
+                            >
+                              Never mind
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => activePackage.cancellable && setShowPackageCancelConfirm(true)}
+                          disabled={!activePackage.cancellable}
+                          title={activePackage.cancellable ? "" : "A session has already been booked against this package — it can no longer be cancelled."}
+                          className={`mt-4 w-full rounded-lg py-2 text-xs font-semibold transition ${
+                            activePackage.cancellable
+                              ? "bg-brown-800 text-red-400 hover:bg-brown-700 border border-red-900/50"
+                              : "bg-brown-800/50 text-brown-600 cursor-not-allowed"
+                          }`}
+                        >
+                          Cancel Package
+                        </button>
+                      )}
                     </div>
                   );
                 })()}
+
+                {packageCancelResult && (
+                  <div className={`rounded-2xl p-4 text-sm ${packageCancelResult.success ? "bg-green-900/20 border border-green-800/50 text-green-300" : "bg-red-900/20 border border-red-800/50 text-red-300"}`}>
+                    {packageCancelResult.message}
+                  </div>
+                )}
             </div>
 
             {/* Main — bookings */}

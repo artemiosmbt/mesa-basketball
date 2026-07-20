@@ -6,6 +6,7 @@ import {
   getProfileReferralCode,
   getActivePackage,
   getAccountCreditBalance,
+  packageHasAnyBookedSession,
 } from "@/lib/supabase";
 import { getWeeklySchedule, getPrivateSlots } from "@/lib/sheets";
 
@@ -40,6 +41,8 @@ export async function POST(req: NextRequest) {
     for (const s of privateSlots) {
       if (s.date && s.startTime) locationLookup.set(`${s.date}|${s.startTime}`, s.location);
     }
+
+    const packageCancellable = activePackage ? !(await packageHasAnyBookedSession(activePackage.id).catch(() => true)) : false;
 
     // Profile is source of truth; fall back to registrations, then generate from name
     const referralCode =
@@ -88,9 +91,11 @@ export async function POST(req: NextRequest) {
       accountCredit: accountCreditBalance || 0,
       activePackage: activePackage
         ? {
+            id: activePackage.id,
             packageType: activePackage.package_type,
             sessionsUsed: activePackage.sessions_used,
             monthYear: activePackage.month_year,
+            cancellable: packageCancellable,
           }
         : null,
     });

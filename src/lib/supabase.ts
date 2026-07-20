@@ -846,6 +846,42 @@ export async function abandonPendingPackage(packageId: string): Promise<MonthlyP
   return data as MonthlyPackage;
 }
 
+/**
+ * True if ANY session was ever booked against this package, regardless of
+ * that session's current status — a client can only cancel a package
+ * they've never actually used, and "used" here means "ever booked," not
+ * "currently has an active session." Booking then cancelling a session
+ * still permanently disqualifies the package from a full refund; otherwise
+ * someone could book-then-cancel to reset eligibility.
+ */
+export async function packageHasAnyBookedSession(packageId: string): Promise<boolean> {
+  const supabase = getSupabase();
+  const { data } = await supabase
+    .from("registrations")
+    .select("id")
+    .eq("package_id", packageId)
+    .limit(1);
+  return !!data && data.length > 0;
+}
+
+/**
+ * Client-initiated package cancellation (never used) — row-count guard
+ * means a duplicate request (double click, retry) finds nothing left to
+ * cancel, so the refund below never runs twice for the same package.
+ */
+export async function cancelPackage(packageId: string): Promise<MonthlyPackage | null> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("monthly_packages")
+    .update({ status: "cancelled" })
+    .eq("id", packageId)
+    .eq("status", "active")
+    .select("*")
+    .single();
+  if (error || !data) return null;
+  return data as MonthlyPackage;
+}
+
 /** Safety net for the cron sweep, same convention as getStalePendingBatches. */
 export async function getStalePendingPackages(olderThanMs: number): Promise<{ packageId: string; checkoutSessionId: string | null }[]> {
   const supabase = getSupabase();

@@ -119,7 +119,9 @@ export interface StripeRefundResult {
  */
 export async function issueStripeRefund(params: {
   email: string;
-  manageToken: string;
+  // Registrations-only bookkeeping — a package refund has no
+  // registrations row to attach this to, so it's optional there.
+  manageToken?: string;
   paymentIntentId: string;
   amountDollars: number;
   sessionLabel: string;
@@ -131,7 +133,7 @@ export async function issueStripeRefund(params: {
       payment_intent: params.paymentIntentId,
       amount: Math.round(params.amountDollars * 100),
     });
-    await recordStripeRefund(params.manageToken, refund.id).catch(() => {});
+    if (params.manageToken) await recordStripeRefund(params.manageToken, refund.id).catch(() => {});
     return { refundedAmount: params.amountDollars, creditedAmount: 0, failed: false };
   } catch (err) {
     // Different Stripe API versions surface this differently — some set
@@ -149,7 +151,7 @@ export async function issueStripeRefund(params: {
             payment_intent: params.paymentIntentId,
             amount: Math.round(refundableDollars * 100),
           });
-          await recordStripeRefund(params.manageToken, partial.id).catch(() => {});
+          if (params.manageToken) await recordStripeRefund(params.manageToken, partial.id).catch(() => {});
         }
         const shortfall = Math.round((params.amountDollars - refundableDollars) * 100) / 100;
         if (shortfall > 0) {
