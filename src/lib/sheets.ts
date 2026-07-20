@@ -82,10 +82,13 @@ export async function getWeeklySchedule(options?: { noCache?: boolean }): Promis
   }));
 }
 
-export async function getCamps(): Promise<Camp[]> {
+export async function getCamps(options?: { noCache?: boolean }): Promise<Camp[]> {
   const url = process.env.SHEET_CSV_CAMPS;
   if (!url) return [];
-  const res = await fetch(url, { next: { revalidate: 60 } });
+  const fetchOptions = options?.noCache
+    ? { cache: "no-store" as const }
+    : { next: { revalidate: 60 } };
+  const res = await fetch(url, fetchOptions);
   const rows = parseCSV(await res.text());
   return rows.slice(1).map((row, i) => ({
     id: `camp-${i}`,

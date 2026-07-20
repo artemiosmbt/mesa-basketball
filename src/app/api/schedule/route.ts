@@ -71,11 +71,16 @@ export async function GET() {
   }
 
   try {
+    // Always fresh, never the 60s-cached default — this is what clients see
+    // on the booking form right before they submit, so it needs to match
+    // what /api/register will independently re-verify and actually charge
+    // moments later, not a copy that could still be showing last minute's
+    // price if the sheet just changed.
     const [weeklySchedule, camps, privateSlots, bookedSlots, groupEnrollment] =
       await Promise.all([
-        getWeeklySchedule(),
-        getCamps(),
-        getPrivateSlots(),
+        getWeeklySchedule({ noCache: true }),
+        getCamps({ noCache: true }),
+        getPrivateSlots({ noCache: true }),
         getBookedSlots().catch(() => []),
         getGroupSessionEnrollment().catch(() => ({})),
       ]);

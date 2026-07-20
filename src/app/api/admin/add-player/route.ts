@@ -100,7 +100,7 @@ export async function POST(req: NextRequest) {
     // price — different groups have different per-session rates (e.g. "HS
     // Pickup" is $30, not $50), and this also sidesteps a null session_price.
     try {
-      const sessions = await getWeeklySchedule();
+      const sessions = await getWeeklySchedule({ noCache: true });
       const match = sessions.find((s) => s.group === reg.booked_group && s.date === reg.booked_date && s.startTime === reg.booked_start_time);
       if (match) {
         newFullPrice = Math.round(match.price * newCount);

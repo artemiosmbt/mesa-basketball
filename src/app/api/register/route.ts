@@ -202,7 +202,7 @@ export async function POST(req: NextRequest) {
       // the browser happened to have loaded, which could be stale (the
       // sheet changed since) or simply wrong if the request was tampered
       // with, and this is the only place real money gets decided.
-      const liveWeeklySchedule = await getWeeklySchedule();
+      const liveWeeklySchedule = await getWeeklySchedule({ noCache: true });
       const liveWeeklyMatches = weeklySessions.map((s: { date: string; startTime: string; group: string }) =>
         liveWeeklySchedule.find((ls) => ls.group === s.group && ls.date === s.date && ls.startTime === s.startTime)
       );
@@ -386,7 +386,7 @@ export async function POST(req: NextRequest) {
       // rather than what's actually on the sheet right now. Mirrors
       // calcCampPrice()/isEarlyBirdActive() on the booking form exactly, just
       // computed from freshly-fetched data instead of trusted client input.
-      const liveCamps = await getCamps();
+      const liveCamps = await getCamps({ noCache: true });
       const firstCampSession = campSessions[0];
       const liveCamp = liveCamps.find((c) =>
         c.name === firstCampSession.campName && (firstCampSession.gradeGroup ? c.gradeGroup === firstCampSession.gradeGroup : true)

@@ -166,7 +166,7 @@ export async function POST(req: NextRequest) {
     newFullPrice = calcPrivatePrice(durationMins, reg.total_participants || 1);
   } else if (effectiveType === "weekly") {
     try {
-      const sessions = await getWeeklySchedule();
+      const sessions = await getWeeklySchedule({ noCache: true });
       const match = sessions.find((s) => s.group === newSessionLabel && s.date === bookedDate && s.startTime === bookedStartTime);
       if (match) {
         newFullPrice = Math.round(match.price * (reg.total_participants || 1));

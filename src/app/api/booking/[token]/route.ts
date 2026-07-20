@@ -112,7 +112,7 @@ export async function DELETE(
   // $50, and that's not a discount, just their regular rate.
   if (reg.type === "weekly" && reg.session_price !== null && reg.booked_date && reg.booked_start_time) {
     try {
-      const sessions = await getWeeklySchedule();
+      const sessions = await getWeeklySchedule({ noCache: true });
       const groupLabel = reg.booked_group || reg.session_details.split(" — ")[0] || "";
       const match = sessions.find((s) => s.group === groupLabel && s.date === reg.booked_date && s.startTime === reg.booked_start_time);
       if (match) {
