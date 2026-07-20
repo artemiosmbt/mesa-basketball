@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getStalePendingBatches } from "@/lib/supabase";
-import { expireAbandonedBookingBatch, finalizePaidCheckoutSession } from "@/lib/booking-finalize";
+import { getStalePendingBatches, getStalePendingPackages } from "@/lib/supabase";
+import { expireAbandonedBookingBatch, expireAbandonedPackage, finalizePaidCheckoutSession } from "@/lib/booking-finalize";
 import { getStripe } from "@/lib/stripe";
 
 // Safety net for missed checkout.session.expired (or checkout.session.completed)
@@ -54,5 +54,31 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  return NextResponse.json({ checked: batches.length, healed, expired, skipped });
+  // Same self-heal-or-expire sweep, for monthly package purchases — a
+  // separate table/id scheme from registrations, so it's its own loop.
+  const packages = await getStalePendingPackages(STALE_AFTER_MS);
+  for (const pkg of packages) {
+    try {
+      if (pkg.checkoutSessionId) {
+        const stripe = getStripe();
+        const session = await stripe.checkout.sessions.retrieve(pkg.checkoutSessionId);
+        if (session.payment_status === "paid" || session.status === "complete") {
+          await finalizePaidCheckoutSession(session);
+          healed++;
+          continue;
+        }
+        if (session.status === "open") {
+          skipped++;
+          continue;
+        }
+      }
+      await expireAbandonedPackage(pkg.packageId);
+      expired++;
+    } catch (err) {
+      console.error(`Failed to process stale package ${pkg.packageId}:`, err);
+      skipped++;
+    }
+  }
+
+  return NextResponse.json({ checked: batches.length + packages.length, healed, expired, skipped });
 }

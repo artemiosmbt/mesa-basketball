@@ -749,8 +749,15 @@ export interface MonthlyPackage {
   sessions_used: number;
   reminder_sent: boolean;
   status: string;
+  stripe_checkout_session_id?: string | null;
+  stripe_payment_intent_id?: string | null;
+  stripe_customer_id?: string | null;
 }
 
+// Inserted as 'pending_payment' — the client is redirected to Stripe
+// Checkout right after this, and the package only becomes usable
+// (getActivePackage filters on status 'active') once the webhook confirms
+// payment via finalizePaidPackage below.
 export async function enrollInPackage(data: {
   email: string;
   parentName: string;
@@ -769,12 +776,74 @@ export async function enrollInPackage(data: {
       month_year: data.monthYear,
       sessions_used: 0,
       reminder_sent: false,
-      status: "active",
+      status: "pending_payment",
     })
     .select("id")
     .single();
   if (error) throw error;
   return { id: row.id };
+}
+
+export async function attachPackageCheckoutSession(packageId: string, checkoutSessionId: string): Promise<void> {
+  const supabase = getSupabase();
+  await supabase
+    .from("monthly_packages")
+    .update({ stripe_checkout_session_id: checkoutSessionId })
+    .eq("id", packageId);
+}
+
+/**
+ * Webhook calls this once payment succeeds: flips the package from
+ * pending_payment to active and records the PaymentIntent. Row-count guard
+ * (eq status pending_payment) means a duplicate webhook delivery is a no-op
+ * — the confirmation email/SMS only fire when this actually flips something.
+ */
+export async function finalizePaidPackage(
+  packageId: string,
+  stripePaymentIntentId: string,
+  stripeCustomerId: string | null
+): Promise<MonthlyPackage | null> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("monthly_packages")
+    .update({
+      status: "active",
+      stripe_payment_intent_id: stripePaymentIntentId,
+      ...(stripeCustomerId ? { stripe_customer_id: stripeCustomerId } : {}),
+    })
+    .eq("id", packageId)
+    .eq("status", "pending_payment")
+    .select("*")
+    .single();
+  if (error || !data) return null;
+  return data as MonthlyPackage;
+}
+
+/** Webhook calls this when a Checkout Session expires unused. */
+export async function abandonPendingPackage(packageId: string): Promise<MonthlyPackage | null> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("monthly_packages")
+    .update({ status: "payment_abandoned" })
+    .eq("id", packageId)
+    .eq("status", "pending_payment")
+    .select("*")
+    .single();
+  if (error || !data) return null;
+  return data as MonthlyPackage;
+}
+
+/** Safety net for the cron sweep, same convention as getStalePendingBatches. */
+export async function getStalePendingPackages(olderThanMs: number): Promise<{ packageId: string; checkoutSessionId: string | null }[]> {
+  const supabase = getSupabase();
+  const cutoff = new Date(Date.now() - olderThanMs).toISOString();
+  const { data, error } = await supabase
+    .from("monthly_packages")
+    .select("id, stripe_checkout_session_id")
+    .eq("status", "pending_payment")
+    .lt("created_at", cutoff);
+  if (error || !data) return [];
+  return data.map((row) => ({ packageId: row.id as string, checkoutSessionId: (row.stripe_checkout_session_id as string | null) ?? null }));
 }
 
 export async function getActivePackage(
@@ -791,6 +860,21 @@ export async function getActivePackage(
     .single();
   if (error || !data) return null;
   return data as MonthlyPackage;
+}
+
+/** True if a package already exists for this email+month, active or still
+ *  mid-checkout — stops a client from starting a second Stripe Checkout for
+ *  the same month before the first one even resolves. */
+export async function hasPendingOrActivePackage(email: string, monthYear: string): Promise<boolean> {
+  const supabase = getSupabase();
+  const { data } = await supabase
+    .from("monthly_packages")
+    .select("id")
+    .ilike("email", email.trim())
+    .eq("month_year", monthYear)
+    .in("status", ["active", "pending_payment"])
+    .limit(1);
+  return !!data && data.length > 0;
 }
 
 export async function incrementPackageSessions(id: string, currentUsed: number): Promise<void> {

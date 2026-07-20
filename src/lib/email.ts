@@ -510,6 +510,10 @@ export async function sendPackageConfirmation(data: {
   const resend = getResend();
   const monthLabel = formatMonthYear(data.monthYear);
   const expiry = lastDayOfMonth(data.monthYear);
+  // This only ever sends once the Stripe charge for the package has already
+  // succeeded (see finalizePaidPackageEnrollment) — never claim payment is
+  // still "due."
+  const totalWithFee = Math.round((data.totalPrice + SERVICE_FEE) * 100) / 100;
 
   // Notify Artemi
   await resend.emails.send({
@@ -523,7 +527,7 @@ export async function sendPackageConfirmation(data: {
       <p><strong>Phone:</strong> ${data.phone}</p>
       <p><strong>Package:</strong> ${data.packageType} sessions / month</p>
       <p><strong>Month:</strong> ${monthLabel}</p>
-      <p><strong>Total:</strong> $${data.totalPrice}</p>
+      <p><strong>Charged:</strong> $${totalWithFee} ($${data.totalPrice} + ${SERVICE_FEE_LABEL} fee)</p>
       ${data.kids ? `<p><strong>Player(s):</strong> ${data.kids}</p>` : ""}
       ${data.referralCode ? `<p><strong>Referral Code:</strong> ${data.referralCode}</p>` : ""}
     `,
@@ -541,12 +545,11 @@ export async function sendPackageConfirmation(data: {
       <h3>Package Details</h3>
       <ul>
         <li><strong>Sessions:</strong> ${data.packageType} private sessions</li>
-        <li><strong>Total Price:</strong> $${data.totalPrice}</li>
         <li><strong>Month:</strong> ${monthLabel}</li>
         <li><strong>Sessions expire:</strong> ${expiry} — unused sessions do not carry over</li>
       </ul>
-      <h3>Payment</h3>
-      <p>Payment is due upon registration: ${PAYMENT_OPTIONS}.</p>
+      <p style="background: #162d5a; color: #d4af37; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">Charged to your card: $${totalWithFee} ($${data.totalPrice} + ${SERVICE_FEE_LABEL} service fee)</p>
+      <p>Your next ${data.packageType} private session bookings this month are already covered — nothing further will be charged when you book them at <a href="${BASE_URL}/schedule" style="color: #d4af37; font-weight: bold;">mesabasketballtraining.com/schedule</a>, up to your package total.</p>
       <h3>Cancellation &amp; Rescheduling Policy</h3>
       <p>Cancellations and reschedules within 24 hours of a scheduled session incur a <strong>$75 fee</strong> (50% of the standard $150 private rate). <strong>No-shows without prior notice will be charged the full session fee.</strong></p>
       <h3>Track Your Sessions</h3>

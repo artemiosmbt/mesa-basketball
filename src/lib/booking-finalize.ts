@@ -1,5 +1,5 @@
 import Stripe from "stripe";
-import { sendRegistrationNotification, sendReferralCreditNotification, sendRescheduleNotification } from "@/lib/email";
+import { sendRegistrationNotification, sendReferralCreditNotification, sendRescheduleNotification, sendPackageConfirmation } from "@/lib/email";
 import { addPrivateSessionToCalendar, upsertGroupSessionCalendarEvent } from "@/lib/calendar";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import { getStripe } from "@/lib/stripe";
@@ -13,6 +13,8 @@ import {
   setPackageSessions,
   countConfirmedPrivateSessions,
   recordStripeRefund,
+  finalizePaidPackage,
+  abandonPendingPackage,
 } from "@/lib/supabase";
 
 /**
@@ -191,6 +193,11 @@ export interface FinalizePrivateBookingParams {
   smsConsent: boolean;
   accountCreditApplied: number;
   fullPrice?: number;
+  // Already fully prepaid by an active monthly package — no Stripe charge
+  // happened for this specific row, so the notification must show $0/no
+  // charge regardless of what fullPrice/isFree/accountCreditApplied would
+  // otherwise compute to.
+  packageCovered?: boolean;
 }
 
 /**
@@ -248,10 +255,13 @@ export async function finalizeConfirmedPrivateBooking(params: FinalizePrivateBoo
 
   // What actually got charged via Stripe, net of the first-time/referral
   // discount and any account credit — 0 whenever nothing was charged (fully
-  // covered by credit). The service fee is added on top of this by the
-  // notification functions themselves, not baked in here, since fullPrice
-  // still needs to stay the nominal session price for refund/reschedule math.
-  const amountCharged = Math.max(0, (params.isFree ? Math.round((params.fullPrice ?? 0) * 0.5) : (params.fullPrice ?? 0)) - params.accountCreditApplied);
+  // covered by credit, or already prepaid via an active package). The
+  // service fee is added on top of this by the notification functions
+  // themselves, not baked in here, since fullPrice still needs to stay the
+  // nominal session price for refund/reschedule math.
+  const amountCharged = params.packageCovered
+    ? 0
+    : Math.max(0, (params.isFree ? Math.round((params.fullPrice ?? 0) * 0.5) : (params.fullPrice ?? 0)) - params.accountCreditApplied);
 
   try {
     await sendRegistrationNotification({
@@ -562,6 +572,9 @@ export interface FinalizePrivateSeriesBookingParams {
     trainer?: string;
     fullPrice: number;
     isFree: boolean;
+    // Already fully prepaid by an active monthly package — no Stripe charge
+    // happened for this date, regardless of fullPrice/isFree.
+    packageCovered?: boolean;
   }>;
   totalParticipants: number;
   referralCode: string;
@@ -647,7 +660,7 @@ export async function finalizeConfirmedPrivateSeriesBooking(params: FinalizePriv
   const allSessionsList = privateSessions
     .map((s) => `${s.date} ${s.startTime}-${s.endTime} at ${s.location}`)
     .join("<br/>");
-  const totalPaid = privateSessions.reduce((sum, s) => sum + (s.isFree ? Math.round(s.fullPrice * 0.5) : s.fullPrice), 0);
+  const totalPaid = privateSessions.reduce((sum, s) => sum + (s.packageCovered ? 0 : s.isFree ? Math.round(s.fullPrice * 0.5) : s.fullPrice), 0);
   const seriesAmountCharged = Math.max(0, totalPaid - params.accountCreditApplied);
   const seriesTotalWithFee = seriesAmountCharged > 0 ? Math.round((seriesAmountCharged + SERVICE_FEE) * 100) / 100 : 0;
   const priceNote = `<p><strong>Total:</strong> $${totalPaid}${params.accountCreditApplied > 0 ? ` — $${params.accountCreditApplied} account credit applied` : ""}${seriesAmountCharged > 0 ? ` — <strong>Charged:</strong> $${seriesTotalWithFee} ($${seriesAmountCharged} + ${SERVICE_FEE_LABEL} fee)` : ""}</p>`;
@@ -750,6 +763,33 @@ export async function expireAbandonedBookingBatch(bookingBatchId: string): Promi
   }
 }
 
+/** A monthly package's Checkout Session expired unused — mirrors
+ *  expireAbandonedBookingBatch above, just for the monthly_packages table. */
+export async function expireAbandonedPackage(packageId: string): Promise<void> {
+  const pkg = await abandonPendingPackage(packageId);
+  if (!pkg) return;
+  try {
+    await sendAdminSMS(`Package checkout expired unused: ${pkg.parent_name}\n${pkg.package_type}-session package — ${pkg.month_year}\nNo charge — not confirmed.`);
+  } catch {
+    // non-critical
+  }
+}
+
+/**
+ * Dispatches a checkout.session.expired event to the right table — mirrors
+ * finalizePaidCheckoutSession's package_enrollment branch, since
+ * client_reference_id means something different for each.
+ */
+export async function expireAbandonedCheckoutSession(session: Stripe.Checkout.Session): Promise<void> {
+  const referenceId = session.client_reference_id;
+  if (!referenceId) return;
+  if (session.metadata?.purpose === "package_enrollment") {
+    await expireAbandonedPackage(referenceId);
+  } else {
+    await expireAbandonedBookingBatch(referenceId);
+  }
+}
+
 export interface FinalizeRescheduleTopupParams {
   parentName: string;
   email: string;
@@ -844,6 +884,70 @@ export async function finalizeRescheduleTopup(params: FinalizeRescheduleTopupPar
 }
 
 /**
+ * A monthly package's Stripe Checkout completed — flips it from
+ * pending_payment to active, seeds sessions_used from anything already
+ * booked this month, awards the referrer's credit (only now that payment is
+ * actually confirmed, not at the enrollment request), and announces it.
+ * Mirrors the old synchronous /api/packages logic, just moved here so it
+ * only runs once money has actually moved.
+ */
+async function finalizePaidPackageEnrollment(
+  packageId: string,
+  paymentIntentId: string,
+  customerId: string | null,
+  metadata: Record<string, string>
+): Promise<void> {
+  const pkg = await finalizePaidPackage(packageId, paymentIntentId, customerId);
+  if (!pkg) return; // already handled (duplicate webhook delivery) or not found
+
+  try {
+    const existingCount = await countConfirmedPrivateSessions(pkg.email, pkg.month_year, pkg.phone);
+    if (existingCount > 0) {
+      await setPackageSessions(pkg.id, Math.min(existingCount, pkg.package_type));
+    }
+  } catch (err) {
+    console.error("Package session seeding failed (package was paid):", err);
+  }
+
+  const referrerEmail = metadata.referrer_email || undefined;
+  const referrerName = metadata.referrer_name || undefined;
+  if (referrerEmail) {
+    try {
+      await addReferralCredit(referrerEmail);
+      await sendReferralCreditNotification({ referrerName: referrerName || "", referrerEmail, newClientName: pkg.parent_name });
+    } catch (creditErr) {
+      console.error("Failed to award referral credit (package, booking was paid):", creditErr);
+    }
+  }
+
+  const kids = metadata.kids || "";
+  const smsConsent = metadata.sms_consent === "true";
+  const submittedReferralCode = metadata.submitted_referral_code || undefined;
+  const totalPrice = pkg.package_type === 4 ? 475 : 900;
+
+  try {
+    await sendPackageConfirmation({
+      parentName: pkg.parent_name,
+      email: pkg.email,
+      phone: pkg.phone,
+      packageType: pkg.package_type,
+      monthYear: pkg.month_year,
+      totalPrice,
+      kids: kids || undefined,
+      referralCode: submittedReferralCode,
+    });
+  } catch (notifyErr) {
+    console.error("Package confirmation email failed (booking was paid):", notifyErr);
+  }
+
+  const totalWithFee = Math.round((totalPrice + SERVICE_FEE) * 100) / 100;
+  if (smsConsent && pkg.phone) {
+    await sendSMS(pkg.phone, `Mesa Basketball: Your ${pkg.package_type}-session package is confirmed for ${pkg.month_year}! Charged: $${totalWithFee} ($${totalPrice} + ${SERVICE_FEE_LABEL} fee).\nBook your private sessions at mesabasketballtraining.com/schedule and we'll track them automatically.\nReply STOP to opt out.`);
+  }
+  await sendAdminSMS(`NEW PACKAGE (paid $${totalWithFee}): ${pkg.parent_name}\n${pkg.package_type}-session package — ${pkg.month_year}\nPhone: ${pkg.phone}${kids ? `\nPlayers: ${kids}` : ""}${submittedReferralCode ? `\nRef code: ${submittedReferralCode} ${referrerEmail ? "✓ applied" : "✗ NOT applied"}` : ""}`);
+}
+
+/**
  * Finalizes a Stripe Checkout Session that actually completed payment,
  * routing to the right per-type finalize function. Called from two places:
  * the Stripe webhook (the normal path), and the abandonment-sweep cron as a
@@ -866,14 +970,22 @@ export async function finalizePaidCheckoutSession(session: Stripe.Checkout.Sessi
     return;
   }
 
+  const metadata = session.metadata || {};
+
+  // A monthly package purchase — client_reference_id here is the
+  // monthly_packages row's own id, not a registrations booking_batch_id, so
+  // this has to branch before ever touching finalizePaidBookingBatch below.
+  if (metadata.purpose === "package_enrollment") {
+    await finalizePaidPackageEnrollment(bookingBatchId, paymentIntentId, customerId, metadata);
+    return;
+  }
+
   // Only rows still pending_payment get flipped here — a duplicate delivery
   // (or the cron catching one the webhook already handled) finds nothing
   // left to update and this returns an empty array, so the notification/
   // calendar side effects below never run twice.
   const confirmedRows = await finalizePaidBookingBatch(bookingBatchId, paymentIntentId, customerId);
   if (confirmedRows.length === 0) return;
-
-  const metadata = session.metadata || {};
 
   // A reschedule that needed a Stripe topup (or, after a late reschedule's
   // 50% fee, a fresh full charge) — the old booking was already cancelled

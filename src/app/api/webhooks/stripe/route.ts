@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { getStripe } from "@/lib/stripe";
-import { finalizePaidCheckoutSession, expireAbandonedBookingBatch } from "@/lib/booking-finalize";
+import { finalizePaidCheckoutSession, expireAbandonedCheckoutSession } from "@/lib/booking-finalize";
 
 // Stripe needs the raw, unparsed request body to verify the signature —
 // same requirement as Twilio's webhook (see src/app/api/twilio/incoming),
@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
     if (event.type === "checkout.session.completed") {
       await finalizePaidCheckoutSession(event.data.object as Stripe.Checkout.Session);
     } else if (event.type === "checkout.session.expired") {
-      await handleCheckoutExpired(event.data.object as Stripe.Checkout.Session);
+      await expireAbandonedCheckoutSession(event.data.object as Stripe.Checkout.Session);
     }
   } catch (err) {
     console.error(`Stripe webhook handler error (${event.type}):`, err);
@@ -44,10 +44,4 @@ export async function POST(req: NextRequest) {
   }
 
   return NextResponse.json({ received: true });
-}
-
-async function handleCheckoutExpired(session: Stripe.Checkout.Session) {
-  const bookingBatchId = session.client_reference_id;
-  if (!bookingBatchId) return;
-  await expireAbandonedBookingBatch(bookingBatchId);
 }

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { enrollInPackage, getActivePackage, countConfirmedPrivateSessions, setPackageSessions, isNewClient, findReferrerInfoByCode, addReferralCredit } from "@/lib/supabase";
-import { sendPackageConfirmation, sendReferralCreditNotification } from "@/lib/email";
-import { sendSMS, sendAdminSMS } from "@/lib/sms";
+import { enrollInPackage, getActivePackage, hasPendingOrActivePackage, isNewClient, findReferrerInfoByCode, attachPackageCheckoutSession } from "@/lib/supabase";
+import { getStripe } from "@/lib/stripe";
+import { SERVICE_FEE } from "@/lib/pricing";
 
 export async function POST(req: NextRequest) {
   try {
@@ -16,18 +16,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Invalid package type. Must be 4 or 8." }, { status: 400 });
     }
 
-    // Check if an active package already exists for this email + month
-    const existing = await getActivePackage(email, monthYear);
-    if (existing) {
+    // Block a second attempt for the same month whether the existing one is
+    // already active or still mid-checkout — otherwise two simultaneous
+    // Checkout Sessions could both complete and double-charge.
+    const alreadyHasOne = await hasPendingOrActivePackage(email, monthYear);
+    if (alreadyHasOne) {
       return NextResponse.json(
-        { error: "You already have an active package for this month." },
+        { error: "You already have a package for this month." },
         { status: 400 }
       );
     }
 
     // Check referrer BEFORE enrolling — same eligibility rule as every other booking type:
     // only a genuinely new client (no prior registration under this email or phone) can
-    // trigger a reward for whoever referred them.
+    // trigger a reward for whoever referred them. The actual credit award happens once
+    // payment is confirmed (see finalizePaidPackageEnrollment), not here.
     let referrer: { email: string; name: string } | null = null;
     if (referralCode) {
       const newClient = await isNewClient(email, phone);
@@ -38,38 +41,60 @@ export async function POST(req: NextRequest) {
         }
       }
     }
-    const referralApplied = !!referrer;
 
     const { id } = await enrollInPackage({ email, parentName, phone, packageType, monthYear });
 
-    // Seed sessions_used from any private sessions already booked this month
-    const existingCount = await countConfirmedPrivateSessions(email, monthYear);
-    if (existingCount > 0) {
-      await setPackageSessions(id, Math.min(existingCount, packageType));
-    }
-
     const totalPrice = packageType === 4 ? 475 : 900;
 
-    // Award referral credit unconditionally — must not depend on the confirmation email
-    // succeeding below, and wrapped so a failure here (the package is already enrolled)
-    // can't surface as a failed enrollment to the client.
-    if (referrer) {
-      try {
-        await addReferralCredit(referrer.email);
-        await sendReferralCreditNotification({ referrerName: referrer.name, referrerEmail: referrer.email, newClientName: parentName });
-      } catch (creditErr) {
-        console.error("Failed to award referral credit (package, enrollment was saved):", creditErr);
-      }
-    }
+    // Real money is due — send them to Stripe. The package stays
+    // pending_payment (unusable — getActivePackage won't return it) until
+    // the webhook confirms payment, same as every other paid booking type.
+    const stripe = getStripe();
+    const origin = req.nextUrl.origin;
+    const checkoutSession = await stripe.checkout.sessions.create({
+      mode: "payment",
+      payment_method_types: ["card"],
+      customer_creation: "always",
+      customer_email: email,
+      client_reference_id: id,
+      // The webhook runs in a separate request with no access to this
+      // request's body, and monthly_packages has no columns for kids/SMS
+      // consent — small facts the finalize step needs ride along here.
+      metadata: {
+        purpose: "package_enrollment",
+        package_id: id,
+        kids: kids || "",
+        sms_consent: String(!!smsConsent),
+        referrer_email: referrer?.email || "",
+        referrer_name: referrer?.name || "",
+        submitted_referral_code: referralCode || "",
+      },
+      line_items: [
+        {
+          price_data: {
+            currency: "usd",
+            product_data: { name: `${packageType}-Session Monthly Package — ${monthYear}` },
+            unit_amount: Math.round(totalPrice * 100),
+          },
+          quantity: 1,
+        },
+        {
+          price_data: {
+            currency: "usd",
+            product_data: { name: "Service Fee" },
+            unit_amount: Math.round(SERVICE_FEE * 100),
+          },
+          quantity: 1,
+        },
+      ],
+      success_url: `${origin}/booking-confirmed?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${origin}/schedule?checkout=cancelled`,
+      expires_at: Math.floor(Date.now() / 1000) + 30 * 60,
+    });
 
-    await sendPackageConfirmation({ parentName, email, phone, packageType, monthYear, totalPrice, kids, referralCode });
+    await attachPackageCheckoutSession(id, checkoutSession.id);
 
-    if (smsConsent && phone) {
-      await sendSMS(phone, `Mesa Basketball: Your ${packageType}-session package is confirmed for ${monthYear}!\nBook your private sessions at mesabasketballtraining.com/schedule and we'll track them automatically.\nReply STOP to opt out.`);
-    }
-    await sendAdminSMS(`NEW PACKAGE: ${parentName}\n${packageType}-session package — ${monthYear}\nPhone: ${phone}${kids ? `\nPlayers: ${kids}` : ""}${referralCode ? `\nRef code: ${referralCode} ${referralApplied ? "✓ applied" : "✗ NOT applied"}` : ""}`);
-
-    return NextResponse.json({ success: true, id, referralApplied });
+    return NextResponse.json({ success: true, checkoutUrl: checkoutSession.url });
   } catch (error) {
     console.error("Package enrollment error:", error);
     return NextResponse.json({ error: "Enrollment failed. Please try again." }, { status: 500 });

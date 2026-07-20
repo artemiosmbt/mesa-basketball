@@ -19,7 +19,44 @@ import {
   getAccountCreditBalance,
   deductAccountCredit,
   attachStripeCheckoutSession,
+  getActivePackage,
+  countConfirmedPrivateSessions,
 } from "@/lib/supabase";
+
+// For each booked date (in order), true if it's covered by that month's
+// active package with remaining capacity — consumed first-come-first-served
+// within the request, tracked per month since a recurring series can span
+// more than one. A session covered this way needs no Stripe charge at all:
+// the package was already paid for in full, upfront, separately.
+async function allocatePackageCoverage(email: string, phone: string, dates: string[]): Promise<boolean[]> {
+  const remainingByMonth = new Map<string, number>();
+  const covered: boolean[] = [];
+  for (const dateStr of dates) {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) {
+      covered.push(false);
+      continue;
+    }
+    const month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    if (!remainingByMonth.has(month)) {
+      const pkg = await getActivePackage(email, month);
+      if (pkg) {
+        const used = await countConfirmedPrivateSessions(email, month, phone);
+        remainingByMonth.set(month, Math.max(0, pkg.package_type - used));
+      } else {
+        remainingByMonth.set(month, 0);
+      }
+    }
+    const remaining = remainingByMonth.get(month)!;
+    if (remaining > 0) {
+      covered.push(true);
+      remainingByMonth.set(month, remaining - 1);
+    } else {
+      covered.push(false);
+    }
+  }
+  return covered;
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -441,26 +478,6 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Only the FIRST date in the series can carry the first-time discount
-      // or a redeemed referral credit — by the second date, isNewClient
-      // would already read false anyway (a row now exists for this email),
-      // so this just makes explicit that the discount is a one-time thing,
-      // not "free for every date in the series."
-      let isFirstTime = false;
-      let firstIsFree = false;
-      let usedReferralCredit = false;
-      if (newClient) {
-        firstIsFree = true;
-        isFirstTime = true;
-      } else if (useReferralCredit) {
-        const credits = await getReferralCredits(email);
-        if (credits > 0) {
-          firstIsFree = true;
-          usedReferralCredit = true;
-          await decrementReferralCredit(email);
-        }
-      }
-
       const duplicateChecks = await Promise.all(
         privateSessions.map((s: { date: string; startTime: string }) => checkDuplicateRegistration(email, s.date, s.startTime))
       );
@@ -473,21 +490,51 @@ export async function POST(req: NextRequest) {
         );
       }
 
+      // Checked before the first-time/referral-credit logic below — a date
+      // covered by an active package (possibly more than just the first
+      // date, if the package has enough remaining capacity) is already
+      // fully prepaid, so it shouldn't also consume the one-time discount
+      // or a referral credit that could instead apply to a future booking.
+      const packageCoverage = await allocatePackageCoverage(email, phone, privateSessions.map((s: { date: string }) => s.date));
+
+      // Only the FIRST (non-package-covered) date in the series can carry
+      // the first-time discount or a redeemed referral credit — by the
+      // second date, isNewClient would already read false anyway (a row now
+      // exists for this email), so this just makes explicit that the
+      // discount is a one-time thing, not "free for every date in the series."
+      let isFirstTime = false;
+      let firstIsFree = false;
+      let usedReferralCredit = false;
+      if (!packageCoverage[0]) {
+        if (newClient) {
+          firstIsFree = true;
+          isFirstTime = true;
+        } else if (useReferralCredit) {
+          const credits = await getReferralCredits(email);
+          if (credits > 0) {
+            firstIsFree = true;
+            usedReferralCredit = true;
+            await decrementReferralCredit(email);
+          }
+        }
+      }
+
       const pricedSessions = privateSessions.map((s: { date: string; startTime: string; endTime: string; location: string; trainer?: string }, i: number) => {
         const fullPrice = calcPrivateSessionPrice(s.startTime, s.endTime, totalParticipants || 1) ?? 0;
-        const isFree = i === 0 && firstIsFree;
-        const effectivePrice = isFree ? Math.round(fullPrice * 0.5) : fullPrice;
-        return { ...s, fullPrice, effectivePrice, isFree };
+        const packageCovered = packageCoverage[i];
+        const isFree = !packageCovered && i === 0 && firstIsFree;
+        const effectivePrice = packageCovered ? 0 : isFree ? Math.round(fullPrice * 0.5) : fullPrice;
+        return { ...s, fullPrice, effectivePrice, isFree, packageCovered };
       });
 
       const totalBeforeCredit = pricedSessions.reduce((sum: number, s: { effectivePrice: number }) => sum + s.effectivePrice, 0);
 
-      // Account credit is applied once, against the first date's row only —
-      // same convention as weekly/camp.
+      // Account credit is applied once, against the series total (recorded
+      // on the first date's row) — same convention as weekly/camp.
       let accountCreditApplied = 0;
-      if (applyAccountCredit && pricedSessions[0]) {
+      if (applyAccountCredit && totalBeforeCredit > 0) {
         const balance = await getAccountCreditBalance(email);
-        accountCreditApplied = Math.min(balance, pricedSessions[0].effectivePrice);
+        accountCreditApplied = Math.min(balance, totalBeforeCredit);
         if (accountCreditApplied > 0) await deductAccountCredit(email, accountCreditApplied);
       }
 
@@ -525,7 +572,7 @@ export async function POST(req: NextRequest) {
         phone,
         kids,
         type,
-        privateSessions: pricedSessions as Array<{ date: string; startTime: string; endTime: string; location: string; trainer?: string; fullPrice: number; isFree: boolean }>,
+        privateSessions: pricedSessions as Array<{ date: string; startTime: string; endTime: string; location: string; trainer?: string; fullPrice: number; isFree: boolean; packageCovered?: boolean }>,
         totalParticipants: totalParticipants || 1,
         referralCode,
         privateReferrer,
@@ -601,33 +648,43 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      // Already covered by an active monthly package? Check this before any
+      // discount/credit logic — a package-covered session is already fully
+      // prepaid, so it shouldn't also spend a referral credit or "waste" the
+      // first-time discount that could instead apply to a future session.
+      const packageCovered = (await allocatePackageCoverage(email, phone, [bookedDate]))[0];
+
       let isFree = false;
       let isFirstTime = false;
       let usedReferralCredit = false;
-      if (newClient) {
-        isFree = true; // first-time 50% off
-        isFirstTime = true;
-      } else if (useReferralCredit) {
-        const credits = await getReferralCredits(email);
-        if (credits > 0) {
-          isFree = true;
-          usedReferralCredit = true;
-          await decrementReferralCredit(email);
+      if (!packageCovered) {
+        if (newClient) {
+          isFree = true; // first-time 50% off
+          isFirstTime = true;
+        } else if (useReferralCredit) {
+          const credits = await getReferralCredits(email);
+          if (credits > 0) {
+            isFree = true;
+            usedReferralCredit = true;
+            await decrementReferralCredit(email);
+          }
         }
       }
 
       const privateSessionPrice = calcPrivateSessionPrice(bookedStartTime, bookedEndTime, totalParticipants || 1);
 
       let accountCreditApplied = 0;
-      if (applyAccountCredit && privateSessionPrice != null) {
+      if (!packageCovered && applyAccountCredit && privateSessionPrice != null) {
         const balance = await getAccountCreditBalance(email);
         accountCreditApplied = Math.min(balance, privateSessionPrice);
         if (accountCreditApplied > 0) await deductAccountCredit(email, accountCreditApplied);
       }
 
-      const effectivePrice = isFree && privateSessionPrice != null
-        ? Math.round(privateSessionPrice * 0.5)
-        : (privateSessionPrice ?? 0);
+      const effectivePrice = packageCovered
+        ? 0
+        : isFree && privateSessionPrice != null
+          ? Math.round(privateSessionPrice * 0.5)
+          : (privateSessionPrice ?? 0);
       const amountToCharge = Math.max(0, effectivePrice - accountCreditApplied);
 
       const bookingBatchId = crypto.randomUUID();
@@ -679,6 +736,7 @@ export async function POST(req: NextRequest) {
           smsConsent: !!smsConsent,
           accountCreditApplied,
           fullPrice: privateSessionPrice,
+          packageCovered,
         });
         return NextResponse.json({ success: true, isFree, referralApplied: !!privateReferrer });
       }
