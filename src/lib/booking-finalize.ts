@@ -11,7 +11,7 @@ import {
   finalizePaidBookingBatch,
   getActivePackage,
   setPackageSessions,
-  countConfirmedPrivateSessions,
+  countPackageSessionsUsed,
   recordStripeRefund,
   finalizePaidPackage,
   abandonPendingPackage,
@@ -217,21 +217,22 @@ export async function finalizeConfirmedPrivateBooking(params: FinalizePrivateBoo
   // Wrapped like every other side effect below — a transient DB error here
   // must not abort the referral credit, email, SMS, and calendar sync that
   // follow for a booking that's already been paid for.
+  // Only worth looking up when this specific booking was itself covered by
+  // the package — a client with an active package who chose to book (or had
+  // to book, having run out of capacity) a separately-paid session doesn't
+  // need "sessions remaining" noise attached to that unrelated charge.
   try {
-    if (isPrivateType && params.bookedDate) {
+    if (isPrivateType && params.bookedDate && params.packageCovered) {
       const d = new Date(params.bookedDate);
       const bookingMonth = isNaN(d.getTime())
         ? null
         : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
       const activePkg = bookingMonth ? await getActivePackage(params.email, bookingMonth) : null;
-      if (activePkg && bookingMonth) {
-        const confirmedCount = await countConfirmedPrivateSessions(params.email, bookingMonth);
-        const newUsed = Math.min(activePkg.package_type, confirmedCount);
-        await setPackageSessions(activePkg.id, newUsed);
-        if (newUsed <= activePkg.package_type) {
-          packageSessionsRemaining = activePkg.package_type - newUsed;
-          packageType = activePkg.package_type;
-        }
+      if (activePkg) {
+        const used = await countPackageSessionsUsed(activePkg.id);
+        await setPackageSessions(activePkg.id, used);
+        packageSessionsRemaining = Math.max(0, activePkg.package_type - used);
+        packageType = activePkg.package_type;
       }
     }
   } catch (pkgErr) {
@@ -613,9 +614,8 @@ export async function finalizeConfirmedPrivateSeriesBooking(params: FinalizePriv
       if (!isPrivateType) continue;
       const activePkg = await getActivePackage(params.email, bookingMonth);
       if (activePkg) {
-        const confirmedCount = await countConfirmedPrivateSessions(params.email, bookingMonth);
-        const newUsed = Math.min(activePkg.package_type, confirmedCount);
-        await setPackageSessions(activePkg.id, newUsed);
+        const used = await countPackageSessionsUsed(activePkg.id);
+        await setPackageSessions(activePkg.id, used);
       }
     }
   } catch (pkgErr) {
@@ -628,13 +628,13 @@ export async function finalizeConfirmedPrivateSeriesBooking(params: FinalizePriv
   // that might span several months' packages anyway.
   let packageSessionsRemaining: number | undefined;
   let packageType: number | undefined;
-  if (isPrivateType) {
+  if (isPrivateType && privateSessions.some((s) => s.packageCovered)) {
     try {
       const now = new Date();
       const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
       const activePkg = await getActivePackage(params.email, currentMonth);
       if (activePkg) {
-        packageSessionsRemaining = activePkg.package_type - activePkg.sessions_used;
+        packageSessionsRemaining = Math.max(0, activePkg.package_type - activePkg.sessions_used);
         packageType = activePkg.package_type;
       }
     } catch (pkgErr) {
@@ -885,11 +885,12 @@ export async function finalizeRescheduleTopup(params: FinalizeRescheduleTopupPar
 
 /**
  * A monthly package's Stripe Checkout completed — flips it from
- * pending_payment to active, seeds sessions_used from anything already
- * booked this month, awards the referrer's credit (only now that payment is
- * actually confirmed, not at the enrollment request), and announces it.
- * Mirrors the old synchronous /api/packages logic, just moved here so it
- * only runs once money has actually moved.
+ * pending_payment to active, awards the referrer's credit (only now that
+ * payment is actually confirmed, not at the enrollment request), and
+ * announces it. Starts at 0 sessions used — a session only ever counts
+ * against this package once a future booking is explicitly tagged with its
+ * package_id (see allocatePackageCoverage in /api/register), never by
+ * guessing from whatever else this email happened to book that month.
  */
 async function finalizePaidPackageEnrollment(
   packageId: string,
@@ -899,15 +900,6 @@ async function finalizePaidPackageEnrollment(
 ): Promise<void> {
   const pkg = await finalizePaidPackage(packageId, paymentIntentId, customerId);
   if (!pkg) return; // already handled (duplicate webhook delivery) or not found
-
-  try {
-    const existingCount = await countConfirmedPrivateSessions(pkg.email, pkg.month_year, pkg.phone);
-    if (existingCount > 0) {
-      await setPackageSessions(pkg.id, Math.min(existingCount, pkg.package_type));
-    }
-  } catch (err) {
-    console.error("Package session seeding failed (package was paid):", err);
-  }
 
   const referrerEmail = metadata.referrer_email || undefined;
   const referrerName = metadata.referrer_name || undefined;
@@ -957,6 +949,19 @@ async function finalizePaidPackageEnrollment(
  * its webhook never arrived.
  */
 export async function finalizePaidCheckoutSession(session: Stripe.Checkout.Session): Promise<void> {
+  const metadata = session.metadata || {};
+
+  // A package late-cancellation/reschedule fee — this is a standalone
+  // charge with no registration row or package state to flip (the
+  // cancellation/reschedule already happened synchronously when it was
+  // requested; this only confirms the fee itself actually got paid), so it
+  // has no client_reference_id and is checked before that's required below.
+  if (metadata.purpose === "package_late_fee") {
+    const amount = session.amount_total != null ? session.amount_total / 100 : undefined;
+    await sendAdminSMS(`Package late fee PAID ($${amount ?? "?"}): ${metadata.parent_name || "unknown"}\n${metadata.session_details || ""} (${metadata.action || "cancel/reschedule"})`).catch(() => {});
+    return;
+  }
+
   const bookingBatchId = session.client_reference_id;
   if (!bookingBatchId) {
     console.error("checkout.session.completed with no client_reference_id", session.id);
@@ -969,8 +974,6 @@ export async function finalizePaidCheckoutSession(session: Stripe.Checkout.Sessi
     console.error("checkout.session.completed with no payment_intent", session.id);
     return;
   }
-
-  const metadata = session.metadata || {};
 
   // A monthly package purchase — client_reference_id here is the
   // monthly_packages row's own id, not a registrations booking_batch_id, so

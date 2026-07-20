@@ -48,6 +48,7 @@ export interface Registration {
   stripe_payment_intent_id?: string | null;
   stripe_customer_id?: string | null;
   stripe_refund_id?: string | null;
+  package_id?: string | null;
 }
 
 export async function addRegistration(data: {
@@ -84,6 +85,10 @@ export async function addRegistration(data: {
   // of this row needs this to know how much to give back vs. how much (if
   // any) to actually refund through Stripe.
   appliedAccountCredit?: number;
+  // Set when this rescheduled session is still covered by the same monthly
+  // package that covered the old one (same month, still private) — $0,
+  // no Stripe charge, just moving which date the package's slot applies to.
+  packageId?: string;
 }): Promise<{ manageToken: string }> {
   const supabase = getSupabase();
   const { data: row, error } = await supabase
@@ -110,6 +115,7 @@ export async function addRegistration(data: {
       ...(data.stripePaymentIntentId ? { stripe_payment_intent_id: data.stripePaymentIntentId } : {}),
       ...(data.stripeCustomerId ? { stripe_customer_id: data.stripeCustomerId } : {}),
       ...(data.appliedAccountCredit ? { applied_account_credit: data.appliedAccountCredit } : {}),
+      ...(data.packageId ? { package_id: data.packageId } : {}),
     })
     .select("manage_token")
     .single();
@@ -605,6 +611,12 @@ export async function addRegistrationWithRewards(data: {
   // ("confirmed") — only the new pay-via-Stripe path passes these.
   status?: string;
   bookingBatchId?: string;
+  // Set when this session's price was covered by an active monthly package
+  // rather than a Stripe charge — the specific package row, so cancel/
+  // reschedule/no-show handling can tell a package-covered session apart
+  // from one that just happened to be free/credit-covered for another
+  // reason, and know which package's session count it affects.
+  packageId?: string;
 }): Promise<{ id: string; manageToken: string }> {
   const supabase = getSupabase();
   const { data: row, error } = await supabase
@@ -633,6 +645,7 @@ export async function addRegistrationWithRewards(data: {
       applied_account_credit: data.appliedAccountCredit ?? 0,
       ...(data.status ? { status: data.status } : {}),
       ...(data.bookingBatchId ? { booking_batch_id: data.bookingBatchId } : {}),
+      ...(data.packageId ? { package_id: data.packageId } : {}),
     })
     .select("id, manage_token")
     .single();
@@ -903,44 +916,34 @@ export async function setPackageSessions(id: string, count: number): Promise<voi
     .eq("id", id);
 }
 
-/** Count confirmed private/group-private registrations for an email in a given month.
- *  Falls back to phone matching if email yields 0 results. */
-export async function countConfirmedPrivateSessions(email: string, monthYear: string, phone?: string): Promise<number> {
+/**
+ * Sessions actually charged against a specific package — package_id is set
+ * on a row only when that exact package covered its price, so this is exact
+ * (no email/phone fuzzy-matching, no risk of counting an individually-paid
+ * overflow session against the package that didn't cover it). A no-show
+ * still counts (the session slot is forfeited as the no-show penalty); a
+ * cancelled or rescheduled-away row does not (the slot is freed back).
+ */
+export async function countPackageSessionsUsed(packageId: string): Promise<number> {
   const supabase = getSupabase();
-  const normalizedEmail = email.toLowerCase().trim();
-
   const { data, error } = await supabase
     .from("registrations")
-    .select("booked_date, email, phone")
-    .eq("status", "confirmed")
-    .in("type", ["private", "group-private"])
-    .not("booked_date", "is", null);
-
+    .select("id")
+    .eq("package_id", packageId)
+    .in("status", ["confirmed", "no_show"]);
   if (error || !data) return 0;
+  return data.length;
+}
 
-  function inMonth(rows: { booked_date: string }[]): number {
-    return rows.filter((r) => {
-      const raw = r.booked_date as string;
-      const d = /^\d{4}-\d{2}-\d{2}$/.test(raw)
-        ? new Date(raw + "T12:00:00")
-        : new Date(raw);
-      if (isNaN(d.getTime())) return false;
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}` === monthYear;
-    }).length;
-  }
-
-  // Match by email first
-  const byEmail = data.filter((r) => (r.email || "").toLowerCase().trim() === normalizedEmail);
-  if (byEmail.length > 0) return inMonth(byEmail);
-
-  // Fallback: match by phone if email yielded nothing
-  if (phone) {
-    const normalizedPhone = phone.replace(/\D/g, "").slice(-10);
-    const byPhone = data.filter((r) => (r.phone || "").replace(/\D/g, "").slice(-10) === normalizedPhone);
-    return inMonth(byPhone);
-  }
-
-  return 0;
+export async function getPackageById(packageId: string): Promise<MonthlyPackage | null> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("monthly_packages")
+    .select("*")
+    .eq("id", packageId)
+    .single();
+  if (error || !data) return null;
+  return data as MonthlyPackage;
 }
 
 export async function getPackagesNeedingReminder(monthYear: string): Promise<MonthlyPackage[]> {

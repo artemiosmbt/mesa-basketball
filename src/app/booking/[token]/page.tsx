@@ -483,6 +483,13 @@ export default function ManageBooking({
     const res = await fetch(`/api/booking/${token}`, { method: "DELETE" });
     const data = await res.json();
     if (data.success) {
+      // A package-covered session cancelled late owes a fresh late fee —
+      // the cancellation itself already went through, this just sends them
+      // to pay it, same as any other real Stripe charge in this app.
+      if (data.checkoutUrl) {
+        window.location.href = data.checkoutUrl;
+        return;
+      }
       setCancelled(true);
       setIsLateCancel(data.isLateCancel);
     } else {

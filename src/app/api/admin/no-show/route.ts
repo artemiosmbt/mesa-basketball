@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { ADMIN_EMAIL } from "@/lib/auth";
 import { sendNoShowNotification } from "@/lib/email";
 import { sendSMS, sendAdminSMS } from "@/lib/sms";
+import { countPackageSessionsUsed, setPackageSessions } from "@/lib/supabase";
 
 async function verifyAdmin(req: NextRequest) {
   const token = req.headers.get("authorization")?.replace("Bearer ", "");
@@ -37,7 +38,7 @@ export async function POST(req: NextRequest) {
 
   const { data: reg } = await supabase
     .from("registrations")
-    .select("parent_name, email, session_details, type, session_price, is_free, phone, sms_consent, is_paid, stripe_payment_intent_id, applied_account_credit")
+    .select("parent_name, email, session_details, type, session_price, is_free, phone, sms_consent, is_paid, stripe_payment_intent_id, applied_account_credit, package_id")
     .eq("id", id)
     .single();
 
@@ -55,6 +56,33 @@ export async function POST(req: NextRequest) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   if (!updated || updated.length === 0) {
     return NextResponse.json({ error: "This booking is no longer confirmed (already cancelled or already marked)" }, { status: 409 });
+  }
+
+  // A package-covered no-show keeps sessions_used counted against it (the
+  // penalty for a no-show is losing that session, unlike a late cancel/
+  // reschedule which keeps the slot but costs a fresh fee instead) — no
+  // Stripe payment exists on this row to keep or ask for, so no fee applies
+  // at all. Recompute now so the package's remaining count is accurate
+  // immediately, not just on next admin dashboard load.
+  if (reg.package_id) {
+    try {
+      const used = await countPackageSessionsUsed(reg.package_id);
+      await setPackageSessions(reg.package_id, used);
+    } catch (err) {
+      console.error("Package session recompute failed (no-show):", err);
+    }
+
+    try {
+      if (reg.sms_consent && reg.phone) {
+        const noShowLabel = reg.session_details.split(" — ")[0] || "session";
+        await sendSMS(reg.phone, `Mesa Basketball: You were marked as a no-show for today's ${noShowLabel}. No payment is due — this session has been used from your package. Reply here with any questions. Reply STOP to opt out.`);
+      }
+      await sendAdminSMS(`NO-SHOW (package session): ${reg.parent_name} — ${reg.session_details} | No fee — session used from package`);
+    } catch (err) {
+      console.error("No-show notification error (package session):", err);
+    }
+
+    return NextResponse.json({ ok: true, feeAmount: 0, wasPaid: false, packageSession: true });
   }
 
   const isPrivateType = reg.type === "private" || reg.type === "group-private";

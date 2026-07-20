@@ -20,42 +20,45 @@ import {
   deductAccountCredit,
   attachStripeCheckoutSession,
   getActivePackage,
-  countConfirmedPrivateSessions,
+  countPackageSessionsUsed,
 } from "@/lib/supabase";
 
-// For each booked date (in order), true if it's covered by that month's
-// active package with remaining capacity — consumed first-come-first-served
-// within the request, tracked per month since a recurring series can span
-// more than one. A session covered this way needs no Stripe charge at all:
-// the package was already paid for in full, upfront, separately.
-async function allocatePackageCoverage(email: string, phone: string, dates: string[]): Promise<boolean[]> {
-  const remainingByMonth = new Map<string, number>();
-  const covered: boolean[] = [];
+// For each booked date (in order), the active package (if any) whose
+// remaining capacity covers it — consumed first-come-first-served within
+// the request, tracked per month since a recurring series can span more
+// than one. A session covered this way needs no Stripe charge at all: the
+// package was already paid for in full, upfront, separately. Coverage is
+// counted against package_id specifically (not "any private session this
+// email had this month"), so an individually-paid overflow session never
+// eats into a package's count.
+async function allocatePackageCoverage(email: string, dates: string[]): Promise<Array<{ covered: boolean; packageId: string | null }>> {
+  const remainingByMonth = new Map<string, { packageId: string; remaining: number }>();
+  const result: Array<{ covered: boolean; packageId: string | null }> = [];
   for (const dateStr of dates) {
     const d = new Date(dateStr);
     if (isNaN(d.getTime())) {
-      covered.push(false);
+      result.push({ covered: false, packageId: null });
       continue;
     }
     const month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
     if (!remainingByMonth.has(month)) {
       const pkg = await getActivePackage(email, month);
       if (pkg) {
-        const used = await countConfirmedPrivateSessions(email, month, phone);
-        remainingByMonth.set(month, Math.max(0, pkg.package_type - used));
+        const used = await countPackageSessionsUsed(pkg.id);
+        remainingByMonth.set(month, { packageId: pkg.id, remaining: Math.max(0, pkg.package_type - used) });
       } else {
-        remainingByMonth.set(month, 0);
+        remainingByMonth.set(month, { packageId: "", remaining: 0 });
       }
     }
-    const remaining = remainingByMonth.get(month)!;
-    if (remaining > 0) {
-      covered.push(true);
-      remainingByMonth.set(month, remaining - 1);
+    const entry = remainingByMonth.get(month)!;
+    if (entry.remaining > 0) {
+      result.push({ covered: true, packageId: entry.packageId });
+      remainingByMonth.set(month, { ...entry, remaining: entry.remaining - 1 });
     } else {
-      covered.push(false);
+      result.push({ covered: false, packageId: null });
     }
   }
-  return covered;
+  return result;
 }
 
 export async function POST(req: NextRequest) {
@@ -495,7 +498,7 @@ export async function POST(req: NextRequest) {
       // date, if the package has enough remaining capacity) is already
       // fully prepaid, so it shouldn't also consume the one-time discount
       // or a referral credit that could instead apply to a future booking.
-      const packageCoverage = await allocatePackageCoverage(email, phone, privateSessions.map((s: { date: string }) => s.date));
+      const packageCoverage = await allocatePackageCoverage(email, privateSessions.map((s: { date: string }) => s.date));
 
       // Only the FIRST (non-package-covered) date in the series can carry
       // the first-time discount or a redeemed referral credit — by the
@@ -505,7 +508,7 @@ export async function POST(req: NextRequest) {
       let isFirstTime = false;
       let firstIsFree = false;
       let usedReferralCredit = false;
-      if (!packageCoverage[0]) {
+      if (!packageCoverage[0]?.covered) {
         if (newClient) {
           firstIsFree = true;
           isFirstTime = true;
@@ -521,10 +524,11 @@ export async function POST(req: NextRequest) {
 
       const pricedSessions = privateSessions.map((s: { date: string; startTime: string; endTime: string; location: string; trainer?: string }, i: number) => {
         const fullPrice = calcPrivateSessionPrice(s.startTime, s.endTime, totalParticipants || 1) ?? 0;
-        const packageCovered = packageCoverage[i];
+        const packageCovered = packageCoverage[i]?.covered ?? false;
+        const packageId = packageCoverage[i]?.packageId ?? null;
         const isFree = !packageCovered && i === 0 && firstIsFree;
         const effectivePrice = packageCovered ? 0 : isFree ? Math.round(fullPrice * 0.5) : fullPrice;
-        return { ...s, fullPrice, effectivePrice, isFree, packageCovered };
+        return { ...s, fullPrice, effectivePrice, isFree, packageCovered, packageId };
       });
 
       const totalBeforeCredit = pricedSessions.reduce((sum: number, s: { effectivePrice: number }) => sum + s.effectivePrice, 0);
@@ -563,6 +567,7 @@ export async function POST(req: NextRequest) {
           ...(i === 0 && accountCreditApplied > 0 ? { appliedAccountCredit: accountCreditApplied } : {}),
           status: amountToCharge > 0 ? "pending_payment" : undefined,
           bookingBatchId,
+          ...(s.packageId ? { packageId: s.packageId } : {}),
         });
       }
 
@@ -652,7 +657,7 @@ export async function POST(req: NextRequest) {
       // discount/credit logic — a package-covered session is already fully
       // prepaid, so it shouldn't also spend a referral credit or "waste" the
       // first-time discount that could instead apply to a future session.
-      const packageCovered = (await allocatePackageCoverage(email, phone, [bookedDate]))[0];
+      const { covered: packageCovered, packageId } = (await allocatePackageCoverage(email, [bookedDate]))[0];
 
       let isFree = false;
       let isFirstTime = false;
@@ -709,6 +714,7 @@ export async function POST(req: NextRequest) {
         ...(accountCreditApplied > 0 ? { appliedAccountCredit: accountCreditApplied } : {}),
         status: amountToCharge > 0 ? "pending_payment" : undefined,
         bookingBatchId,
+        ...(packageId ? { packageId } : {}),
       });
 
       if (amountToCharge === 0) {
