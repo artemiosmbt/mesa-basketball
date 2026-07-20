@@ -1403,12 +1403,16 @@ export default function Home() {
       const data = await res.json();
       if (!res.ok) {
         setPkgResult({ success: false, message: data.error || "Enrollment failed." });
+        setPkgSubmitting(false);
+      } else if (data.checkoutUrl) {
+        window.location.href = data.checkoutUrl;
+        return;
       } else {
         setPkgResult({ success: true, message: `You're enrolled! Check your email for details. Book your ${pkgModal.packageType} private sessions for ${pkgMonthOptions.find(o => o.value === pkgMonth)?.label} and we'll track them automatically.${referralNote(!!data.referralApplied, pkgReferralCode)}` });
+        setPkgSubmitting(false);
       }
     } catch {
       setPkgResult({ success: false, message: "Something went wrong. Please try again." });
-    } finally {
       setPkgSubmitting(false);
     }
   }
@@ -3441,7 +3445,7 @@ export default function Home() {
               <button onClick={() => setPkgModal({ open: false, packageType: null })} className="text-2xl text-brown-400 hover:text-white">&times;</button>
             </div>
             <p className="mt-1 text-sm text-brown-400">
-              {pkgModal.packageType === 4 ? "$475" : "$900"} — payment due upon registration (Cash, Venmo, or Zelle)
+              {pkgModal.packageType === 4 ? "$475" : "$900"} + {SERVICE_FEE_LABEL} service fee — paid securely by card via Stripe
             </p>
 
             {pkgResult?.success ? (
@@ -3561,7 +3565,7 @@ export default function Home() {
                   <p className="text-sm text-red-400">{pkgResult.message}</p>
                 )}
                 <button type="submit" disabled={pkgSubmitting} className="w-full rounded-lg bg-mesa-accent py-3 font-semibold text-white transition hover:bg-yellow-600 disabled:opacity-50">
-                  {pkgSubmitting ? "Enrolling..." : "Confirm Enrollment"}
+                  {pkgSubmitting ? "Submitting..." : "Continue to Payment"}
                 </button>
               </form>
             )}
