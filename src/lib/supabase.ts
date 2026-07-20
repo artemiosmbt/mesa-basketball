@@ -1076,15 +1076,15 @@ export async function getGroupSessionEnrollment(): Promise<
   return counts;
 }
 
-// A pending_payment row only blocks a duplicate/capacity check while
-// there's a real chance someone is still mid-Stripe-checkout for it — Stripe
-// Checkout Sessions don't expire for a full 30 minutes (its own imposed
-// minimum), which is far longer than anyone actually takes to pay, and
-// there's no webhook for "the client hit back" — only for a genuine
-// expiration. Without a shorter cutoff here, someone who backs out of
-// checkout (or a browser back/forward) is wrongly locked out of re-booking
-// that same session for up to half an hour, even though nothing was ever
-// charged and no session was ever actually held for them.
+// Used only for capacity (checkGroupSessionCapacity) — a genuine race
+// between two DIFFERENT clients for the same last spot, where a
+// pending_payment row briefly needs to count so a second client can't grab
+// a spot while the first is still mid-Stripe-checkout. Stripe Checkout
+// Sessions don't expire for a full 30 minutes (its own imposed minimum),
+// far longer than anyone actually takes to pay, so this caps how long a
+// single stale/abandoned checkout can hold a spot hostage from everyone
+// else. (checkDuplicateRegistration doesn't use this — see its own comment:
+// it can only ever find the SAME client's own row, never a real race.)
 const PENDING_PAYMENT_GRACE_MS = 10 * 60 * 1000;
 
 function pendingPaymentGraceFilter(): string {
@@ -1139,16 +1139,24 @@ export async function checkDuplicateRegistration(
   startTime: string
 ): Promise<boolean> {
   const supabase = getSupabase();
-  // Same grace-window reasoning as checkGroupSessionCapacity — a stale
-  // pending_payment row (backed out of checkout) must not permanently block
-  // the client from booking that same session again.
+  // Filtered to this one email, so a pending_payment row found here can
+  // NEVER be someone else's booking — it's always this same client's own
+  // not-yet-paid attempt. Blocking on it (even briefly) traps a client who
+  // backs out of Stripe and immediately tries again — e.g. to drop one
+  // session from a 5-session order down to 4 — behind their own abandoned
+  // checkout for no protective reason at all: nothing was charged, no spot
+  // is genuinely theirs yet. Only a real, already-CONFIRMED (paid) booking
+  // should ever block a re-registration. The old pending_payment row is left
+  // untouched here (never mutated) — it simply expires normally later via
+  // the checkout.session.expired webhook or the abandonment cron, exactly
+  // as it would have anyway.
   const { count, error } = await supabase
     .from("registrations")
     .select("*", { count: "exact", head: true })
     .eq("email", email)
     .eq("booked_date", date)
     .eq("booked_start_time", startTime)
-    .or(pendingPaymentGraceFilter());
+    .eq("status", "confirmed");
   return !error && (count ?? 0) > 0;
 }
 
