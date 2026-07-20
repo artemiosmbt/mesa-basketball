@@ -306,23 +306,23 @@ export default function PaymentsPage() {
   }, [registrations, packages]);
 
   // Now that Stripe collects payment upfront for every new booking, this
-  // list only has a reason to show anything for the pre-Stripe backlog:
-  // sessions that already happened, booked before the switch, still
-  // waiting on a manual cash/Venmo/Zelle payment. A real Stripe payment
-  // never shows here (checked via stripe_payment_intent_id, not just
-  // is_paid — that field is never set for a Stripe-collected booking, so
-  // checking is_paid alone was wrongly showing paid clients as unpaid).
-  // A future booking never belongs here at all: it's either already paid
-  // through Stripe or the checkout was never completed, in which case it
-  // was never confirmed in the first place. Once the backlog clears out,
-  // this list stays empty for good — kept around only in case a future
-  // non-Stripe payment path is ever added back.
+  // list only has a reason to show anything for bookings that were never
+  // charged through Stripe — the pre-Stripe backlog, or (per policy) any
+  // future non-Stripe payment path. A real Stripe payment never shows here
+  // (checked via stripe_payment_intent_id, not just is_paid — that field is
+  // never set for a Stripe-collected booking, so checking is_paid alone was
+  // wrongly showing paid clients as unpaid). Deliberately NOT filtered by
+  // session date: a pre-Stripe booking can legitimately still be unpaid
+  // whether its session already happened or hasn't yet — a future date
+  // doesn't mean it's Stripe-covered unless it's actually a Stripe row.
+  // Once the backlog clears out, this naturally stays empty on its own,
+  // since a brand new booking today is always either Stripe-paid or never
+  // confirmed to begin with.
   const unpaid = useMemo(() => {
     const seenCamps = new Set<string>();
     return registrations
       .filter((r) => {
         if (r.status !== "confirmed" || r.is_paid || r.stripe_payment_intent_id) return false;
-        if (sessionDateTimeMs(r) > now) return false;
         const mem = packageMembership.get(r.id);
         if (mem?.withinPackage && mem.packagePaid) return false;
         // Full camps are one payment covering all days — only show one row per camp group
@@ -334,7 +334,7 @@ export default function PaymentsPage() {
         return true;
       })
       .sort((a, b) => dateMs(a.booked_date) - dateMs(b.booked_date));
-  }, [registrations, packageMembership, now]);
+  }, [registrations, packageMembership]);
 
   const paid = useMemo(() => {
     const seenCamps = new Set<string>();
