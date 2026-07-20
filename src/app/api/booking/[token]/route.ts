@@ -985,9 +985,11 @@ export async function PUT(
       }
     }
 
+    // Packages only ever cover a standard private session (up to 3 kids) —
+    // never a 4+ kid group-private rate, regardless of remaining capacity.
     const oldPkg = await getPackageById(reg.package_id).catch(() => null);
     let sameMonthCovered = false;
-    if (oldPkg && newType === "private") {
+    if (oldPkg && newType === "private" && kidCount <= 3) {
       const d = new Date(bookedDate);
       if (!isNaN(d.getTime())) {
         const newMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
@@ -997,9 +999,9 @@ export async function PUT(
         }
       }
     }
-    // Different month (or switched away from private) — the old package
-    // can't cover it, so price and charge the new session like a normal
-    // booking rather than silently giving it away for free.
+    // Different month, switched away from private, or bumped to 4+ kids —
+    // the old package can't cover it, so price and charge the new session
+    // like a normal booking rather than silently giving it away for free.
     if (!sameMonthCovered && newPriceKnown && newEffectivePrice! > 0) {
       priceReconciliation = { kind: "charge", amount: newEffectivePrice! };
     }

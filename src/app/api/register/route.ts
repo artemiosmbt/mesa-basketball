@@ -30,8 +30,14 @@ import {
 // package was already paid for in full, upfront, separately. Coverage is
 // counted against package_id specifically (not "any private session this
 // email had this month"), so an individually-paid overflow session never
-// eats into a package's count.
-async function allocatePackageCoverage(email: string, dates: string[]): Promise<Array<{ covered: boolean; packageId: string | null }>> {
+// eats into a package's count. Packages only ever cover standard private
+// sessions (up to 3 kids, $150/hr) — never group-private (4+, $250/hr):
+// a package slot is priced around the private rate, so a 4+ kid session
+// always charges normally regardless of remaining capacity.
+async function allocatePackageCoverage(email: string, dates: string[], kidCount: number): Promise<Array<{ covered: boolean; packageId: string | null }>> {
+  if (kidCount >= 4) {
+    return dates.map(() => ({ covered: false, packageId: null }));
+  }
   const remainingByMonth = new Map<string, { packageId: string; remaining: number }>();
   const result: Array<{ covered: boolean; packageId: string | null }> = [];
   for (const dateStr of dates) {
@@ -498,7 +504,7 @@ export async function POST(req: NextRequest) {
       // date, if the package has enough remaining capacity) is already
       // fully prepaid, so it shouldn't also consume the one-time discount
       // or a referral credit that could instead apply to a future booking.
-      const packageCoverage = await allocatePackageCoverage(email, privateSessions.map((s: { date: string }) => s.date));
+      const packageCoverage = await allocatePackageCoverage(email, privateSessions.map((s: { date: string }) => s.date), totalParticipants || 1);
 
       // Only the FIRST (non-package-covered) date in the series can carry
       // the first-time discount or a redeemed referral credit — by the
@@ -657,7 +663,7 @@ export async function POST(req: NextRequest) {
       // discount/credit logic — a package-covered session is already fully
       // prepaid, so it shouldn't also spend a referral credit or "waste" the
       // first-time discount that could instead apply to a future session.
-      const { covered: packageCovered, packageId } = (await allocatePackageCoverage(email, [bookedDate]))[0];
+      const { covered: packageCovered, packageId } = (await allocatePackageCoverage(email, [bookedDate], totalParticipants || 1))[0];
 
       let isFree = false;
       let isFirstTime = false;
