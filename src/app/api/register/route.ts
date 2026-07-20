@@ -215,22 +215,30 @@ export async function POST(req: NextRequest) {
         );
       }
       // Same multi-session volume-discount tiers shown on the booking form
-      // (4+ sessions = 10% off, 8+ = 15% off), applied to the live rate of
-      // the first selected session — matches the frontend's own
-      // groupPricing calc exactly, just computed from verified data instead
-      // of trusted client input.
-      const liveBasePrice = liveWeeklyMatches[0]!.price;
-      const sessionCount = weeklySessions.length;
-      const volumeDiscountPct = sessionCount >= 8 ? 0.15 : sessionCount >= 4 ? 0.10 : 0;
-      const unitPrice = Math.round(liveBasePrice * (1 - volumeDiscountPct) * 100) / 100;
-      const perSessionPrice = Math.round(unitPrice * (totalParticipants || 1) * 100) / 100;
-      const weeklyTotal = Math.round(perSessionPrice * sessionCount * 100) / 100;
+      // (4+ sessions = 10% off, 8+ = 15% off) — but applied PER GROUP, not
+      // across the whole request. A submission can now span more than one
+      // group at once (e.g. a group skills session plus its companion
+      // pickup slot, cross-sold on the booking form), each with its own
+      // live rate and its own discount tier based on how many sessions of
+      // THAT group are in this request, never blended with another group's
+      // price or count.
+      const groupCounts = new Map<string, number>();
+      for (const s of weeklySessions) groupCounts.set(s.group, (groupCounts.get(s.group) || 0) + 1);
+      const perSessionPrices: number[] = weeklySessions.map((s: { group: string }, i: number) => {
+        const liveMatch = liveWeeklyMatches[i]!;
+        const groupCount = groupCounts.get(s.group)!;
+        const volumeDiscountPct = groupCount >= 8 ? 0.15 : groupCount >= 4 ? 0.10 : 0;
+        const unitPrice = Math.round(liveMatch.price * (1 - volumeDiscountPct) * 100) / 100;
+        return Math.round(unitPrice * (totalParticipants || 1) * 100) / 100;
+      });
+      const weeklyTotal = Math.round(perSessionPrices.reduce((sum: number, p: number) => sum + p, 0) * 100) / 100;
 
       // Account credit can cover the WHOLE booking, not just one session —
-      // split proportionally across every row (equal shares, since every row
-      // already carries the same flat perSessionPrice) so that cancelling
-      // any single session later refunds/credits exactly its own fair
-      // share, never more or less than what was actually applied to it.
+      // split proportionally across every row, weighted by each row's own
+      // price (so a cheaper pickup slot doesn't absorb the same credit
+      // share as a pricier skills session) — so that cancelling any single
+      // session later refunds/credits exactly its own fair share, never
+      // more or less than what was actually applied to it.
       let weeklyCreditApplied = 0;
       if (applyAccountCredit && weeklyTotal > 0) {
         const balance = await getAccountCreditBalance(email);
@@ -238,7 +246,7 @@ export async function POST(req: NextRequest) {
         if (weeklyCreditApplied > 0) await deductAccountCredit(email, weeklyCreditApplied);
       }
       const weeklyCreditShares = weeklyCreditApplied > 0
-        ? splitProportional(weeklyCreditApplied, weeklySessions.map(() => 1))
+        ? splitProportional(weeklyCreditApplied, perSessionPrices)
         : [];
 
       const amountToCharge = Math.max(0, weeklyTotal - weeklyCreditApplied);
@@ -262,7 +270,7 @@ export async function POST(req: NextRequest) {
           referralCode,
           isFree: false,
           smsConsent: !!smsConsent,
-          sessionPrice: perSessionPrice,
+          sessionPrice: perSessionPrices[i],
           ...(weeklyCreditShares[i] > 0 ? { appliedAccountCredit: weeklyCreditShares[i] } : {}),
           status: amountToCharge > 0 ? "pending_payment" : undefined,
           bookingBatchId,
@@ -298,15 +306,18 @@ export async function POST(req: NextRequest) {
       // Itemize per group (one line item each) at the FULL pre-credit price
       // — same "GroupName x3" shape shown on our own page — rather than one
       // opaque lump sum, so Stripe's own checkout page shows the same
-      // breakdown. Almost always just one group across every date, but a
-      // request could in principle mix groups.
-      const groupCounts = new Map<string, number>();
-      for (const s of weeklySessions) groupCounts.set(s.group, (groupCounts.get(s.group) || 0) + 1);
+      // breakdown. Each group's line item uses THAT group's own per-session
+      // price (which already reflects its own live rate and its own
+      // volume-discount tier), not a blended average across groups.
+      const groupSubtotals = new Map<string, number>();
+      weeklySessions.forEach((s: { group: string }, i: number) => {
+        groupSubtotals.set(s.group, Math.round(((groupSubtotals.get(s.group) || 0) + perSessionPrices[i]) * 100) / 100);
+      });
       const weeklyLineItems = Array.from(groupCounts.entries()).map(([group, count]) => ({
         price_data: {
           currency: "usd",
           product_data: { name: count > 1 ? `${group} x${count}` : group },
-          unit_amount: Math.round((perSessionPrice ?? 0) * count * 100),
+          unit_amount: Math.round((groupSubtotals.get(group) || 0) * 100),
         },
         quantity: 1,
       }));

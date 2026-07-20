@@ -276,6 +276,31 @@ function formatPrice(amount: number): string {
   return amount % 1 === 0 ? `$${amount}` : `$${amount.toFixed(2)}`;
 }
 
+// Groups weekly sessions by their own `group` name and prices each group
+// using its OWN volume-discount tier (10% at 4+, 15% at 8+ sessions of THAT
+// group) — never blended with another group's rate or count. A selection
+// can span more than one group at once (e.g. a group skills session plus
+// its cross-sold companion pickup slot), each with its own price entirely.
+function calcWeeklyGroupBreakdown(sessions: { group: string; price: number }[], kidCount: number) {
+  const byGroup = new Map<string, { count: number; basePrice: number }>();
+  for (const s of sessions) {
+    const existing = byGroup.get(s.group);
+    if (existing) existing.count++;
+    else byGroup.set(s.group, { count: 1, basePrice: s.price });
+  }
+  const items: { group: string; count: number; unitPrice: number; subtotal: number; savings: number }[] = [];
+  for (const [group, { count, basePrice }] of byGroup) {
+    const discountPct = count >= 8 ? 0.15 : count >= 4 ? 0.10 : 0;
+    const unitPrice = Math.round(basePrice * (1 - discountPct) * 100) / 100;
+    const subtotal = Math.round(unitPrice * count * kidCount * 100) / 100;
+    const fullSubtotal = Math.round(basePrice * count * kidCount * 100) / 100;
+    items.push({ group, count, unitPrice, subtotal, savings: Math.round((fullSubtotal - subtotal) * 100) / 100 });
+  }
+  const total = Math.round(items.reduce((sum, it) => sum + it.subtotal, 0) * 100) / 100;
+  const savings = Math.round(items.reduce((sum, it) => sum + it.savings, 0) * 100) / 100;
+  return { items, total, savings };
+}
+
 interface SelectedGroupSession {
   date: string;
   startTime: string;
@@ -1464,10 +1489,12 @@ export default function Home() {
   const creditEstimate = (() => {
     if (modal.type === "weekly") {
       const sessions = modal.selectedGroupSessions || [];
-      const total = (modal.weeklyTotalPrice || 0) * kids.length;
-      const groupLabel = sessions[0]?.group || "Group Session";
-      const items = [{ label: sessions.length > 1 ? `${groupLabel} x${sessions.length}` : groupLabel, amount: total }];
-      return { total, items };
+      const breakdown = calcWeeklyGroupBreakdown(sessions, kids.length);
+      const items = breakdown.items.map((it) => ({
+        label: it.count > 1 ? `${it.group} x${it.count}` : it.group,
+        amount: it.subtotal,
+      }));
+      return { total: breakdown.total, items };
     }
     if (modal.type === "camp") {
       const camp = camps[modal.sessionIndex];
@@ -1536,6 +1563,42 @@ export default function Home() {
     : 0;
   const orderRemainder = creditEstimate ? Math.max(0, Math.round((creditEstimate.total - creditAppliedToOrder) * 100) / 100) : 0;
   const orderTotalDue = Math.round((orderRemainder + (orderRemainder > 0 ? SERVICE_FEE : 0)) * 100) / 100;
+
+  // The companion pickup/skills session for whatever's currently selected in
+  // a weekly booking — one per date already selected, skipping any group
+  // that's already part of the selection (already added, or the primary
+  // group itself). Empty when there's no adjacent session at all, or it's
+  // already full.
+  const companionSessions = modal.type === "weekly"
+    ? (() => {
+        const sessions = modal.selectedGroupSessions || [];
+        if (sessions.length === 0) return [];
+        const selectedGroups = new Set(sessions.map((s) => s.group));
+        const found: WeeklySession[] = [];
+        for (const s of sessions) {
+          const match = findAdjacentSession(s);
+          if (!match || selectedGroups.has(match.group)) continue;
+          if (found.some((f) => f.date === match.date && f.group === match.group)) continue;
+          found.push(match);
+        }
+        return found;
+      })()
+    : [];
+  const companionBreakdown = calcWeeklyGroupBreakdown(companionSessions, kids.length);
+
+  function addCompanionSessions() {
+    if (companionSessions.length === 0) return;
+    setModal((prev) => {
+      if (!prev.selectedGroupSessions) return prev;
+      const newRows: SelectedGroupSession[] = companionSessions.map((c) => ({
+        date: c.date, startTime: c.startTime, endTime: c.endTime,
+        location: c.location, group: c.group, maxSpots: c.maxSpots, price: c.price, trainer: c.trainer,
+      }));
+      const newSessions = [...prev.selectedGroupSessions, ...newRows];
+      const breakdown = calcWeeklyGroupBreakdown(newSessions, 1);
+      return { ...prev, selectedGroupSessions: newSessions, weeklyTotalPrice: breakdown.total, weeklySavings: breakdown.savings };
+    });
+  }
 
   // Dates that have available private slots (for calendar highlights)
   // Server already filtered out past slots — just collect the dates.
@@ -1631,6 +1694,49 @@ export default function Home() {
   function getEnrollmentCount(s: WeeklySession): number {
     const key = `${s.date}|${s.startTime}|${s.group || ""}`;
     return groupEnrollment[key] || 0;
+  }
+
+  // A group's "base" name for relatedness checks — strip the "— Grades X-Y"
+  // suffix and the word "pickup" so "High School Boys Pickup" and
+  // "High School Boys — Grades 9-12" both reduce to "high school boys".
+  function groupBaseName(group: string): string {
+    return group.split("—")[0].replace(/pickup/i, "").trim().toLowerCase();
+  }
+
+  // Whether two groups are a genuine skills-session/pickup companion pair,
+  // rather than two unrelated groups that just happen to be scheduled
+  // back-to-back. Requires exactly one side to be a pickup group, and the
+  // other side's base name to overlap with it (e.g. pickup slot base name
+  // "high school boys" contains/overlaps the skills group's base name).
+  function isCompanionGroup(a: string, b: string): boolean {
+    const aIsPickup = a.toLowerCase().includes("pickup");
+    const bIsPickup = b.toLowerCase().includes("pickup");
+    if (aIsPickup === bIsPickup) return false;
+    const baseA = groupBaseName(a);
+    const baseB = groupBaseName(b);
+    if (!baseA || !baseB) return false;
+    return baseA.includes(baseB) || baseB.includes(baseA);
+  }
+
+  // The companion pickup or skills session for this one — a different but
+  // related group's session on the same date, at the same location,
+  // scheduled exactly back-to-back (its end = this one's start, or its
+  // start = this one's end). E.g. a group skills session immediately
+  // followed by its pickup slot, or vice versa. Skips a session that's
+  // already full.
+  function findAdjacentSession(session: { date: string; startTime: string; endTime: string; location: string; group: string }): WeeklySession | null {
+    const startMin = parseTime(session.startTime);
+    const endMin = parseTime(session.endTime);
+    const match = schedule.find((s) =>
+      s.date === session.date &&
+      s.location === session.location &&
+      s.group !== session.group &&
+      isCompanionGroup(s.group, session.group) &&
+      (parseTime(s.endTime) === startMin || parseTime(s.startTime) === endMin)
+    );
+    if (!match) return null;
+    const spotsLeft = match.maxSpots - getEnrollmentCount(match);
+    return spotsLeft > 0 ? match : null;
   }
 
   // Server already filters out past sessions — everything returned is upcoming.
@@ -3023,31 +3129,76 @@ export default function Home() {
             })()}
 
             {/* Weekly sessions list */}
-            {modal.type === "weekly" && modal.selectedGroupSessions && modal.selectedGroupSessions.length > 0 && !submitResult?.success && (
-              <div className="mt-3 rounded-lg border border-brown-700 bg-brown-800/50 p-3">
-                <p className="text-xs font-semibold text-brown-300 mb-2">Selected dates:</p>
-                <div className="space-y-1">
-                  {modal.selectedGroupSessions.map((s, i) => {
-                    return (
-                      <p key={i} className="text-xs text-brown-400">
-                        {fmtDateShort(s.date)} &bull; {s.startTime}-{s.endTime} &bull; <LocationLink location={s.location} />
-                      </p>
-                    );
-                  })}
+            {modal.type === "weekly" && modal.selectedGroupSessions && modal.selectedGroupSessions.length > 0 && !submitResult?.success && (() => {
+              const multiGroup = new Set(modal.selectedGroupSessions.map((s) => s.group)).size > 1;
+              const itemizedBreakdown = multiGroup ? calcWeeklyGroupBreakdown(modal.selectedGroupSessions, kids.length) : null;
+              return (
+                <div className="mt-3 rounded-lg border border-brown-700 bg-brown-800/50 p-3">
+                  <p className="text-xs font-semibold text-brown-300 mb-2">Selected dates:</p>
+                  <div className="space-y-1">
+                    {modal.selectedGroupSessions.map((s, i) => {
+                      return (
+                        <p key={i} className="text-xs text-brown-400">
+                          {multiGroup ? `${s.group} — ` : ""}
+                          {fmtDateShort(s.date)} &bull; {s.startTime}-{s.endTime} &bull; <LocationLink location={s.location} />
+                        </p>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-3 border-t border-brown-700 pt-2">
+                    {itemizedBreakdown && itemizedBreakdown.items.length > 1 && (
+                      <div className="mb-2 space-y-0.5">
+                        {itemizedBreakdown.items.map((it) => (
+                          <p key={it.group} className="text-xs text-brown-400 flex justify-between">
+                            <span>{it.group}{it.count > 1 ? ` x${it.count}` : ""}</span>
+                            <span>${it.subtotal.toFixed(2)}</span>
+                          </p>
+                        ))}
+                      </div>
+                    )}
+                    <p className="text-sm font-semibold text-mesa-accent">
+                      Total: ${(modal.weeklyTotalPrice || 0) * kids.length}
+                      {modal.weeklySavings && modal.weeklySavings > 0 ? (
+                        <span className="ml-2 text-xs text-green-400">
+                          (You save ${modal.weeklySavings * kids.length}!)
+                        </span>
+                      ) : null}
+                    </p>
+                    {kids.length > 1 && (
+                      <p className="text-xs text-brown-400 mt-0.5">${modal.weeklyTotalPrice} &times; {kids.length} athletes</p>
+                    )}
+                  </div>
                 </div>
-                <div className="mt-3 border-t border-brown-700 pt-2">
-                  <p className="text-sm font-semibold text-mesa-accent">
-                    Total: ${(modal.weeklyTotalPrice || 0) * kids.length}
-                    {modal.weeklySavings && modal.weeklySavings > 0 ? (
-                      <span className="ml-2 text-xs text-green-400">
-                        (You save ${modal.weeklySavings * kids.length}!)
-                      </span>
-                    ) : null}
-                  </p>
-                  {kids.length > 1 && (
-                    <p className="text-xs text-brown-400 mt-0.5">${modal.weeklyTotalPrice} &times; {kids.length} athletes</p>
-                  )}
-                </div>
+              );
+            })()}
+
+            {/* Cross-sell: an adjacent pickup/skills session right before or after this one */}
+            {modal.type === "weekly" && companionSessions.length > 0 && !submitResult?.success && (
+              <div className="mt-3 rounded-lg border-2 border-mesa-accent bg-mesa-accent/10 p-3">
+                <p className="text-sm font-bold text-mesa-accent">
+                  {companionSessions[0].group.toLowerCase().includes("pickup")
+                    ? "Also sign up for Pickup after your session?"
+                    : `Sign up for ${companionSessions[0].group} before Pickup?`}
+                </p>
+                <p className="mt-1 text-xs font-bold text-brown-100">
+                  {companionSessions[0].group} &bull; {companionSessions[0].startTime}-{companionSessions[0].endTime} &bull; <LocationLink location={companionSessions[0].location} />
+                  {companionSessions.length > 1 ? ` — ${companionSessions.length} sessions` : ""}
+                </p>
+                <p className="mt-1 text-sm font-bold text-white">
+                  +${companionBreakdown.total.toFixed(2)}
+                  {kids.length > 1 || companionSessions.length > 1 ? (
+                    <span className="ml-1 text-xs font-normal text-brown-300">
+                      (${companionSessions[0].price}{companionSessions.length > 1 ? ` × ${companionSessions.length} sessions` : ""}{kids.length > 1 ? ` × ${kids.length} athletes` : ""})
+                    </span>
+                  ) : null}
+                </p>
+                <button
+                  type="button"
+                  onClick={addCompanionSessions}
+                  className="mt-2 rounded bg-mesa-accent px-3 py-1.5 text-xs font-bold text-mesa-dark hover:opacity-90"
+                >
+                  Add to booking — ${companionBreakdown.total.toFixed(2)}
+                </button>
               </div>
             )}
 
