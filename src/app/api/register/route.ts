@@ -56,6 +56,22 @@ function splitProportional(total: number, weights: number[]): number[] {
   });
 }
 
+// A one-time, ad-hoc Stripe coupon so Checkout's own page shows the account
+// credit as a real line item deduction — "Account Credit -$X" — rather than
+// baking it invisibly into a single reduced total. Line items keep their
+// full, undiscounted prices; Stripe applies this against the whole order
+// total, landing on the exact same final amount either way.
+async function buildCreditDiscount(stripe: ReturnType<typeof getStripe>, creditApplied: number): Promise<{ coupon: string }[] | undefined> {
+  if (creditApplied <= 0) return undefined;
+  const coupon = await stripe.coupons.create({
+    amount_off: Math.round(creditApplied * 100),
+    currency: "usd",
+    duration: "once",
+    name: "Account Credit",
+  });
+  return [{ coupon: coupon.id }];
+}
+
 async function allocatePackageCoverage(email: string, dates: string[], kidCount: number): Promise<Array<{ covered: boolean; packageId: string | null }>> {
   if (kidCount >= 4) {
     return dates.map(() => ({ covered: false, packageId: null }));
@@ -256,8 +272,23 @@ export async function POST(req: NextRequest) {
       // Real money is due — send them to Stripe instead of confirming yet.
       const stripe = getStripe();
       const origin = req.nextUrl.origin;
-      const isPickupBooking = weeklySessions[0]?.group?.toLowerCase().includes("pickup");
-      const groupLabel = weeklySessions[0]?.group || (isPickupBooking ? "Pickup" : "Group");
+
+      // Itemize per group (one line item each) at the FULL pre-credit price
+      // — same "GroupName x3" shape shown on our own page — rather than one
+      // opaque lump sum, so Stripe's own checkout page shows the same
+      // breakdown. Almost always just one group across every date, but a
+      // request could in principle mix groups.
+      const groupCounts = new Map<string, number>();
+      for (const s of weeklySessions) groupCounts.set(s.group, (groupCounts.get(s.group) || 0) + 1);
+      const weeklyLineItems = Array.from(groupCounts.entries()).map(([group, count]) => ({
+        price_data: {
+          currency: "usd",
+          product_data: { name: count > 1 ? `${group} x${count}` : group },
+          unit_amount: Math.round((perSessionPrice ?? 0) * count * 100),
+        },
+        quantity: 1,
+      }));
+
       const session = await stripe.checkout.sessions.create({
         mode: "payment",
         payment_method_types: ["card"],
@@ -267,6 +298,7 @@ export async function POST(req: NextRequest) {
         payment_intent_data: { setup_future_usage: "off_session" },
         customer_email: email,
         client_reference_id: bookingBatchId,
+        discounts: await buildCreditDiscount(stripe, weeklyCreditApplied),
         metadata: {
           booking_batch_id: bookingBatchId,
           referrer_email: weeklyReferrer?.email || "",
@@ -275,14 +307,7 @@ export async function POST(req: NextRequest) {
           total_price: String(weeklyTotal),
         },
         line_items: [
-          {
-            price_data: {
-              currency: "usd",
-              product_data: { name: `${groupLabel} — ${weeklySessions.length} session${weeklySessions.length !== 1 ? "s" : ""}` },
-              unit_amount: Math.round(amountToCharge * 100),
-            },
-            quantity: 1,
-          },
+          ...weeklyLineItems,
           {
             price_data: {
               currency: "usd",
@@ -368,17 +393,15 @@ export async function POST(req: NextRequest) {
       const firstDayPrice = isFullCamp ? campTotalNum : dropInDayPrice(0, campTotalNum, campSessions.length);
 
       // Account credit can cover the whole registration (up to the full
-      // total), not just one day. Full camp keeps the existing convention of
-      // recording it all on the first day's row — the whole-group cancel
-      // path already aggregates credit across every row regardless of which
-      // one carries it, and cancelling one day while others remain
-      // deliberately leaves it "stranded" there until the group is
-      // eventually cancelled (unchanged, pre-existing behavior). Drop-in
-      // days are typically cancelled independently through the plain
-      // per-row cancel path though, so credit there is split proportionally
-      // across every selected day up front, the same way each day's own
-      // price already is — otherwise cancelling just one day on its own
-      // could strand or double-count credit actually spread across several.
+      // total), not just one day — split evenly across every day (full camp
+      // or drop-in alike) the same way each day's own price is already
+      // split, so cancelling any single day always refunds/credits exactly
+      // its own fair share right away rather than only whichever day
+      // happened to hold it all. This is safe for a full-camp day cancelled
+      // while others remain: cancelRegistration zeroes applied_account_credit
+      // on the cancelled row specifically so the whole-group cancel path's
+      // later aggregate (which sums applied_account_credit across every row
+      // still in the group) never double-counts a share already refunded.
       let campCreditApplied = 0;
       if (applyAccountCredit) {
         const balance = await getAccountCreditBalance(email);
@@ -391,9 +414,7 @@ export async function POST(req: NextRequest) {
 
       for (const [i, session] of campSessions.entries()) {
         const dayPrice = isFullCamp ? campTotalNum : dropInDayPrice(i, campTotalNum, campSessions.length);
-        const dayCredit = campCreditApplied > 0
-          ? (isFullCamp ? (i === 0 ? campCreditApplied : 0) : dropInDayPrice(i, campCreditApplied, campSessions.length))
-          : 0;
+        const dayCredit = campCreditApplied > 0 ? dropInDayPrice(i, campCreditApplied, campSessions.length) : 0;
         await addRegistrationWithRewards({
           parentName,
           email,
@@ -457,6 +478,7 @@ export async function POST(req: NextRequest) {
         payment_intent_data: { setup_future_usage: "off_session" },
         customer_email: email,
         client_reference_id: bookingBatchId,
+        discounts: await buildCreditDiscount(stripe, campCreditApplied),
         metadata: {
           booking_batch_id: bookingBatchId,
           referrer_email: campReferrer?.email || "",
@@ -469,8 +491,12 @@ export async function POST(req: NextRequest) {
           {
             price_data: {
               currency: "usd",
-              product_data: { name: `${campNameLine} — ${campSessions.length} day${campSessions.length !== 1 ? "s" : ""}` },
-              unit_amount: Math.round(amountToCharge * 100),
+              product_data: { name: campSessions.length > 1 ? `${campNameLine} x${campSessions.length} days` : campNameLine },
+              // Full pre-credit total — the discount coupon above (if any)
+              // handles the credit deduction, same as the weekly/private
+              // checkouts, so Stripe's own page itemizes it the same way
+              // our form does instead of baking it into one reduced number.
+              unit_amount: Math.round(campTotalNum * 100),
             },
             quantity: 1,
           },
@@ -724,6 +750,7 @@ export async function POST(req: NextRequest) {
         payment_intent_data: { setup_future_usage: "off_session" },
         customer_email: email,
         client_reference_id: bookingBatchId,
+        discounts: await buildCreditDiscount(stripe, accountCreditApplied),
         metadata: {
           booking_batch_id: bookingBatchId,
           is_first_time: String(isFirstTime),
@@ -735,8 +762,11 @@ export async function POST(req: NextRequest) {
           {
             price_data: {
               currency: "usd",
-              product_data: { name: `${uncoveredSessions.length} private session${uncoveredSessions.length !== 1 ? "s" : ""}` },
-              unit_amount: Math.round(amountToCharge * 100),
+              product_data: { name: uncoveredSessions.length > 1 ? `Private Session x${uncoveredSessions.length}` : "Private Session" },
+              // Full pre-credit total (still net of any referral/first-time
+              // discount, which isn't shown as its own line) — the discount
+              // coupon above handles the credit deduction as its own line.
+              unit_amount: Math.round(totalBeforeCredit * 100),
             },
             quantity: 1,
           },
@@ -882,6 +912,7 @@ export async function POST(req: NextRequest) {
         payment_intent_data: { setup_future_usage: "off_session" },
         customer_email: email,
         client_reference_id: bookingBatchId,
+        discounts: await buildCreditDiscount(stripe, accountCreditApplied),
         // The webhook runs in a separate request with no access to this
         // request's body, so anything the finalize step needs beyond what's
         // already stored on the pending row (referrer info, first-time vs
@@ -899,7 +930,10 @@ export async function POST(req: NextRequest) {
             price_data: {
               currency: "usd",
               product_data: { name: plainSessionDetails || "Mesa Basketball Training Session" },
-              unit_amount: Math.round(amountToCharge * 100),
+              // Full pre-credit price (still net of any referral/first-time
+              // discount) — the discount coupon above handles the credit
+              // deduction as its own line on Stripe's own page.
+              unit_amount: Math.round(effectivePrice * 100),
             },
             quantity: 1,
           },

@@ -4,7 +4,7 @@ import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import Image from "next/image";
 import { authClient, ADMIN_EMAIL } from "@/lib/auth";
 import LandingNav from "@/app/LandingNav";
-import { SERVICE_FEE_LABEL } from "@/lib/pricing";
+import { SERVICE_FEE, SERVICE_FEE_LABEL } from "@/lib/pricing";
 
 const LOCATION_LINKS: Record<string, { name: string; url: string }> = {
   "St. Pauls": { name: "St. Paul's Cathedral", url: "https://share.google/kgiqMxAj2iAFEAGI6" },
@@ -631,6 +631,7 @@ export default function Home() {
   const [useReferralCredit, setUseReferralCredit] = useState(false);
   const [accountCreditBalance, setAccountCreditBalance] = useState<number | null>(null);
   const [applyAccountCredit, setApplyAccountCredit] = useState(true);
+  const [packageSessionsRemaining, setPackageSessionsRemaining] = useState(0);
 
   // Load hideUpsell from localStorage
   useEffect(() => {
@@ -662,6 +663,29 @@ export default function Home() {
       .then((d) => setAccountCreditBalance(d.balance ?? 0))
       .catch(() => setAccountCreditBalance(0));
   }, [email, modal.open]);
+
+  // Fetch the client's active monthly package (if any) for the booked
+  // date's month — a package-covered private session never needs Stripe at
+  // all, regardless of credit, so the button/fee copy needs to know this
+  // too, not just the account credit balance. Packages never cover
+  // group-private (4+ kid) sessions, so those don't bother fetching one.
+  useEffect(() => {
+    const isPrivate = modal.type === "private" || modal.type === "group-private";
+    const effectiveGroup = isGroupRate || kids.length >= 4;
+    if (!modal.open || !isPrivate || effectiveGroup || !modal.bookedDate) { setPackageSessionsRemaining(0); return; }
+    const trimmed = email.trim().toLowerCase();
+    if (!trimmed || !trimmed.includes("@")) { setPackageSessionsRemaining(0); return; }
+    const d = new Date(modal.bookedDate);
+    if (isNaN(d.getTime())) { setPackageSessionsRemaining(0); return; }
+    const monthYear = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    fetch(`/api/packages?email=${encodeURIComponent(trimmed)}&monthYear=${monthYear}`)
+      .then((r) => r.json())
+      .then((d) => {
+        const pkg = d.package;
+        setPackageSessionsRemaining(pkg ? Math.max(0, pkg.package_type - pkg.sessions_used) : 0);
+      })
+      .catch(() => setPackageSessionsRemaining(0));
+  }, [email, modal.open, modal.type, modal.bookedDate, isGroupRate, kids.length]);
 
 
   const [recurringWeeks, setRecurringWeeks] = useState<
@@ -1439,8 +1463,11 @@ export default function Home() {
   // row rather than capping it at just one.
   const creditEstimate = (() => {
     if (modal.type === "weekly") {
+      const sessions = modal.selectedGroupSessions || [];
       const total = (modal.weeklyTotalPrice || 0) * kids.length;
-      return { total };
+      const groupLabel = sessions[0]?.group || "Group Session";
+      const items = [{ label: sessions.length > 1 ? `${groupLabel} x${sessions.length}` : groupLabel, amount: total }];
+      return { total, items };
     }
     if (modal.type === "camp") {
       const camp = camps[modal.sessionIndex];
@@ -1448,7 +1475,9 @@ export default function Home() {
       const priceStr = calcCampPrice(campSelectedDays.size, camp.campDays.length, camp, kids.length);
       if (!priceStr) return null;
       const total = parseInt(priceStr.replace(/\D/g, "")) || 0;
-      return { total };
+      const days = campSelectedDays.size;
+      const items = [{ label: days > 1 ? `${camp.name} x${days} days` : camp.name, amount: total }];
+      return { total, items };
     }
     if (modal.type === "private" || modal.type === "group-private") {
       const match = modal.sessionDetails.match(/\((\d+) min\)/);
@@ -1460,44 +1489,53 @@ export default function Home() {
       const extraPrice = upsellExtra > 0 ? getPrivatePrice(upsellExtra, kidCount) * 0.5 : 0;
       const totalPrice = basePrice + extraPrice;
       const numDates = 1 + recurringWeeks.filter((w) => w.selected).length;
+      // Package-covered dates need no payment at all — subtract them before
+      // anything else (server allocates package coverage the same way,
+      // first-come-first-served against the dates in order).
+      const packageCoveredCount = effectiveGroup ? 0 : Math.min(numDates, packageSessionsRemaining);
+      const payableDates = numDates - packageCoveredCount;
+      const items: { label: string; amount: number }[] = [];
+      if (packageCoveredCount > 0) {
+        items.push({ label: `Private Session${packageCoveredCount > 1 ? ` x${packageCoveredCount}` : ""} (covered by package)`, amount: 0 });
+      }
+      if (payableDates === 0) return { total: 0, items };
       if (numDates > 1) {
         // Recurring booking: server prices/discounts each date individually
         // (and only ever discounts the very first one for a first-time-free
         // client), which can't be predicted here — use the plain undiscounted
-        // total across all dates instead. That's never an underestimate, so
-        // this only ever errs toward showing the Stripe-bound copy, not
-        // wrongly promising "no charge" for a booking that still needs one.
-        const total = Math.round(totalPrice * numDates * 100) / 100;
-        return { total };
+        // total across all payable dates instead. That's never an
+        // underestimate, so this only ever errs toward showing the
+        // Stripe-bound copy, not wrongly promising "no charge" for a
+        // booking that still needs one.
+        const total = Math.round(totalPrice * payableDates * 100) / 100;
+        items.push({ label: payableDates > 1 ? `Private Session x${payableDates}` : "Private Session", amount: total });
+        return { total, items };
       }
       const total = useReferralCredit ? Math.round(totalPrice * 0.5 * 100) / 100 : totalPrice;
-      return { total };
+      const upsellNote = upsellExtra > 0 ? ` (+${upsellExtra} min bonus)` : "";
+      items.push({ label: `Private Session${upsellNote}${useReferralCredit ? " — referral credit applied" : ""}`, amount: total });
+      return { total, items };
     }
     return null;
   })();
 
-  const willCoverWithCredit = accountCreditBalance !== null && accountCreditBalance > 0 && applyAccountCredit
-    && creditEstimate !== null && creditEstimate.total > 0
-    && accountCreditBalance >= creditEstimate.total;
+  // True when nothing will need to go to Stripe at all — either the total
+  // (already net of any package-covered dates) is $0 outright, or account
+  // credit covers whatever's left of it.
+  const noPaymentNeeded = creditEstimate !== null && (
+    creditEstimate.total === 0
+    || (accountCreditBalance !== null && accountCreditBalance > 0 && applyAccountCredit && accountCreditBalance >= creditEstimate.total)
+  );
 
-  const priceLabel = (() => {
-    if (modal.type !== "private" && modal.type !== "group-private") return null;
-    const match = modal.sessionDetails.match(/\((\d+) min\)/);
-    if (!match) return null;
-    const baseDuration = parseInt(match[1]);
-    const totalDuration = baseDuration + upsellExtra;
-    const effectiveGroup = isGroupRate || kids.length >= 4;
-    const kidCount = effectiveGroup ? 4 : kids.length;
-    // Base price + discounted extra
-    const basePrice = getPrivatePrice(baseDuration, kidCount);
-    const extraPrice = upsellExtra > 0 ? getPrivatePrice(upsellExtra, kidCount) * 0.5 : 0;
-    const totalPrice = basePrice + extraPrice;
-    const tier = effectiveGroup ? "Group Private — 4+ participants" : "Private — up to 3 participants";
-    const timeNote = totalDuration !== 60 ? ` (${totalDuration} min session)` : "";
-    const savingsNote = upsellExtra > 0 ? ` — includes ${upsellExtra} min bonus at 50% off` : "";
-    const feeNote = willCoverWithCredit ? "" : ` + ${SERVICE_FEE_LABEL} service fee (non-refundable)`;
-    return `${formatPrice(totalPrice)} (${tier})${timeNote}${savingsNote}${feeNote}`;
-  })();
+  // How much credit actually applies (capped at the total — the rest, if
+  // any, stays in their balance for next time), and what's left after that,
+  // plus the fee (only when something still needs to be charged). Mirrors
+  // exactly what /api/register will compute server-side.
+  const creditAppliedToOrder = creditEstimate && accountCreditBalance !== null && accountCreditBalance > 0 && applyAccountCredit
+    ? Math.min(accountCreditBalance, creditEstimate.total)
+    : 0;
+  const orderRemainder = creditEstimate ? Math.max(0, Math.round((creditEstimate.total - creditAppliedToOrder) * 100) / 100) : 0;
+  const orderTotalDue = Math.round((orderRemainder + (orderRemainder > 0 ? SERVICE_FEE : 0)) * 100) / 100;
 
   // Dates that have available private slots (for calendar highlights)
   // Server already filtered out past slots — just collect the dates.
@@ -2975,14 +3013,6 @@ export default function Home() {
                           Drop-in rate: {fmtPrice(camp.dropInPrice)}/day &bull; All {totalDays} days: {earlyBird && camp.earlyBirdPrice ? `${camp.earlyBirdPrice} (EB) / ${camp.price}` : camp.price}
                         </p>
                       )}
-                      {willCoverWithCredit ? (
-                        <p className="text-xs text-blue-400 mt-1">Fully covered by your account credit — no charge</p>
-                      ) : (
-                        <>
-                          <p className="text-xs text-brown-400 mt-0.5">+ {SERVICE_FEE_LABEL} service fee (non-refundable)</p>
-                          <p className="text-xs text-brown-500 mt-1">Payment due upon registration — pay securely by card via Stripe</p>
-                        </>
-                      )}
                     </div>
                   )}
                   {selectedCount === 0 && (
@@ -3016,14 +3046,6 @@ export default function Home() {
                   </p>
                   {kids.length > 1 && (
                     <p className="text-xs text-brown-400 mt-0.5">${modal.weeklyTotalPrice} &times; {kids.length} athletes</p>
-                  )}
-                  {willCoverWithCredit ? (
-                    <p className="text-xs text-blue-400 mt-0.5">Fully covered by your account credit — no charge</p>
-                  ) : (
-                    <>
-                      <p className="text-xs text-brown-400 mt-0.5">+ {SERVICE_FEE_LABEL} service fee (non-refundable)</p>
-                      <p className="text-xs text-brown-500 mt-0.5">Payment due upon registration — pay securely by card via Stripe</p>
-                    </>
                   )}
                 </div>
               </div>
@@ -3321,11 +3343,6 @@ export default function Home() {
                         <span className="ml-1 text-green-400"> — you save ${(modal.weeklySavings || 0) * kids.length}!</span>
                       )}
                     </p>
-                    {willCoverWithCredit ? (
-                      <p className="mt-0.5 text-xs text-blue-400">Fully covered by your account credit — no charge</p>
-                    ) : (
-                      <p className="mt-0.5 text-xs text-brown-500">+ {SERVICE_FEE_LABEL} service fee (non-refundable)</p>
-                    )}
                   </div>
                 )}
 
@@ -3463,8 +3480,31 @@ export default function Home() {
                   </div>
                 )}
 
-                {priceLabel && (
-                  <p className="rounded-lg bg-brown-800 px-3 py-2 text-sm text-mesa-accent">{priceLabel}</p>
+                {creditEstimate && creditEstimate.items.length > 0 && (
+                  <div className="rounded-lg bg-brown-800 px-4 py-3 text-sm space-y-1.5">
+                    {creditEstimate.items.map((item, i) => (
+                      <div key={i} className="flex items-center justify-between gap-3">
+                        <span className="text-brown-300">{item.label}</span>
+                        <span className="text-white shrink-0">{formatPrice(item.amount)}</span>
+                      </div>
+                    ))}
+                    {orderRemainder > 0 && (
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-brown-300">Service Fee</span>
+                        <span className="text-white shrink-0">{SERVICE_FEE_LABEL}</span>
+                      </div>
+                    )}
+                    {creditAppliedToOrder > 0 && (
+                      <div className="flex items-center justify-between gap-3 text-blue-400">
+                        <span>Account Credit</span>
+                        <span className="shrink-0">-{formatPrice(creditAppliedToOrder)}</span>
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between gap-3 border-t border-brown-700 pt-1.5 mt-1.5 font-semibold">
+                      <span className="text-white">Total Due</span>
+                      <span className="text-mesa-accent">{formatPrice(orderTotalDue)}</span>
+                    </div>
+                  </div>
                 )}
 
                 {submitResult && !submitResult.success && (
@@ -3493,7 +3533,9 @@ export default function Home() {
                   {submitting
                     ? "Submitting..."
                     : modal.type === "private" || modal.type === "group-private" || modal.type === "weekly" || modal.type === "camp"
-                      ? (willCoverWithCredit ? "Confirm Booking" : "Continue to Payment")
+                      ? (creditEstimate
+                          ? (noPaymentNeeded ? `Confirm Booking — $0 Due` : `Continue to Payment — ${formatPrice(orderTotalDue)} Due`)
+                          : (noPaymentNeeded ? "Confirm Booking" : "Continue to Payment"))
                       : "Confirm Registration"}
                 </button>
               </form>
@@ -3513,7 +3555,7 @@ export default function Home() {
               <button onClick={() => setPkgModal({ open: false, packageType: null })} className="text-2xl text-brown-400 hover:text-white">&times;</button>
             </div>
             <p className="mt-1 text-sm text-brown-400">
-              {pkgModal.packageType === 4 ? "$475" : "$900"} + {SERVICE_FEE_LABEL} service fee (non-refundable) — paid securely by card via Stripe
+              {pkgModal.packageType === 4 ? "$475" : "$900"} + {SERVICE_FEE_LABEL} service fee — paid securely by card via Stripe
             </p>
 
             {pkgResult?.success ? (
