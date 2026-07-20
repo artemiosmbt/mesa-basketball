@@ -984,8 +984,8 @@ export default function AdminPage() {
       }
     } else if (data.creditGranted > 0) {
       notes.push(`$${data.creditGranted} was credited to ${r.parent_name}'s account (new price is lower and they'd already paid).`);
-    } else if (data.amountDue > 0) {
-      notes.push(`$${data.amountDue} additional is now due from ${r.parent_name} (already paid at the old, lower price) — there's no auto-charge yet, so collect this manually.`);
+    } else if (data.autoChargedAmount > 0) {
+      notes.push(`$${data.autoChargedAmount} (+ service fee) was automatically charged to their card on file (new price is higher).`);
     }
     if (data.creditRefunded) {
       notes.push(`Their referral credit was refunded since it's no longer applied to this booking.`);
@@ -1834,7 +1834,7 @@ export default function AdminPage() {
                 </label>
               )}
               {rescheduleError && <p className="text-xs text-red-400 mt-2">{rescheduleError}</p>}
-              <p className="text-[11px] text-brown-500 mt-3">No late fee is charged — this updates the client&apos;s existing booking and notifies them by email/text.</p>
+              <p className="text-[11px] text-brown-500 mt-3">If the current session is within 24 hours, you&apos;ll be asked whether to waive or charge the late fee. If the new session costs more, the difference (or the fee remainder) is charged automatically to the card on file. The client will get an email/text about the change.</p>
               <div className="flex gap-3 mt-4">
                 <button onClick={reviewReschedule} disabled={!scheduleData} className="flex-1 rounded-lg bg-mesa-accent text-white text-sm font-semibold py-2 disabled:opacity-50">
                   Review Change

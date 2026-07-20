@@ -196,50 +196,52 @@ export async function POST(req: NextRequest) {
 
   const wasPaid = !!reg.is_paid || !!reg.stripe_payment_intent_id;
 
-  // Late + the admin chose to charge the fee: same policy a client-initiated
-  // late reschedule pays — 50% of what they paid for the OLD session is
-  // credited, then applied toward the new session's price. Unlike every
-  // other admin tool, any TRUE remainder beyond that credit is charged
-  // automatically to the card on file, right now, before anything else
-  // happens — the admin explicitly asked for this (parents don't reliably
-  // pay a "you still owe X" note on their own), and unlike a fully
-  // unattended flow, the admin is right here to see success or failure
-  // immediately. If there's no saved card to charge, or the charge fails
-  // (declined, expired, etc.), the whole reschedule is aborted before
+  // Nothing gets confirmed with money still owed — every dollar the client
+  // ends up owing after this reschedule is auto-charged to the card on file
+  // before anything changes, whether that's an on-time price increase (the
+  // whole delta) or a late reschedule's remainder after the 50% fee credit
+  // is applied. The admin is right here to see success or failure
+  // immediately, unlike every other flow in this codebase that deliberately
+  // avoids off-session charging. If there's no saved card, or the charge
+  // fails (declined, expired, etc.), the whole reschedule is aborted before
   // anything changes — the original session stays booked exactly as it
   // was, and it's on the admin to have the client sort out their card.
   let lateFeeCredited = 0;
   let lateFeeCreditApplied = 0;
-  let autoChargedAmount = 0;
-  let autoChargePaymentIntentId: string | undefined;
+  let amountToCharge = 0;
   if (wasPaid && chargeLateFee) {
     lateFeeCredited = Math.round(oldAmount * 0.5);
     lateFeeCreditApplied = Math.min(lateFeeCredited, newAmount);
-    const remainder = Math.max(0, Math.round((newAmount - lateFeeCreditApplied) * 100) / 100);
-    if (remainder > 0.005) {
-      const source = await resolveOffSessionPaymentSource(reg);
-      if (!source) {
-        return NextResponse.json(
-          { error: `No saved card found for ${reg.parent_name} to auto-charge the remaining $${remainder} — the reschedule was NOT applied. Choose "waive" instead, or have them update their payment method first.` },
-          { status: 402 }
-        );
-      }
-      const plainSessionDetails = newSessionDetails.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "").trim();
-      const chargeResult = await chargeSavedCardOffSession({
-        customerId: source.customerId,
-        paymentMethodId: source.paymentMethodId,
-        amountDollars: Math.round((remainder + SERVICE_FEE) * 100) / 100,
-        description: `Late reschedule remainder: ${plainSessionDetails || "Mesa Basketball Training Session"}`,
-      });
-      if (!chargeResult.success) {
-        return NextResponse.json(
-          { error: `Couldn't automatically charge the remaining $${remainder} (+ ${SERVICE_FEE_LABEL} fee) — ${chargeResult.reason} The reschedule was NOT applied; the original session is unchanged.` },
-          { status: 402 }
-        );
-      }
-      autoChargedAmount = remainder;
-      autoChargePaymentIntentId = chargeResult.paymentIntentId;
+    amountToCharge = Math.max(0, Math.round((newAmount - lateFeeCreditApplied) * 100) / 100);
+  } else if (wasPaid && priceDelta > 0) {
+    amountToCharge = priceDelta;
+  }
+
+  let autoChargedAmount = 0;
+  let autoChargePaymentIntentId: string | undefined;
+  if (amountToCharge > 0.005) {
+    const source = await resolveOffSessionPaymentSource(reg);
+    if (!source) {
+      return NextResponse.json(
+        { error: `No saved card found for ${reg.parent_name} to auto-charge the $${amountToCharge} owed — the reschedule was NOT applied. Have them update their payment method first${chargeLateFee ? ', or choose "waive" instead' : ""}.` },
+        { status: 402 }
+      );
     }
+    const plainSessionDetails = newSessionDetails.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "").trim();
+    const chargeResult = await chargeSavedCardOffSession({
+      customerId: source.customerId,
+      paymentMethodId: source.paymentMethodId,
+      amountDollars: Math.round((amountToCharge + SERVICE_FEE) * 100) / 100,
+      description: `Reschedule${chargeLateFee ? " (late fee remainder)" : ""}: ${plainSessionDetails || "Mesa Basketball Training Session"}`,
+    });
+    if (!chargeResult.success) {
+      return NextResponse.json(
+        { error: `Couldn't automatically charge the $${amountToCharge} owed (+ ${SERVICE_FEE_LABEL} fee) — ${chargeResult.reason} The reschedule was NOT applied; the original session is unchanged.` },
+        { status: 402 }
+      );
+    }
+    autoChargedAmount = amountToCharge;
+    autoChargePaymentIntentId = chargeResult.paymentIntentId;
   }
 
   const { error } = await supabase
@@ -279,19 +281,16 @@ export async function POST(req: NextRequest) {
   // charge — Stripe-paid rows never set is_paid, so checking that alone would
   // miss every paying client since Stripe went live.
   //
-  // On-time (or the admin chose to waive the fee): if the new amount owed is
-  // lower, credit the difference to their account for their next booking
-  // (same rule already used for partial camp-day cancellations elsewhere) —
-  // always account credit here, never a real Stripe refund, since this is a
-  // business-initiated change, not a client cancellation. If the new amount
-  // is higher, there's no charge triggered automatically — surface it in the
-  // response/notices instead so the admin can follow up.
-  //
-  // Late + charged: any remainder was already auto-charged above (or there
-  // wasn't one) — this only needs to actually grant/apply the 50% late-fee
-  // credit now that the reschedule (and any required charge) has succeeded.
+  // A price DECREASE always credits the difference to their account for
+  // their next booking (same rule already used for partial camp-day
+  // cancellations elsewhere) — always account credit here, never a real
+  // Stripe refund, since this is a business-initiated change, not a client
+  // cancellation. A price INCREASE (on-time or the late-fee remainder) was
+  // already auto-charged above, or the whole reschedule was blocked — so
+  // there's never anything left owed by the time this runs. This block only
+  // needs to actually grant/apply the 50% late-fee credit now that the
+  // reschedule (and any required charge) has succeeded.
   let creditGranted = 0;
-  let amountDue = 0;
   if (wasPaid && chargeLateFee) {
     if (lateFeeCredited > 0) {
       try {
@@ -312,8 +311,6 @@ export async function POST(req: NextRequest) {
     } catch (err) {
       console.error("Failed to grant account credit (admin reschedule):", err);
     }
-  } else if (wasPaid && priceDelta > 0) {
-    amountDue = priceDelta;
   }
 
   // Sync calendar. Private sessions are a single event tied to the booking;
@@ -380,8 +377,8 @@ export async function POST(req: NextRequest) {
       ? ""
       : creditGranted > 0
         ? `\n$${oldAmount} → $${newAmount}. $${creditGranted} credited to your account for your next booking.`
-        : amountDue > 0
-          ? `\n$${oldAmount} → $${newAmount}. $${amountDue} additional due.`
+        : autoChargedAmount > 0
+          ? `\n$${oldAmount} → $${newAmount}. $${Math.round((autoChargedAmount + SERVICE_FEE) * 100) / 100} ($${autoChargedAmount} + ${SERVICE_FEE_LABEL} fee) was charged to your card on file.`
           : priceDelta !== 0
             ? `\n$${oldAmount} → $${newAmount}.`
             : "";
@@ -420,8 +417,8 @@ export async function POST(req: NextRequest) {
         ? ""
         : creditGranted > 0
           ? `\n$${oldAmount} -> $${newAmount}: $${creditGranted} credited to their account (already paid)`
-          : amountDue > 0
-            ? `\n$${oldAmount} -> $${newAmount}: $${amountDue} additional now due (already paid at the old price)`
+          : autoChargedAmount > 0
+            ? `\n$${oldAmount} -> $${newAmount}: $${Math.round((autoChargedAmount + SERVICE_FEE) * 100) / 100} auto-charged to their card on file (${autoChargePaymentIntentId}).`
             : priceDelta !== 0
               ? `\nPrice: $${oldAmount} -> $${newAmount}`
               : "";
@@ -441,7 +438,6 @@ export async function POST(req: NextRequest) {
     newAmount,
     priceDelta,
     creditGranted,
-    amountDue,
     creditRefunded,
     newIsFree,
     newUsedReferralCredit,
