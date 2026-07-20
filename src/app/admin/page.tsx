@@ -979,8 +979,8 @@ export default function AdminPage() {
     const notes: string[] = [];
     if (data.lateFeeCharged) {
       notes.push(`Late fee charged: $${data.lateFeeCredited} credited to ${r.parent_name}'s account (50% of what they paid)${data.lateFeeCreditApplied > 0 ? `, $${data.lateFeeCreditApplied} of it applied to the new session` : ""}.`);
-      if (data.amountDue > 0) {
-        notes.push(`$${data.amountDue} additional is now due — there's no auto-charge yet, so collect this manually.`);
+      if (data.autoChargedAmount > 0) {
+        notes.push(`$${data.autoChargedAmount} (+ service fee) was automatically charged to their card on file to cover the rest.`);
       }
     } else if (data.creditGranted > 0) {
       notes.push(`$${data.creditGranted} was credited to ${r.parent_name}'s account (new price is lower and they'd already paid).`);

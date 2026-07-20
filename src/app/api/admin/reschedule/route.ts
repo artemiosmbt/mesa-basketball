@@ -10,7 +10,8 @@ import { sendRescheduleNotification } from "@/lib/email";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import { getWeeklySchedule } from "@/lib/sheets";
 import { addAccountCredit, deductAccountCredit, addReferralCredit } from "@/lib/supabase";
-import { isLateAction } from "@/lib/booking-finalize";
+import { isLateAction, resolveOffSessionPaymentSource, chargeSavedCardOffSession } from "@/lib/booking-finalize";
+import { SERVICE_FEE, SERVICE_FEE_LABEL } from "@/lib/pricing";
 
 async function verifyAdmin(req: NextRequest) {
   const token = req.headers.get("authorization")?.replace("Bearer ", "");
@@ -193,6 +194,54 @@ export async function POST(req: NextRequest) {
   const newAmount = newFullPrice !== undefined ? Math.max(0, effectiveAmount(newFullPrice, newIsFree, isNewPrivate) - appliedCredit) : oldAmount;
   const priceDelta = newFullPrice !== undefined ? newAmount - oldAmount : 0;
 
+  const wasPaid = !!reg.is_paid || !!reg.stripe_payment_intent_id;
+
+  // Late + the admin chose to charge the fee: same policy a client-initiated
+  // late reschedule pays — 50% of what they paid for the OLD session is
+  // credited, then applied toward the new session's price. Unlike every
+  // other admin tool, any TRUE remainder beyond that credit is charged
+  // automatically to the card on file, right now, before anything else
+  // happens — the admin explicitly asked for this (parents don't reliably
+  // pay a "you still owe X" note on their own), and unlike a fully
+  // unattended flow, the admin is right here to see success or failure
+  // immediately. If there's no saved card to charge, or the charge fails
+  // (declined, expired, etc.), the whole reschedule is aborted before
+  // anything changes — the original session stays booked exactly as it
+  // was, and it's on the admin to have the client sort out their card.
+  let lateFeeCredited = 0;
+  let lateFeeCreditApplied = 0;
+  let autoChargedAmount = 0;
+  let autoChargePaymentIntentId: string | undefined;
+  if (wasPaid && chargeLateFee) {
+    lateFeeCredited = Math.round(oldAmount * 0.5);
+    lateFeeCreditApplied = Math.min(lateFeeCredited, newAmount);
+    const remainder = Math.max(0, Math.round((newAmount - lateFeeCreditApplied) * 100) / 100);
+    if (remainder > 0.005) {
+      const source = await resolveOffSessionPaymentSource(reg);
+      if (!source) {
+        return NextResponse.json(
+          { error: `No saved card found for ${reg.parent_name} to auto-charge the remaining $${remainder} — the reschedule was NOT applied. Choose "waive" instead, or have them update their payment method first.` },
+          { status: 402 }
+        );
+      }
+      const plainSessionDetails = newSessionDetails.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "").trim();
+      const chargeResult = await chargeSavedCardOffSession({
+        customerId: source.customerId,
+        paymentMethodId: source.paymentMethodId,
+        amountDollars: Math.round((remainder + SERVICE_FEE) * 100) / 100,
+        description: `Late reschedule remainder: ${plainSessionDetails || "Mesa Basketball Training Session"}`,
+      });
+      if (!chargeResult.success) {
+        return NextResponse.json(
+          { error: `Couldn't automatically charge the remaining $${remainder} (+ ${SERVICE_FEE_LABEL} fee) — ${chargeResult.reason} The reschedule was NOT applied; the original session is unchanged.` },
+          { status: 402 }
+        );
+      }
+      autoChargedAmount = remainder;
+      autoChargePaymentIntentId = chargeResult.paymentIntentId;
+    }
+  }
+
   const { error } = await supabase
     .from("registrations")
     .update({
@@ -238,35 +287,24 @@ export async function POST(req: NextRequest) {
   // is higher, there's no charge triggered automatically — surface it in the
   // response/notices instead so the admin can follow up.
   //
-  // Late + the admin chose to charge the fee: same policy a client-initiated
-  // late reschedule pays — 50% of what they paid for the OLD session is
-  // credited, then immediately applied toward the new session's price
-  // (rather than sitting unused), and only any true remainder is surfaced as
-  // still owed. There's no automatic off-session Stripe charge for that
-  // remainder — same reasoning as everywhere else admin tools don't charge
-  // a card directly: nobody's present to fix it if it fails. The admin
-  // follows up for that piece, same as any other price-increase amountDue.
-  const wasPaid = !!reg.is_paid || !!reg.stripe_payment_intent_id;
+  // Late + charged: any remainder was already auto-charged above (or there
+  // wasn't one) — this only needs to actually grant/apply the 50% late-fee
+  // credit now that the reschedule (and any required charge) has succeeded.
   let creditGranted = 0;
-  let lateFeeCredited = 0;
-  let lateFeeCreditApplied = 0;
   let amountDue = 0;
   if (wasPaid && chargeLateFee) {
-    lateFeeCredited = Math.round(oldAmount * 0.5);
     if (lateFeeCredited > 0) {
       try {
         await addAccountCredit(reg.email, lateFeeCredited);
       } catch (err) {
         console.error("Failed to grant late-fee account credit (admin reschedule):", err);
       }
-      lateFeeCreditApplied = Math.min(lateFeeCredited, newAmount);
       if (lateFeeCreditApplied > 0) {
         const applied = await deductAccountCredit(reg.email, lateFeeCreditApplied).catch(() => false);
         if (!applied) lateFeeCreditApplied = 0; // couldn't apply it (shouldn't happen right after crediting it) — leave it in their balance instead
       }
     }
     creditGranted = lateFeeCredited - lateFeeCreditApplied;
-    amountDue = Math.max(0, Math.round((newAmount - lateFeeCreditApplied) * 100) / 100);
   } else if (wasPaid && priceDelta < 0) {
     try {
       await addAccountCredit(reg.email, -priceDelta);
@@ -337,7 +375,7 @@ export async function POST(req: NextRequest) {
   // part of the shared template) since only this admin flow needs to say
   // "no change" vs "credited" vs "due".
   const priceNote = chargeLateFee
-    ? `\nLate reschedule fee: $${lateFeeCredited} (50% of what you paid) credited to your account${lateFeeCreditApplied > 0 ? `, $${lateFeeCreditApplied} applied to your new session` : ""}.${amountDue > 0 ? ` $${amountDue} additional due.` : ""}`
+    ? `\nLate reschedule fee: $${lateFeeCredited} (50% of what you paid) credited to your account${lateFeeCreditApplied > 0 ? `, $${lateFeeCreditApplied} applied to your new session` : ""}.${autoChargedAmount > 0 ? ` $${Math.round((autoChargedAmount + SERVICE_FEE) * 100) / 100} ($${autoChargedAmount} + ${SERVICE_FEE_LABEL} fee) was charged to your card on file to cover the rest.` : ""}`
     : newFullPrice === undefined
       ? ""
       : creditGranted > 0
@@ -367,6 +405,7 @@ export async function POST(req: NextRequest) {
       isLateReschedule: chargeLateFee,
       lateFeeCredited: chargeLateFee ? lateFeeCredited : undefined,
       lateFeeCreditApplied: chargeLateFee ? lateFeeCreditApplied : undefined,
+      priceAdjustment: autoChargedAmount > 0 ? { kind: "charge", amount: autoChargedAmount } : undefined,
       newTrainer: resolvedTrainer,
     });
     if (reg.sms_consent && reg.phone) {
@@ -376,7 +415,7 @@ export async function POST(req: NextRequest) {
       );
     }
     const adminPriceNote = chargeLateFee
-      ? `\nLate fee charged: $${lateFeeCredited} credited (50% of $${oldAmount} paid)${lateFeeCreditApplied > 0 ? `, $${lateFeeCreditApplied} applied to new session ($${newAmount})` : ""}.${amountDue > 0 ? ` $${amountDue} additional now due.` : ""}`
+      ? `\nLate fee charged: $${lateFeeCredited} credited (50% of $${oldAmount} paid)${lateFeeCreditApplied > 0 ? `, $${lateFeeCreditApplied} applied to new session ($${newAmount})` : ""}.${autoChargedAmount > 0 ? ` $${Math.round((autoChargedAmount + SERVICE_FEE) * 100) / 100} auto-charged to their card on file (${autoChargePaymentIntentId}).` : ""}`
       : newFullPrice === undefined
         ? ""
         : creditGranted > 0
@@ -411,5 +450,6 @@ export async function POST(req: NextRequest) {
     lateFeeCharged: chargeLateFee,
     lateFeeCredited: chargeLateFee ? lateFeeCredited : undefined,
     lateFeeCreditApplied: chargeLateFee ? lateFeeCreditApplied : undefined,
+    autoChargedAmount: autoChargedAmount > 0 ? autoChargedAmount : undefined,
   });
 }

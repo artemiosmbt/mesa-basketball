@@ -233,6 +233,9 @@ export async function POST(req: NextRequest) {
         mode: "payment",
         payment_method_types: ["card"],
         customer_creation: "always",
+        // Save the card for a legitimate future off-session charge — used
+        // when an admin charges a late-reschedule remainder automatically.
+        payment_intent_data: { setup_future_usage: "off_session" },
         customer_email: email,
         client_reference_id: bookingBatchId,
         metadata: {
@@ -409,6 +412,9 @@ export async function POST(req: NextRequest) {
         mode: "payment",
         payment_method_types: ["card"],
         customer_creation: "always",
+        // Save the card for a legitimate future off-session charge — used
+        // when an admin charges a late-reschedule remainder automatically.
+        payment_intent_data: { setup_future_usage: "off_session" },
         customer_email: email,
         client_reference_id: bookingBatchId,
         metadata: {
@@ -607,6 +613,9 @@ export async function POST(req: NextRequest) {
         mode: "payment",
         payment_method_types: ["card"],
         customer_creation: "always",
+        // Save the card for a legitimate future off-session charge — used
+        // when an admin charges a late-reschedule remainder automatically.
+        payment_intent_data: { setup_future_usage: "off_session" },
         customer_email: email,
         client_reference_id: bookingBatchId,
         metadata: {
@@ -762,6 +771,9 @@ export async function POST(req: NextRequest) {
         mode: "payment",
         payment_method_types: ["card"],
         customer_creation: "always",
+        // Save the card for a legitimate future off-session charge — used
+        // when an admin charges a late-reschedule remainder automatically.
+        payment_intent_data: { setup_future_usage: "off_session" },
         customer_email: email,
         client_reference_id: bookingBatchId,
         // The webhook runs in a separate request with no access to this

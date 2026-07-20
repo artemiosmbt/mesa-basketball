@@ -10,6 +10,7 @@ import {
   abandonPendingBookingBatch,
   finalizePaidBookingBatch,
   getActivePackage,
+  getPackageById,
   setPackageSessions,
   countPackageSessionsUsed,
   recordStripeRefund,
@@ -211,6 +212,78 @@ export async function issueStripeRefund(params: {
       // non-critical
     }
     return { refundedAmount: 0, creditedAmount: 0, failed: true };
+  }
+}
+
+// Resolves the customer + payment method to charge off-session for a given
+// registration: its own Stripe payment if it has one, or — for a
+// package-covered session, which has no per-session payment — the package
+// that covered it. Returns null when there's nothing on file to charge
+// (a legacy cash booking, or a payment intent whose payment method wasn't
+// retained), so callers can fail closed rather than guessing.
+export async function resolveOffSessionPaymentSource(reg: {
+  stripe_customer_id?: string | null;
+  stripe_payment_intent_id?: string | null;
+  package_id?: string | null;
+}): Promise<{ customerId: string; paymentMethodId: string } | null> {
+  let customerId = reg.stripe_customer_id || null;
+  let paymentIntentId = reg.stripe_payment_intent_id || null;
+  if ((!customerId || !paymentIntentId) && reg.package_id) {
+    const pkg = await getPackageById(reg.package_id).catch(() => null);
+    customerId = customerId || pkg?.stripe_customer_id || null;
+    paymentIntentId = paymentIntentId || pkg?.stripe_payment_intent_id || null;
+  }
+  if (!customerId || !paymentIntentId) return null;
+  const stripe = getStripe();
+  try {
+    const pi = await stripe.paymentIntents.retrieve(paymentIntentId);
+    const paymentMethodId = typeof pi.payment_method === "string" ? pi.payment_method : pi.payment_method?.id;
+    if (!paymentMethodId) return null;
+    return { customerId, paymentMethodId };
+  } catch {
+    return null;
+  }
+}
+
+export interface OffSessionChargeResult {
+  success: boolean;
+  paymentIntentId?: string;
+  reason?: string;
+}
+
+// Charges a saved card with nobody present to fix a failure — deliberately
+// avoided everywhere else in this codebase for that exact reason. Only used
+// for an admin-initiated action where the admin IS present to see success
+// or failure immediately and decide what to do next, and where a failure
+// here must block the caller's action rather than proceeding anyway.
+export async function chargeSavedCardOffSession(params: {
+  customerId: string;
+  paymentMethodId: string;
+  amountDollars: number;
+  description: string;
+}): Promise<OffSessionChargeResult> {
+  if (params.amountDollars <= 0) return { success: true };
+  const stripe = getStripe();
+  try {
+    const pi = await stripe.paymentIntents.create({
+      amount: Math.round(params.amountDollars * 100),
+      currency: "usd",
+      customer: params.customerId,
+      payment_method: params.paymentMethodId,
+      off_session: true,
+      confirm: true,
+      description: params.description,
+    });
+    if (pi.status !== "succeeded") {
+      return { success: false, reason: `Charge did not complete (status: ${pi.status}) — it may require additional authentication the client needs to provide themselves.` };
+    }
+    return { success: true, paymentIntentId: pi.id };
+  } catch (err) {
+    if (err instanceof Stripe.errors.StripeCardError) {
+      return { success: false, reason: err.message || "The card was declined." };
+    }
+    console.error("Off-session charge failed:", err);
+    return { success: false, reason: "The charge failed — the client's card may need updating." };
   }
 }
 
