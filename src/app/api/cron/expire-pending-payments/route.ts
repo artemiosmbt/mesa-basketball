@@ -11,6 +11,14 @@ import { getStripe } from "@/lib/stripe";
 // a missed/delayed completed-payment webhook must self-heal here rather than
 // getting permanently marked payment_abandoned while the customer was
 // actually charged.
+//
+// This cron is scheduled once daily (vercel.json) — Vercel's Hobby plan
+// rejects any cron expression that would fire more than once a day, which
+// silently blocked every deployment for a while when this was briefly set to
+// hourly. Real-world impact of the daily cadence: a stuck pending_payment row
+// (and any tentatively-deducted credit) can sit for up to ~24-26h instead of
+// ~2-3h before this sweep catches it. Move to hourly only after upgrading off
+// Hobby.
 const STALE_AFTER_MS = 2 * 60 * 60 * 1000;
 
 export async function GET(req: NextRequest) {
