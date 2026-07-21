@@ -45,7 +45,18 @@ import {
 // package-covered or already-free row) always gets exactly $0.
 function splitProportional(total: number, weights: number[]): number[] {
   const sumWeights = weights.reduce((s, w) => s + w, 0);
-  if (total <= 0 || sumWeights <= 0) return weights.map(() => 0);
+  if (total <= 0) return weights.map(() => 0);
+  // A positive total with all-zero weights has no real proportions to work
+  // from — not reachable through either current call site (both derive
+  // total from the same weights it's being split across), but returning
+  // all-zeros here would silently make that total vanish without landing on
+  // any row at all, rather than at least splitting it evenly, if some future
+  // caller ever did pass an independently-computed total.
+  if (sumWeights <= 0) {
+    const n = weights.length;
+    if (n === 0) return [];
+    return splitProportional(total, weights.map(() => 1));
+  }
   let cumulativeWeight = 0;
   let cumulativeShare = 0;
   return weights.map((w) => {

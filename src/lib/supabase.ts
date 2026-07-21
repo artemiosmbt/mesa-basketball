@@ -233,10 +233,16 @@ export async function recordStripeRefund(token: string, refundId: string): Promi
 // original full-camp price and re-refunding ground already covered.
 export async function recordCampDayRefund(token: string, amount: number): Promise<void> {
   const supabase = getSupabase();
-  await supabase
+  const { error } = await supabase
     .from("registrations")
     .update({ camp_day_refund_issued: Math.round(amount) })
     .eq("manage_token", token);
+  // If this silently fails (e.g. the migration adding this column was never
+  // run), every later cancellation in the same camp group loses track of
+  // what's already been refunded and the over-refund bug this exists to
+  // prevent comes right back — loud enough to actually notice, not just a
+  // swallowed error.
+  if (error) console.error(`Failed to record camp-day refund for token ${token} — over-refund protection may be broken. Verify the camp_day_refund_issued column exists.`, error);
 }
 
 /** Get every day-row sharing a referral_code for a full camp group, ordered by date. */
@@ -292,45 +298,82 @@ export async function getReferralCredits(email: string): Promise<number> {
   return data.credits || 0;
 }
 
-/** Add 1 referral credit to an email (upsert) */
+/**
+ * Add 1 referral credit to an email (upsert). Optimistic compare-and-swap
+ * with a few retries, same reasoning as addAccountCredit — this gets called
+ * from many concurrent-prone money-moving paths (new referral bookings,
+ * cancellations refunding a used credit, admin actions), and a plain
+ * read-then-write here could let two credits land near-simultaneously both
+ * read the same starting value and both write back the same +1 result,
+ * silently losing one of them.
+ */
 export async function addReferralCredit(email: string): Promise<void> {
   const supabase = getSupabase();
-  const { data } = await supabase
-    .from("referral_credits")
-    .select("credits, total_referrals")
-    .eq("email", email)
-    .single();
 
-  if (data) {
-    await supabase
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const { data } = await supabase
       .from("referral_credits")
-      .update({
-        credits: (data.credits || 0) + 1,
-        total_referrals: (data.total_referrals || 0) + 1,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("email", email);
-  } else {
-    await supabase
+      .select("credits, total_referrals")
+      .eq("email", email)
+      .single();
+
+    if (data) {
+      const currentCredits = data.credits || 0;
+      const currentTotal = data.total_referrals || 0;
+      const { data: updated, error } = await supabase
+        .from("referral_credits")
+        .update({
+          credits: currentCredits + 1,
+          total_referrals: currentTotal + 1,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("email", email)
+        .eq("credits", currentCredits)
+        .select("email");
+      if (!error && updated && updated.length > 0) return;
+      // Someone else updated it between our read and write — retry with a fresh read.
+      continue;
+    }
+    const { error } = await supabase
       .from("referral_credits")
       .insert({ email, credits: 1, total_referrals: 1 });
+    if (!error) return;
+    // Insert failed (likely a unique violation — someone else just created
+    // the row) — retry, which will now find it via the select above.
   }
+  console.error(`addReferralCredit: gave up after retries (email=${email}) — concurrent writes kept colliding`);
 }
 
-/** Use 1 referral credit (half-off session) */
+/**
+ * Use 1 referral credit (half-off session). Same optimistic
+ * compare-and-swap as addReferralCredit/deductAccountCredit — two
+ * concurrent bookings for the same email could otherwise both read the same
+ * starting count and both successfully decrement, letting two sessions get
+ * the discount off of what should have only covered one.
+ */
 export async function decrementReferralCredit(email: string): Promise<void> {
   const supabase = getSupabase();
-  const { data } = await supabase
-    .from("referral_credits")
-    .select("credits")
-    .eq("email", email)
-    .single();
-  if (data && (data.credits || 0) > 0) {
-    await supabase
+
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const { data } = await supabase
       .from("referral_credits")
-      .update({ credits: data.credits - 1, updated_at: new Date().toISOString() })
-      .eq("email", email);
+      .select("credits")
+      .eq("email", email)
+      .single();
+    if (!data || (data.credits || 0) <= 0) return;
+
+    const currentCredits = data.credits;
+    const { data: updated, error } = await supabase
+      .from("referral_credits")
+      .update({ credits: currentCredits - 1, updated_at: new Date().toISOString() })
+      .eq("email", email)
+      .eq("credits", currentCredits)
+      .select("email");
+    if (!error && updated && updated.length > 0) return;
+    // Someone else updated it concurrently — retry with a fresh read rather
+    // than decrement against a count that's no longer accurate.
   }
+  console.error(`decrementReferralCredit: gave up after retries (email=${email}) — concurrent writes kept colliding`);
 }
 
 // --- Account Credit Helpers (dollar-value credit, e.g. from a partial camp

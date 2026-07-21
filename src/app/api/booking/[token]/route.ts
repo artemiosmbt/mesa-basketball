@@ -190,15 +190,18 @@ export async function DELETE(
       const wasPaid = reg.is_paid || group.some((r) => r.is_paid) || !!groupPaymentIntentId;
       // Every day in this group still carries the ORIGINAL full-camp
       // session_price (cancelling a day never rewrites it) — so anything
-      // computed against it must net out whatever earlier individual
-      // day-cancellations in this same group already refunded/credited, or
-      // cancelling the last day would refund the ENTIRE original camp price
-      // all over again on top of those earlier partial refunds.
+      // computed against it must net out BOTH whatever earlier individual
+      // day-cancellations in this same group already refunded/credited
+      // (priorRefundedTotal) AND whatever they already correctly kept as a
+      // late fee (priorAccruedFees) — missing either one would either
+      // refund the same money twice, or hand back a late fee that was
+      // already permanently forfeited on an earlier day's cancellation.
       const priorRefundedTotal = group.reduce((sum, r) => sum + (r.camp_day_refund_issued || 0), 0);
+      const priorAccruedFees = group.reduce((sum, r) => sum + (r.camp_day_late_fee || 0), 0);
       let cancelCredit = 0;
       let stripeRefundResult: { refundedAmount: number; creditedAmount: number; failed: boolean } | undefined;
       if (wasPaid && reg.email) {
-        const paidAmount = Math.max(0, resolvedSessionPrice(reg) - groupCredit - priorRefundedTotal);
+        const paidAmount = Math.max(0, resolvedSessionPrice(reg) - groupCredit - priorRefundedTotal - priorAccruedFees);
         if (isLateCancel) {
           cancelCredit = Math.round(paidAmount * 0.5);
           if (cancelCredit > 0) await addAccountCredit(reg.email, cancelCredit).catch(() => {});
@@ -809,51 +812,56 @@ export async function PATCH(
     const stripe = getStripe();
     const origin = req.nextUrl.origin;
     const plainSessionDetails = reg.session_details.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "").trim();
-    const checkoutSession = await stripe.checkout.sessions.create({
-      mode: "payment",
-      payment_method_types: ["card"],
-      customer_creation: "always",
-      customer_email: reg.email,
-      metadata: {
-        purpose: "player_edit_topup",
-        manage_token: token,
-        new_kids: newKidsStr,
-        new_count: String(newCount),
-        new_price: newPrice != null ? String(newPrice) : "",
-        old_price: reg.session_price != null ? String(reg.session_price) : "",
-        removed_players: JSON.stringify(removedPlayers),
-        added_players: JSON.stringify(addedPlayers),
-        is_late: String(isLate),
-        late_fee_due: lateFeeDue != null ? String(lateFeeDue) : "",
-        // The actual amount this checkout charges (net of any applied
-        // account credit) — passed through explicitly rather than
-        // re-derived from old_price/new_price at finalize time, since those
-        // are raw prices and re-deriving from them would ignore credit.
-        total_owed: String(totalOwedViaCheckout),
-      },
-      line_items: [
-        {
-          price_data: {
-            currency: "usd",
-            product_data: { name: `Roster change: ${plainSessionDetails || "Mesa Basketball Training Session"}` },
-            unit_amount: Math.round(totalOwedViaCheckout * 100),
-          },
-          quantity: 1,
+    try {
+      const checkoutSession = await stripe.checkout.sessions.create({
+        mode: "payment",
+        payment_method_types: ["card"],
+        customer_creation: "always",
+        customer_email: reg.email,
+        metadata: {
+          purpose: "player_edit_topup",
+          manage_token: token,
+          new_kids: newKidsStr,
+          new_count: String(newCount),
+          new_price: newPrice != null ? String(newPrice) : "",
+          old_price: reg.session_price != null ? String(reg.session_price) : "",
+          removed_players: JSON.stringify(removedPlayers),
+          added_players: JSON.stringify(addedPlayers),
+          is_late: String(isLate),
+          late_fee_due: lateFeeDue != null ? String(lateFeeDue) : "",
+          // The actual amount this checkout charges (net of any applied
+          // account credit) — passed through explicitly rather than
+          // re-derived from old_price/new_price at finalize time, since those
+          // are raw prices and re-deriving from them would ignore credit.
+          total_owed: String(totalOwedViaCheckout),
         },
-        {
-          price_data: {
-            currency: "usd",
-            product_data: { name: "Service Fee" },
-            unit_amount: Math.round(SERVICE_FEE * 100),
+        line_items: [
+          {
+            price_data: {
+              currency: "usd",
+              product_data: { name: `Roster change: ${plainSessionDetails || "Mesa Basketball Training Session"}` },
+              unit_amount: Math.round(totalOwedViaCheckout * 100),
+            },
+            quantity: 1,
           },
-          quantity: 1,
-        },
-      ],
-      success_url: `${origin}/booking-confirmed?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${origin}/booking/${token}`,
-      expires_at: Math.floor(Date.now() / 1000) + 30 * 60,
-    });
-    return NextResponse.json({ success: true, pendingPayment: true, checkoutUrl: checkoutSession.url });
+          {
+            price_data: {
+              currency: "usd",
+              product_data: { name: "Service Fee" },
+              unit_amount: Math.round(SERVICE_FEE * 100),
+            },
+            quantity: 1,
+          },
+        ],
+        success_url: `${origin}/booking-confirmed?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${origin}/booking/${token}`,
+        expires_at: Math.floor(Date.now() / 1000) + 30 * 60,
+      });
+      return NextResponse.json({ success: true, pendingPayment: true, checkoutUrl: checkoutSession.url });
+    } catch (err) {
+      console.error("Failed to create player-edit topup checkout:", err);
+      return NextResponse.json({ error: "Couldn't start payment for this change — nothing was applied. Please try again." }, { status: 500 });
+    }
   }
 
   const ok = await updateRegistrationPlayers(token, newKidsStr, newCount, newPrice);
@@ -936,7 +944,14 @@ export async function PUT(
   // Use updated kids from client if provided, otherwise keep originals
   const kidsToUse = typeof bodyKids === "string" && bodyKids.trim() ? bodyKids : reg.kids;
   const kidCount = kidsToUse ? parseKidsList(kidsToUse).length : (reg.total_participants || 1);
-  const newType: "private" | "weekly" = bodySessionType === "weekly" ? "weekly" : "private";
+  // 4+ kids is a genuinely different type ("group-private", $250/hr) from a
+  // standard private session ($150/hr) — this used to always write "private"
+  // regardless of headcount. That never caused a pricing bug (calcPrivatePrice
+  // branches on kidCount directly, not the type string), but it did mean the
+  // row's own type field lied about what it actually was, which could mislead
+  // anything that branches on type === "group-private" specifically without
+  // also checking headcount (confirmation email copy, admin dashboard pills).
+  const newType: "private" | "group-private" | "weekly" = bodySessionType === "weekly" ? "weekly" : (kidCount >= 4 ? "group-private" : "private");
   const newSessionDetails = newType === "weekly" && sessionGroup
     ? `${sessionGroup} — ${bookedDate} ${bookedStartTime}-${bookedEndTime} at ${bookedLocation}`
     : `Private Session — ${bookedDate} ${bookedStartTime}-${bookedEndTime} at ${bookedLocation}`;
@@ -1037,7 +1052,7 @@ export async function PUT(
     } catch (err) {
       console.error("Client reschedule: live price lookup failed — price reconciliation skipped.", err);
     }
-  } else if (newType === "private" && bookedStartTime && bookedEndTime) {
+  } else if ((newType === "private" || newType === "group-private") && bookedStartTime && bookedEndTime) {
     const duration = Math.max(60, parseMins(bookedEndTime) - parseMins(bookedStartTime));
     newSessionPrice = calcPrivatePrice(duration, kidCount);
   }
@@ -1360,7 +1375,7 @@ export async function PUT(
 
   // Sync calendar for the new booking
   try {
-    if (newType === "private") {
+    if (newType === "private" || newType === "group-private") {
       await addPrivateSessionToCalendar({
         parentName: newParentName,
         email: reg.email,

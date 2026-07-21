@@ -1140,8 +1140,32 @@ async function finalizePlayerEditTopup(session: Stripe.Checkout.Session): Promis
   const newKids = metadata.new_kids || reg.kids;
   const newCount = metadata.new_count ? parseInt(metadata.new_count, 10) : reg.total_participants;
   const newPrice = metadata.new_price ? Math.round(parseFloat(metadata.new_price) * 100) / 100 : reg.session_price;
-  const removedPlayers: string[] = metadata.removed_players ? JSON.parse(metadata.removed_players) : [];
-  const addedPlayers: string[] = metadata.added_players ? JSON.parse(metadata.added_players) : [];
+
+  // Nothing here ever changes reg.status, so updateRegistrationPlayers'
+  // .eq("status","confirmed") guard can't detect "already processed" the way
+  // the main registration flow does — a duplicate webhook delivery (Stripe
+  // guarantees at-least-once, not exactly-once) would otherwise re-apply a
+  // harmless no-op update but ALSO re-sync the calendar and re-send the
+  // client/admin notifications every single redelivery. Checking whether the
+  // row already reflects the intended end state catches that without needing
+  // a new column.
+  if (reg.kids === newKids && reg.total_participants === newCount && (newPrice == null || reg.session_price === newPrice)) {
+    return;
+  }
+
+  let removedPlayers: string[] = [];
+  let addedPlayers: string[] = [];
+  try {
+    removedPlayers = metadata.removed_players ? JSON.parse(metadata.removed_players) : [];
+    addedPlayers = metadata.added_players ? JSON.parse(metadata.added_players) : [];
+  } catch (err) {
+    // Malformed/truncated metadata (Stripe caps each value at 500 chars) —
+    // don't let a JSON.parse throw fail the whole webhook handler, which
+    // Stripe would then retry uselessly for up to 3 days. The roster/price
+    // change itself doesn't depend on these lists; they're only used for
+    // the notification copy.
+    console.error(`Player-edit topup: couldn't parse removed/added players metadata for token ${token} — notification will show an incomplete list.`, err);
+  }
   const isLate = metadata.is_late === "true";
   const lateFeeDue = metadata.late_fee_due ? parseFloat(metadata.late_fee_due) : undefined;
   const oldPrice = metadata.old_price ? parseFloat(metadata.old_price) : reg.session_price;

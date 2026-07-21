@@ -130,9 +130,11 @@ export default function MyBookings() {
           success: true,
           message: data.refundFailed
             ? "Your package has been cancelled. Your refund is being processed — you'll get a separate confirmation once it's complete."
-            : data.creditedAmount > 0
-              ? `Your package has been cancelled and $${fmtMoney(data.creditedAmount)} has been credited to your account (the $4.50 service fee isn't refundable).`
-              : `Your package has been cancelled and $${fmtMoney(data.refundedAmount)} has been refunded to your original payment method (the $4.50 service fee isn't refundable).`,
+            : data.refundedAmount > 0 && data.creditedAmount > 0
+              ? `Your package has been cancelled — $${fmtMoney(data.refundedAmount)} has been refunded to your original payment method and $${fmtMoney(data.creditedAmount)} credited to your account (the $4.50 service fee isn't refundable).`
+              : data.creditedAmount > 0
+                ? `Your package has been cancelled and $${fmtMoney(data.creditedAmount)} has been credited to your account (the $4.50 service fee isn't refundable).`
+                : `Your package has been cancelled and $${fmtMoney(data.refundedAmount)} has been refunded to your original payment method (the $4.50 service fee isn't refundable).`,
         });
         setActivePackage(null);
       } else {

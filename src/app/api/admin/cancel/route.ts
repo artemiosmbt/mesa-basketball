@@ -6,7 +6,9 @@ import { sendCancellationNotification } from "@/lib/email";
 import { getCurrentSheetLocation } from "@/lib/sheets";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import { issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome, isLateAction } from "@/lib/booking-finalize";
-import { addAccountCredit, addReferralCredit, logLateFeeEvent } from "@/lib/supabase";
+import { addAccountCredit, addReferralCredit, logLateFeeEvent, countPackageSessionsUsed, setPackageSessions } from "@/lib/supabase";
+import { getStripe } from "@/lib/stripe";
+import { SERVICE_FEE, fmtMoney } from "@/lib/pricing";
 
 async function verifyAdmin(req: NextRequest) {
   const token = req.headers.get("authorization")?.replace("Bearer ", "");
@@ -17,6 +19,21 @@ async function verifyAdmin(req: NextRequest) {
   );
   const { data: { user } } = await supabase.auth.getUser(token);
   return user?.email === ADMIN_EMAIL;
+}
+
+function parseMinsFromTime(t: string): number {
+  const m = t.match(/(\d+):(\d+)\s*(AM|PM)/i);
+  if (!m) return 0;
+  let h = parseInt(m[1]);
+  const min = parseInt(m[2]);
+  const period = m[3].toUpperCase();
+  if (period === "PM" && h !== 12) h += 12;
+  if (period === "AM" && h === 12) h = 0;
+  return h * 60 + min;
+}
+
+function calcPrivatePrice(durationMins: number, kidCount: number): number {
+  return Math.round((kidCount >= 4 ? 250 : 150) * (durationMins / 60) * 100) / 100;
 }
 
 export async function POST(req: NextRequest) {
@@ -40,7 +57,7 @@ export async function POST(req: NextRequest) {
   // a late cancellation the same way a client-initiated one would.
   const { data: reg } = await supabase
     .from("registrations")
-    .select("manage_token, type, email, parent_name, booked_date, booked_start_time, booked_end_time, booked_location, booked_group, kids, session_details, total_participants, phone, sms_consent, is_paid, stripe_payment_intent_id, applied_account_credit, session_price, is_free, used_referral_credit, created_at, admin_change_at")
+    .select("manage_token, type, email, parent_name, booked_date, booked_start_time, booked_end_time, booked_location, booked_group, kids, session_details, total_participants, phone, sms_consent, is_paid, stripe_payment_intent_id, applied_account_credit, session_price, is_free, used_referral_credit, created_at, admin_change_at, package_id")
     .eq("id", id)
     .single();
 
@@ -91,6 +108,99 @@ export async function POST(req: NextRequest) {
   // Give back any account credit that was applied at booking time.
   if (reg.applied_account_credit && reg.email) {
     await addAccountCredit(reg.email, reg.applied_account_credit).catch(() => {});
+  }
+
+  // Cancelling a package-covered session frees its slot back — recompute
+  // straight from this row's own package_id, same as the client-facing
+  // cancel flow. Without this, an admin cancelling a package session on a
+  // client's behalf (e.g. over the phone) never returns that session to
+  // their package, permanently costing them one of the sessions they paid
+  // for with no way to fix it from the admin dashboard.
+  if (reg.package_id) {
+    try {
+      const used = await countPackageSessionsUsed(reg.package_id);
+      await setPackageSessions(reg.package_id, used);
+    } catch {
+      // non-critical — don't fail the cancellation
+    }
+  }
+
+  // A package-covered session has no Stripe payment on this row (it was
+  // covered by the package's lump-sum charge instead) — an on-time cancel
+  // needs nothing further (slot already freed above). A LATE cancel the
+  // admin chose to CHARGE still needs to cost something, same policy and
+  // mechanism as the client-facing flow: a fresh Stripe Checkout for 50% of
+  // what a session like this actually costs right now, sent directly to the
+  // client (the admin isn't the one paying). Waiving is simply not entering
+  // this block at all.
+  let packageLateFeeCheckoutUrl: string | undefined;
+  let packageLateFeeAmount: number | undefined;
+  if (reg.package_id && chargeLateFee && reg.email) {
+    const durationMins = reg.booked_start_time && reg.booked_end_time
+      ? Math.max(60, parseMinsFromTime(reg.booked_end_time) - parseMinsFromTime(reg.booked_start_time))
+      : 60;
+    const liveFullPrice = calcPrivatePrice(durationMins, reg.total_participants || 1);
+    packageLateFeeAmount = Math.round(liveFullPrice * 0.5 * 100) / 100;
+    if (packageLateFeeAmount > 0) {
+      try {
+        // Logged with no charged amount yet — not real until the client
+        // actually pays it via the Checkout below. Filled in by the webhook
+        // once payment confirms (finalizePaidCheckoutSession's
+        // package_late_fee branch), same as the client-facing equivalent.
+        const eventId = await logLateFeeEvent({
+          registrationId: id,
+          parentName: reg.parent_name,
+          email: reg.email,
+          kids: reg.kids,
+          sessionType: reg.type,
+          sessionDetails: reg.session_details,
+          bookedDate: reg.booked_date,
+          bookedStartTime: reg.booked_start_time,
+          action: "cancel",
+          initiatedBy: "admin",
+        });
+        const stripe = getStripe();
+        const origin = req.nextUrl.origin;
+        const plainDetails = (reg.session_details || "").replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "").trim();
+        const feeSession = await stripe.checkout.sessions.create({
+          mode: "payment",
+          payment_method_types: ["card"],
+          customer_creation: "always",
+          customer_email: reg.email,
+          metadata: {
+            purpose: "package_late_fee",
+            action: "cancel",
+            parent_name: reg.parent_name,
+            session_details: plainDetails,
+            late_fee_event_id: eventId || "",
+          },
+          line_items: [
+            {
+              price_data: {
+                currency: "usd",
+                product_data: { name: `Late Cancellation Fee: ${plainDetails || "Mesa Basketball Training Session"}` },
+                unit_amount: Math.round(packageLateFeeAmount * 100),
+              },
+              quantity: 1,
+            },
+            {
+              price_data: {
+                currency: "usd",
+                product_data: { name: "Service Fee" },
+                unit_amount: Math.round(SERVICE_FEE * 100),
+              },
+              quantity: 1,
+            },
+          ],
+          success_url: `${origin}/booking-confirmed?session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${origin}/my-bookings`,
+          expires_at: Math.floor(Date.now() / 1000) + 30 * 60,
+        });
+        packageLateFeeCheckoutUrl = feeSession.url ?? undefined;
+      } catch (err) {
+        console.error("Failed to create package late-cancellation fee checkout (admin):", err);
+      }
+    }
   }
 
   // Full refund/credit unless the admin explicitly chose to charge the
@@ -192,11 +302,20 @@ export async function POST(req: NextRequest) {
           ? `\n${formatDateWithDay(reg.booked_date)} | ${reg.booked_start_time}${reg.booked_end_time ? `-${reg.booked_end_time}` : ""}${bookedLocation ? `\nLocation: ${resolveLocationName(bookedLocation)}` : ""}`
           : "";
         const moneyOutcome = wasPaid ? describeMoneyOutcome(stripeRefundResult, creditIssued, chargeLateFee, false) : "";
-        const moneyNote = moneyOutcome ? `\n${moneyOutcome}.` : "";
+        const moneyNote = reg.package_id
+          ? (packageLateFeeCheckoutUrl
+              ? `\nLate cancellation fee: $${fmtMoney((packageLateFeeAmount || 0) + SERVICE_FEE)}. Finish payment here: ${packageLateFeeCheckoutUrl}`
+              : "\nYour package session is available for you to rebook.")
+          : moneyOutcome ? `\n${moneyOutcome}.` : "";
         await sendSMS(reg.phone, `Mesa Basketball: Session cancelled by your trainer.${sessionLine}\nAthlete: ${reg.kids}${moneyNote}\nQuestions? mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
       }
       const adminMoneyOutcome = wasPaid ? describeMoneyOutcome(stripeRefundResult, creditIssued, chargeLateFee, true) : "";
-      await sendAdminSMS(`CANCELLED: ${reg.parent_name}\n${sessionDetails}\nPlayers: ${reg.kids}${chargeLateFee ? "\n(Late fee charged)" : isLate ? "\n(Late fee waived)" : ""}${adminMoneyOutcome ? `\n${adminMoneyOutcome}` : ""}`);
+      const adminPackageNote = reg.package_id
+        ? packageLateFeeCheckoutUrl
+          ? `\nPackage session — late fee checkout sent: $${fmtMoney((packageLateFeeAmount || 0) + SERVICE_FEE)}`
+          : "\nPackage session — slot freed"
+        : "";
+      await sendAdminSMS(`CANCELLED: ${reg.parent_name}\n${sessionDetails}\nPlayers: ${reg.kids}${chargeLateFee ? "\n(Late fee charged)" : isLate ? "\n(Late fee waived)" : ""}${adminMoneyOutcome ? `\n${adminMoneyOutcome}` : ""}${adminPackageNote}`);
     } catch (err) {
       console.error("Email/SMS notification error (admin cancel):", err);
     }

@@ -4,7 +4,7 @@ import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import Image from "next/image";
 import { authClient, ADMIN_EMAIL } from "@/lib/auth";
 import LandingNav from "@/app/LandingNav";
-import { SERVICE_FEE, SERVICE_FEE_LABEL } from "@/lib/pricing";
+import { SERVICE_FEE, SERVICE_FEE_LABEL, packagePrice } from "@/lib/pricing";
 
 const LOCATION_LINKS: Record<string, { name: string; url: string }> = {
   "St. Pauls": { name: "St. Paul's Cathedral", url: "https://share.google/kgiqMxAj2iAFEAGI6" },
@@ -2630,12 +2630,12 @@ export default function Home() {
             <div className="mt-6 grid gap-4 sm:grid-cols-2">
               {/* 4-session */}
               <div className="rounded-xl border border-brown-700 bg-brown-900/40 p-5 text-center">
-                <p className="text-3xl font-bold text-mesa-accent">$475</p>
+                <p className="text-3xl font-bold text-mesa-accent">${packagePrice(4)}</p>
                 <p className="mt-0.5 text-sm text-brown-300">4 sessions / month</p>
                 <div className="mt-3 rounded-lg bg-brown-800/50 p-3 space-y-0.5">
                   <p className="text-xs text-brown-500">Normally <span className="line-through">$600</span></p>
-                  <p className="text-sm font-semibold text-green-400">Save $125 — 21% off</p>
-                  <p className="text-xs text-brown-400">$118.75 per session</p>
+                  <p className="text-sm font-semibold text-green-400">Save ${600 - packagePrice(4)} — {Math.round((1 - packagePrice(4) / 600) * 100)}% off</p>
+                  <p className="text-xs text-brown-400">${(packagePrice(4) / 4).toFixed(2)} per session</p>
                 </div>
                 <button
                   onClick={() => { if (!userEmail) { setAuthPrompt(true); return; } setPkgModal({ open: true, packageType: 4 }); setPkgFirstName(profileRef.current?.firstName ?? ""); setPkgLastName(profileRef.current?.lastName ?? ""); setPkgEmail(userEmail ?? ""); setPkgPhone(profileRef.current?.phone ?? ""); setPkgMonth(pkgMonthOptions[0]?.value || ""); setPkgResult(null); setKids(profileRef.current?.kids ?? [{ name: "", dob: "", grade: "", gender: "" }]); setPkgReferralCode(""); setPkgReferralCodeError(""); }}
@@ -2647,12 +2647,12 @@ export default function Home() {
               {/* 8-session */}
               <div className="relative rounded-xl border border-mesa-accent/50 bg-brown-900/40 p-5 text-center">
                 <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-mesa-accent px-3 py-0.5 text-xs font-bold text-white whitespace-nowrap">BEST VALUE</span>
-                <p className="text-3xl font-bold text-mesa-accent">$900</p>
+                <p className="text-3xl font-bold text-mesa-accent">${packagePrice(8)}</p>
                 <p className="mt-0.5 text-sm text-brown-300">8 sessions / month</p>
                 <div className="mt-3 rounded-lg bg-brown-800/50 p-3 space-y-0.5">
                   <p className="text-xs text-brown-500">Normally <span className="line-through">$1,200</span></p>
-                  <p className="text-sm font-semibold text-green-400">Save $300 — 25% off</p>
-                  <p className="text-xs text-brown-400">$112.50 per session</p>
+                  <p className="text-sm font-semibold text-green-400">Save ${1200 - packagePrice(8)} — {Math.round((1 - packagePrice(8) / 1200) * 100)}% off</p>
+                  <p className="text-xs text-brown-400">${(packagePrice(8) / 8).toFixed(2)} per session</p>
                 </div>
                 <button
                   onClick={() => { if (!userEmail) { setAuthPrompt(true); return; } setPkgModal({ open: true, packageType: 8 }); setPkgFirstName(profileRef.current?.firstName ?? ""); setPkgLastName(profileRef.current?.lastName ?? ""); setPkgEmail(userEmail ?? ""); setPkgPhone(profileRef.current?.phone ?? ""); setPkgMonth(pkgMonthOptions[0]?.value || ""); setPkgResult(null); setKids(profileRef.current?.kids ?? [{ name: "", dob: "", grade: "", gender: "" }]); setPkgReferralCode(""); setPkgReferralCodeError(""); }}
@@ -3716,7 +3716,7 @@ export default function Home() {
               <button onClick={() => setPkgModal({ open: false, packageType: null })} className="text-2xl text-brown-400 hover:text-white">&times;</button>
             </div>
             <p className="mt-1 text-sm text-brown-400">
-              {pkgModal.packageType === 4 ? "$475" : "$900"} + {SERVICE_FEE_LABEL} service fee — paid securely by card via Stripe
+              ${packagePrice(pkgModal.packageType || 4)} + {SERVICE_FEE_LABEL} service fee — paid securely by card via Stripe
             </p>
 
             {pkgResult?.success ? (

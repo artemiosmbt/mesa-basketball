@@ -104,9 +104,16 @@ export async function POST(req: NextRequest) {
       const match = sessions.find((s) => s.group === reg.booked_group && s.date === reg.booked_date && s.startTime === reg.booked_start_time);
       if (match) {
         newFullPrice = Math.round(match.price * newCount);
+      } else {
+        // No matching row — price stays untouched below, but this must be
+        // visible: silently leaving newFullPrice null here means the added
+        // player is never charged for at all, with nothing telling the
+        // admin that happened.
+        console.error(`Admin add-player: couldn't find "${reg.booked_group}" on ${reg.booked_date} ${reg.booked_start_time} in the live sheet — added player was not charged for. Verify manually.`);
       }
-    } catch {
+    } catch (err) {
       // Sheet lookup failed — leave the existing price untouched rather than guessing.
+      console.error(`Admin add-player: live price lookup failed for "${reg.booked_group}" — added player was not charged for. Verify manually.`, err);
     }
   }
   // camp (or missing price data): leave session_price untouched — pass null so
