@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getPackageById, packageHasAnyBookedSession, cancelPackage, addAccountCredit } from "@/lib/supabase";
+import { getPackageById, packageHasAnyBookedSession, cancelPackage, revertPackageCancellation, addAccountCredit } from "@/lib/supabase";
 import { issueStripeRefund } from "@/lib/booking-finalize";
 import { sendSMS, sendAdminSMS } from "@/lib/sms";
 import { fmtMoney, packagePrice } from "@/lib/pricing";
@@ -37,6 +37,17 @@ export async function POST(req: NextRequest) {
       // Zero rows matched — another request already cancelled this (double
       // click, retry). Bail out before the refund below runs twice.
       return NextResponse.json({ error: "This package was already cancelled" }, { status: 409 });
+    }
+
+    // Re-check after the flip — the check above and the cancel itself are
+    // two separate queries with no shared transaction, so a register request
+    // that read "no session yet" and inserted one in the gap between them
+    // would otherwise slip through, giving a full refund for a package that
+    // now has a real booked (and possibly serviced) session against it.
+    const usedAfterAll = await packageHasAnyBookedSession(packageId);
+    if (usedAfterAll) {
+      await revertPackageCancellation(packageId);
+      return NextResponse.json({ error: "This package can't be cancelled anymore — a session has already been booked against it." }, { status: 400 });
     }
 
     // The $4.50 service fee is never refunded, on any cancellation — it

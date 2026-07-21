@@ -74,7 +74,7 @@ export function resolvedSessionPrice(reg: { session_price: number | null; is_fre
   const isPrivateType = reg.type === "private" || reg.type === "group-private";
   const fullPrice = reg.type === "group-private" ? 250 : reg.type === "private" ? 150 : 50;
   const basePrice = reg.session_price ?? fullPrice;
-  return reg.is_free && isPrivateType ? Math.round(basePrice * 0.5) : basePrice;
+  return reg.is_free && isPrivateType ? Math.round(basePrice * 0.5 * 100) / 100 : basePrice;
 }
 
 /**
@@ -382,7 +382,7 @@ export async function finalizeConfirmedPrivateBooking(params: FinalizePrivateBoo
   // nominal session price for refund/reschedule math.
   const amountCharged = params.packageCovered
     ? 0
-    : Math.max(0, (params.isFree ? Math.round((params.fullPrice ?? 0) * 0.5) : (params.fullPrice ?? 0)) - params.accountCreditApplied);
+    : Math.max(0, (params.isFree ? Math.round((params.fullPrice ?? 0) * 0.5 * 100) / 100 : (params.fullPrice ?? 0)) - params.accountCreditApplied);
 
   try {
     await sendRegistrationNotification({
@@ -780,7 +780,7 @@ export async function finalizeConfirmedPrivateSeriesBooking(params: FinalizePriv
   const allSessionsList = privateSessions
     .map((s) => `${s.date} ${s.startTime}-${s.endTime} at ${s.location}`)
     .join("<br/>");
-  const totalPaid = privateSessions.reduce((sum, s) => sum + (s.packageCovered ? 0 : s.isFree ? Math.round(s.fullPrice * 0.5) : s.fullPrice), 0);
+  const totalPaid = privateSessions.reduce((sum, s) => sum + (s.packageCovered ? 0 : s.isFree ? Math.round(s.fullPrice * 0.5 * 100) / 100 : s.fullPrice), 0);
   const seriesAmountCharged = Math.max(0, totalPaid - params.accountCreditApplied);
   const seriesTotalWithFee = seriesAmountCharged > 0 ? Math.round((seriesAmountCharged + SERVICE_FEE) * 100) / 100 : 0;
   const priceNote = `<p><strong>Total:</strong> $${fmtMoney(totalPaid)}${params.accountCreditApplied > 0 ? ` — $${fmtMoney(params.accountCreditApplied)} account credit applied` : ""}${seriesAmountCharged > 0 ? ` — <strong>Charged:</strong> $${fmtMoney(seriesTotalWithFee)}` : ""}</p>`;
@@ -1194,8 +1194,8 @@ async function finalizePlayerEditTopup(session: Stripe.Checkout.Session): Promis
 
   try {
     if (reg.type === "private" || reg.type === "group-private") {
-      if (reg.booked_date) {
-        await deletePrivateSessionFromCalendar({ email: reg.email, bookedDate: reg.booked_date });
+      if (reg.booked_date && reg.booked_start_time) {
+        await deletePrivateSessionFromCalendar({ email: reg.email, bookedDate: reg.booked_date, bookedStartTime: reg.booked_start_time });
       }
       if (reg.booked_date && reg.booked_start_time && reg.booked_end_time && reg.booked_location) {
         await addPrivateSessionToCalendar({
@@ -1272,10 +1272,15 @@ export async function finalizePaidCheckoutSession(session: Stripe.Checkout.Sessi
   // has no client_reference_id and is checked before that's required below.
   if (metadata.purpose === "package_late_fee") {
     const amount = session.amount_total != null ? session.amount_total / 100 : undefined;
+    let firstConfirmation = true;
     if (metadata.late_fee_event_id && amount != null) {
-      await markLateFeeEventCharged(metadata.late_fee_event_id, amount);
+      firstConfirmation = await markLateFeeEventCharged(metadata.late_fee_event_id, amount);
     }
-    await sendAdminSMS(`Package late fee PAID ($${amount != null ? fmtMoney(amount) : "?"}): ${metadata.parent_name || "unknown"}\n${metadata.session_details || ""} (${metadata.action || "cancel/reschedule"})`).catch(() => {});
+    // A Stripe webhook redelivery for the same session would otherwise
+    // re-send this "fee PAID" text every time it redelivers.
+    if (firstConfirmation) {
+      await sendAdminSMS(`Package late fee PAID ($${amount != null ? fmtMoney(amount) : "?"}): ${metadata.parent_name || "unknown"}\n${metadata.session_details || ""} (${metadata.action || "cancel/reschedule"})`).catch(() => {});
+    }
     return;
   }
 

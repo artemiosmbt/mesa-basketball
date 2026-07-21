@@ -149,7 +149,7 @@ function effectivePrice(r: Registration, weeklyDiscountRates?: Map<string, numbe
   } else {
     basePrice = fullPriceForType(r.type);
   }
-  const discounted = r.is_free && isPrivateType ? Math.round(basePrice * 0.5) : basePrice;
+  const discounted = r.is_free && isPrivateType ? Math.round(basePrice * 0.5 * 100) / 100 : basePrice;
   // session_price/basePrice is always the full pre-credit rate — account
   // credit applied at booking time is a separate field and has to be
   // subtracted here, or this shows what they'd owe with no credit at all.
@@ -301,7 +301,7 @@ function isPrivateTypeClient(type: string): boolean {
 // the 50% referral-credit/first-time discount is applied at display time via
 // is_free, mirroring effectivePrice() and the server's identical logic.
 function effectiveAmountPreview(fullPrice: number, isFree: boolean, isPriv: boolean): number {
-  return isFree && isPriv ? Math.round(fullPrice * 0.5) : fullPrice;
+  return isFree && isPriv ? Math.round(fullPrice * 0.5 * 100) / 100 : fullPrice;
 }
 
 function uniqueSorted(values: string[]): string[] {

@@ -250,10 +250,17 @@ async function createEvent(
 
 /** Delete a calendar event by id */
 async function deleteEvent(calendarId: string, token: string, eventId: string): Promise<void> {
-  await fetch(
+  const resp = await fetch(
     `${CALENDAR_BASE}/${encodeURIComponent(calendarId)}/events/${eventId}`,
     { method: "DELETE", headers: { Authorization: `Bearer ${token}` } }
   );
+  // 410 (Gone) means it's already deleted — a harmless no-op, not a real
+  // failure. Anything else non-OK (rate limit, expired token, permissions)
+  // must actually surface — every call site's try/catch relies on this
+  // throwing to know the calendar is now out of sync with the real booking.
+  if (!resp.ok && resp.status !== 410) {
+    throw new Error(`Calendar event delete failed (${resp.status}): ${await resp.text().catch(() => "")}`);
+  }
 }
 
 /**
@@ -507,7 +514,11 @@ export async function addPrivateSessionToCalendar(
   const token = await getAccessToken(saEmail, privateKey);
 
   const summary = `Private — ${params.parentName} (${params.kids})`;
-  const tag = `[mesa-private:${params.bookedDate}|${params.email}]`;
+  // Includes start time — email+date alone collides when the same family
+  // has two private sessions on the same day (e.g. two kids at different
+  // times), which would make delete/reschedule target whichever event
+  // Google's API happens to list first, not necessarily the right one.
+  const tag = `[mesa-private:${params.bookedDate}|${params.bookedStartTime}|${params.email}]`;
   const workoutSection = generateWorkoutTemplate(params.bookedStartTime, params.bookedEndTime);
 
   const descParts = [
@@ -539,6 +550,7 @@ export async function addPrivateSessionToCalendar(
 export async function deletePrivateSessionFromCalendar(params: {
   email: string;
   bookedDate: string;
+  bookedStartTime: string;
 }): Promise<void> {
   const calendarId = process.env.GOOGLE_CALENDAR_ID;
   const saEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
@@ -546,7 +558,7 @@ export async function deletePrivateSessionFromCalendar(params: {
   if (!calendarId || !saEmail || !privateKey) return;
 
   const token = await getAccessToken(saEmail, privateKey);
-  const tag = `[mesa-private:${params.bookedDate}|${params.email}]`;
+  const tag = `[mesa-private:${params.bookedDate}|${params.bookedStartTime}|${params.email}]`;
   const existing = await findExistingEvent(calendarId, token, params.bookedDate, tag);
   if (existing) {
     await deleteEvent(calendarId, token, existing.id);

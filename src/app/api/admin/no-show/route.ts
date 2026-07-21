@@ -1,21 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { ADMIN_EMAIL } from "@/lib/auth";
+import { verifyAdmin } from "@/lib/auth";
 import { sendNoShowNotification } from "@/lib/email";
 import { sendSMS, sendAdminSMS } from "@/lib/sms";
 import { countPackageSessionsUsed, setPackageSessions } from "@/lib/supabase";
 import { fmtMoney } from "@/lib/pricing";
 
-async function verifyAdmin(req: NextRequest) {
-  const token = req.headers.get("authorization")?.replace("Bearer ", "");
-  if (!token) return false;
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
-  const { data: { user } } = await supabase.auth.getUser(token);
-  return user?.email === ADMIN_EMAIL;
-}
 
 // Full-price fallback by session type if session_price is not stored
 function fullPriceForType(type: string): number {
@@ -88,7 +78,7 @@ export async function POST(req: NextRequest) {
 
   const isPrivateType = reg.type === "private" || reg.type === "group-private";
   const basePrice = reg.session_price != null ? reg.session_price : fullPriceForType(reg.type);
-  const fullFeeAmount = reg.is_free && isPrivateType ? Math.round(basePrice * 0.5) : basePrice;
+  const fullFeeAmount = reg.is_free && isPrivateType ? Math.round(basePrice * 0.5 * 100) / 100 : basePrice;
 
   // A no-show keeps the FULL charge per policy — if they already paid
   // (Stripe or the old manual cash toggle), nothing further is due and they

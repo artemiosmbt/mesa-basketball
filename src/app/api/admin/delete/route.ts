@@ -1,18 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { ADMIN_EMAIL } from "@/lib/auth";
+import { verifyAdmin } from "@/lib/auth";
 import { deletePrivateSessionFromCalendar, upsertGroupSessionCalendarEvent } from "@/lib/calendar";
 
-async function verifyAdmin(req: NextRequest) {
-  const token = req.headers.get("authorization")?.replace("Bearer ", "");
-  if (!token) return false;
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
-  const { data: { user } } = await supabase.auth.getUser(token);
-  return user?.email === ADMIN_EMAIL;
-}
 
 export async function POST(req: NextRequest) {
   if (!(await verifyAdmin(req))) {
@@ -54,7 +44,7 @@ export async function POST(req: NextRequest) {
     const isPrivate = reg.type === "private" || reg.type === "group-private";
     try {
       if (isPrivate) {
-        await deletePrivateSessionFromCalendar({ email: reg.email, bookedDate: reg.booked_date });
+        await deletePrivateSessionFromCalendar({ email: reg.email, bookedDate: reg.booked_date, bookedStartTime: reg.booked_start_time });
       } else {
         // Use the stored booked_group rather than re-parsing session_details — group
         // labels can themselves contain " — " (e.g. "High School Girls — Grades 9-12"),

@@ -1,20 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { ADMIN_EMAIL } from "@/lib/auth";
+import { verifyAdmin } from "@/lib/auth";
 import { getRegistrantsBySession } from "@/lib/supabase";
 import { sendTimeChangeNotification } from "@/lib/email";
 import { sendSMS, sendAdminSMS, formatDateWithDay } from "@/lib/sms";
 
-async function verifyAdmin(req: NextRequest) {
-  const token = req.headers.get("authorization")?.replace("Bearer ", "");
-  if (!token) return false;
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
-  const { data: { user } } = await supabase.auth.getUser(token);
-  return user?.email === ADMIN_EMAIL;
-}
 
 // GET — preview who will be notified (no notifications sent)
 export async function GET(req: NextRequest) {
@@ -89,6 +79,12 @@ export async function POST(req: NextRequest) {
         booked_start_time: newStartTime,
         booked_end_time: newEndTime,
         session_details: newDetails,
+        // Without this, a client who then cancels is wrongly treated as a
+        // late cancellation (fee kept) instead of getting the late-fee
+        // waiver isLateAction() grants for a business-initiated change —
+        // same field sync-time-changes and the detect-time-changes cron
+        // already set on their own time-change updates.
+        admin_change_at: new Date().toISOString(),
       })
       .eq("id", r.id);
 

@@ -188,6 +188,23 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Validated once at the boundary — every price computation below trusts
+    // this to be a real, positive, reasonably-bounded headcount. Unvalidated,
+    // a negative value (e.g. -1) drives every "totalParticipants || 1"
+    // fallback below to still take the negative number (only 0/null/undefined
+    // fall back to 1), making a session's price computable to $0 or negative,
+    // clamping to a free ($0-to-charge) confirmed booking with no Stripe
+    // interaction at all — while still firing real SMS/email notifications
+    // and, with a referral code, minting a real referral credit.
+    if (totalParticipants !== undefined) {
+      if (!Number.isInteger(totalParticipants) || totalParticipants < 1 || totalParticipants > 12) {
+        return NextResponse.json(
+          { error: "Invalid number of participants" },
+          { status: 400 }
+        );
+      }
+    }
+
     // Handle weekly multi-session registration
     if (type === "weekly" && weeklySessions && weeklySessions.length > 0) {
       const referralCode = await generateUniqueReferralCode(parentName, email);
@@ -744,7 +761,7 @@ export async function POST(req: NextRequest) {
         const packageCovered = packageCoverage[i]?.covered ?? false;
         const packageId = packageCoverage[i]?.packageId ?? null;
         const isFree = !packageCovered && i === 0 && firstIsFree;
-        const effectivePrice = packageCovered ? 0 : isFree ? Math.round(fullPrice * 0.5) : fullPrice;
+        const effectivePrice = packageCovered ? 0 : isFree ? Math.round(fullPrice * 0.5 * 100) / 100 : fullPrice;
         return { ...s, fullPrice, effectivePrice, isFree, packageCovered, packageId };
       });
 
@@ -971,7 +988,7 @@ export async function POST(req: NextRequest) {
       const effectivePrice = packageCovered
         ? 0
         : isFree && privateSessionPrice != null
-          ? Math.round(privateSessionPrice * 0.5)
+          ? Math.round(privateSessionPrice * 0.5 * 100) / 100
           : (privateSessionPrice ?? 0);
 
       // Cap against the DISCOUNTED (effective) price, never the full

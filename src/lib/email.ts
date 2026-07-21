@@ -23,6 +23,21 @@ const LOCATION_MAP: Record<string, { name: string; url: string }> = {
   "Holy Resurrection Brookville": { name: "Holy Resurrection Brookville", url: "https://www.google.com/search?q=holy+resurrection+brookville" },
 };
 
+// Every notification here embeds client-submitted strings (parent/kid names,
+// phone, referral names) directly into an HTML email sent to someone ELSE
+// (the referrer, the admin, or the client themselves) — unescaped, a crafted
+// name like `<a href="https://phish.example">click here</a>` renders as a
+// live, clickable phishing link in that other person's inbox. Escape any
+// such field right before interpolating it into an `html:` template.
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function formatSessionDetailsForEmail(details: string): string {
   let result = details;
   for (const [key, { name, url }] of Object.entries(LOCATION_MAP)) {
@@ -142,10 +157,10 @@ export async function sendRegistrationNotification(data: {
     subject: `New ${typeLabel}: ${data.parentName}${isPackageBooking ? " [Monthly Package]" : ""}${data.isFree && !isPackageBooking ? " [50% OFF]" : ""}`,
     html: `
       <h2>New ${typeLabel}</h2>
-      <p><strong>Parent:</strong> ${data.parentName}</p>
-      <p><strong>Email:</strong> ${data.email}</p>
-      <p><strong>Phone:</strong> ${data.phone}</p>
-      <p><strong>Players:</strong> ${data.kids}</p>
+      <p><strong>Parent:</strong> ${escapeHtml(data.parentName)}</p>
+      <p><strong>Email:</strong> ${escapeHtml(data.email)}</p>
+      <p><strong>Phone:</strong> ${escapeHtml(data.phone)}</p>
+      <p><strong>Players:</strong> ${escapeHtml(data.kids)}</p>
       <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails)}</p>
       ${data.trainer ? `<p><strong>Trainer:</strong> ${data.trainer}</p>` : ""}
       <p><strong>Total Participants:</strong> ${data.totalParticipants}</p>
@@ -153,8 +168,8 @@ export async function sendRegistrationNotification(data: {
       ${data.isFree && !isPackageBooking ? `<p><strong style="color: #d4af37;">${data.isFirstTime ? "First-Time Discount" : "Referral Credit"}: 50% off applied</strong></p>` : ""}
       ${data.accountCreditApplied && data.accountCreditApplied > 0 ? `<p><strong style="color: #93c5fd;">Account credit applied: $${fmtMoney(data.accountCreditApplied)}</strong></p>` : ""}
       ${data.amountCharged != null && data.amountCharged > 0 ? `<p><strong>Charged: $${fmtMoney(data.amountCharged + SERVICE_FEE)}</strong></p>` : ""}
-      ${data.referredBy ? `<p><strong>Referred by:</strong> ${data.referredBy}</p>` : ""}
-      ${data.referralCodeUsed ? `<p><strong>Referral code used:</strong> ${data.referralCodeUsed}</p>` : ""}
+      ${data.referredBy ? `<p><strong>Referred by:</strong> ${escapeHtml(data.referredBy)}</p>` : ""}
+      ${data.referralCodeUsed ? `<p><strong>Referral code used:</strong> ${escapeHtml(data.referralCodeUsed)}</p>` : ""}
     `,
   });
   if (adminResult.error) console.error("Resend admin email error:", adminResult.error);
@@ -241,11 +256,11 @@ export async function sendRegistrationNotification(data: {
       : `Booking Confirmed — Mesa Basketball Training`,
     html: `
       <h2>You're booked!</h2>
-      <p>Hi ${data.parentName},</p>
+      <p>Hi ${escapeHtml(data.parentName)},</p>
       <p>Your ${typeLabel.toLowerCase()} has been confirmed.</p>
       <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails)}</p>
       ${data.trainer ? `<p><strong>Trainer:</strong> ${data.trainer}</p>` : ""}
-      <p><strong>Players:</strong> ${data.kids}</p>
+      <p><strong>Players:</strong> ${escapeHtml(data.kids)}</p>
       ${packageNote}
       ${freeNote}
       ${accountCreditNote}
@@ -277,8 +292,8 @@ export async function sendReferralCreditNotification(data: {
     subject: `You earned a 50% off private session — Mesa Basketball Training`,
     html: `
       <h2>You earned a reward!</h2>
-      <p>Hi ${data.referrerName},</p>
-      <p>Great news — <strong>${data.newClientName}</strong> just booked their first session using your referral code. As a thank you, you've earned <strong>50% off your next private session</strong>.</p>
+      <p>Hi ${escapeHtml(data.referrerName)},</p>
+      <p>Great news — <strong>${escapeHtml(data.newClientName)}</strong> just booked their first session using your referral code. As a thank you, you've earned <strong>50% off your next private session</strong>.</p>
       <p>Your discount will be applied automatically the next time you book a private session.</p>
       <p><a href="${BASE_URL}/my-bookings" style="color: #d4af37; font-weight: bold;">View My Bookings</a> — check your referral credits anytime.</p>
       <br/>
@@ -400,7 +415,7 @@ export async function sendCancellationNotification(data: {
     subject: `${isPickupCancel ? "Pickup " : ""}Cancellation: ${data.parentName}`,
     html: `
       <h2>${isPickupCancel ? "Pickup " : ""}Session Cancelled</h2>
-      <p><strong>Parent:</strong> ${data.parentName}</p>
+      <p><strong>Parent:</strong> ${escapeHtml(data.parentName)}</p>
       <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails)}</p>
       ${data.isLateCancel && !data.campAdjustment && !somethingWasAttempted ? `<p><strong>⚠️ Late cancellation (within 24h) — 50% fee ($${fmtMoney(lateFee)}) applies</strong></p>` : ""}
       ${!data.campAdjustment && adminCancelSummary ? `<p><strong>${adminCancelSummary}</strong>${data.isLateCancel ? " (late cancellation — 50% of what they paid)" : ""}</p>` : ""}
@@ -416,7 +431,7 @@ export async function sendCancellationNotification(data: {
     subject: `${isPickupCancel ? "Pickup " : ""}Session Cancelled — Mesa Basketball Training`,
     html: `
       <h2>${isPickupCancel ? "Pickup " : ""}Session Cancelled</h2>
-      <p>Hi ${data.parentName},</p>
+      <p>Hi ${escapeHtml(data.parentName)},</p>
       <p>Your ${isPickupCancel ? "pickup " : ""}session has been cancelled:</p>
       <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails)}</p>
       ${lateNote}
@@ -458,7 +473,7 @@ export async function sendNoShowNotification(data: {
     subject: `No-Show: ${data.parentName}`,
     html: `
       <h2>No-Show Recorded</h2>
-      <p><strong>Parent:</strong> ${data.parentName}</p>
+      <p><strong>Parent:</strong> ${escapeHtml(data.parentName)}</p>
       <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails)}</p>
       <p><strong>${data.wasPaid ? "Already paid — fee kept" : "Full fee due"}:</strong> $${fmtMoney(data.feeAmount)}</p>
     `,
@@ -472,7 +487,7 @@ export async function sendNoShowNotification(data: {
     subject: data.wasPaid ? `No-Show on File — Mesa Basketball Training` : `No-Show — Session Fee Due — Mesa Basketball Training`,
     html: `
       <h2>No-Show on File</h2>
-      <p>Hi ${data.parentName},</p>
+      <p>Hi ${escapeHtml(data.parentName)},</p>
       <p>You were marked as a <strong>no-show</strong> for the following session:</p>
       <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails)}</p>
       ${alreadyPaidNote}
@@ -522,13 +537,13 @@ export async function sendPackageConfirmation(data: {
     subject: `New Package Enrollment: ${data.parentName} — ${data.packageType} sessions (${monthLabel})`,
     html: `
       <h2>New Monthly Package Enrollment</h2>
-      <p><strong>Parent:</strong> ${data.parentName}</p>
-      <p><strong>Email:</strong> ${data.email}</p>
-      <p><strong>Phone:</strong> ${data.phone}</p>
+      <p><strong>Parent:</strong> ${escapeHtml(data.parentName)}</p>
+      <p><strong>Email:</strong> ${escapeHtml(data.email)}</p>
+      <p><strong>Phone:</strong> ${escapeHtml(data.phone)}</p>
       <p><strong>Package:</strong> ${data.packageType} sessions / month</p>
       <p><strong>Month:</strong> ${monthLabel}</p>
       <p><strong>Charged:</strong> $${fmtMoney(totalWithFee)}</p>
-      ${data.kids ? `<p><strong>Player(s):</strong> ${data.kids}</p>` : ""}
+      ${data.kids ? `<p><strong>Player(s):</strong> ${escapeHtml(data.kids)}</p>` : ""}
       ${data.referralCode ? `<p><strong>Referral Code:</strong> ${data.referralCode}</p>` : ""}
     `,
   });
@@ -540,7 +555,7 @@ export async function sendPackageConfirmation(data: {
     subject: `Package Confirmed — Mesa Basketball Training (${monthLabel})`,
     html: `
       <h2>You're enrolled!</h2>
-      <p>Hi ${data.parentName},</p>
+      <p>Hi ${escapeHtml(data.parentName)},</p>
       <p>Your <strong>${data.packageType}-session private training package</strong> for <strong>${monthLabel}</strong> is confirmed.</p>
       <h3>Package Details</h3>
       <ul>
@@ -579,7 +594,7 @@ export async function sendPackageReminder(data: {
     subject: `Your Mesa Basketball sessions are expiring soon!`,
     html: `
       <h2>Don't let your sessions go to waste!</h2>
-      <p>Hey ${data.parentName},</p>
+      <p>Hey ${escapeHtml(data.parentName)},</p>
       <p>Just a heads up — your <strong>${monthLabel}</strong> package has <strong>${sessionsRemaining} session${sessionsRemaining !== 1 ? "s" : ""} remaining</strong> and the month ends in 3 days.</p>
       <p>Don't let them go to waste! Book now and make the most of your training time.</p>
       <p><a href="${BASE_URL}/#private" style="color: #d4af37; font-weight: bold; font-size: 16px;">Book Your Remaining Sessions &rarr;</a></p>
@@ -596,7 +611,7 @@ export async function sendPackageReminder(data: {
     to: ARTEMI_EMAIL,
     subject: `Package Reminder Sent: ${data.parentName} — ${sessionsRemaining} session(s) remaining`,
     html: `
-      <p><strong>Parent:</strong> ${data.parentName} (${data.email})</p>
+      <p><strong>Parent:</strong> ${escapeHtml(data.parentName)} (${escapeHtml(data.email)})</p>
       <p><strong>Month:</strong> ${monthLabel}</p>
       <p><strong>Sessions Used:</strong> ${data.sessionsUsed} / ${data.packageType}</p>
       <p><strong>Remaining:</strong> ${sessionsRemaining}</p>
@@ -622,9 +637,9 @@ export async function sendPlayerUpdateNotification(data: {
   const resend = getResend();
 
   const removedList = data.removedPlayers.length > 0
-    ? `<p><strong>Removed:</strong> ${data.removedPlayers.join(", ")}</p>` : "";
+    ? `<p><strong>Removed:</strong> ${data.removedPlayers.map(escapeHtml).join(", ")}</p>` : "";
   const addedList = data.addedPlayers.length > 0
-    ? `<p><strong>Added:</strong> ${data.addedPlayers.join(", ")}</p>` : "";
+    ? `<p><strong>Added:</strong> ${data.addedPlayers.map(escapeHtml).join(", ")}</p>` : "";
 
   const lateBlock = data.isLate && data.removedPlayers.length > 0
     ? `<div style="background:#7c1d1d;border-left:4px solid #ef4444;border-radius:6px;padding:14px 16px;margin:16px 0;">
@@ -649,10 +664,10 @@ export async function sendPlayerUpdateNotification(data: {
     subject: `Player Update${data.isLate && data.removedPlayers.length > 0 ? " ⚠️ LATE" : ""}: ${data.parentName}`,
     html: `
       <h2>Player List Updated</h2>
-      <p><strong>Parent:</strong> ${data.parentName}</p>
+      <p><strong>Parent:</strong> ${escapeHtml(data.parentName)}</p>
       <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails)}</p>
       ${removedList}${addedList}
-      <p><strong>Current Players:</strong> ${data.newKids}</p>
+      <p><strong>Current Players:</strong> ${escapeHtml(data.newKids)}</p>
       ${data.priceChanged ? `<p><strong>Price:</strong> $${data.oldPrice != null ? fmtMoney(data.oldPrice) : "—"} → $${data.newPrice != null ? fmtMoney(data.newPrice) : "—"}</p>` : ""}
       ${data.isLate && data.removedPlayers.length > 0 ? `<p style="color:#ef4444;"><strong>⚠️ Late removal${data.lateFeeDue ? ` — $${fmtMoney(data.lateFeeDue)} fee due` : ""}</strong></p>` : ""}
     `,
@@ -665,11 +680,11 @@ export async function sendPlayerUpdateNotification(data: {
     subject: `Player List Updated — Mesa Basketball Training`,
     html: `
       <h2>Player List Updated</h2>
-      <p>Hi ${data.parentName},</p>
+      <p>Hi ${escapeHtml(data.parentName)},</p>
       <p>Your player list for the following session has been updated:</p>
       <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails)}</p>
       ${removedList}${addedList}
-      <p><strong>Current Players:</strong> ${data.newKids}</p>
+      <p><strong>Current Players:</strong> ${escapeHtml(data.newKids)}</p>
       ${priceBlock}
       ${lateBlock}
       <p><a href="${BASE_URL}/my-bookings" style="color:#d4af37;font-weight:bold;">View My Bookings</a></p>
@@ -744,7 +759,7 @@ export async function sendTimeChangeNotification(data: {
     rows.push(td("#1e1e1e", "Location", newLocDisplay));
   }
 
-  rows.push(td("#161616", "Athletes", data.kids));
+  rows.push(td("#161616", "Athletes", escapeHtml(data.kids)));
 
   const result = await resend.emails.send({
     from: FROM_EMAIL,
@@ -753,7 +768,7 @@ export async function sendTimeChangeNotification(data: {
     subject: `${subjectLabel} — Mesa Basketball Training`,
     html: `
       <h2>${subjectLabel}</h2>
-      <p>Hi ${data.parentName},</p>
+      <p>Hi ${escapeHtml(data.parentName)},</p>
       <p>${descText}</p>
       <table style="border-collapse: collapse; width: 100%; margin: 16px 0; border-radius: 8px; overflow: hidden;">
         ${rows.join("")}
@@ -844,7 +859,7 @@ export async function sendRescheduleNotification(data: {
     subject: `Reschedule${data.isLateReschedule ? " ⚠️ LATE" : ""}: ${data.parentName}`,
     html: `
       <h2>Session Rescheduled</h2>
-      <p><strong>Parent:</strong> ${data.parentName}</p>
+      <p><strong>Parent:</strong> ${escapeHtml(data.parentName)}</p>
       <p><strong>Old Session:</strong> ${formatSessionDetailsForEmail(data.oldSessionDetails)}</p>
       <p><strong>New Session:</strong> ${formatSessionDetailsForEmail(data.newSessionDetails)}</p>
       ${data.newTrainer ? `<p><strong>Trainer:</strong> ${data.newTrainer}</p>` : ""}
@@ -869,7 +884,7 @@ export async function sendRescheduleNotification(data: {
     subject: `Session Rescheduled — Mesa Basketball Training`,
     html: `
       <h2>Session Rescheduled</h2>
-      <p>Hi ${data.parentName},</p>
+      <p>Hi ${escapeHtml(data.parentName)},</p>
       <p>Your session has been rescheduled.</p>
       <p><strong>Old Session:</strong> ${formatSessionDetailsForEmail(data.oldSessionDetails)}</p>
       <p><strong>New Session:</strong> ${formatSessionDetailsForEmail(data.newSessionDetails)}</p>
@@ -918,10 +933,10 @@ export async function sendAbandonedCheckoutEmail(data: {
     subject: `Abandoned Checkout: ${data.parentName}`,
     html: `
       <h2>Checkout Started, Never Completed</h2>
-      <p><strong>Parent:</strong> ${data.parentName}</p>
-      <p><strong>Email:</strong> ${data.email}</p>
-      ${data.phone ? `<p><strong>Phone:</strong> ${data.phone}</p>` : ""}
-      ${data.kids ? `<p><strong>Players:</strong> ${data.kids}</p>` : ""}
+      <p><strong>Parent:</strong> ${escapeHtml(data.parentName)}</p>
+      <p><strong>Email:</strong> ${escapeHtml(data.email)}</p>
+      ${data.phone ? `<p><strong>Phone:</strong> ${escapeHtml(data.phone)}</p>` : ""}
+      ${data.kids ? `<p><strong>Players:</strong> ${escapeHtml(data.kids)}</p>` : ""}
       <p><strong>Session${data.sessions.length > 1 ? "s" : ""}:</strong></p>
       ${sessionsHtml}
       ${closingNote}
@@ -945,9 +960,9 @@ export async function sendAbandonedPackageEmail(data: {
     subject: `Abandoned Package Checkout: ${data.parentName}`,
     html: `
       <h2>Package Checkout Started, Never Completed</h2>
-      <p><strong>Parent:</strong> ${data.parentName}</p>
-      <p><strong>Email:</strong> ${data.email}</p>
-      ${data.phone ? `<p><strong>Phone:</strong> ${data.phone}</p>` : ""}
+      <p><strong>Parent:</strong> ${escapeHtml(data.parentName)}</p>
+      <p><strong>Email:</strong> ${escapeHtml(data.email)}</p>
+      ${data.phone ? `<p><strong>Phone:</strong> ${escapeHtml(data.phone)}</p>` : ""}
       <p><strong>Package:</strong> ${data.packageType}-session monthly plan — ${data.monthYear}</p>
       <p style="color: #999; font-size: 13px;">No charge was made and this package was never activated.</p>
     `,

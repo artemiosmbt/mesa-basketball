@@ -427,7 +427,7 @@ export default function PaymentsPage() {
     } else {
       basePrice = fullPriceForType(r.type);
     }
-    const discounted = r.is_free && isPrivateType ? Math.round(basePrice * 0.5) : basePrice;
+    const discounted = r.is_free && isPrivateType ? Math.round(basePrice * 0.5 * 100) / 100 : basePrice;
     // session_price/basePrice is always the full pre-credit rate — account
     // credit applied at booking time is a separate field and has to be
     // subtracted here, or this shows what they'd owe with no credit at all.

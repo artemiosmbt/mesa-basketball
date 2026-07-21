@@ -1,17 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { ADMIN_EMAIL } from "@/lib/auth";
+import { verifyAdmin } from "@/lib/auth";
 
-async function verifyAdmin(req: NextRequest) {
-  const token = req.headers.get("authorization")?.replace("Bearer ", "");
-  if (!token) return false;
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
-  const { data: { user } } = await supabase.auth.getUser(token);
-  return user?.email === ADMIN_EMAIL;
-}
 
 // Backfills session_price for past weekly group session bookings that had volume discounts
 // but never stored the discounted price (registered before that fix was in place).
@@ -28,24 +18,48 @@ export async function POST(req: NextRequest) {
   // Fetch all weekly sessions that are missing a stored price
   const { data: rows, error } = await supabase
     .from("registrations")
-    .select("id, referral_code, total_participants, session_price")
+    .select("id, referral_code, total_participants, session_price, created_at")
     .eq("type", "weekly")
     .is("session_price", null)
-    .not("referral_code", "is", null);
+    .not("referral_code", "is", null)
+    .order("created_at", { ascending: true });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   if (!rows || rows.length === 0) return NextResponse.json({ updated: 0, message: "Nothing to backfill" });
 
-  // Group by referral_code to count sessions per booking group
-  const groups = new Map<string, { ids: string[]; totalParticipants: number }>();
+  // referral_code alone is NOT a unique purchase id — it's the client's
+  // permanent code, identical across every weekly booking they've ever made
+  // (same lesson learned as admin/update-payment.ts). Grouping purely by
+  // code would blend two unrelated purchase batches from the same client
+  // together, miscounting the volume-discount tier and writing one wrong
+  // blended price across both. A single checkout's rows are always created
+  // within milliseconds of each other, so within each referral_code, split
+  // into a new group whenever the gap to the previous row exceeds 5 minutes.
+  const BATCH_GAP_MS = 5 * 60 * 1000;
+  const byCode = new Map<string, typeof rows>();
   for (const r of rows) {
     const code = r.referral_code as string;
-    const existing = groups.get(code);
-    if (existing) {
-      existing.ids.push(r.id);
-      existing.totalParticipants = Math.max(existing.totalParticipants, r.total_participants || 1);
-    } else {
-      groups.set(code, { ids: [r.id], totalParticipants: r.total_participants || 1 });
+    const existing = byCode.get(code);
+    if (existing) existing.push(r);
+    else byCode.set(code, [r]);
+  }
+
+  const groups = new Map<string, { ids: string[]; totalParticipants: number }>();
+  for (const [code, codeRows] of byCode) {
+    let batchIndex = 0;
+    let lastCreatedAt: number | null = null;
+    for (const r of codeRows) {
+      const createdAt = new Date(r.created_at).getTime();
+      if (lastCreatedAt !== null && createdAt - lastCreatedAt > BATCH_GAP_MS) batchIndex++;
+      lastCreatedAt = createdAt;
+      const key = `${code}#${batchIndex}`;
+      const existing = groups.get(key);
+      if (existing) {
+        existing.ids.push(r.id);
+        existing.totalParticipants = Math.max(existing.totalParticipants, r.total_participants || 1);
+      } else {
+        groups.set(key, { ids: [r.id], totalParticipants: r.total_participants || 1 });
+      }
     }
   }
 

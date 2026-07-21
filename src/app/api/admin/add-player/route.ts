@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { ADMIN_EMAIL } from "@/lib/auth";
+import { verifyAdmin } from "@/lib/auth";
 import { updateRegistrationPlayers, addAccountCredit } from "@/lib/supabase";
 import {
   addPrivateSessionToCalendar,
@@ -12,16 +12,6 @@ import { getWeeklySchedule } from "@/lib/sheets";
 import { resolveOffSessionPaymentSource, chargeSavedCardOffSession, issueStripeRefund } from "@/lib/booking-finalize";
 import { SERVICE_FEE, SERVICE_FEE_LABEL, fmtMoney } from "@/lib/pricing";
 
-async function verifyAdmin(req: NextRequest) {
-  const token = req.headers.get("authorization")?.replace("Bearer ", "");
-  if (!token) return false;
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
-  const { data: { user } } = await supabase.auth.getUser(token);
-  return user?.email === ADMIN_EMAIL;
-}
 
 function parseMinsFromTime(t: string): number {
   const m = t.match(/(\d+):(\d+)\s*(AM|PM)/i);
@@ -43,7 +33,7 @@ function isPrivateType(type: string): boolean {
 }
 
 function effectiveAmount(fullPrice: number, isFree: boolean, isPriv: boolean): number {
-  return isFree && isPriv ? Math.round(fullPrice * 0.5) : fullPrice;
+  return isFree && isPriv ? Math.round(fullPrice * 0.5 * 100) / 100 : fullPrice;
 }
 
 // Fallback when session_price is null (a real, common case — legacy rows)
@@ -223,8 +213,8 @@ export async function POST(req: NextRequest) {
 
   try {
     if (isPriv) {
-      if (reg.booked_date) {
-        await deletePrivateSessionFromCalendar({ email: reg.email, bookedDate: reg.booked_date });
+      if (reg.booked_date && reg.booked_start_time) {
+        await deletePrivateSessionFromCalendar({ email: reg.email, bookedDate: reg.booked_date, bookedStartTime: reg.booked_start_time });
       }
       if (reg.booked_date && reg.booked_start_time && reg.booked_end_time && reg.booked_location) {
         await addPrivateSessionToCalendar({

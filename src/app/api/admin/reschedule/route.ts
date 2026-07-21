@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { ADMIN_EMAIL } from "@/lib/auth";
+import { verifyAdmin } from "@/lib/auth";
 import {
   addPrivateSessionToCalendar,
   deletePrivateSessionFromCalendar,
@@ -13,16 +13,6 @@ import { addAccountCredit, deductAccountCredit, addReferralCredit, logLateFeeEve
 import { isLateAction, resolveOffSessionPaymentSource, chargeSavedCardOffSession, issueStripeRefund } from "@/lib/booking-finalize";
 import { SERVICE_FEE, SERVICE_FEE_LABEL, fmtMoney } from "@/lib/pricing";
 
-async function verifyAdmin(req: NextRequest) {
-  const token = req.headers.get("authorization")?.replace("Bearer ", "");
-  if (!token) return false;
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
-  const { data: { user } } = await supabase.auth.getUser(token);
-  return user?.email === ADMIN_EMAIL;
-}
 
 function parseMinsFromTime(t: string): number {
   const m = t.match(/(\d+):(\d+)\s*(AM|PM)/i);
@@ -56,7 +46,7 @@ function fullPriceForType(type: string): number {
 // resolvedSessionPrice() in booking/[token]/route.ts and effectivePrice() in
 // the admin dashboard.
 function effectiveAmount(fullPrice: number, isFree: boolean, isPriv: boolean): number {
-  return isFree && isPriv ? Math.round(fullPrice * 0.5) : fullPrice;
+  return isFree && isPriv ? Math.round(fullPrice * 0.5 * 100) / 100 : fullPrice;
 }
 
 // Admin-initiated move of a single confirmed booking to a new day/time/location
@@ -288,7 +278,7 @@ export async function POST(req: NextRequest) {
   let lateFeeCreditApplied = 0;
   let amountToCharge = 0;
   if (wasPaid && chargeLateFee) {
-    lateFeeCredited = Math.round(oldAmount * 0.5);
+    lateFeeCredited = Math.round(oldAmount * 0.5 * 100) / 100;
     lateFeeCreditApplied = Math.min(lateFeeCredited, newAmount);
     amountToCharge = Math.max(0, Math.round((newAmount - lateFeeCreditApplied) * 100) / 100);
   } else if (wasPaid && priceDelta > 0) {
@@ -501,8 +491,8 @@ export async function POST(req: NextRequest) {
   // means one side is a shared group event and the other is a standalone one.
   try {
     if (wasPrivate) {
-      if (oldBookedDate) {
-        await deletePrivateSessionFromCalendar({ email: reg.email, bookedDate: oldBookedDate });
+      if (oldBookedDate && oldBookedStartTime) {
+        await deletePrivateSessionFromCalendar({ email: reg.email, bookedDate: oldBookedDate, bookedStartTime: oldBookedStartTime });
       }
     } else if (oldBookedDate && oldBookedStartTime) {
       await upsertGroupSessionCalendarEvent({

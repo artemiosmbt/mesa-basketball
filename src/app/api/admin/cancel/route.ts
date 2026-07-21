@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { ADMIN_EMAIL } from "@/lib/auth";
+import { verifyAdmin } from "@/lib/auth";
 import { deletePrivateSessionFromCalendar, upsertGroupSessionCalendarEvent } from "@/lib/calendar";
 import { sendCancellationNotification } from "@/lib/email";
 import { getCurrentSheetLocation } from "@/lib/sheets";
@@ -20,16 +20,6 @@ import {
 import { getStripe } from "@/lib/stripe";
 import { SERVICE_FEE, fmtMoney } from "@/lib/pricing";
 
-async function verifyAdmin(req: NextRequest) {
-  const token = req.headers.get("authorization")?.replace("Bearer ", "");
-  if (!token) return false;
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
-  const { data: { user } } = await supabase.auth.getUser(token);
-  return user?.email === ADMIN_EMAIL;
-}
 
 function parseMinsFromTime(t: string): number {
   const m = t.match(/(\d+):(\d+)\s*(AM|PM)/i);
@@ -132,7 +122,7 @@ export async function POST(req: NextRequest) {
       if (wasPaidCamp && reg.email) {
         const paidAmount = Math.max(0, resolvedSessionPrice(reg) - groupCredit - priorRefundedTotal - priorAccruedFees);
         if (chargeLateFee) {
-          campCancelCredit = Math.round(paidAmount * 0.5);
+          campCancelCredit = Math.round(paidAmount * 0.5 * 100) / 100;
           if (campCancelCredit > 0) await addAccountCredit(reg.email, campCancelCredit).catch(() => {});
         } else if (paidAmount > 0) {
           if (groupPaymentIntentId) {
@@ -208,7 +198,7 @@ export async function POST(req: NextRequest) {
 
     // Partial-day cancel — recompute the capped total and accrue this day's late fee (if any).
     const perDayRate = reg.camp_drop_in_rate ?? Math.round((reg.session_price ?? 0) / totalOriginalDays);
-    const thisDayLateFee = chargeLateFee ? Math.round(perDayRate * 0.5) : 0;
+    const thisDayLateFee = chargeLateFee ? Math.round(perDayRate * 0.5 * 100) / 100 : 0;
     const daySuccess = await cancelRegistration(reg.manage_token, chargeLateFee, thisDayLateFee);
     if (!daySuccess) {
       return NextResponse.json({ error: "This day was already cancelled" }, { status: 409 });
@@ -433,7 +423,7 @@ export async function POST(req: NextRequest) {
   if (wasPaid && reg.email) {
     const paidAmount = Math.max(0, resolvedSessionPrice(reg) - (reg.applied_account_credit || 0));
     if (chargeLateFee) {
-      creditIssued = Math.round(paidAmount * 0.5);
+      creditIssued = Math.round(paidAmount * 0.5 * 100) / 100;
       if (creditIssued > 0) await addAccountCredit(reg.email, creditIssued).catch(() => {});
     } else if (paidAmount > 0) {
       if (reg.stripe_payment_intent_id) {
@@ -472,7 +462,7 @@ export async function POST(req: NextRequest) {
     const isPrivate = reg.type === "private" || reg.type === "group-private";
     try {
       if (isPrivate) {
-        await deletePrivateSessionFromCalendar({ email: reg.email, bookedDate: reg.booked_date });
+        await deletePrivateSessionFromCalendar({ email: reg.email, bookedDate: reg.booked_date, bookedStartTime: reg.booked_start_time });
       } else {
         // Use the stored booked_group rather than re-parsing session_details — group
         // labels can themselves contain " — " (e.g. "High School Girls — Grades 9-12"),

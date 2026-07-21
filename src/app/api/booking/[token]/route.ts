@@ -203,7 +203,7 @@ export async function DELETE(
       if (wasPaid && reg.email) {
         const paidAmount = Math.max(0, resolvedSessionPrice(reg) - groupCredit - priorRefundedTotal - priorAccruedFees);
         if (isLateCancel) {
-          cancelCredit = Math.round(paidAmount * 0.5);
+          cancelCredit = Math.round(paidAmount * 0.5 * 100) / 100;
           if (cancelCredit > 0) await addAccountCredit(reg.email, cancelCredit).catch(() => {});
         } else {
           cancelCredit = paidAmount;
@@ -228,7 +228,7 @@ export async function DELETE(
       // Also subtract any credit already applied at booking time, so the fee
       // reflects what's actually still owed, not the full sticker price.
       const lateFeeAmount = isLateCancel && !wasPaid
-        ? Math.round(Math.max(0, resolvedSessionPrice(reg) - groupCredit) * 0.5)
+        ? Math.round(Math.max(0, resolvedSessionPrice(reg) - groupCredit) * 0.5 * 100) / 100
         : undefined;
       if (wasPaid && isLateCancel) {
         const paidAmount = Math.max(0, resolvedSessionPrice(reg) - groupCredit - priorRefundedTotal);
@@ -294,7 +294,7 @@ export async function DELETE(
 
     // Partial-day cancel — recompute the capped total and accrue this day's late fee (if any).
     const perDayRate = reg.camp_drop_in_rate ?? Math.round((reg.session_price ?? 0) / totalOriginalDays);
-    const thisDayLateFee = isLateCancel ? Math.round(perDayRate * 0.5) : 0;
+    const thisDayLateFee = isLateCancel ? Math.round(perDayRate * 0.5 * 100) / 100 : 0;
     const success = await cancelRegistration(token, isLateCancel, thisDayLateFee);
     if (!success) {
       // Zero rows matched — another request already cancelled this day.
@@ -448,7 +448,7 @@ export async function DELETE(
   if (wasPaid && reg.email) {
     const paidAmount = Math.max(0, resolvedSessionPrice(reg) - (reg.applied_account_credit || 0));
     if (isLateCancel) {
-      cancelCredit = Math.round(paidAmount * 0.5);
+      cancelCredit = Math.round(paidAmount * 0.5 * 100) / 100;
       if (cancelCredit > 0) await addAccountCredit(reg.email, cancelCredit).catch(() => {});
     } else {
       cancelCredit = paidAmount;
@@ -591,7 +591,7 @@ export async function DELETE(
   const lateFeeAmount = reg.package_id
     ? packageLateFeeAmount
     : isLateCancel && !wasPaid
-      ? Math.round(Math.max(0, resolvedSessionPrice(reg) - (reg.applied_account_credit || 0)) * 0.5)
+      ? Math.round(Math.max(0, resolvedSessionPrice(reg) - (reg.applied_account_credit || 0)) * 0.5 * 100) / 100
       : undefined;
 
   let cancelSessionDetails = reg.session_details;
@@ -650,6 +650,7 @@ export async function DELETE(
         await deletePrivateSessionFromCalendar({
           email: reg.email,
           bookedDate: reg.booked_date,
+          bookedStartTime: reg.booked_start_time,
         });
       } else {
         // Group/weekly: update the event count (DB already reflects cancellation)
@@ -757,11 +758,11 @@ export async function PATCH(
       const highPrice = calcPrivatePrice(duration, 4);
       if (!newTierHigh) {
         // 4+ → 1-3: dropping tier
-        newPrice = isLate ? Math.round((lowPrice + highPrice) / 2) : Math.round(lowPrice);
-        if (isLate) lateFeeDue = Math.round(newPrice - lowPrice);
+        newPrice = isLate ? Math.round((lowPrice + highPrice) * 100 / 2) / 100 : lowPrice;
+        if (isLate) lateFeeDue = Math.round((newPrice - lowPrice) * 100) / 100;
       } else {
         // 1-3 → 4+: gaining tier (no fee)
-        newPrice = Math.round(highPrice);
+        newPrice = highPrice;
       }
       priceChanged = true;
     }
@@ -795,9 +796,9 @@ export async function PATCH(
 
   const wasPaid = !!reg.is_paid || !!reg.stripe_payment_intent_id;
   const appliedCredit = reg.applied_account_credit || 0;
-  const oldAmount = Math.max(0, (reg.is_free ? Math.round((reg.session_price ?? 0) * 0.5) : (reg.session_price ?? 0)) - appliedCredit);
+  const oldAmount = Math.max(0, (reg.is_free ? Math.round((reg.session_price ?? 0) * 0.5 * 100) / 100 : (reg.session_price ?? 0)) - appliedCredit);
   const newAmount = priceChanged
-    ? Math.max(0, (reg.is_free && isPrivate ? Math.round((newPrice ?? 0) * 0.5) : (newPrice ?? 0)) - appliedCredit)
+    ? Math.max(0, (reg.is_free && isPrivate ? Math.round((newPrice ?? 0) * 0.5 * 100) / 100 : (newPrice ?? 0)) - appliedCredit)
     : oldAmount;
   const priceDelta = priceChanged ? Math.round((newAmount - oldAmount) * 100) / 100 : 0;
   const totalOwedViaCheckout = Math.round((Math.max(0, priceDelta) + additionalLateFee) * 100) / 100;
@@ -991,7 +992,7 @@ export async function PUT(
     const wasPrivate = reg.type === "private" || reg.type === "group-private";
     try {
       if (wasPrivate) {
-        await deletePrivateSessionFromCalendar({ email: reg.email, bookedDate: reg.booked_date });
+        await deletePrivateSessionFromCalendar({ email: reg.email, bookedDate: reg.booked_date, bookedStartTime: reg.booked_start_time });
       } else {
         // Use the stored booked_group rather than re-parsing session_details — group
         // labels can themselves contain " — " (e.g. "High School Girls — Grades 9-12"),
@@ -1076,7 +1077,7 @@ export async function PUT(
   let lateFeeEventId: string | null = null;
   if (oldPaymentIntentId) {
     if (isLateReschedule) {
-      lateFeeCredited = Math.round(oldPaidAmount * 0.5);
+      lateFeeCredited = Math.round(oldPaidAmount * 0.5 * 100) / 100;
       if (lateFeeCredited > 0) await addAccountCredit(reg.email, lateFeeCredited).catch(() => {});
       if (newPriceKnown && newEffectivePrice! > 0) {
         lateFeeCreditApplied = Math.min(lateFeeCredited, newEffectivePrice!);
@@ -1406,7 +1407,7 @@ export async function PUT(
   const lateFeeAmount = reg.package_id
     ? packageLateFeeAmount
     : isLateReschedule && !priceReconciliation && !lateFeeCredited
-      ? Math.round(resolvedSessionPrice(reg) * 0.5)
+      ? Math.round(resolvedSessionPrice(reg) * 0.5 * 100) / 100
       : undefined;
 
   const refundAdjustment = priceReconciliation?.kind === "refund" && rescheduleRefundResult

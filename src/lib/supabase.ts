@@ -591,12 +591,26 @@ export async function logLateFeeEvent(event: {
 // redirects to its own Checkout Session, since logging it at creation time
 // would record real money as "charged" before the client ever paid it (and
 // permanently overstate it if they abandon that checkout).
-export async function markLateFeeEventCharged(eventId: string, amountChargedExtra: number): Promise<void> {
+/**
+ * Returns true only if THIS call actually flipped the row from its default
+ * "not yet charged" (amount_charged_extra = 0) state — a Stripe webhook
+ * redelivery for the same checkout session would otherwise match zero rows
+ * (already charged) but the caller previously had no way to tell, and would
+ * re-send the "fee PAID" admin SMS every time the same event redelivers.
+ */
+export async function markLateFeeEventCharged(eventId: string, amountChargedExtra: number): Promise<boolean> {
   try {
     const supabase = getSupabase();
-    await supabase.from("late_fee_events").update({ amount_charged_extra: amountChargedExtra }).eq("id", eventId);
+    const { data } = await supabase
+      .from("late_fee_events")
+      .update({ amount_charged_extra: amountChargedExtra })
+      .eq("id", eventId)
+      .eq("amount_charged_extra", 0)
+      .select("id");
+    return !!data && data.length > 0;
   } catch (err) {
     console.error("Failed to mark late fee event as charged:", err);
+    return false;
   }
 }
 
@@ -1071,6 +1085,23 @@ export async function cancelPackage(packageId: string): Promise<MonthlyPackage |
     .single();
   if (error || !data) return null;
   return data as MonthlyPackage;
+}
+
+/**
+ * Undoes a just-issued cancelPackage() flip — used when a session turns out
+ * to have been booked against this package in the gap between the
+ * has-any-booked-session check and the cancel itself (a genuine TOCTOU race:
+ * a register request reads "no session yet" and inserts one right as this
+ * cancellation is also in flight). Guarded on status still being
+ * "cancelled" so it only ever reverts the flip THIS request just made.
+ */
+export async function revertPackageCancellation(packageId: string): Promise<void> {
+  const supabase = getSupabase();
+  await supabase
+    .from("monthly_packages")
+    .update({ status: "active" })
+    .eq("id", packageId)
+    .eq("status", "cancelled");
 }
 
 /** Safety net for the cron sweep, same convention as getStalePendingBatches. */

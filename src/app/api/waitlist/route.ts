@@ -3,9 +3,10 @@ import { Resend } from "resend";
 import { createClient } from "@supabase/supabase-js";
 
 export async function POST(req: NextRequest) {
-  const { email } = await req.json();
+  const { email: rawEmail } = await req.json();
+  const email = typeof rawEmail === "string" ? rawEmail.toLowerCase().trim() : rawEmail;
 
-  if (!email || !email.includes("@")) {
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) {
     return NextResponse.json({ error: "Invalid email" }, { status: 400 });
   }
 
@@ -14,12 +15,22 @@ export async function POST(req: NextRequest) {
 
   const resend = new Resend(key);
 
-  // Save to Supabase (ignore duplicate emails)
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
     { auth: { persistSession: false } }
   );
+
+  // Already on the list — no-op rather than re-sending. Without this,
+  // repeatedly POSTing the same (or an arbitrary victim's) email resends the
+  // confirmation email and the admin alert every single time, unlimited.
+  const { data: existing } = await supabase
+    .from("virtual_training_waitlist")
+    .select("email")
+    .eq("email", email)
+    .maybeSingle();
+  if (existing) return NextResponse.json({ ok: true });
+
   await supabase.from("virtual_training_waitlist").upsert({ email }, { onConflict: "email" });
 
   await Promise.all([
