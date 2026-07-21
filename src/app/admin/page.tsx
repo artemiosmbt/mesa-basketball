@@ -1380,7 +1380,7 @@ export default function AdminPage() {
     return (
       <>
         {list.map((r) => (
-          <tr key={r.id} className="hover:bg-brown-900/30 transition align-top">
+          <tr key={r.id} className="hover:bg-brown-900/30 transition align-top border-b border-brown-800/60">
             <td className="px-4 py-2.5 text-brown-400 whitespace-nowrap text-xs">
               <div>{new Date(r.created_at).toLocaleDateString()}</div>
               {r.booked_date && <div className="text-mesa-accent font-medium mt-0.5">↳ {formatDate(r.booked_date)}</div>}
