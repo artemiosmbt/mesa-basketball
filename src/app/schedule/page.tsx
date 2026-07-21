@@ -662,7 +662,6 @@ export default function Home() {
   const [showCalendar, setShowCalendar] = useState(false);
   const [showAllGroups, setShowAllGroups] = useState<Set<string>>(new Set());
   const [groupTab, setGroupTab] = useState<"skills" | "pickup">("skills");
-  const [selectedPickupKeys, setSelectedPickupKeys] = useState<Set<string>>(new Set());
   const [upsellExtra, setUpsellExtra] = useState(0); // extra minutes accepted
   const [referralCode, setReferralCode] = useState("");
   const [referralCodeError, setReferralCodeError] = useState("");
@@ -1784,13 +1783,17 @@ export default function Home() {
     });
   }
 
-  // Get selected sessions for the active group
-  const selectedSessionsForActiveGroup = useMemo(() => {
+  // Every selected weekly-type session (skills sessions across every group,
+  // plus pickup) — deliberately NOT scoped to activeGroup, so a parent can
+  // pick sessions from several age groups and pickup in one visit and have
+  // all of it count toward one combined registration, matching how the
+  // server already prices/books a mixed-group weeklySessions[] batch.
+  const allSelectedWeeklySessions = useMemo(() => {
     return schedule.filter(
-      (s) => s.group === activeGroup && selectedGroupKeys.has(getGroupSessionKey(s))
+      (s) => isFutureSession(s) && selectedGroupKeys.has(getGroupSessionKey(s))
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schedule, activeGroup, selectedGroupKeys]);
+  }, [schedule, selectedGroupKeys]);
 
   // Auto-restore pending booking once schedule + user are both ready
   useEffect(() => {
@@ -1819,46 +1822,28 @@ export default function Home() {
 
   // Auto-open group registration once sessions are restored and ready
   useEffect(() => {
-    if (!pendingGroupOpen || selectedSessionsForActiveGroup.length < 1) return;
+    if (!pendingGroupOpen || allSelectedWeeklySessions.length < 1) return;
     setPendingGroupOpen(false);
     openGroupRegistration();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingGroupOpen, selectedSessionsForActiveGroup]);
+  }, [pendingGroupOpen, allSelectedWeeklySessions]);
 
-  // Compute group session pricing
+  // Per-group volume-discount breakdown across EVERY selected weekly-type
+  // session (skills, any group, and pickup alike) — mirrors calcWeeklyGroupBreakdown's
+  // per-group tiering, which is also what the server actually prices/books
+  // against, so this preview never diverges from what the modal (and the
+  // real charge) will show.
   const groupPricing = useMemo(() => {
-    const sessions = selectedSessionsForActiveGroup;
+    const sessions = allSelectedWeeklySessions;
     const count = sessions.length;
-    if (count === 0) return { count: 0, unitPrice: 0, totalPrice: 0, savings: 0, discountLabel: "" };
-
-    const basePrice = sessions[0]?.price || 50;
-    let discountPct = 0;
-    let discountLabel = "";
-
-    if (count >= 8) {
-      discountPct = 0.15;
-      discountLabel = "15% off (8+ sessions)";
-    } else if (count >= 4) {
-      discountPct = 0.10;
-      discountLabel = "10% off (4-7 sessions)";
-    }
-
-    const unitPrice = Math.round(basePrice * (1 - discountPct) * 100) / 100;
-    const totalPrice = Math.round(unitPrice * count * 100) / 100;
-    const fullTotal = basePrice * count;
-    const savings = Math.round((fullTotal - totalPrice) * 100) / 100;
-
-    return { count, unitPrice, totalPrice, savings, discountLabel, basePrice };
-  }, [selectedSessionsForActiveGroup]);
-
-  const selectedPickupSessionsForFooter = useMemo(() => {
-    return schedule
-      .filter((s) => s.group.toLowerCase().includes("pickup") && isFutureSession(s) && selectedPickupKeys.has(getGroupSessionKey(s)));
-  }, [schedule, selectedPickupKeys]);
+    if (count === 0) return { count: 0, totalPrice: 0, savings: 0, items: [] as ReturnType<typeof calcWeeklyGroupBreakdown>["items"] };
+    const breakdown = calcWeeklyGroupBreakdown(sessions, 1);
+    return { count, totalPrice: breakdown.total, savings: breakdown.savings, items: breakdown.items };
+  }, [allSelectedWeeklySessions]);
 
   function openGroupRegistration() {
     if (!userEmail) { showAuthPrompt({ kind: "group", savedGroup: activeGroup, savedKeys: Array.from(selectedGroupKeys) }); return; }
-    const sessions = selectedSessionsForActiveGroup;
+    const sessions = allSelectedWeeklySessions;
     if (sessions.length < 1) return;
 
     const sessionList = sessions
@@ -1869,11 +1854,18 @@ export default function Home() {
       })
       .join(", ");
 
+    // "Group Sessions" once more than one distinct group is in the mix
+    // (skills across several age groups, and/or pickup together) — the
+    // per-group label only makes sense when everything selected is from
+    // the same one.
+    const distinctGroups = new Set(sessions.map((s) => s.group));
+    const groupLabel = distinctGroups.size === 1 ? sessions[0].group : "Group Sessions";
+
     setModal({
       open: true,
       type: "weekly",
       sessionIndex: 0,
-      sessionDetails: `${activeGroup} — ${sessions.length} sessions`,
+      sessionDetails: `${groupLabel} — ${sessions.length} sessions`,
       selectedGroupSessions: sessions.map((s) => ({
         date: s.date,
         startTime: s.startTime,
@@ -1898,73 +1890,6 @@ export default function Home() {
     setUpsellExtra(0);
     setReferralCode("");
     setReferralCodeError("");
-  }
-
-  function openPickupGroupRegistration(sessions: WeeklySession[], totalPrice: number) {
-    if (!userEmail) {
-      showAuthPrompt({ kind: "group", savedGroup: sessions[0]?.group || "", savedKeys: sessions.map(getGroupSessionKey) });
-      return;
-    }
-    if (sessions.length < 1) return;
-    setModal({
-      open: true,
-      type: "weekly",
-      sessionIndex: 0,
-      sessionDetails: `${sessions[0].group} — ${sessions.length} session${sessions.length !== 1 ? "s" : ""}`,
-      selectedGroupSessions: sessions.map((s) => ({
-        date: s.date, startTime: s.startTime, endTime: s.endTime,
-        location: s.location, group: s.group, maxSpots: s.maxSpots, price: s.price, trainer: s.trainer,
-      })),
-      weeklyTotalPrice: totalPrice,
-      weeklySavings: 0,
-    });
-    setSubmitResult(null);
-    setFirstName(profileRef.current?.firstName ?? "");
-    setLastName(profileRef.current?.lastName ?? "");
-    setPhone(profileRef.current?.phone ?? "");
-    setSmsConsent(profileRef.current?.smsConsent ?? false);
-    setShowAllRecurring(false);
-    setKids(profileRef.current?.kids ?? [{ name: "", dob: "", grade: "", gender: "" }]);
-    setIsGroupRate(false);
-    setUpsellExtra(0);
-    setReferralCode("");
-    setReferralCodeError("");
-    setUseReferralCredit(false);
-    setApplyAccountCredit(true);
-    setCreditBalance(null);
-  }
-
-  function openPickupRegistration(s: WeeklySession) {
-    if (!userEmail) {
-      showAuthPrompt({ kind: "group", savedGroup: s.group, savedKeys: [getGroupSessionKey(s)] });
-      return;
-    }
-    setModal({
-      open: true,
-      type: "weekly",
-      sessionIndex: 0,
-      sessionDetails: `${s.group} — 1 session`,
-      selectedGroupSessions: [{
-        date: s.date, startTime: s.startTime, endTime: s.endTime,
-        location: s.location, group: s.group, maxSpots: s.maxSpots, price: s.price, trainer: s.trainer,
-      }],
-      weeklyTotalPrice: s.price,
-      weeklySavings: 0,
-    });
-    setSubmitResult(null);
-    setFirstName(profileRef.current?.firstName ?? "");
-    setLastName(profileRef.current?.lastName ?? "");
-    setPhone(profileRef.current?.phone ?? "");
-    setSmsConsent(profileRef.current?.smsConsent ?? false);
-    setShowAllRecurring(false);
-    setKids(profileRef.current?.kids ?? [{ name: "", dob: "", grade: "", gender: "" }]);
-    setIsGroupRate(false);
-    setUpsellExtra(0);
-    setReferralCode("");
-    setReferralCodeError("");
-    setUseReferralCredit(false);
-    setApplyAccountCredit(true);
-    setCreditBalance(null);
   }
 
   const grouped = groupByGroup(schedule);
@@ -2065,10 +1990,13 @@ export default function Home() {
                       : "border-brown-600 bg-brown-900/40 hover:border-brown-500"
                   }`}
                   onClick={() => {
+                    // Switching which group card is expanded must never
+                    // clear what's already selected — a parent picking
+                    // sessions across several age groups (or skills +
+                    // pickup) in one visit needs all of it to survive
+                    // switching cards, not just whichever was open last.
                     setActiveGroup(isActive ? "" : group);
                     if (!isActive) {
-                      setSelectedGroupKeys(new Set());
-                      setSelectedPickupKeys(new Set());
                       setGroupDayFilter(new Set());
                       setGroupTab("skills");
                     }
@@ -2109,9 +2037,7 @@ export default function Home() {
                     ) ?? null;
                     const hasPickup = !!pickupKey && group.toLowerCase().includes("high school boys");
                     const pickupSessions = hasPickup ? (grouped[pickupKey!] || []).filter(isFutureSession) : [];
-                    const selectedPickupSessions = pickupSessions.filter((s) => selectedPickupKeys.has(getGroupSessionKey(s)));
                     const pickupUnitPrice = pickupSessions[0]?.price || 30;
-                    const pickupTotal = selectedPickupSessions.length * pickupUnitPrice;
                     const showAllPickup = showAllGroups.has(`${group}|pickup`);
                     const visiblePickupSessions = showAllPickup ? pickupSessions : pickupSessions.slice(0, 5);
 
@@ -2131,7 +2057,7 @@ export default function Home() {
                       {hasPickup && (
                         <div className="flex gap-2 mb-4">
                           <button
-                            onClick={() => { setGroupTab("skills"); setSelectedPickupKeys(new Set()); }}
+                            onClick={() => setGroupTab("skills")}
                             className={`rounded-full px-4 py-1.5 text-xs font-semibold transition ${
                               groupTab !== "pickup"
                                 ? "bg-mesa-accent text-white"
@@ -2141,7 +2067,7 @@ export default function Home() {
                             Skills Sessions
                           </button>
                           <button
-                            onClick={() => { setGroupTab("pickup"); setSelectedGroupKeys(new Set()); }}
+                            onClick={() => setGroupTab("pickup")}
                             className={`rounded-full px-4 py-1.5 text-xs font-semibold transition ${
                               groupTab === "pickup"
                                 ? "bg-mesa-accent text-white"
@@ -2268,42 +2194,6 @@ export default function Home() {
                               {showAll ? "Show less ↑" : `View ${filteredSessions.length - 5} more sessions ↓`}
                             </button>
                           )}
-                          {groupPricing.count > 0 && (
-                            <div className="mt-4 rounded-lg border border-brown-700 bg-brown-800/60 p-4">
-                              <div className="flex items-center justify-between">
-                                <div>
-                                  <p className="text-sm font-semibold text-white">
-                                    {groupPricing.count} session{groupPricing.count !== 1 ? "s" : ""} &times; ${groupPricing.unitPrice}
-                                    {" = "}
-                                    <span className="text-mesa-accent">${groupPricing.totalPrice}</span>
-                                    <span className="text-brown-400 text-xs font-normal ml-1">per athlete</span>
-                                  </p>
-                                  {groupPricing.savings > 0 && (
-                                    <p className="text-xs text-green-400 mt-0.5">
-                                      {groupPricing.discountLabel} — You save ${groupPricing.savings}!
-                                    </p>
-                                  )}
-                                  {groupPricing.count >= 1 && groupPricing.count < 4 && (
-                                    <p className="text-xs text-brown-500 mt-0.5">
-                                      Add {4 - groupPricing.count} more for 10% off
-                                    </p>
-                                  )}
-                                  {groupPricing.count >= 4 && groupPricing.count < 8 && (
-                                    <p className="text-xs text-brown-500 mt-0.5">
-                                      Add {8 - groupPricing.count} more for 15% off
-                                    </p>
-                                  )}
-                                </div>
-                                <button
-                                  onClick={openGroupRegistration}
-                                  disabled={groupPricing.count < 1}
-                                  className="rounded bg-mesa-accent px-4 py-2 text-sm font-semibold text-white transition hover:bg-yellow-600 disabled:opacity-40 disabled:cursor-not-allowed"
-                                >
-                                  Register
-                                </button>
-                              </div>
-                            </div>
-                          )}
                         </div>
                       )}
 
@@ -2323,7 +2213,7 @@ export default function Home() {
                             const enrolled = getEnrollmentCount(s);
                             const spotsLeft = s.maxSpots - enrolled;
                             const full = spotsLeft <= 0;
-                            const checked = selectedPickupKeys.has(key);
+                            const checked = selectedGroupKeys.has(key);
                             const d = parseDateForDisplay(s.date);
                             const dayName = d.toLocaleDateString("en-US", { weekday: "short", timeZone: "America/New_York" });
                             return (
@@ -2341,12 +2231,7 @@ export default function Home() {
                                   type="checkbox"
                                   checked={checked}
                                   disabled={full}
-                                  onChange={() => setSelectedPickupKeys((prev) => {
-                                    const next = new Set(prev);
-                                    if (next.has(key)) next.delete(key);
-                                    else next.add(key);
-                                    return next;
-                                  })}
+                                  onChange={() => toggleGroupSession(s)}
                                   className="rounded border-brown-600 accent-mesa-accent h-4 w-4"
                                 />
                                 <div className="flex-1 min-w-0">
@@ -2385,24 +2270,55 @@ export default function Home() {
                               {showAllPickup ? "Show less ↑" : `View ${pickupSessions.length - 5} more sessions ↓`}
                             </button>
                           )}
-                          {selectedPickupSessions.length > 0 && (
-                            <div className="mt-4 rounded-lg border border-brown-700 bg-brown-800/60 p-4">
-                              <div className="flex items-center justify-between">
-                                <p className="text-sm font-semibold text-white">
-                                  {selectedPickupSessions.length} session{selectedPickupSessions.length !== 1 ? "s" : ""} &times; ${pickupUnitPrice}
-                                  {" = "}
-                                  <span className="text-mesa-accent">${pickupTotal}</span>
-                                  <span className="text-brown-400 text-xs font-normal ml-1">per athlete</span>
+                        </div>
+                      )}
+
+                      {/* Combined summary — spans every selected session in
+                          this group's skills list AND its pickup list, so
+                          picking from both tabs counts toward one booking
+                          instead of needing two separate registrations. */}
+                      {groupPricing.count > 0 && (
+                        <div className="mt-4 rounded-lg border border-brown-700 bg-brown-800/60 p-4">
+                          <div className="flex items-center justify-between gap-4">
+                            <div>
+                              <p className="text-sm font-semibold text-white">
+                                {groupPricing.count} session{groupPricing.count !== 1 ? "s" : ""}
+                                {" = "}
+                                <span className="text-mesa-accent">${groupPricing.totalPrice}</span>
+                                <span className="text-brown-400 text-xs font-normal ml-1">per athlete</span>
+                              </p>
+                              {groupPricing.items.length > 1 && (
+                                <div className="mt-1 space-y-0.5">
+                                  {groupPricing.items.map((it) => (
+                                    <p key={it.group} className="text-xs text-brown-400">
+                                      {it.group} &times;{it.count} — ${it.subtotal.toFixed(2)}
+                                    </p>
+                                  ))}
+                                </div>
+                              )}
+                              {groupPricing.savings > 0 && (
+                                <p className="text-xs text-green-400 mt-0.5">
+                                  You save ${groupPricing.savings.toFixed(2)} total!
                                 </p>
-                                <button
-                                  onClick={() => openPickupGroupRegistration(selectedPickupSessions, pickupTotal)}
-                                  className="rounded bg-mesa-accent px-4 py-2 text-sm font-semibold text-white transition hover:bg-yellow-600"
-                                >
-                                  Register
-                                </button>
-                              </div>
+                              )}
+                              {groupPricing.items.length === 1 && groupPricing.count >= 1 && groupPricing.count < 4 && (
+                                <p className="text-xs text-brown-500 mt-0.5">
+                                  Add {4 - groupPricing.count} more for 10% off
+                                </p>
+                              )}
+                              {groupPricing.items.length === 1 && groupPricing.count >= 4 && groupPricing.count < 8 && (
+                                <p className="text-xs text-brown-500 mt-0.5">
+                                  Add {8 - groupPricing.count} more for 15% off
+                                </p>
+                              )}
                             </div>
-                          )}
+                            <button
+                              onClick={openGroupRegistration}
+                              className="shrink-0 rounded bg-mesa-accent px-4 py-2 text-sm font-semibold text-white transition hover:bg-yellow-600"
+                            >
+                              Register
+                            </button>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -2885,39 +2801,25 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Sticky pickup registration bar */}
-      {selectedPickupSessionsForFooter.length >= 1 && (
-        <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-brown-700 bg-brown-900 px-6 py-3 shadow-2xl">
-          <div className="mx-auto flex max-w-5xl items-center justify-between">
-            <p className="text-sm font-semibold text-white">
-              {selectedPickupSessionsForFooter.length} pickup session{selectedPickupSessionsForFooter.length !== 1 ? "s" : ""} &times; ${selectedPickupSessionsForFooter[0]?.price || 30} = <span className="text-mesa-accent">${selectedPickupSessionsForFooter.length * (selectedPickupSessionsForFooter[0]?.price || 30)}</span>
-            </p>
-            <button
-              onClick={() => openPickupGroupRegistration(selectedPickupSessionsForFooter, selectedPickupSessionsForFooter.length * (selectedPickupSessionsForFooter[0]?.price || 30))}
-              className="rounded bg-mesa-accent px-5 py-2 text-sm font-semibold text-white hover:bg-yellow-600"
-            >
-              Register
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Sticky group session registration bar */}
+      {/* Sticky group/pickup registration bar — one bar for everything
+          currently selected across every age group and pickup combined,
+          so it stays visible (and accurate) no matter which group card is
+          expanded or which tab is showing. */}
       {groupPricing.count >= 1 && (
         <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-brown-700 bg-brown-900 px-6 py-3 shadow-2xl">
-          <div className="mx-auto flex max-w-5xl items-center justify-between">
-            <div>
-              <p className="text-sm font-semibold text-white">
-                {groupPricing.count} session{groupPricing.count !== 1 ? "s" : ""} &times; ${groupPricing.unitPrice} = <span className="text-mesa-accent">${groupPricing.totalPrice}</span>
+          <div className="mx-auto flex max-w-5xl items-center justify-between gap-4">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-white truncate">
+                {groupPricing.count} session{groupPricing.count !== 1 ? "s" : ""} = <span className="text-mesa-accent">${groupPricing.totalPrice}</span>
                 <span className="text-brown-400 text-xs font-normal ml-1">per athlete</span>
               </p>
               {groupPricing.savings > 0 && (
-                <p className="text-xs text-green-400">{groupPricing.discountLabel} — You save ${groupPricing.savings}!</p>
+                <p className="text-xs text-green-400">You save ${groupPricing.savings.toFixed(2)} total!</p>
               )}
             </div>
             <button
               onClick={openGroupRegistration}
-              className="rounded bg-mesa-accent px-5 py-2 text-sm font-semibold text-white hover:bg-yellow-600"
+              className="shrink-0 rounded bg-mesa-accent px-5 py-2 text-sm font-semibold text-white hover:bg-yellow-600"
             >
               Register
             </button>

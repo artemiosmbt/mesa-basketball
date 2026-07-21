@@ -1380,16 +1380,18 @@ export default function AdminPage() {
     return (
       <>
         {list.map((r) => (
-          <tr key={r.id} className="hover:bg-brown-900/30 transition">
-            <td className="px-4 py-3 text-brown-400 whitespace-nowrap text-xs">
+          <tr key={r.id} className="hover:bg-brown-900/30 transition align-top">
+            <td className="px-4 py-2.5 text-brown-400 whitespace-nowrap text-xs">
               <div>{new Date(r.created_at).toLocaleDateString()}</div>
               {r.booked_date && <div className="text-mesa-accent font-medium mt-0.5">↳ {formatDate(r.booked_date)}</div>}
             </td>
-            <td className="px-4 py-3 font-medium whitespace-nowrap">{r.parent_name}</td>
-            <td className="px-4 py-3 text-brown-300 text-xs">{r.email}</td>
-            <td className="px-4 py-3 text-brown-300 text-xs whitespace-nowrap">{r.phone}</td>
-            <td className="px-4 py-3 text-brown-300 text-xs">{athleteNames(r.kids || "")}</td>
-            <td className="px-4 py-3 whitespace-nowrap">
+            <td className="px-4 py-2.5 max-w-[190px]">
+              <div className="font-medium truncate">{r.parent_name}</div>
+              <div className="text-brown-400 text-xs mt-0.5 truncate" title={r.email}>{r.email}</div>
+              <div className="text-brown-500 text-xs">{r.phone}</div>
+            </td>
+            <td className="px-4 py-2.5 text-brown-300 text-xs max-w-[140px]">{athleteNames(r.kids || "")}</td>
+            <td className="px-4 py-2.5 whitespace-nowrap">
               <div className="flex flex-wrap gap-1">
                 <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${isPickup(r) ? "bg-orange-500 text-white" : "bg-amber-400 text-blue-900"}`}>{typePillLabel(r.type, r.session_details)}</span>
                 {packageMembership.get(r.id)?.withinPackage && (
@@ -1398,22 +1400,22 @@ export default function AdminPage() {
                 {(() => { const da = daysAway(r.booked_date); return da ? <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${da.cls}`}>{da.label}</span> : null; })()}
               </div>
             </td>
-            <td className="px-4 py-3 text-brown-400 text-xs max-w-[240px]">
-              <div className="whitespace-pre-line leading-relaxed">{r.session_details ? r.session_details.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim() : "—"}</div>
+            <td className="px-4 py-2.5 text-brown-400 text-xs min-w-[220px] max-w-[380px]">
+              <div className="whitespace-pre-line leading-snug">{r.session_details ? r.session_details.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim() : "—"}</div>
             </td>
-            <td className="px-4 py-3 whitespace-nowrap">
+            <td className="px-4 py-2.5 whitespace-nowrap">
               <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusBadge(r.status, isPast).cls}`}>
                 {statusBadge(r.status, isPast).label}
               </span>
             </td>
-            <td className="px-4 py-3 whitespace-nowrap text-xs">
+            <td className="px-4 py-2.5 whitespace-nowrap text-xs">
               {packageMembership.get(r.id)?.withinPackage ? (
                 <span className="text-brown-600">—</span>
               ) : (
                 <span className="text-green-400 font-medium">{formatPrice(effectivePrice(r, weeklyDiscountRates))}</span>
               )}
             </td>
-            <td className="px-4 py-3 whitespace-nowrap">
+            <td className="px-4 py-2.5 whitespace-nowrap">
               {isPast ? (
                 <div className="flex items-center gap-3">
                   {r.status === "confirmed" && (
@@ -1449,7 +1451,7 @@ export default function AdminPage() {
           </tr>
         ))}
         {list.length === 0 && (
-          <tr><td colSpan={10} className="px-4 py-8 text-center text-brown-500">No registrations found.</td></tr>
+          <tr><td colSpan={8} className="px-4 py-8 text-center text-brown-500">No registrations found.</td></tr>
         )}
       </>
     );
@@ -1624,17 +1626,17 @@ export default function AdminPage() {
                   <div className="hidden md:block rounded-xl border border-brown-700 overflow-hidden">
                     <table className="w-full text-sm">
                       <thead className="bg-brown-900/60 text-xs uppercase tracking-wider text-brown-400">
-                        <tr><th className="px-4 py-3 text-left">Registered</th><th className="px-4 py-3 text-left">Parent</th><th className="px-4 py-3 text-left">Email</th><th className="px-4 py-3 text-left">Phone</th><th className="px-4 py-3 text-left">Athletes</th><th className="px-4 py-3 text-left">Type</th><th className="px-4 py-3 text-left">Session</th><th className="px-4 py-3 text-left">Status</th><th className="px-4 py-3 text-left">Price</th><th className="px-4 py-3 text-left">Action</th></tr>
+                        <tr><th className="px-4 py-3 text-left">Registered</th><th className="px-4 py-3 text-left">Client</th><th className="px-4 py-3 text-left">Athletes</th><th className="px-4 py-3 text-left">Type</th><th className="px-4 py-3 text-left">Session</th><th className="px-4 py-3 text-left">Status</th><th className="px-4 py-3 text-left">Price</th><th className="px-4 py-3 text-left">Action</th></tr>
                       </thead>
                       <tbody>
-                        <tr><td colSpan={10} className="px-4 py-2 bg-brown-900/70 text-xs font-semibold text-mesa-accent">Today — {todayLabel}</td></tr>
+                        <tr><td colSpan={8} className="px-4 py-2 bg-brown-900/70 text-xs font-semibold text-mesa-accent">Today — {todayLabel}</td></tr>
                         {todaySessions.length === 0
-                          ? <tr><td colSpan={10} className="px-4 py-3 text-xs text-brown-500 italic">No sessions scheduled for today.</td></tr>
+                          ? <tr><td colSpan={8} className="px-4 py-3 text-xs text-brown-500 italic">No sessions scheduled for today.</td></tr>
                           : <RegTableRows list={todaySessions} />
                         }
                         {groupByDate(futureSessions).map(({ key, label, sessions }) => (
                           <Fragment key={key}>
-                            <tr><td colSpan={10} className="px-4 py-2 bg-brown-900/70 border-t-2 border-brown-600 text-xs font-semibold text-mesa-accent">{label}</td></tr>
+                            <tr><td colSpan={8} className="px-4 py-2 bg-brown-900/70 border-t-2 border-brown-600 text-xs font-semibold text-mesa-accent">{label}</td></tr>
                             <RegTableRows list={sessions} />
                           </Fragment>
                         ))}
@@ -1665,13 +1667,13 @@ export default function AdminPage() {
             <div className="hidden md:block rounded-xl border border-brown-700 overflow-hidden">
               <table className="w-full text-sm">
                 <thead className="bg-brown-900/60 text-xs uppercase tracking-wider text-brown-400">
-                  <tr><th className="px-4 py-3 text-left">Registered</th><th className="px-4 py-3 text-left">Parent</th><th className="px-4 py-3 text-left">Email</th><th className="px-4 py-3 text-left">Phone</th><th className="px-4 py-3 text-left">Athletes</th><th className="px-4 py-3 text-left">Type</th><th className="px-4 py-3 text-left">Session</th><th className="px-4 py-3 text-left">Status</th><th className="px-4 py-3 text-left">Price</th><th className="px-4 py-3 text-left">Action</th></tr>
+                  <tr><th className="px-4 py-3 text-left">Registered</th><th className="px-4 py-3 text-left">Client</th><th className="px-4 py-3 text-left">Athletes</th><th className="px-4 py-3 text-left">Type</th><th className="px-4 py-3 text-left">Session</th><th className="px-4 py-3 text-left">Status</th><th className="px-4 py-3 text-left">Price</th><th className="px-4 py-3 text-left">Action</th></tr>
                 </thead>
                 <tbody>
-                  {displayedPast.length === 0 && <tr><td colSpan={10} className="px-4 py-8 text-center text-brown-500">No past sessions.</td></tr>}
+                  {displayedPast.length === 0 && <tr><td colSpan={8} className="px-4 py-8 text-center text-brown-500">No past sessions.</td></tr>}
                   {groupByDate(displayedPast).map(({ key, label, sessions }) => (
                     <Fragment key={key}>
-                      <tr><td colSpan={10} className="px-4 py-2 bg-brown-900/70 border-t-2 border-brown-600 text-xs font-semibold text-mesa-accent">{label}</td></tr>
+                      <tr><td colSpan={8} className="px-4 py-2 bg-brown-900/70 border-t-2 border-brown-600 text-xs font-semibold text-mesa-accent">{label}</td></tr>
                       <RegTableRows list={sessions} isPast />
                     </Fragment>
                   ))}
