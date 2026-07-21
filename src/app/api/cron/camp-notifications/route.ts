@@ -91,6 +91,20 @@ export async function GET(req: NextRequest) {
 
   for (const camp of newCamps) {
     const campId = `${camp.name}|${camp.startDate}`;
+
+    // Claim this camp BEFORE sending anything — camp_id is the primary key,
+    // so a unique-violation here means another overlapping run (this cron
+    // firing twice, or a slow-running previous invocation) already claimed
+    // it. Without claiming first, two overlapping runs could both pass the
+    // "not yet notified" check above and both blast the full opted-in list.
+    const { error: claimError } = await supabase
+      .from("camp_notifications")
+      .insert({ camp_id: campId, camp_name: camp.name, texts_sent: 0 });
+    if (claimError) {
+      results.push({ camp: camp.name, sent: 0, failed: 0, skipped: "already claimed by another run" });
+      continue;
+    }
+
     const gradeRange = getGradeRangeForCamp(camp.name);
 
     // Find phones where at least one kid is in the grade range (or camp has no grade restriction)
@@ -132,12 +146,8 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Record that we've notified for this camp
-    await supabase.from("camp_notifications").insert({
-      camp_id: campId,
-      camp_name: camp.name,
-      texts_sent: sent,
-    });
+    // Fill in the real count on the claim row inserted above
+    await supabase.from("camp_notifications").update({ texts_sent: sent }).eq("camp_id", campId);
 
     results.push({ camp: camp.name, sent, failed });
   }

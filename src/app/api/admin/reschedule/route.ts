@@ -98,11 +98,41 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Only confirmed bookings can be rescheduled" }, { status: 400 });
   }
 
+  // Claim the row BEFORE charging anything — two near-simultaneous reschedule
+  // requests for the same booking (double-click, retry) would otherwise both
+  // pass the check above, both charge a real off-session card payment below,
+  // and only one would win the final write. Claiming first means the loser
+  // of the race is rejected here, before any charge happens, instead of
+  // relying on a best-effort refund afterward.
+  const claimToken = crypto.randomUUID();
+  const { data: claimedRows } = await supabase
+    .from("registrations")
+    .update({ admin_action_claim_token: claimToken })
+    .eq("id", id)
+    .eq("status", "confirmed")
+    .is("admin_action_claim_token", null)
+    .select("id");
+  if (!claimedRows || claimedRows.length === 0) {
+    return NextResponse.json({ error: "This booking is already being rescheduled by another request." }, { status: 409 });
+  }
+  // Best-effort release for every abort path below that returns before the
+  // final update (which clears the claim itself on success) — otherwise an
+  // aborted attempt (needs-fee-choice, no card on file, decline) would leave
+  // this row permanently unable to be rescheduled again.
+  async function releaseClaim() {
+    await supabase
+      .from("registrations")
+      .update({ admin_action_claim_token: null })
+      .eq("id", id)
+      .eq("admin_action_claim_token", claimToken);
+  }
+
   // Same lateness rule a client-initiated reschedule uses, checked against
   // the OLD (current) session time before it moves. Gate on the choice
   // before any mutation happens, so a retry after the admin picks is clean.
   const isLateReschedule = !!(reg.booked_date && reg.booked_start_time && isLateAction(reg.booked_date, reg.booked_start_time, reg.created_at, reg.admin_change_at));
   if (isLateReschedule && !feeChoice) {
+    await releaseClaim();
     return NextResponse.json(
       { error: "The current session is within the 24-hour window — choose how to handle the fee.", needsFeeChoice: true, isLateReschedule: true },
       { status: 400 }
@@ -271,6 +301,7 @@ export async function POST(req: NextRequest) {
   if (amountToCharge > 0.005) {
     const source = await resolveOffSessionPaymentSource(reg);
     if (!source) {
+      await releaseClaim();
       return NextResponse.json(
         { error: `No saved card found for ${reg.parent_name} to auto-charge the $${amountToCharge} owed — the reschedule was NOT applied. Have them update their payment method first${chargeLateFee ? ', or choose "waive" instead' : ""}.` },
         { status: 402 }
@@ -284,6 +315,7 @@ export async function POST(req: NextRequest) {
       description: `Reschedule${chargeLateFee ? " (late fee remainder)" : ""}: ${plainSessionDetails || "Mesa Basketball Training Session"}`,
     });
     if (!chargeResult.success) {
+      await releaseClaim();
       return NextResponse.json(
         { error: `Couldn't automatically charge the $${amountToCharge} owed (+ ${SERVICE_FEE_LABEL} fee) — ${chargeResult.reason} The reschedule was NOT applied; the original session is unchanged.` },
         { status: 402 }
@@ -293,14 +325,12 @@ export async function POST(req: NextRequest) {
     autoChargePaymentIntentId = chargeResult.paymentIntentId;
   }
 
-  // Guarded on status still being "confirmed" — without this, two
-  // near-simultaneous submissions for the same booking (double-click, retry)
-  // could both pass the earlier confirmed-status check, both successfully
-  // auto-charge the card above, and both write here, charging the client
-  // twice for one reschedule. If the row already moved (this request lost
-  // the race), the charge that already went through above needs to come
-  // straight back rather than leaving them charged for a change that was
-  // never actually applied.
+  // Guarded on status still being "confirmed" as defense-in-depth against a
+  // concurrent CANCEL of this same row (a concurrent reschedule can no
+  // longer race here — the claim step above already rejects that). If the
+  // row's status changed out from under us, the charge that already went
+  // through needs to come straight back rather than leaving the client
+  // charged for a change that was never actually applied.
   const { data: updatedRows, error } = await supabase
     .from("registrations")
     .update({
@@ -315,6 +345,7 @@ export async function POST(req: NextRequest) {
       admin_change_at: new Date().toISOString(),
       is_free: newIsFree,
       used_referral_credit: newUsedReferralCredit,
+      admin_action_claim_token: null,
       ...(newFullPrice !== undefined ? { session_price: newFullPrice } : {}),
       ...(clearPackageId ? { package_id: null } : {}),
     })
@@ -323,15 +354,22 @@ export async function POST(req: NextRequest) {
     .select("id");
 
   if (!error && (!updatedRows || updatedRows.length === 0)) {
+    let refundNote = "";
     if (autoChargedAmount > 0 && autoChargePaymentIntentId) {
-      await issueStripeRefund({
+      const refundResult = await issueStripeRefund({
         email: reg.email,
         paymentIntentId: autoChargePaymentIntentId,
         amountDollars: Math.round((autoChargedAmount + SERVICE_FEE) * 100) / 100,
         sessionLabel: reg.session_details || "",
-      }).catch((err) => console.error("Failed to refund admin reschedule charge after lost race:", err));
+      }).catch((err) => {
+        console.error("Failed to refund admin reschedule charge after lost race:", err);
+        return null;
+      });
+      refundNote = refundResult && !refundResult.failed
+        ? " Any charge was refunded."
+        : " The charge could NOT be automatically refunded — check Stripe and refund manually.";
     }
-    return NextResponse.json({ error: "This booking was already changed by another request — nothing was applied, and any charge was refunded." }, { status: 409 });
+    return NextResponse.json({ error: `This booking was already changed by another request — nothing was applied.${refundNote}` }, { status: 409 });
   }
 
   if (error) {
@@ -339,15 +377,23 @@ export async function POST(req: NextRequest) {
     // apply it failed outright (network blip, constraint violation) — same
     // reasoning as the lost-race case just above: refund rather than leave
     // the client charged for a reschedule that never actually took effect.
+    let refundNote = "";
     if (autoChargedAmount > 0 && autoChargePaymentIntentId) {
-      await issueStripeRefund({
+      const refundResult = await issueStripeRefund({
         email: reg.email,
         paymentIntentId: autoChargePaymentIntentId,
         amountDollars: Math.round((autoChargedAmount + SERVICE_FEE) * 100) / 100,
         sessionLabel: reg.session_details || "",
-      }).catch((err) => console.error("Failed to refund admin reschedule charge after DB update error:", err));
+      }).catch((err) => {
+        console.error("Failed to refund admin reschedule charge after DB update error:", err);
+        return null;
+      });
+      refundNote = refundResult && !refundResult.failed
+        ? " Any charge was refunded."
+        : " The charge could NOT be automatically refunded — check Stripe and refund manually.";
     }
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    await releaseClaim();
+    return NextResponse.json({ error: `${error.message}${refundNote}` }, { status: 500 });
   }
 
   // The session just left package coverage (moved to a different month, or

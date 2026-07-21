@@ -77,7 +77,23 @@ export async function POST(req: NextRequest) {
   };
   if (referralCodeToSave) upsertData.referral_code = referralCodeToSave;
 
-  await supabase.from("profiles").upsert(upsertData);
+  let { error: upsertError } = await supabase.from("profiles").upsert(upsertData);
+  if (upsertError?.code === "23505" && referralCodeToSave) {
+    // Unique violation on referral_code — two concurrent profile saves raced
+    // to the same generated/requested code. A user-requested code losing
+    // that race should be reported, not silently swapped for something else.
+    if (body.referralCode !== undefined) {
+      return NextResponse.json({ error: "That referral code is already taken." }, { status: 409 });
+    }
+    // Auto-generated code collided — retry once with a random suffix rather
+    // than silently dropping the whole profile save.
+    upsertData.referral_code = `${referralCodeToSave}${Math.floor(10 + Math.random() * 90)}`;
+    ({ error: upsertError } = await supabase.from("profiles").upsert(upsertData));
+  }
+  if (upsertError) {
+    console.error("Profile upsert failed:", upsertError);
+    return NextResponse.json({ error: "Failed to save profile." }, { status: 500 });
+  }
 
   // Keep auth display name in sync so it shows in Supabase dashboard
   if (body.parentName) {

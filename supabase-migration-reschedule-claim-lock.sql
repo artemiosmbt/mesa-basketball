@@ -1,0 +1,12 @@
+-- Several admin actions (reschedule, add-player) charge a saved card
+-- off-session BEFORE the write that applies the change — so two
+-- near-simultaneous requests for the same booking (double-click, retry)
+-- could both pass the initial "still confirmed" read and both successfully
+-- charge the card, with only one winning the final write (the loser gets
+-- refunded, best-effort). This column lets a route atomically CLAIM the row
+-- before charging anything, so the loser of a race never charges a card in
+-- the first place. Shared across every admin money-mutating action on a
+-- single registration row — they should be mutually exclusive of each other
+-- too, not just of themselves. Purely a transient lock token — always null
+-- outside the brief window of an in-flight admin action.
+ALTER TABLE registrations ADD COLUMN IF NOT EXISTS admin_action_claim_token text;

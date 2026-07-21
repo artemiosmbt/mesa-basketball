@@ -7,7 +7,10 @@ import { resolveRequestEmail } from "@/lib/request-email";
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { parentName, email, phone, packageType, monthYear, kids, referralCode, smsConsent } = body;
+    const { parentName, email: rawEmail, phone, packageType, monthYear, kids, referralCode, smsConsent } = body;
+    // Normalized once at the boundary — the self-referral comparison below
+    // must match the lowercased/trimmed form already stored for the referrer.
+    const email = typeof rawEmail === "string" ? rawEmail.toLowerCase().trim() : rawEmail;
 
     if (!parentName || !email || !phone || !packageType || !monthYear) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
@@ -37,7 +40,7 @@ export async function POST(req: NextRequest) {
       const newClient = await isNewClient(email, phone);
       if (newClient) {
         const info = await findReferrerInfoByCode(referralCode);
-        if (info && info.email !== email) {
+        if (info && info.email.toLowerCase().trim() !== email) {
           referrer = info;
         }
       }

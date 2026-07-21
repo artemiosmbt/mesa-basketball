@@ -6,6 +6,7 @@ import { getStripe } from "@/lib/stripe";
 import { SERVICE_FEE, fmtMoney, packagePrice } from "@/lib/pricing";
 import {
   addReferralCredit,
+  awardReferralCreditOnce,
   addAccountCredit,
   abandonPendingBookingBatch,
   finalizePaidBookingBatch,
@@ -362,7 +363,7 @@ export async function finalizeConfirmedPrivateBooking(params: FinalizePrivateBoo
   // failure here must not surface as a failed booking.
   if (params.privateReferrer) {
     try {
-      await addReferralCredit(params.privateReferrer.email);
+      await awardReferralCreditOnce(params.privateReferrer.email, params.email);
       await sendReferralCreditNotification({
         referrerName: params.privateReferrer.name,
         referrerEmail: params.privateReferrer.email,
@@ -428,7 +429,7 @@ export async function finalizeConfirmedPrivateBooking(params: FinalizePrivateBoo
     : "";
   const adminTrainerLine = isPrivateType && params.bookedTrainer ? `\nTrainer: ${params.bookedTrainer}` : "";
   const adminTypeLabel = params.type === "group-private" ? "group private" : "private";
-  await sendAdminSMS(`NEW BOOKING (paid): ${params.parentName}\n1 ${adminTypeLabel} session:\n${adminDateLine}${adminTrainerLine}\nPlayers: ${params.kids}${pkgAdminNote}${params.submittedReferralCode ? `\nRef code: ${params.submittedReferralCode} ${params.privateReferrer ? "✓ applied" : "✗ NOT applied"}` : ""}`);
+  await sendAdminSMS(`NEW BOOKING (paid): ${params.parentName}\n1 ${adminTypeLabel} session:\n${adminDateLine}${adminTrainerLine}\nPlayers: ${params.kids}${pkgAdminNote}${params.submittedReferralCode ? `\nRef code: ${params.submittedReferralCode} ${params.privateReferrer ? "✓ applied" : "✗ NOT applied"}` : ""}`).catch(() => {});
 
   if (isPrivateType && params.bookedDate && params.bookedStartTime && params.bookedEndTime) {
     try {
@@ -498,7 +499,7 @@ export async function finalizeConfirmedWeeklyBooking(params: FinalizeWeeklyBooki
   // failure here must not surface as a failed booking.
   if (weeklyReferrer) {
     try {
-      await addReferralCredit(weeklyReferrer.email);
+      await awardReferralCreditOnce(weeklyReferrer.email, params.email);
     } catch (creditErr) {
       console.error("Failed to award referral credit (weekly, booking was paid):", creditErr);
     }
@@ -547,7 +548,7 @@ export async function finalizeConfirmedWeeklyBooking(params: FinalizeWeeklyBooki
   const adminLines = weeklySessions.map((s) =>
     `${formatDateWithDay(s.date)} | ${s.startTime}-${s.endTime}\nLocation: ${resolveLocationName(s.location)}`
   ).join("\n");
-  await sendAdminSMS(`NEW BOOKING (paid): ${params.parentName}\n${weeklySessions.length} ${sessionTypeSMS} session${weeklySessions.length !== 1 ? "s" : ""}:\n${adminLines}${weeklyTrainerLine}\nPlayers: ${params.kids}${params.submittedReferralCode ? `\nRef code: ${params.submittedReferralCode} ${weeklyReferrer ? "✓ applied" : "✗ NOT applied"}` : ""}`);
+  await sendAdminSMS(`NEW BOOKING (paid): ${params.parentName}\n${weeklySessions.length} ${sessionTypeSMS} session${weeklySessions.length !== 1 ? "s" : ""}:\n${adminLines}${weeklyTrainerLine}\nPlayers: ${params.kids}${params.submittedReferralCode ? `\nRef code: ${params.submittedReferralCode} ${weeklyReferrer ? "✓ applied" : "✗ NOT applied"}` : ""}`).catch(() => {});
 
   for (const session of weeklySessions) {
     try {
@@ -616,7 +617,7 @@ export async function finalizeConfirmedCampBooking(params: FinalizeCampBookingPa
   // here must not surface as a failed booking.
   if (campReferrer) {
     try {
-      await addReferralCredit(campReferrer.email);
+      await awardReferralCreditOnce(campReferrer.email, params.email);
     } catch (creditErr) {
       console.error("Failed to award referral credit (camp, booking was paid):", creditErr);
     }
@@ -658,7 +659,7 @@ export async function finalizeConfirmedCampBooking(params: FinalizeCampBookingPa
     `${formatDateWithDay(s.date)} | ${s.startTime}${s.endTime ? `-${s.endTime}` : ""}\nLocation: ${resolveLocationName(s.location)}`
   ).join("\n");
   const campNameLine = `${firstSession.campName}${firstSession.gradeGroup ? ` — ${firstSession.gradeGroup}` : ""}`;
-  await sendAdminSMS(`NEW BOOKING (paid): ${params.parentName}\n${campNameLine}\n${campSessions.length} camp day${campSessions.length !== 1 ? "s" : ""}:\n${adminCampLines}\nPlayers: ${params.kids}${params.submittedReferralCode ? `\nRef code: ${params.submittedReferralCode} ${campReferrer ? "✓ applied" : "✗ NOT applied"}` : ""}`);
+  await sendAdminSMS(`NEW BOOKING (paid): ${params.parentName}\n${campNameLine}\n${campSessions.length} camp day${campSessions.length !== 1 ? "s" : ""}:\n${adminCampLines}\nPlayers: ${params.kids}${params.submittedReferralCode ? `\nRef code: ${params.submittedReferralCode} ${campReferrer ? "✓ applied" : "✗ NOT applied"}` : ""}`).catch(() => {});
 
   for (const session of campSessions) {
     try {
@@ -765,7 +766,7 @@ export async function finalizeConfirmedPrivateSeriesBooking(params: FinalizePriv
   // failure here must not surface as a failed booking.
   if (params.privateReferrer) {
     try {
-      await addReferralCredit(params.privateReferrer.email);
+      await awardReferralCreditOnce(params.privateReferrer.email, params.email);
       await sendReferralCreditNotification({
         referrerName: params.privateReferrer.name,
         referrerEmail: params.privateReferrer.email,
@@ -827,7 +828,7 @@ export async function finalizeConfirmedPrivateSeriesBooking(params: FinalizePriv
   ).join("\n");
   const trainerLine = privateSessions[0]?.trainer ? `\nTrainer: ${privateSessions[0].trainer}` : "";
   const adminTypeLabel = params.type === "group-private" ? "group private" : "private";
-  await sendAdminSMS(`NEW BOOKING (paid): ${params.parentName}\n${privateSessions.length} ${adminTypeLabel} sessions:\n${adminLines}${trainerLine}\nPlayers: ${params.kids}${params.submittedReferralCode ? `\nRef code: ${params.submittedReferralCode} ${params.privateReferrer ? "✓ applied" : "✗ NOT applied"}` : ""}`);
+  await sendAdminSMS(`NEW BOOKING (paid): ${params.parentName}\n${privateSessions.length} ${adminTypeLabel} sessions:\n${adminLines}${trainerLine}\nPlayers: ${params.kids}${params.submittedReferralCode ? `\nRef code: ${params.submittedReferralCode} ${params.privateReferrer ? "✓ applied" : "✗ NOT applied"}` : ""}`).catch(() => {});
 
   if (isPrivateType) {
     for (const s of privateSessions) {
@@ -1030,7 +1031,7 @@ export async function finalizeRescheduleTopup(params: FinalizeRescheduleTopupPar
     await sendSMS(params.phone, `Mesa Basketball: Reschedule confirmed — $${fmtMoney(topupTotalWithFee)} charged${creditAppliedNote}!\n${formatDateWithDay(params.bookedDate)} | ${params.bookedStartTime}-${params.bookedEndTime}\nLocation: ${resolveLocationName(params.bookedLocation)}${trainerLine}\nAthlete: ${params.kids}\nManage: mesabasketballtraining.com/booking/${params.manageToken}\nReply STOP to opt out.`);
   }
 
-  await sendAdminSMS(`RESCHEDULED (paid $${fmtMoney(topupTotalWithFee)}${creditAppliedNote}): ${params.parentName}\nFrom: ${params.oldSessionDetails}\nTo: ${params.newSessionDetails}\nPlayers: ${params.kids}`);
+  await sendAdminSMS(`RESCHEDULED (paid $${fmtMoney(topupTotalWithFee)}${creditAppliedNote}): ${params.parentName}\nFrom: ${params.oldSessionDetails}\nTo: ${params.newSessionDetails}\nPlayers: ${params.kids}`).catch(() => {});
 
   try {
     if (isPrivateType) {
@@ -1084,7 +1085,7 @@ async function finalizePaidPackageEnrollment(
   const referrerName = metadata.referrer_name || undefined;
   if (referrerEmail) {
     try {
-      await addReferralCredit(referrerEmail);
+      await awardReferralCreditOnce(referrerEmail, pkg.email);
       await sendReferralCreditNotification({ referrerName: referrerName || "", referrerEmail, newClientName: pkg.parent_name });
     } catch (creditErr) {
       console.error("Failed to award referral credit (package, booking was paid):", creditErr);
@@ -1115,7 +1116,7 @@ async function finalizePaidPackageEnrollment(
   if (smsConsent && pkg.phone) {
     await sendSMS(pkg.phone, `Mesa Basketball: Your ${pkg.package_type}-session package is confirmed for ${pkg.month_year}! Charged: $${fmtMoney(totalWithFee)}.\nBook your private sessions at mesabasketballtraining.com/schedule and we'll track them automatically.\nReply STOP to opt out.`);
   }
-  await sendAdminSMS(`NEW PACKAGE (paid $${fmtMoney(totalWithFee)}): ${pkg.parent_name}\n${pkg.package_type}-session package — ${pkg.month_year}\nPhone: ${pkg.phone}${kids ? `\nPlayers: ${kids}` : ""}${submittedReferralCode ? `\nRef code: ${submittedReferralCode} ${referrerEmail ? "✓ applied" : "✗ NOT applied"}` : ""}`);
+  await sendAdminSMS(`NEW PACKAGE (paid $${fmtMoney(totalWithFee)}): ${pkg.parent_name}\n${pkg.package_type}-session package — ${pkg.month_year}\nPhone: ${pkg.phone}${kids ? `\nPlayers: ${kids}` : ""}${submittedReferralCode ? `\nRef code: ${submittedReferralCode} ${referrerEmail ? "✓ applied" : "✗ NOT applied"}` : ""}`).catch(() => {});
 }
 
 /**
@@ -1246,7 +1247,7 @@ async function finalizePlayerEditTopup(session: Stripe.Checkout.Session): Promis
     ].filter(Boolean).join(" | ");
     const sessionLabel = reg.session_details.split(" — ")[0] || reg.session_details;
     const totalOwed = metadata.total_owed ? parseFloat(metadata.total_owed) : 0;
-    await sendAdminSMS(`PLAYERS UPDATED & PAID (${sessionLabel}): ${reg.parent_name}\n${changeNote || "Roster order/details changed"}\nNow: ${newKids}\n$${fmtMoney(totalOwed + SERVICE_FEE)} charged (incl. service fee).`);
+    await sendAdminSMS(`PLAYERS UPDATED & PAID (${sessionLabel}): ${reg.parent_name}\n${changeNote || "Roster order/details changed"}\nNow: ${newKids}\n$${fmtMoney(totalOwed + SERVICE_FEE)} charged (incl. service fee).`).catch(() => {});
   } catch (err) {
     console.error("Player update notification error (paid topup):", err);
   }

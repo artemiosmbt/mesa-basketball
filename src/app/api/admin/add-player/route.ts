@@ -86,6 +86,32 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Only confirmed bookings can be edited" }, { status: 400 });
   }
 
+  // Claim the row BEFORE charging anything — two near-simultaneous add-player
+  // requests for the same booking (double-click, retry) would otherwise both
+  // pass the check above, both charge a real off-session card payment below
+  // (each computing the same "+1 player" delta off the same stale read), and
+  // only one would actually land. Claiming first rejects the loser here,
+  // before any charge happens. Shared with reschedule's identical lock, since
+  // the two actions should be mutually exclusive on the same row too.
+  const claimToken = crypto.randomUUID();
+  const { data: claimedRows } = await supabase
+    .from("registrations")
+    .update({ admin_action_claim_token: claimToken })
+    .eq("id", id)
+    .eq("status", "confirmed")
+    .is("admin_action_claim_token", null)
+    .select("id");
+  if (!claimedRows || claimedRows.length === 0) {
+    return NextResponse.json({ error: "This booking is currently being modified by another request." }, { status: 409 });
+  }
+  async function releaseClaim() {
+    await supabase
+      .from("registrations")
+      .update({ admin_action_claim_token: null })
+      .eq("id", id)
+      .eq("admin_action_claim_token", claimToken);
+  }
+
   const newKids = reg.kids ? `${reg.kids}, ${playerName.trim()}` : playerName.trim();
   const oldCount = reg.total_participants || 1;
   const newCount = oldCount + 1;
@@ -143,6 +169,7 @@ export async function POST(req: NextRequest) {
   if (wasPaid && priceDelta > 0) {
     const source = await resolveOffSessionPaymentSource(reg);
     if (!source) {
+      await releaseClaim();
       return NextResponse.json(
         { error: `No saved card found for ${reg.parent_name} to auto-charge the $${priceDelta} owed for adding this player — nothing was changed. Have them update their payment method first.` },
         { status: 402 }
@@ -156,6 +183,7 @@ export async function POST(req: NextRequest) {
       description: `Added player: ${plainSessionDetails || "Mesa Basketball Training Session"}`,
     });
     if (!chargeResult.success) {
+      await releaseClaim();
       return NextResponse.json(
         { error: `Couldn't automatically charge the $${priceDelta} owed (+ ${SERVICE_FEE_LABEL} fee) — ${chargeResult.reason} Nothing was changed.` },
         { status: 402 }
@@ -166,6 +194,7 @@ export async function POST(req: NextRequest) {
   }
 
   const ok = await updateRegistrationPlayers(reg.manage_token, newKids, newCount, newFullPrice);
+  await releaseClaim();
   if (!ok) {
     // The booking stopped being confirmed in the moment between our fetch
     // and this write (e.g. the client cancelled) — extremely rare, but if

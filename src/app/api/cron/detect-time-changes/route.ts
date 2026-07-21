@@ -3,6 +3,59 @@ import { createClient } from "@supabase/supabase-js";
 import { getWeeklySchedule, getPrivateSlots } from "@/lib/sheets";
 import { sendTimeChangeNotification, sendCancellationNotification } from "@/lib/email";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
+import { addAccountCredit, addReferralCredit, countPackageSessionsUsed, setPackageSessions } from "@/lib/supabase";
+import { issueStripeRefund, resolvedSessionPrice } from "@/lib/booking-finalize";
+
+// A session the trainer removed from the schedule is never the client's
+// fault — this is always treated as an on-time cancellation (full refund,
+// never a late fee), unlike every client-initiated cancel path. Mirrors the
+// on-time-cancel branch in booking/[token]/route.ts's DELETE handler.
+async function refundTrainerCancelledBooking(r: {
+  id: string;
+  email: string;
+  manage_token: string;
+  session_details: string | null;
+  used_referral_credit: boolean | null;
+  applied_account_credit: number | null;
+  is_paid: boolean | null;
+  stripe_payment_intent_id: string | null;
+  package_id: string | null;
+  session_price: number | null;
+  is_free: boolean | null;
+  type: string;
+}): Promise<void> {
+  if (r.used_referral_credit && r.email) {
+    await addReferralCredit(r.email).catch(() => {});
+  }
+  if (r.applied_account_credit && r.email) {
+    await addAccountCredit(r.email, r.applied_account_credit).catch(() => {});
+  }
+  const wasPaid = !!r.is_paid || !!r.stripe_payment_intent_id;
+  if (wasPaid && r.email) {
+    const paidAmount = Math.max(0, resolvedSessionPrice({ session_price: r.session_price, is_free: !!r.is_free, type: r.type }) - (r.applied_account_credit || 0));
+    if (paidAmount > 0) {
+      if (r.stripe_payment_intent_id) {
+        await issueStripeRefund({
+          email: r.email,
+          manageToken: r.manage_token,
+          paymentIntentId: r.stripe_payment_intent_id,
+          amountDollars: paidAmount,
+          sessionLabel: r.session_details || "",
+        }).catch((err) => console.error("Trainer-deletion refund failed for", r.email, err));
+      } else {
+        await addAccountCredit(r.email, paidAmount).catch(() => {});
+      }
+    }
+  }
+  if (r.package_id) {
+    try {
+      const used = await countPackageSessionsUsed(r.package_id);
+      await setPackageSessions(r.package_id, used);
+    } catch (err) {
+      console.error("Package usage recompute failed (trainer-deleted session):", err);
+    }
+  }
+}
 
 function sessionIsUpcoming(dateStr: string, startTimeStr: string): boolean {
   try {
@@ -227,6 +280,8 @@ export async function GET(req: NextRequest) {
       .update({ status: "cancelled", is_late_cancel: false })
       .eq("id", r.id);
 
+    await refundTrainerCancelledBooking(r);
+
     try {
       await sendCancellationNotification({
         parentName: r.parent_name,
@@ -291,6 +346,8 @@ export async function GET(req: NextRequest) {
       .from("registrations")
       .update({ status: "cancelled", is_late_cancel: false })
       .eq("id", r.id);
+
+    await refundTrainerCancelledBooking(r);
 
     try {
       await sendCancellationNotification({

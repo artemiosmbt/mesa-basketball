@@ -147,7 +147,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const {
       parentName,
-      email,
+      email: rawEmail,
       phone,
       kids,
       type,
@@ -176,6 +176,10 @@ export async function POST(req: NextRequest) {
       // Account credit opt-in (dollar-value credit from e.g. a partial camp cancellation)
       applyAccountCredit,
     } = body;
+    // Normalized once at the boundary — every downstream check (self-referral
+    // comparison, isNewClient, checkDuplicateRegistration) relies on this
+    // matching the lowercased/trimmed form already stored for the referrer.
+    const email = typeof rawEmail === "string" ? rawEmail.toLowerCase().trim() : rawEmail;
 
     if (!parentName || !email || !phone || !kids || !type || !sessionDetails) {
       return NextResponse.json(
@@ -194,7 +198,7 @@ export async function POST(req: NextRequest) {
         const newClient = await isNewClient(email, phone);
         if (newClient) {
           const info = await findReferrerInfoByCode(submittedReferralCode);
-          if (info && info.email !== email) {
+          if (info && info.email.toLowerCase().trim() !== email) {
             weeklyReferrer = info;
           }
         }
@@ -414,7 +418,7 @@ export async function POST(req: NextRequest) {
         const newClient = await isNewClient(email, phone);
         if (newClient) {
           const info = await findReferrerInfoByCode(submittedReferralCode);
-          if (info && info.email !== email) {
+          if (info && info.email.toLowerCase().trim() !== email) {
             campReferrer = info;
           }
         }
@@ -681,7 +685,7 @@ export async function POST(req: NextRequest) {
       let privateReferrer: { email: string; name: string } | null = null;
       if (submittedReferralCode && newClient) {
         const info = await findReferrerInfoByCode(submittedReferralCode);
-        if (info && info.email !== email) {
+        if (info && info.email.toLowerCase().trim() !== email) {
           privateReferrer = info;
         }
       }
@@ -934,7 +938,7 @@ export async function POST(req: NextRequest) {
       let privateReferrer: { email: string; name: string } | null = null;
       if (submittedReferralCode && newClient) {
         const info = await findReferrerInfoByCode(submittedReferralCode);
-        if (info && info.email !== email) {
+        if (info && info.email.toLowerCase().trim() !== email) {
           privateReferrer = info;
         }
       }

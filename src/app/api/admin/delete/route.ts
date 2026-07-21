@@ -30,9 +30,21 @@ export async function POST(req: NextRequest) {
   // Fetch registration details before deleting so we can clean up the calendar
   const { data: reg } = await supabase
     .from("registrations")
-    .select("type, email, booked_date, booked_start_time, booked_end_time, booked_location, booked_group, kids, session_details, total_participants, status")
+    .select("type, email, booked_date, booked_start_time, booked_end_time, booked_location, booked_group, kids, session_details, total_participants, status, is_paid, stripe_payment_intent_id")
     .eq("id", id)
     .single();
+
+  // Delete is meant for erasing a genuine mistake/duplicate row, not for
+  // making a paid booking's money disappear with no refund trail — unlike
+  // /api/admin/cancel, this route has no refund/credit logic at all. A
+  // confirmed row that was actually paid for must go through Cancel instead,
+  // which correctly refunds or credits it.
+  if (reg && reg.status === "confirmed" && (reg.is_paid || reg.stripe_payment_intent_id)) {
+    return NextResponse.json(
+      { error: "This booking was paid for — use Cancel instead of Delete so the client is properly refunded or credited." },
+      { status: 400 }
+    );
+  }
 
   const { error } = await supabase.from("registrations").delete().eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

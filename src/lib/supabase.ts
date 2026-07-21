@@ -307,6 +307,34 @@ export async function getReferralCredits(email: string): Promise<number> {
  * read the same starting value and both write back the same +1 result,
  * silently losing one of them.
  */
+/**
+ * Awards a referral bonus to `referrerEmail` for successfully referring
+ * `referredEmail`, but only once ever for that specific pair. A
+ * unique-violation on the insert means this exact pair was already awarded —
+ * a double-submitted booking, a retried request, or two near-simultaneous
+ * registrations racing the same brand-new client — so the credit is skipped
+ * rather than doubled. Every call site that awards a referral bonus should
+ * go through this instead of calling addReferralCredit directly.
+ */
+export async function awardReferralCreditOnce(referrerEmail: string, referredEmail: string): Promise<void> {
+  const supabase = getSupabase();
+  const normalizedReferrer = referrerEmail.toLowerCase().trim();
+  const normalizedReferred = referredEmail.toLowerCase().trim();
+  const { error } = await supabase
+    .from("referral_credit_awards")
+    .insert({ referrer_email: normalizedReferrer, referred_email: normalizedReferred });
+  if (error) {
+    // Unique violation (code 23505) means this pair was already awarded —
+    // anything else is an unexpected failure, logged but not re-thrown since
+    // this must never block an already-paid, already-confirmed booking.
+    if (error.code !== "23505") {
+      console.error(`awardReferralCreditOnce: insert failed (referrer=${normalizedReferrer}, referred=${normalizedReferred}):`, error);
+    }
+    return;
+  }
+  await addReferralCredit(normalizedReferrer);
+}
+
 export async function addReferralCredit(email: string): Promise<void> {
   const supabase = getSupabase();
 
