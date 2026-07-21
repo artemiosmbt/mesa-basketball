@@ -19,6 +19,19 @@ export const authClient = {
   },
 };
 
+// Login/signup redirect via ?next= must only ever go to a path on this same
+// site — an unchecked value lets an attacker send
+// `/login?next=https://evil.example.com`, so a victim logs in for real on
+// the legitimate domain and is then bounced straight to a phishing page
+// right after a trusted auth flow. Only a same-origin relative path
+// (leading "/", never "//" which browsers treat as protocol-relative to
+// another host) is allowed; anything else falls back to "/".
+export function safeRedirectPath(next: string | null): string {
+  if (!next) return "/";
+  if (!next.startsWith("/") || next.startsWith("//")) return "/";
+  return next;
+}
+
 // Shared admin check for every /api/admin/* route — every route must call
 // this before any mutation. Previously each route redeclared its own
 // near-identical copy (some checking a fresh client, some the shared

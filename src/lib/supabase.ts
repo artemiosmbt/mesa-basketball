@@ -145,6 +145,36 @@ export async function getBookedSlots(): Promise<
   }));
 }
 
+/**
+ * Finds any still-confirmed registrations/package tied to a payment intent —
+ * used to react to a refund or dispute created OUTSIDE the app (e.g. an
+ * admin refunding directly in the Stripe Dashboard, or a client-initiated
+ * chargeback), which the webhook otherwise has no way to connect back to a
+ * booking. Read-only lookups for an alert, not a mutation — deciding
+ * whether to also cancel/free the slot is left to a human, since the
+ * context behind an out-of-band refund varies (see call site).
+ */
+export async function findConfirmedByPaymentIntent(paymentIntentId: string): Promise<{
+  registrations: Pick<Registration, "id" | "parent_name" | "email" | "session_details" | "manage_token">[];
+  package: Pick<MonthlyPackage, "id" | "parent_name" | "email" | "package_type" | "month_year"> | null;
+}> {
+  const supabase = getSupabase();
+  const [{ data: regs }, { data: pkg }] = await Promise.all([
+    supabase
+      .from("registrations")
+      .select("id, parent_name, email, session_details, manage_token")
+      .eq("stripe_payment_intent_id", paymentIntentId)
+      .eq("status", "confirmed"),
+    supabase
+      .from("monthly_packages")
+      .select("id, parent_name, email, package_type, month_year")
+      .eq("stripe_payment_intent_id", paymentIntentId)
+      .eq("status", "active")
+      .maybeSingle(),
+  ]);
+  return { registrations: regs || [], package: pkg || null };
+}
+
 export async function getRegistrationByToken(
   token: string
 ): Promise<Registration | null> {
@@ -1251,13 +1281,17 @@ export async function getGroupSessionEnrollment(): Promise<
 // Used only for capacity (checkGroupSessionCapacity) — a genuine race
 // between two DIFFERENT clients for the same last spot, where a
 // pending_payment row briefly needs to count so a second client can't grab
-// a spot while the first is still mid-Stripe-checkout. Stripe Checkout
-// Sessions don't expire for a full 30 minutes (its own imposed minimum),
-// far longer than anyone actually takes to pay, so this caps how long a
-// single stale/abandoned checkout can hold a spot hostage from everyone
-// else. (checkDuplicateRegistration doesn't use this — see its own comment:
-// it can only ever find the SAME client's own row, never a real race.)
-const PENDING_PAYMENT_GRACE_MS = 10 * 60 * 1000;
+// a spot while the first is still mid-Stripe-checkout. A real checkout only
+// needs a couple of minutes of protection (pay-or-abandon happens fast);
+// this used to be 10 minutes, which gave a repeated-submission script (no
+// payment required to create a pending row, no rate limiting anywhere in
+// this codebase) a wide, cheap window to permanently squat a session's
+// capacity by resubmitting every ~9 minutes forever. Shortened to raise the
+// cost of that without punishing a genuinely slow real checkout — anyone
+// actually paying resolves (success or abandon) well inside 3 minutes in
+// practice. (checkDuplicateRegistration doesn't use this — see its own
+// comment: it can only ever find the SAME client's own row, never a real race.)
+const PENDING_PAYMENT_GRACE_MS = 3 * 60 * 1000;
 
 function pendingPaymentGraceFilter(): string {
   const cutoff = new Date(Date.now() - PENDING_PAYMENT_GRACE_MS).toISOString();

@@ -3,7 +3,7 @@
 import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { authClient } from "@/lib/auth";
+import { authClient, safeRedirectPath } from "@/lib/auth";
 
 function splitName(full: string): { first: string; last: string } {
   const parts = full.trim().split(/\s+/);
@@ -124,10 +124,15 @@ export default function SignupPage() {
         body: JSON.stringify({ parentName, phone, kids, smsConsent, marketingEmails, videoConsent }),
       });
       const next = new URLSearchParams(window.location.search).get("next");
-      router.push(next || "/");
+      router.push(safeRedirectPath(next));
     } else {
-      // Email confirmation required — stash profile data so login page can save it after confirm
-      localStorage.setItem("mesa_pending_profile", JSON.stringify({ parentName, phone, kids, smsConsent, marketingEmails, videoConsent }));
+      // Email confirmation required — stash profile data so login page can
+      // save it after confirm. Tagged with the signup email so it's only
+      // ever applied to that SAME account — on a shared device, someone
+      // else logging into their own unrelated existing account before this
+      // signup is confirmed must never have this data silently applied to
+      // their profile instead.
+      localStorage.setItem("mesa_pending_profile", JSON.stringify({ email: email.toLowerCase().trim(), parentName, phone, kids, smsConsent, marketingEmails, videoConsent }));
       setConfirmed(true);
       setLoading(false);
     }

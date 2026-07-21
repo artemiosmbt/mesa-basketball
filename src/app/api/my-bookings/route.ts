@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 import {
   getRegistrationsByEmail,
   getReferralCredits,
@@ -10,14 +11,28 @@ import {
 } from "@/lib/supabase";
 import { getWeeklySchedule, getPrivateSlots } from "@/lib/sheets";
 
-export async function POST(req: NextRequest) {
-  const body = await req.json();
-  const { email } = body;
+// This returns every past/future booking's manage_token (the sole secret
+// needed to cancel/reschedule it), plus kids' names, session prices,
+// account credit balance, and referral credits — it must never trust a
+// client-supplied email. Only the caller's OWN authenticated session can
+// resolve which email to look up, same pattern as /api/profile.
+async function getAuthedEmail(req: NextRequest): Promise<string | null> {
+  const token = req.headers.get("authorization")?.replace("Bearer ", "");
+  if (!token) return null;
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
+  const { data: { user } } = await supabase.auth.getUser(token);
+  return user?.email ? user.email.toLowerCase().trim() : null;
+}
 
-  if (!email || typeof email !== "string") {
+export async function POST(req: NextRequest) {
+  const email = await getAuthedEmail(req);
+  if (!email) {
     return NextResponse.json(
-      { error: "Email is required" },
-      { status: 400 }
+      { error: "Please log in to view your bookings." },
+      { status: 401 }
     );
   }
 

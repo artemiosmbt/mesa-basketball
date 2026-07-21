@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { authClient } from "@/lib/auth";
+import { authClient, safeRedirectPath } from "@/lib/auth";
 
 async function resendConfirmationEmail(email: string) {
   return authClient.auth.resend({ type: "signup", email, options: { emailRedirectTo: "https://www.mesabasketballtraining.com/auth/callback" } });
@@ -54,22 +54,28 @@ export default function LoginPage() {
       const pending = localStorage.getItem("mesa_pending_profile");
       if (pending && data.session) {
         try {
-          const profile = JSON.parse(pending);
-          await fetch("/api/profile", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${data.session.access_token}`,
-            },
-            body: JSON.stringify(profile),
-          });
-          localStorage.removeItem("mesa_pending_profile");
+          const { email: pendingEmail, ...profile } = JSON.parse(pending);
+          // Only apply if this pending data was stashed for the SAME account
+          // that just logged in — otherwise (shared device, a different
+          // account confirmed/logged in first) it must never overwrite
+          // someone else's real profile.
+          if (pendingEmail === data.session.user.email?.toLowerCase().trim()) {
+            await fetch("/api/profile", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${data.session.access_token}`,
+              },
+              body: JSON.stringify(profile),
+            });
+            localStorage.removeItem("mesa_pending_profile");
+          }
         } catch {
           // non-critical, ignore
         }
       }
       const next = new URLSearchParams(window.location.search).get("next");
-      router.push(next || "/");
+      router.push(safeRedirectPath(next));
     }
   }
 

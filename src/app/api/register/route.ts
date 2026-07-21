@@ -965,6 +965,14 @@ export async function POST(req: NextRequest) {
       // prepaid, so it shouldn't also spend a referral credit or "waste" the
       // first-time discount that could instead apply to a future session.
       const { covered: packageCovered, packageId } = (await allocatePackageCoverage(email, [bookedDate], totalParticipants || 1))[0];
+      // A package-covered session is $0 due to Stripe — no incremental
+      // revenue to justify awarding the referrer a real credit. isNewClient
+      // only checks past registrations (never monthly_packages), so a
+      // client whose first-ever registration row is package-covered would
+      // otherwise still mint a real referral credit off a transaction Mesa
+      // collected nothing extra for. Matches the private-series path, which
+      // already nulls this out for the same reason.
+      if (packageCovered) privateReferrer = null;
 
       let isFree = false;
       let isFirstTime = false;

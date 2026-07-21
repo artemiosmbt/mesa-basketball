@@ -29,20 +29,24 @@ export default function AuthCallbackPage() {
         if ((event === "SIGNED_IN" || event === "TOKEN_REFRESHED") && session) {
           clearTimeout(timeoutId);
 
-          // Save any pending profile data stored during signup
+          // Save any pending profile data stored during signup — only if it
+          // was stashed for this SAME account (shared-device safety, see
+          // signup/login pages for the full reasoning).
           const pending = localStorage.getItem("mesa_pending_profile");
           if (pending) {
             try {
-              const profile = JSON.parse(pending);
-              await fetch("/api/profile", {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  "Authorization": `Bearer ${session.access_token}`,
-                },
-                body: JSON.stringify(profile),
-              });
-              localStorage.removeItem("mesa_pending_profile");
+              const { email: pendingEmail, ...profile } = JSON.parse(pending);
+              if (pendingEmail === session.user.email?.toLowerCase().trim()) {
+                await fetch("/api/profile", {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${session.access_token}`,
+                  },
+                  body: JSON.stringify(profile),
+                });
+                localStorage.removeItem("mesa_pending_profile");
+              }
             } catch {
               // non-critical
             }

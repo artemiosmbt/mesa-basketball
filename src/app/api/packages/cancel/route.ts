@@ -1,8 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 import { getPackageById, packageHasAnyBookedSession, cancelPackage, revertPackageCancellation, addAccountCredit } from "@/lib/supabase";
 import { issueStripeRefund } from "@/lib/booking-finalize";
 import { sendSMS, sendAdminSMS } from "@/lib/sms";
 import { fmtMoney, packagePrice } from "@/lib/pricing";
+
+// The ownership check below must never trust a client-supplied email —
+// only the caller's OWN authenticated session can prove which package is
+// theirs to cancel (same pattern as /api/my-bookings).
+async function getAuthedEmail(req: NextRequest): Promise<string | null> {
+  const token = req.headers.get("authorization")?.replace("Bearer ", "");
+  if (!token) return null;
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
+  const { data: { user } } = await supabase.auth.getUser(token);
+  return user?.email ? user.email.toLowerCase().trim() : null;
+}
 
 // Client-initiated package cancellation — only ever allowed before a single
 // session has been booked against it. Once any session exists (even a
@@ -11,16 +26,20 @@ import { fmtMoney, packagePrice } from "@/lib/pricing";
 // on it just runs its course for the month.
 export async function POST(req: NextRequest) {
   try {
-    const { packageId, email } = await req.json();
-    if (!packageId || !email) {
-      return NextResponse.json({ error: "Missing packageId or email" }, { status: 400 });
+    const email = await getAuthedEmail(req);
+    if (!email) {
+      return NextResponse.json({ error: "Please log in to cancel your package." }, { status: 401 });
+    }
+    const { packageId } = await req.json();
+    if (!packageId) {
+      return NextResponse.json({ error: "Missing packageId" }, { status: 400 });
     }
 
     const pkg = await getPackageById(packageId);
     if (!pkg) {
       return NextResponse.json({ error: "Package not found" }, { status: 404 });
     }
-    if (pkg.email.toLowerCase().trim() !== String(email).toLowerCase().trim()) {
+    if (pkg.email.toLowerCase().trim() !== email) {
       return NextResponse.json({ error: "This package doesn't belong to that email" }, { status: 403 });
     }
     if (pkg.status !== "active") {

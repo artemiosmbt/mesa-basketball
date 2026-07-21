@@ -55,7 +55,6 @@ interface BookingRecord {
 }
 
 export default function MyBookings() {
-  const [email, setEmail] = useState("");
   const [bookings, setBookings] = useState<BookingRecord[] | null>(null);
   const [rewards, setRewards] = useState<{
     referralCredits: number;
@@ -70,33 +69,33 @@ export default function MyBookings() {
   const [cancellingPackage, setCancellingPackage] = useState(false);
   const [packageCancelResult, setPackageCancelResult] = useState<{ success: boolean; message: string } | null>(null);
 
-  // Load saved email and auto-lookup — prefer logged-in session
+  // Bookings/tokens/credit balance are sensitive — only ever looked up
+  // using the caller's own authenticated session, never a typed-in email
+  // (previously anyone could type any parent's email and get back every
+  // one of their bookings' manage-cancel/reschedule tokens with zero proof
+  // of ownership).
+  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [checkedSession, setCheckedSession] = useState(false);
+
   useEffect(() => {
     authClient.auth.getSession().then(({ data: { session } }) => {
-      const sessionEmail = session?.user?.email;
-      if (sessionEmail) {
-        setEmail(sessionEmail);
-        lookupBookings(sessionEmail);
-      } else if (typeof window !== "undefined") {
-        const saved = localStorage.getItem("mesa_parent_email");
-        if (saved) {
-          setEmail(saved);
-          lookupBookings(saved);
-        }
+      setCheckedSession(true);
+      if (session?.access_token && session.user?.email) {
+        setAccessToken(session.access_token);
+        lookupBookings(session.access_token);
       }
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function lookupBookings(lookupEmail: string) {
+  async function lookupBookings(token: string) {
     setLoading(true);
     setError("");
     setBookings(null);
     try {
       const res = await fetch("/api/my-bookings", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: lookupEmail.trim() }),
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
       if (data.error) {
@@ -106,7 +105,6 @@ export default function MyBookings() {
         setRewards(data.rewards || null);
         setAccountCredit(data.accountCredit || 0);
         setActivePackage(data.activePackage || null);
-        localStorage.setItem("mesa_parent_email", lookupEmail.trim());
       }
     } catch {
       setError("Something went wrong. Please try again.");
@@ -116,13 +114,13 @@ export default function MyBookings() {
   }
 
   async function handleCancelPackage() {
-    if (!activePackage) return;
+    if (!activePackage || !accessToken) return;
     setCancellingPackage(true);
     try {
       const res = await fetch("/api/packages/cancel", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ packageId: activePackage.id, email }),
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({ packageId: activePackage.id }),
       });
       const data = await res.json();
       if (data.success) {
@@ -165,36 +163,12 @@ export default function MyBookings() {
           <p className="mt-8 text-brown-400 text-sm">Loading your bookings...</p>
         )}
 
-        {!loading && bookings === null && !error && (
-          <div className="mt-8 space-y-6">
-            <form
-              onSubmit={(e) => { e.preventDefault(); if (email.trim()) lookupBookings(email.trim()); }}
-              className="rounded-2xl bg-brown-900 p-6 space-y-4"
-            >
-              <p className="text-sm text-brown-300">Enter the email you used when registering to view your bookings.</p>
-              <div className="flex gap-3">
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="your@email.com"
-                  className="flex-1 rounded-lg bg-brown-800 border border-brown-700 px-4 py-2.5 text-sm text-white placeholder-brown-500 focus:outline-none focus:border-mesa-accent"
-                />
-                <button
-                  type="submit"
-                  disabled={!email.trim()}
-                  className="rounded-lg bg-mesa-accent px-5 py-2.5 text-sm font-semibold text-white hover:bg-yellow-600 disabled:opacity-40"
-                >
-                  Look up
-                </button>
-              </div>
-            </form>
-            <div className="text-center text-sm text-brown-600">or</div>
-            <div className="text-center">
-              <a href="/login?next=/my-bookings" className="inline-block rounded-lg bg-brown-800 border border-brown-700 px-6 py-3 text-sm font-semibold text-white hover:bg-brown-700">
-                Log In
-              </a>
-            </div>
+        {!loading && checkedSession && bookings === null && !error && (
+          <div className="mt-8 space-y-4 rounded-2xl bg-brown-900 p-6 text-center">
+            <p className="text-sm text-brown-300">Log in to view and manage your bookings.</p>
+            <a href="/login?next=/my-bookings" className="inline-block rounded-lg bg-mesa-accent px-6 py-3 text-sm font-semibold text-white hover:bg-yellow-600">
+              Log In
+            </a>
           </div>
         )}
 
