@@ -272,7 +272,7 @@ export default function ManageBooking({
     const isPrivate = booking?.type === "private" || booking?.type === "group-private";
     if (!showReschedule || !isPrivate || !booking?.email) { setCreditBalance(null); return; }
     // Original booking's credit is refunded on reschedule, so include it in balance
-    fetch(`/api/referral-credits?email=${encodeURIComponent(booking.email.toLowerCase())}`)
+    fetch(`/api/referral-credits?token=${encodeURIComponent(token)}`)
       .then((r) => r.json())
       .then((d) => {
         // If original booking used a credit, it will be refunded — add 1 to reflect that

@@ -16,6 +16,15 @@ const LOCATION_LINKS: Record<string, { name: string; url: string }> = {
   "Holy Resurrection Brookville": { name: "Holy Resurrection Brookville", url: "https://www.google.com/search?q=holy+resurrection+brookville" },
 };
 
+// Balance/package lookups must prove identity via the caller's own session —
+// the server rejects a bare ?email= now, so every such fetch needs this header.
+async function authedJsonFetch(path: string): Promise<Record<string, unknown>> {
+  const { data: { session } } = await authClient.auth.getSession();
+  const headers: HeadersInit = session ? { Authorization: `Bearer ${session.access_token}` } : {};
+  const res = await fetch(path, { headers });
+  return res.json();
+}
+
 function parseDateForDisplay(dateStr: string): Date {
   // ISO format (YYYY-MM-DD) needs T12:00:00 appended to avoid UTC midnight off-by-one
   // All other formats (e.g. "April 25, 2026", "4/25/2026") parse fine with a space suffix
@@ -677,9 +686,8 @@ export default function Home() {
     if (!modal.open || !isPrivate || !isReturningClient) { setCreditBalance(null); return; }
     const trimmed = email.trim().toLowerCase();
     if (!trimmed || !trimmed.includes("@")) { setCreditBalance(null); return; }
-    fetch(`/api/referral-credits?email=${encodeURIComponent(trimmed)}`)
-      .then((r) => r.json())
-      .then((d) => setCreditBalance(d.credits ?? 0))
+    authedJsonFetch(`/api/referral-credits?email=${encodeURIComponent(trimmed)}`)
+      .then((d) => setCreditBalance((d.credits as number) ?? 0))
       .catch(() => setCreditBalance(0));
   }, [email, modal.open, modal.type, isReturningClient]);
 
@@ -689,9 +697,8 @@ export default function Home() {
     if (!modal.open) { setAccountCreditBalance(null); return; }
     const trimmed = email.trim().toLowerCase();
     if (!trimmed || !trimmed.includes("@")) { setAccountCreditBalance(null); return; }
-    fetch(`/api/account-credits?email=${encodeURIComponent(trimmed)}`)
-      .then((r) => r.json())
-      .then((d) => setAccountCreditBalance(d.balance ?? 0))
+    authedJsonFetch(`/api/account-credits?email=${encodeURIComponent(trimmed)}`)
+      .then((d) => setAccountCreditBalance((d.balance as number) ?? 0))
       .catch(() => setAccountCreditBalance(0));
   }, [email, modal.open]);
 
@@ -709,10 +716,9 @@ export default function Home() {
     const d = new Date(modal.bookedDate);
     if (isNaN(d.getTime())) { setPackageSessionsRemaining(0); return; }
     const monthYear = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-    fetch(`/api/packages?email=${encodeURIComponent(trimmed)}&monthYear=${monthYear}`)
-      .then((r) => r.json())
+    authedJsonFetch(`/api/packages?email=${encodeURIComponent(trimmed)}&monthYear=${monthYear}`)
       .then((d) => {
-        const pkg = d.package;
+        const pkg = d.package as { package_type: number; sessions_used: number } | null;
         setPackageSessionsRemaining(pkg ? Math.max(0, pkg.package_type - pkg.sessions_used) : 0);
       })
       .catch(() => setPackageSessionsRemaining(0));

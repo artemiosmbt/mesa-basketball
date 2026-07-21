@@ -16,6 +16,7 @@ import {
   findReferrerInfoByCode,
   generateUniqueReferralCode,
   checkGroupSessionCapacity,
+  checkCampCapacity,
   checkDuplicateRegistration,
   getAccountCreditBalance,
   deductAccountCredit,
@@ -461,6 +462,25 @@ export async function POST(req: NextRequest) {
       }
       const liveTotalDays = liveCamp.campDays.length || campSessions.length;
       const campKidCount = Math.max(1, totalParticipants || 1);
+
+      // Camps had NO server-side capacity check at all (only a client-side
+      // UI limit) — a camp could be oversold either by two legitimate
+      // simultaneous bookings racing each other, or trivially by calling
+      // this endpoint directly. Checked per selected day, same as weekly.
+      const campCapacityChecks = await Promise.all(
+        campSessions.map((s: { date: string; startTime: string }) =>
+          checkCampCapacity(s.date, s.startTime, firstCampSession.campName, liveCamp.maxSpots, campKidCount)
+        )
+      );
+      const fullCampDays = campSessions.filter((_: unknown, i: number) => !campCapacityChecks[i].available);
+      if (fullCampDays.length > 0) {
+        const fullDates = fullCampDays.map((s: { date: string }) => s.date).join(", ");
+        return NextResponse.json(
+          { error: `The following camp day${fullCampDays.length > 1 ? "s are" : " is"} full: ${fullDates}. Please deselect ${fullCampDays.length > 1 ? "them" : "it"} and try again.` },
+          { status: 400 }
+        );
+      }
+
       const earlyBirdActive = new Date() < new Date("2026-04-01T04:00:00Z");
       const fullBaseStr = earlyBirdActive && liveCamp.earlyBirdPrice ? liveCamp.earlyBirdPrice : liveCamp.price;
       const fullBase = (parseInt(fullBaseStr.replace(/\D/g, "")) || 0) * campKidCount;
@@ -481,8 +501,13 @@ export async function POST(req: NextRequest) {
       // can round the same way on every row (e.g. $11 over 2 days -> $6 and
       // $6), and since each drop-in day is later refunded independently,
       // that would let cumulative refunds exceed what was actually charged.
+      // Rounds to the nearest CENT, not the nearest dollar — same fix as
+      // splitProportional, needed for the same reason: a fractional-dollar
+      // total (e.g. a discounted or early-bird camp price) would otherwise
+      // stamp a phantom overage onto applied_account_credit that gets
+      // refunded right back on cancellation.
       function dropInDayPrice(index: number, total: number, days: number): number {
-        return Math.round((total * (index + 1)) / days) - Math.round((total * index) / days);
+        return Math.round((total * (index + 1) * 100) / days) / 100 - Math.round((total * index * 100) / days) / 100;
       }
 
       // Full camp: every row stores the SAME total price (the per-day

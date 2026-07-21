@@ -220,9 +220,12 @@ export default function PaymentsPage() {
     setCreditMessage(null);
   }
 
-  // Lets the admin type the balance they want a client to end up at, rather
-  // than compute a delta by hand — reuses the same delta-based endpoint the
-  // Add form above already uses, just with the delta worked out here first.
+  // Lets the admin type the balance they want a client to end up at. Sends
+  // the absolute target, not a delta computed against this possibly-stale
+  // client-side snapshot — the server applies it against the live balance
+  // (see setAccountCreditBalance), so a balance change that happened after
+  // this page last loaded (e.g. an unrelated cancellation crediting the
+  // client) can't cause the edit to silently land on the wrong number.
   async function submitCreditEdit(email: string, currentBalance: number) {
     if (!token) return;
     const newBalance = parseFloat(editingCreditValue);
@@ -230,8 +233,7 @@ export default function PaymentsPage() {
       setCreditMessage({ text: "Enter a valid non-negative balance.", isError: true });
       return;
     }
-    const delta = Math.round((newBalance - currentBalance) * 100) / 100;
-    if (delta === 0) {
+    if (newBalance === currentBalance) {
       setEditingCreditEmail(null);
       return;
     }
@@ -240,7 +242,7 @@ export default function PaymentsPage() {
     const res = await fetch("/api/admin/account-credits", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ email, amount: delta }),
+      body: JSON.stringify({ email, setBalance: newBalance }),
     });
     const data = await res.json().catch(() => null);
     if (!res.ok) {

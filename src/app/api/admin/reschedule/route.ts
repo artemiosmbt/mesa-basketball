@@ -9,7 +9,7 @@ import {
 import { sendRescheduleNotification } from "@/lib/email";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import { getWeeklySchedule } from "@/lib/sheets";
-import { addAccountCredit, deductAccountCredit, addReferralCredit, logLateFeeEvent } from "@/lib/supabase";
+import { addAccountCredit, deductAccountCredit, addReferralCredit, logLateFeeEvent, getPackageById, countPackageSessionsUsed, setPackageSessions } from "@/lib/supabase";
 import { isLateAction, resolveOffSessionPaymentSource, chargeSavedCardOffSession, issueStripeRefund } from "@/lib/booking-finalize";
 import { SERVICE_FEE, SERVICE_FEE_LABEL, fmtMoney } from "@/lib/pricing";
 
@@ -196,6 +196,50 @@ export async function POST(req: NextRequest) {
 
   const wasPaid = !!reg.is_paid || !!reg.stripe_payment_intent_id;
 
+  // A package-covered session has no direct per-session Stripe payment on
+  // this row (wasPaid is always false for it — it was covered by the
+  // package's lump-sum charge instead), so every wasPaid-gated branch below
+  // silently no-ops for it. That used to mean an admin choosing to CHARGE a
+  // late fee on a package session actually charged nothing, logged nothing,
+  // and still told the client "$0.00 credited to your account" as if it had
+  // worked. Handled explicitly here instead: a late reschedule fee is always
+  // a fresh 50%-of-live-rate charge (packages only ever cover a standard,
+  // up-to-3-kid private session, same live-pricing rule as the client-facing
+  // package late fee); whether the SESSION itself costs anything on top
+  // depends on whether the new date still falls within the package's own
+  // covered month — if not, the package can no longer cover it and this slot
+  // needs to be priced and charged like a normal booking, with the OLD
+  // package's session count freed back up.
+  let packageLateFeeAmount = 0;
+  let sameMonthCovered = false;
+  let clearPackageId = false;
+  if (reg.package_id) {
+    if (chargeLateFee) {
+      const oldDuration = reg.booked_start_time && reg.booked_end_time
+        ? Math.max(60, parseMinsFromTime(reg.booked_end_time) - parseMinsFromTime(reg.booked_start_time))
+        : 60;
+      const liveFullPrice = calcPrivatePrice(oldDuration, reg.total_participants || 1);
+      packageLateFeeAmount = Math.round(liveFullPrice * 0.5 * 100) / 100;
+    }
+    // Packages only ever cover a standard private session (up to 3 kids) —
+    // never a 4+ kid group-private rate, regardless of remaining capacity.
+    const oldPkg = await getPackageById(reg.package_id).catch(() => null);
+    if (oldPkg && effectiveType === "private" && (reg.total_participants || 1) <= 3) {
+      const d = new Date(bookedDate);
+      if (!isNaN(d.getTime())) {
+        const newMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+        sameMonthCovered = newMonth === oldPkg.month_year;
+      }
+    }
+    clearPackageId = !sameMonthCovered;
+  }
+  // Nothing was ever paid directly for this specific session while it was
+  // package-covered, so if it's leaving the package, the FULL new price is
+  // owed — not a delta off of some prior payment that never actually happened.
+  const packageMoveOutCharge = clearPackageId && newFullPrice !== undefined
+    ? Math.max(0, effectiveAmount(newFullPrice, newIsFree, isNewPrivate))
+    : 0;
+
   // Nothing gets confirmed with money still owed — every dollar the client
   // ends up owing after this reschedule is auto-charged to the card on file
   // before anything changes, whether that's an on-time price increase (the
@@ -206,6 +250,10 @@ export async function POST(req: NextRequest) {
   // fails (declined, expired, etc.), the whole reschedule is aborted before
   // anything changes — the original session stays booked exactly as it
   // was, and it's on the admin to have the client sort out their card.
+  // resolveOffSessionPaymentSource already falls back to the PACKAGE's own
+  // saved card when the row itself has no direct payment on file, so the
+  // packageLateFeeAmount/packageMoveOutCharge pieces below can charge
+  // through the exact same mechanism with no separate code path needed.
   let lateFeeCredited = 0;
   let lateFeeCreditApplied = 0;
   let amountToCharge = 0;
@@ -216,6 +264,7 @@ export async function POST(req: NextRequest) {
   } else if (wasPaid && priceDelta > 0) {
     amountToCharge = priceDelta;
   }
+  amountToCharge = Math.round((amountToCharge + packageLateFeeAmount + packageMoveOutCharge) * 100) / 100;
 
   let autoChargedAmount = 0;
   let autoChargePaymentIntentId: string | undefined;
@@ -267,6 +316,7 @@ export async function POST(req: NextRequest) {
       is_free: newIsFree,
       used_referral_credit: newUsedReferralCredit,
       ...(newFullPrice !== undefined ? { session_price: newFullPrice } : {}),
+      ...(clearPackageId ? { package_id: null } : {}),
     })
     .eq("id", id)
     .eq("status", "confirmed")
@@ -298,6 +348,19 @@ export async function POST(req: NextRequest) {
       }).catch((err) => console.error("Failed to refund admin reschedule charge after DB update error:", err));
     }
     return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  // The session just left package coverage (moved to a different month, or
+  // converted away from a package-eligible private session) — free its slot
+  // back on the OLD package, same recompute used everywhere else a
+  // package-covered session stops counting against it.
+  if (clearPackageId && reg.package_id) {
+    try {
+      const used = await countPackageSessionsUsed(reg.package_id);
+      await setPackageSessions(reg.package_id, used);
+    } catch {
+      // non-critical — don't fail the reschedule
+    }
   }
 
   // Unchecking "keep referral credit" gives the credit back — they're no
@@ -362,6 +425,26 @@ export async function POST(req: NextRequest) {
     } catch (err) {
       console.error("Failed to grant account credit (admin reschedule):", err);
     }
+  } else if (reg.package_id && chargeLateFee && packageLateFeeAmount > 0) {
+    // Package late fee — a fresh charge, not a credit-from-a-prior-payment
+    // (there was no prior direct payment for this session at all), so this
+    // doesn't fit the wasPaid branch above. Charged synchronously off-session
+    // already (folded into amountToCharge), so the confirmed amount is known
+    // immediately — logged directly rather than deferred to a webhook.
+    await logLateFeeEvent({
+      registrationId: id,
+      parentName: reg.parent_name,
+      email: reg.email,
+      kids: reg.kids,
+      sessionType: reg.type,
+      sessionDetails: oldSessionDetails,
+      bookedDate: oldBookedDate,
+      bookedStartTime: oldBookedStartTime,
+      action: "reschedule",
+      initiatedBy: "admin",
+      amountChargedExtra: Math.round((autoChargedAmount + SERVICE_FEE) * 100) / 100,
+      newSessionDetails,
+    });
   }
 
   // Sync calendar. Private sessions are a single event tied to the booking;
@@ -422,17 +505,26 @@ export async function POST(req: NextRequest) {
   // any) covered the new session. The price note is appended directly (not
   // part of the shared template) since only this admin flow needs to say
   // "no change" vs "credited" vs "due".
-  const priceNote = chargeLateFee
-    ? `\nLate reschedule fee: $${fmtMoney(lateFeeCredited)} (50% of what you paid) credited to your account${lateFeeCreditApplied > 0 ? `, $${fmtMoney(lateFeeCreditApplied)} applied to your new session` : ""}.${autoChargedAmount > 0 ? ` $${fmtMoney(autoChargedAmount + SERVICE_FEE)} was charged to your card on file to cover the rest.` : ""}`
-    : newFullPrice === undefined
-      ? ""
-      : creditGranted > 0
-        ? `\n$${fmtMoney(oldAmount)} → $${fmtMoney(newAmount)}. $${fmtMoney(creditGranted)} credited to your account for your next booking.`
-        : autoChargedAmount > 0
-          ? `\n$${fmtMoney(oldAmount)} → $${fmtMoney(newAmount)}. $${fmtMoney(autoChargedAmount + SERVICE_FEE)} was charged to your card on file.`
-          : priceDelta !== 0
-            ? `\n$${fmtMoney(oldAmount)} → $${fmtMoney(newAmount)}.`
-            : "";
+  const priceNote = reg.package_id
+    ? [
+        chargeLateFee && packageLateFeeAmount > 0 ? `\nLate reschedule fee: $${fmtMoney(packageLateFeeAmount + SERVICE_FEE)} charged to your card on file.` : "",
+        clearPackageId
+          ? packageMoveOutCharge > 0
+            ? `\nThis date falls outside your package month, so it's priced as a regular session: $${fmtMoney(packageMoveOutCharge + (chargeLateFee ? 0 : SERVICE_FEE))} charged to your card on file.`
+            : "\nThis date falls outside your package month, so it's no longer covered by it."
+          : "\nStill covered by your monthly package — nothing further due for this session.",
+      ].filter(Boolean).join("")
+    : chargeLateFee
+      ? `\nLate reschedule fee: $${fmtMoney(lateFeeCredited)} (50% of what you paid) credited to your account${lateFeeCreditApplied > 0 ? `, $${fmtMoney(lateFeeCreditApplied)} applied to your new session` : ""}.${autoChargedAmount > 0 ? ` $${fmtMoney(autoChargedAmount + SERVICE_FEE)} was charged to your card on file to cover the rest.` : ""}`
+      : newFullPrice === undefined
+        ? ""
+        : creditGranted > 0
+          ? `\n$${fmtMoney(oldAmount)} → $${fmtMoney(newAmount)}. $${fmtMoney(creditGranted)} credited to your account for your next booking.`
+          : autoChargedAmount > 0
+            ? `\n$${fmtMoney(oldAmount)} → $${fmtMoney(newAmount)}. $${fmtMoney(autoChargedAmount + SERVICE_FEE)} was charged to your card on file.`
+            : priceDelta !== 0
+              ? `\n$${fmtMoney(oldAmount)} → $${fmtMoney(newAmount)}.`
+              : "";
   const creditRefundNote = creditRefunded ? "\nYour referral credit was refunded since it's no longer applied to this booking." : "";
 
   // Spell out exactly what moved — which session type/name, on what day, at
@@ -462,17 +554,26 @@ export async function POST(req: NextRequest) {
         `Mesa Basketball: Your session has been rescheduled by your trainer.\n${fromLine ? `${fromLine}\n` : ""}${toLine}\nAthlete: ${reg.kids}${priceNote}${creditRefundNote}\nManage: mesabasketballtraining.com/booking/${reg.manage_token}\nReply STOP to opt out.`
       );
     }
-    const adminPriceNote = chargeLateFee
-      ? `\nLate fee charged: $${fmtMoney(lateFeeCredited)} credited (50% of $${fmtMoney(oldAmount)} paid)${lateFeeCreditApplied > 0 ? `, $${fmtMoney(lateFeeCreditApplied)} applied to new session ($${fmtMoney(newAmount)})` : ""}.${autoChargedAmount > 0 ? ` $${fmtMoney(autoChargedAmount + SERVICE_FEE)} auto-charged to their card on file (${autoChargePaymentIntentId}).` : ""}`
-      : newFullPrice === undefined
-        ? ""
-        : creditGranted > 0
-          ? `\n$${fmtMoney(oldAmount)} -> $${fmtMoney(newAmount)}: $${fmtMoney(creditGranted)} credited to their account (already paid)`
-          : autoChargedAmount > 0
-            ? `\n$${fmtMoney(oldAmount)} -> $${fmtMoney(newAmount)}: $${fmtMoney(autoChargedAmount + SERVICE_FEE)} auto-charged to their card on file (${autoChargePaymentIntentId}).`
-            : priceDelta !== 0
-              ? `\nPrice: $${fmtMoney(oldAmount)} -> $${fmtMoney(newAmount)}`
-              : "";
+    const adminPriceNote = reg.package_id
+      ? [
+          chargeLateFee && packageLateFeeAmount > 0 ? `\nPackage late fee: $${fmtMoney(packageLateFeeAmount + SERVICE_FEE)} auto-charged to their card on file (${autoChargePaymentIntentId}).` : "",
+          clearPackageId
+            ? packageMoveOutCharge > 0
+              ? `\nOutside package month — $${fmtMoney(packageMoveOutCharge + (chargeLateFee ? 0 : SERVICE_FEE))} auto-charged to their card on file (${autoChargePaymentIntentId}), package slot freed.`
+              : "\nOutside package month — package slot freed, no charge."
+            : "\nStill within package month — no charge.",
+        ].filter(Boolean).join("")
+      : chargeLateFee
+        ? `\nLate fee charged: $${fmtMoney(lateFeeCredited)} credited (50% of $${fmtMoney(oldAmount)} paid)${lateFeeCreditApplied > 0 ? `, $${fmtMoney(lateFeeCreditApplied)} applied to new session ($${fmtMoney(newAmount)})` : ""}.${autoChargedAmount > 0 ? ` $${fmtMoney(autoChargedAmount + SERVICE_FEE)} auto-charged to their card on file (${autoChargePaymentIntentId}).` : ""}`
+        : newFullPrice === undefined
+          ? ""
+          : creditGranted > 0
+            ? `\n$${fmtMoney(oldAmount)} -> $${fmtMoney(newAmount)}: $${fmtMoney(creditGranted)} credited to their account (already paid)`
+            : autoChargedAmount > 0
+              ? `\n$${fmtMoney(oldAmount)} -> $${fmtMoney(newAmount)}: $${fmtMoney(autoChargedAmount + SERVICE_FEE)} auto-charged to their card on file (${autoChargePaymentIntentId}).`
+              : priceDelta !== 0
+                ? `\nPrice: $${fmtMoney(oldAmount)} -> $${fmtMoney(newAmount)}`
+                : "";
     const adminCreditRefundNote = creditRefunded ? "\nReferral credit refunded (no longer applied)." : "";
     const priceLookupFailedNote = priceLookupFailed ? `\n⚠️ Couldn't verify the new price on the schedule sheet — price left at $${fmtMoney(reg.session_price ?? 0)}, double-check it manually.` : "";
     await sendAdminSMS(`ADMIN RESCHEDULED: ${reg.parent_name}\nFrom: ${oldSessionDetails}\nTo: ${newSessionDetails}\nPlayers: ${reg.kids}${adminPriceNote}${adminCreditRefundNote}${priceLookupFailedNote}`);

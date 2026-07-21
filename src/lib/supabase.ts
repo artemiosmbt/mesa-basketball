@@ -467,6 +467,44 @@ export async function deductAccountCredit(email: string, amount: number): Promis
 }
 
 /**
+ * Set an email's account credit balance to an exact absolute value (admin
+ * override), rather than applying a relative delta. Same optimistic
+ * compare-and-swap loop as addAccountCredit/deductAccountCredit — computing
+ * a delta from a client-displayed balance and applying that instead would
+ * silently land on the wrong number if the true balance changed (e.g. an
+ * unrelated cancellation credited this email) between page load and submit.
+ */
+export async function setAccountCreditBalance(email: string, newBalance: number): Promise<void> {
+  const supabase = getSupabase();
+
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const { data } = await supabase
+      .from("account_credits")
+      .select("balance")
+      .eq("email", email)
+      .single();
+
+    if (!data) {
+      const { error } = await supabase
+        .from("account_credits")
+        .insert({ email, balance: newBalance });
+      if (!error) return;
+      continue;
+    }
+
+    const { data: updated, error } = await supabase
+      .from("account_credits")
+      .update({ balance: newBalance, updated_at: new Date().toISOString() })
+      .eq("email", email)
+      .eq("balance", data.balance)
+      .select("balance");
+    if (!error && updated && updated.length > 0) return;
+    // Someone else updated the balance between our read and write — retry with a fresh read.
+  }
+  console.error(`setAccountCreditBalance: gave up after retries (email=${email}, newBalance=${newBalance}) — concurrent writes kept colliding`);
+}
+
+/**
  * Records a late cancellation/reschedule fee event for the admin payments
  * page's recent-activity feed — purely informational, nothing else in the
  * app reads this. Best-effort: a logging failure must never block the
@@ -1190,6 +1228,35 @@ export async function checkGroupSessionCapacity(
 
   const enrolled = error ? 0 : count || 0;
   return { available: enrolled < maxSpots, enrolled };
+}
+
+/**
+ * Same purpose as checkGroupSessionCapacity, for a camp day — camps had NO
+ * server-side capacity check at all (only a client-side UI limit), so a
+ * camp could be oversold either by two legitimate simultaneous bookings
+ * racing each other, or trivially by calling /api/register directly. Sums
+ * total_participants rather than counting rows, since one camp-day
+ * registration can cover several kids from the same family at once.
+ */
+export async function checkCampCapacity(
+  date: string,
+  startTime: string,
+  campName: string,
+  maxSpots: number,
+  kidCount: number
+): Promise<{ available: boolean; enrolled: number }> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("registrations")
+    .select("total_participants")
+    .eq("type", "camp")
+    .or(pendingPaymentGraceFilter())
+    .eq("booked_date", date)
+    .eq("booked_start_time", startTime)
+    .eq("booked_group", campName || "");
+
+  const enrolled = error || !data ? 0 : data.reduce((sum, r) => sum + (r.total_participants || 1), 0);
+  return { available: enrolled + kidCount <= maxSpots, enrolled };
 }
 
 export async function getRegistrantsBySession(

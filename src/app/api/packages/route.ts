@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { enrollInPackage, getActivePackage, hasPendingOrActivePackage, isNewClient, findReferrerInfoByCode, attachPackageCheckoutSession } from "@/lib/supabase";
 import { getStripe } from "@/lib/stripe";
 import { SERVICE_FEE, packagePrice } from "@/lib/pricing";
+import { resolveRequestEmail } from "@/lib/request-email";
 
 export async function POST(req: NextRequest) {
   try {
@@ -106,13 +107,13 @@ export async function POST(req: NextRequest) {
 
 export async function GET(req: NextRequest) {
   try {
-    const { searchParams } = new URL(req.url);
-    const email = searchParams.get("email");
-    const monthYear = searchParams.get("monthYear");
-
-    if (!email || !monthYear) {
-      return NextResponse.json({ error: "email and monthYear are required" }, { status: 400 });
+    const monthYear = req.nextUrl.searchParams.get("monthYear");
+    if (!monthYear) {
+      return NextResponse.json({ error: "monthYear is required" }, { status: 400 });
     }
+
+    const email = await resolveRequestEmail(req);
+    if (!email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const pkg = await getActivePackage(email, monthYear);
     return NextResponse.json({ package: pkg });

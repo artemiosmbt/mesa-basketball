@@ -6,7 +6,17 @@ import { sendCancellationNotification } from "@/lib/email";
 import { getCurrentSheetLocation } from "@/lib/sheets";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import { issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome, isLateAction } from "@/lib/booking-finalize";
-import { addAccountCredit, addReferralCredit, logLateFeeEvent, countPackageSessionsUsed, setPackageSessions } from "@/lib/supabase";
+import {
+  addAccountCredit,
+  addReferralCredit,
+  logLateFeeEvent,
+  countPackageSessionsUsed,
+  setPackageSessions,
+  getCampGroupByReferralCode,
+  cancelFullCampByReferralCode,
+  cancelRegistration,
+  recordCampDayRefund,
+} from "@/lib/supabase";
 import { getStripe } from "@/lib/stripe";
 import { SERVICE_FEE, fmtMoney } from "@/lib/pricing";
 
@@ -57,7 +67,7 @@ export async function POST(req: NextRequest) {
   // a late cancellation the same way a client-initiated one would.
   const { data: reg } = await supabase
     .from("registrations")
-    .select("manage_token, type, email, parent_name, booked_date, booked_start_time, booked_end_time, booked_location, booked_group, kids, session_details, total_participants, phone, sms_consent, is_paid, stripe_payment_intent_id, applied_account_credit, session_price, is_free, used_referral_credit, created_at, admin_change_at, package_id")
+    .select("manage_token, type, email, parent_name, booked_date, booked_start_time, booked_end_time, booked_location, booked_group, kids, session_details, total_participants, phone, sms_consent, is_paid, stripe_payment_intent_id, applied_account_credit, session_price, is_free, used_referral_credit, created_at, admin_change_at, package_id, is_full_camp, referral_code, camp_drop_in_rate")
     .eq("id", id)
     .single();
 
@@ -81,6 +91,214 @@ export async function POST(req: NextRequest) {
   }
 
   const chargeLateFee = isLate && feeChoice === "charge";
+
+  // A multi-day camp booking is actually SEVERAL rows sharing a referral_code
+  // (see getCampGroupByReferralCode), each still carrying the ORIGINAL
+  // full-camp price — treating one as a plain single-row cancellation (the
+  // path below) would refund/credit the ENTIRE camp price for cancelling
+  // just one day, and compound further with every additional day cancelled
+  // this way. This mirrors the client-facing DELETE handler's camp handling
+  // exactly (src/app/api/booking/[token]/route.ts), just driven by the
+  // admin's explicit fee choice instead of an automatic late/on-time split.
+  if (reg.type === "camp" && reg.is_full_camp) {
+    if (!reg.referral_code) {
+      return NextResponse.json({ error: "Cannot cancel — missing camp group reference." }, { status: 500 });
+    }
+    const campName = reg.booked_group || reg.session_details.split(" — ")[0] || reg.session_details;
+    const group = await getCampGroupByReferralCode(reg.referral_code, reg.booked_group);
+    const totalOriginalDays = group.length || 1;
+    const remainingAfterThis = group.filter((r) => r.status === "confirmed" && r.id !== id).length;
+
+    if (remainingAfterThis === 0) {
+      // Last remaining day — cancel the whole (now-empty) group.
+      const success = await cancelFullCampByReferralCode(reg.referral_code, reg.booked_group);
+      if (!success) {
+        return NextResponse.json({ error: "This camp was already cancelled" }, { status: 409 });
+      }
+      const groupCredit = group.reduce((sum, r) => sum + (r.applied_account_credit || 0), 0);
+      if (groupCredit > 0 && reg.email) {
+        await addAccountCredit(reg.email, groupCredit).catch(() => {});
+      }
+      const groupPaymentIntentId = reg.stripe_payment_intent_id || group.find((r) => r.stripe_payment_intent_id)?.stripe_payment_intent_id;
+      const wasPaidCamp = reg.is_paid || group.some((r) => r.is_paid) || !!groupPaymentIntentId;
+      // Net out both what's already been refunded (priorRefundedTotal) AND
+      // what's already been correctly kept as a late fee (priorAccruedFees)
+      // from earlier day-cancellations in this same group — see the
+      // matching client-side comment for why both are required.
+      const priorRefundedTotal = group.reduce((sum, r) => sum + (r.camp_day_refund_issued || 0), 0);
+      const priorAccruedFees = group.reduce((sum, r) => sum + (r.camp_day_late_fee || 0), 0);
+      let campCancelCredit = 0;
+      let campStripeRefundResult: { refundedAmount: number; creditedAmount: number; failed: boolean } | undefined;
+      if (wasPaidCamp && reg.email) {
+        const paidAmount = Math.max(0, resolvedSessionPrice(reg) - groupCredit - priorRefundedTotal - priorAccruedFees);
+        if (chargeLateFee) {
+          campCancelCredit = Math.round(paidAmount * 0.5);
+          if (campCancelCredit > 0) await addAccountCredit(reg.email, campCancelCredit).catch(() => {});
+        } else if (paidAmount > 0) {
+          if (groupPaymentIntentId) {
+            campStripeRefundResult = await issueStripeRefund({
+              email: reg.email,
+              manageToken: reg.manage_token,
+              paymentIntentId: groupPaymentIntentId,
+              amountDollars: paidAmount,
+              sessionLabel: campName,
+            });
+          } else {
+            await addAccountCredit(reg.email, paidAmount).catch(() => {});
+            campCancelCredit = paidAmount;
+          }
+        }
+        if (chargeLateFee) {
+          await logLateFeeEvent({
+            registrationId: id,
+            parentName: reg.parent_name,
+            email: reg.email,
+            kids: reg.kids,
+            sessionType: reg.type,
+            sessionDetails: campName,
+            bookedDate: reg.booked_date,
+            bookedStartTime: reg.booked_start_time,
+            action: "cancel",
+            initiatedBy: "admin",
+            amountKept: Math.round((paidAmount - campCancelCredit) * 100) / 100,
+            amountCredited: campCancelCredit,
+          });
+        }
+      }
+      try {
+        await sendCancellationNotification({
+          parentName: reg.parent_name,
+          email: reg.email,
+          sessionDetails: campName,
+          sessionType: reg.type,
+          isLateCancel: chargeLateFee,
+          cancelCredit: wasPaidCamp && chargeLateFee ? campCancelCredit : undefined,
+          stripeRefundResult: campStripeRefundResult,
+        });
+      } catch (notifyErr) {
+        console.error("Cancellation email failed (admin full camp cancel):", notifyErr);
+      }
+      if (reg.sms_consent && reg.phone) {
+        const moneyOutcome = wasPaidCamp ? describeMoneyOutcome(campStripeRefundResult, campCancelCredit, chargeLateFee, false) : "";
+        const lateNote = wasPaidCamp
+          ? (moneyOutcome ? `\n${moneyOutcome}.` : "\nNothing additional is due — your account credit already covered this.")
+          : chargeLateFee ? "\nA late cancellation fee applies." : "";
+        await sendSMS(reg.phone, `Mesa Basketball: ${campName} cancelled by your trainer.${lateNote}\nQuestions? mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
+      }
+      const adminCampMoneyOutcome = describeMoneyOutcome(campStripeRefundResult, campCancelCredit, chargeLateFee, true);
+      await sendAdminSMS(`CANCELLED (Camp): ${reg.parent_name}\n${campName}${chargeLateFee ? " (late fee charged)" : isLate ? " (late fee waived)" : ""}${adminCampMoneyOutcome ? ` — ${adminCampMoneyOutcome}` : ""}\nPlayers: ${reg.kids}`);
+      if (reg.booked_date && reg.booked_start_time) {
+        try {
+          await upsertGroupSessionCalendarEvent({
+            sessionType: "camp",
+            sessionLabel: campName,
+            bookedDate: reg.booked_date,
+            bookedStartTime: reg.booked_start_time,
+            bookedEndTime: reg.booked_end_time || reg.booked_start_time,
+            bookedLocation: reg.booked_location || "",
+            kidsJustRegistered: reg.kids,
+            participantsJustRegistered: reg.total_participants || 1,
+          });
+        } catch (err) {
+          console.error("Calendar sync error (admin camp cancel):", err);
+        }
+      }
+      return NextResponse.json({ ok: true, isLateCancel: chargeLateFee, isFullCamp: true });
+    }
+
+    // Partial-day cancel — recompute the capped total and accrue this day's late fee (if any).
+    const perDayRate = reg.camp_drop_in_rate ?? Math.round((reg.session_price ?? 0) / totalOriginalDays);
+    const thisDayLateFee = chargeLateFee ? Math.round(perDayRate * 0.5) : 0;
+    const daySuccess = await cancelRegistration(reg.manage_token, chargeLateFee, thisDayLateFee);
+    if (!daySuccess) {
+      return NextResponse.json({ error: "This day was already cancelled" }, { status: 409 });
+    }
+    if (chargeLateFee && thisDayLateFee > 0) {
+      await logLateFeeEvent({
+        registrationId: id,
+        parentName: reg.parent_name,
+        email: reg.email,
+        kids: reg.kids,
+        sessionType: reg.type,
+        sessionDetails: campName,
+        bookedDate: reg.booked_date,
+        bookedStartTime: reg.booked_start_time,
+        action: "cancel",
+        initiatedBy: "admin",
+        amountKept: thisDayLateFee,
+      });
+    }
+    if (reg.applied_account_credit && reg.email) {
+      await addAccountCredit(reg.email, reg.applied_account_credit).catch(() => {});
+    }
+    const originalAmount = reg.session_price ?? 0;
+    const recomputedPrice = Math.min(remainingAfterThis * perDayRate, originalAmount);
+    const priorAccruedFeesDay = group
+      .filter((r) => r.status === "cancelled" && r.id !== id)
+      .reduce((sum, r) => sum + (r.camp_day_late_fee || 0), 0);
+    const finalAmount = Math.min(originalAmount, recomputedPrice + priorAccruedFeesDay + thisDayLateFee);
+    const isPaidDay = !!reg.is_paid || !!reg.stripe_payment_intent_id;
+    const priorRefundedTotalDay = group
+      .filter((r) => r.status === "cancelled" && r.id !== id)
+      .reduce((sum, r) => sum + (r.camp_day_refund_issued || 0), 0);
+    const effectiveAlreadyPaidDay = originalAmount - priorRefundedTotalDay;
+    const dayCreditGranted = isPaidDay && effectiveAlreadyPaidDay > finalAmount ? effectiveAlreadyPaidDay - finalAmount : 0;
+    let dayStripeRefundResult: { refundedAmount: number; creditedAmount: number; failed: boolean } | undefined;
+    if (dayCreditGranted > 0 && reg.email) {
+      if (reg.stripe_payment_intent_id) {
+        dayStripeRefundResult = await issueStripeRefund({
+          email: reg.email,
+          manageToken: reg.manage_token,
+          paymentIntentId: reg.stripe_payment_intent_id,
+          amountDollars: dayCreditGranted,
+          sessionLabel: campName,
+        });
+      } else {
+        await addAccountCredit(reg.email, dayCreditGranted);
+      }
+      await recordCampDayRefund(reg.manage_token, dayCreditGranted);
+    }
+    try {
+      await sendCancellationNotification({
+        parentName: reg.parent_name,
+        email: reg.email,
+        sessionDetails: campName,
+        sessionType: reg.type,
+        isLateCancel: chargeLateFee,
+        campAdjustment: { finalAmount, originalAmount, isPaid: isPaidDay, creditGranted: dayCreditGranted, stripeRefundResult: dayStripeRefundResult },
+      });
+    } catch (notifyErr) {
+      console.error("Cancellation email failed (admin camp day cancel):", notifyErr);
+    }
+    if (reg.phone) {
+      const moneyOutcome = isPaidDay ? describeMoneyOutcome(dayStripeRefundResult, dayCreditGranted, false, false) : "";
+      const adjustmentLine = isPaidDay
+        ? (moneyOutcome ? ` ${moneyOutcome}.` : "")
+        : ` Amount due: $${fmtMoney(finalAmount)}.`;
+      if (reg.sms_consent) {
+        await sendSMS(reg.phone, `Mesa Basketball: ${campName} — ${formatDateWithDay(reg.booked_date || "")} cancelled by your trainer. New total: $${fmtMoney(finalAmount)} (was $${fmtMoney(originalAmount)}).${adjustmentLine}\nReply STOP to opt out.`);
+      }
+    }
+    const adminDayMoneyOutcome = isPaidDay ? describeMoneyOutcome(dayStripeRefundResult, dayCreditGranted, false, true) : "";
+    await sendAdminSMS(`CANCELLED (Camp day): ${reg.parent_name}\n${campName} — ${reg.booked_date}\nNew total: $${fmtMoney(finalAmount)} (was $${fmtMoney(originalAmount)})${isPaidDay ? (adminDayMoneyOutcome ? ` — ${adminDayMoneyOutcome}` : "") : ` — due: $${fmtMoney(finalAmount)}`}`);
+    if (reg.booked_date && reg.booked_start_time) {
+      try {
+        await upsertGroupSessionCalendarEvent({
+          sessionType: "camp",
+          sessionLabel: campName,
+          bookedDate: reg.booked_date,
+          bookedStartTime: reg.booked_start_time,
+          bookedEndTime: reg.booked_end_time || reg.booked_start_time,
+          bookedLocation: reg.booked_location || "",
+          kidsJustRegistered: reg.kids,
+          participantsJustRegistered: reg.total_participants || 1,
+        });
+      } catch (err) {
+        console.error("Calendar sync error (admin camp day cancel):", err);
+      }
+    }
+    return NextResponse.json({ ok: true, isLateCancel: chargeLateFee, isPartialDayCancel: true, remainingDays: remainingAfterThis, finalAmount, originalAmount });
+  }
 
   // Only flips a row still actually confirmed — guards against double-cancelling
   // (double click, retry) from running the refund flow below twice.
