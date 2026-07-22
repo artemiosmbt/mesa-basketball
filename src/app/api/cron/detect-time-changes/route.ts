@@ -83,6 +83,71 @@ function refundSmsLine(result: { stripeRefundResult?: StripeRefundResult; cancel
   return "";
 }
 
+function parseTimeMins(t: string): number | null {
+  const m = t.match(/(\d+):(\d+)\s*(AM|PM)/i);
+  if (!m) return null;
+  let h = parseInt(m[1]);
+  const min = parseInt(m[2]);
+  const period = m[3].toUpperCase();
+  if (period === "PM" && h !== 12) h += 12;
+  if (period === "AM" && h === 12) h = 0;
+  return h * 60 + min;
+}
+
+// A private booking's start/end time is NOT guaranteed to match any single
+// raw sheet row — the booking page merges consecutive same-day/location/
+// trainer rows into one bigger window (see buildTimeWindows in
+// schedule/page.tsx) and lets the client pick any 15-minute-aligned start
+// inside it. So "1:30-2:30 PM" is a perfectly normal booking spanning two
+// raw 1-hour rows (1:00-2:00, 2:00-3:00) and will NEVER exact-match either
+// row's startTime. Deletion detection has to check whether the booked
+// interval is covered by the union of still-present sheet rows for that
+// date/trainer, not whether one exact row still exists — otherwise every
+// booking that doesn't happen to start on a raw row boundary looks
+// "deleted" from the moment it's booked, on the very next sheet edit.
+//
+// Deliberately checks windows at ANY location for the date/trainer, not
+// just the registration's stored booked_location — a session that moved
+// location (without the registration's booked_location being resynced;
+// that drift is only patched display-side, by getCurrentSheetLocation)
+// must not look like a deletion.
+function privateBookingStillOnSheet(
+  reg: { booked_date: string | null; booked_start_time: string | null; booked_end_time: string | null; booked_trainer?: string | null },
+  slots: { date: string; startTime: string; endTime: string; location: string; trainer: string }[]
+): boolean {
+  const regStart = parseTimeMins(reg.booked_start_time || "");
+  const regEnd = parseTimeMins(reg.booked_end_time || "");
+  if (regStart === null || regEnd === null) return true; // can't evaluate — don't risk a false cancel
+
+  const trainer = reg.booked_trainer || "Artemios Gavalas";
+  const byLocation: Record<string, { start: number; end: number }[]> = {};
+  slots
+    .filter((s) => s.date === reg.booked_date && s.trainer === trainer)
+    .forEach((s) => {
+      const start = parseTimeMins(s.startTime);
+      const end = parseTimeMins(s.endTime);
+      if (start === null || end === null) return;
+      if (!byLocation[s.location]) byLocation[s.location] = [];
+      byLocation[s.location].push({ start, end });
+    });
+
+  return Object.values(byLocation).some((rows) => {
+    const sorted = [...rows].sort((a, b) => a.start - b.start);
+    let windowStart = sorted[0].start;
+    let windowEnd = sorted[0].end;
+    for (let i = 1; i < sorted.length; i++) {
+      if (sorted[i].start === windowEnd) {
+        windowEnd = sorted[i].end;
+      } else {
+        if (regStart >= windowStart && regEnd <= windowEnd) return true;
+        windowStart = sorted[i].start;
+        windowEnd = sorted[i].end;
+      }
+    }
+    return regStart >= windowStart && regEnd <= windowEnd;
+  });
+}
+
 function sessionIsUpcoming(dateStr: string, startTimeStr: string): boolean {
   try {
     const now = new Date();
@@ -367,14 +432,11 @@ export async function GET(req: NextRequest) {
     console.error("detect-time-changes: failed to fetch private slots", err);
   }
 
-  const sheetPrivateKeys = new Set(privateSlots.map((s) => `${s.date}|${s.startTime}`));
-
   // Same double-read safety net as the weekly deletion check above — one
   // fresh CSV read is not enough evidence to cancel a paid private session.
-  let sheetPrivateKeysConfirm: Set<string> | null = null;
+  let privateSlotsConfirm: typeof privateSlots | null = null;
   try {
-    const confirmSlots = await getPrivateSlots({ noCache: true });
-    sheetPrivateKeysConfirm = new Set(confirmSlots.map((s) => `${s.date}|${s.startTime}`));
+    privateSlotsConfirm = await getPrivateSlots({ noCache: true });
   } catch (err) {
     console.error("detect-time-changes: confirmation re-fetch failed (private)", err);
   }
@@ -387,9 +449,8 @@ export async function GET(req: NextRequest) {
 
   for (const r of (allPrivateRegs || [])) {
     if (!r.booked_date || !sessionIsUpcoming(r.booked_date, r.booked_start_time || "")) continue;
-    const privateKey = `${r.booked_date}|${r.booked_start_time}`;
-    const existsInFirstRead = sheetPrivateKeys.has(privateKey);
-    const existsInConfirmRead = sheetPrivateKeysConfirm === null ? true : sheetPrivateKeysConfirm.has(privateKey);
+    const existsInFirstRead = privateBookingStillOnSheet(r, privateSlots);
+    const existsInConfirmRead = privateSlotsConfirm === null ? true : privateBookingStillOnSheet(r, privateSlotsConfirm);
     if (existsInFirstRead || existsInConfirmRead) continue;
 
     const summaryKey = `${r.booked_date}|${r.booked_start_time}`;
