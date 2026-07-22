@@ -445,6 +445,11 @@ export async function finalizeConfirmedPrivateBooking(params: FinalizePrivateBoo
       });
     } catch (err) {
       console.error("Calendar sync error (private, post-payment):", err);
+      // Silent otherwise — this booking is already paid and confirmed, and
+      // private sessions have no daily reconciliation cron (unlike
+      // weekly/camp), so a failed sync here would never self-heal or
+      // surface anywhere unless the client happens to mention it.
+      await sendAdminSMS(`⚠️ Calendar sync FAILED for ${params.parentName}'s paid private session (${formatDateWithDay(params.bookedDate || "")} ${params.bookedStartTime}). Booking is confirmed — add it to the calendar manually.`).catch(() => {});
     }
   }
 }
@@ -549,6 +554,7 @@ export async function finalizeConfirmedWeeklyBooking(params: FinalizeWeeklyBooki
   ).join("\n");
   await sendAdminSMS(`NEW BOOKING (paid): ${params.parentName}\n${weeklySessions.length} ${sessionTypeSMS} session${weeklySessions.length !== 1 ? "s" : ""}:\n${adminLines}${weeklyTrainerLine}\nPlayers: ${params.kids}${params.submittedReferralCode ? `\nRef code: ${params.submittedReferralCode} ${weeklyReferrer ? "✓ applied" : "✗ NOT applied"}` : ""}`).catch(() => {});
 
+  const calendarSyncFailures: string[] = [];
   for (const session of weeklySessions) {
     try {
       await upsertGroupSessionCalendarEvent({
@@ -564,7 +570,15 @@ export async function finalizeConfirmedWeeklyBooking(params: FinalizeWeeklyBooki
       });
     } catch (err) {
       console.error("Calendar sync error (weekly, post-payment):", err);
+      calendarSyncFailures.push(`${session.date} ${session.startTime} (${session.group || "Group Session"})`);
     }
+  }
+  // Weekly/camp events do get a daily reconciliation sweep (calendar-sync
+  // cron), so a failure here isn't permanent the way a private-session one
+  // is — but that's up to a day away, so still worth an immediate heads-up
+  // rather than relying on Artemios to notice a gap on the calendar first.
+  if (calendarSyncFailures.length > 0) {
+    await sendAdminSMS(`⚠️ Calendar sync FAILED for ${calendarSyncFailures.length} of ${weeklySessions.length} session(s) in ${params.parentName}'s paid weekly booking:\n${calendarSyncFailures.join("\n")}\nBooking is confirmed — will self-heal by tomorrow's calendar sync, or add manually now.`).catch(() => {});
   }
 }
 
@@ -660,6 +674,7 @@ export async function finalizeConfirmedCampBooking(params: FinalizeCampBookingPa
   const campNameLine = `${firstSession.campName}${firstSession.gradeGroup ? ` — ${firstSession.gradeGroup}` : ""}`;
   await sendAdminSMS(`NEW BOOKING (paid): ${params.parentName}\n${campNameLine}\n${campSessions.length} camp day${campSessions.length !== 1 ? "s" : ""}:\n${adminCampLines}\nPlayers: ${params.kids}${params.submittedReferralCode ? `\nRef code: ${params.submittedReferralCode} ${campReferrer ? "✓ applied" : "✗ NOT applied"}` : ""}`).catch(() => {});
 
+  const calendarSyncFailures: string[] = [];
   for (const session of campSessions) {
     try {
       await upsertGroupSessionCalendarEvent({
@@ -674,7 +689,11 @@ export async function finalizeConfirmedCampBooking(params: FinalizeCampBookingPa
       });
     } catch (err) {
       console.error("Calendar sync error (camp, post-payment):", err);
+      calendarSyncFailures.push(`${session.date} ${session.startTime}`);
     }
+  }
+  if (calendarSyncFailures.length > 0) {
+    await sendAdminSMS(`⚠️ Calendar sync FAILED for ${calendarSyncFailures.length} of ${campSessions.length} day(s) in ${params.parentName}'s paid camp booking (${campNameLine}):\n${calendarSyncFailures.join("\n")}\nBooking is confirmed — will self-heal by tomorrow's calendar sync, or add manually now.`).catch(() => {});
   }
 }
 
@@ -830,6 +849,7 @@ export async function finalizeConfirmedPrivateSeriesBooking(params: FinalizePriv
   await sendAdminSMS(`NEW BOOKING (paid): ${params.parentName}\n${privateSessions.length} ${adminTypeLabel} sessions:\n${adminLines}${trainerLine}\nPlayers: ${params.kids}${params.submittedReferralCode ? `\nRef code: ${params.submittedReferralCode} ${params.privateReferrer ? "✓ applied" : "✗ NOT applied"}` : ""}`).catch(() => {});
 
   if (isPrivateType) {
+    const calendarSyncFailures: string[] = [];
     for (const s of privateSessions) {
       try {
         await addPrivateSessionToCalendar({
@@ -845,7 +865,13 @@ export async function finalizeConfirmedPrivateSeriesBooking(params: FinalizePriv
         });
       } catch (err) {
         console.error("Calendar sync error (private series, post-payment):", err);
+        calendarSyncFailures.push(`${s.date} ${s.startTime}`);
       }
+    }
+    // Private sessions have no daily reconciliation cron (unlike
+    // weekly/camp), so a failed sync here would never self-heal.
+    if (calendarSyncFailures.length > 0) {
+      await sendAdminSMS(`⚠️ Calendar sync FAILED for ${calendarSyncFailures.length} of ${privateSessions.length} session(s) in ${params.parentName}'s paid private series:\n${calendarSyncFailures.join("\n")}\nBooking is confirmed — add these to the calendar manually.`).catch(() => {});
     }
   }
 }
@@ -1059,6 +1085,7 @@ export async function finalizeRescheduleTopup(params: FinalizeRescheduleTopupPar
     }
   } catch (err) {
     console.error("Calendar sync error (reschedule topup):", err);
+    await sendAdminSMS(`⚠️ Calendar sync FAILED for ${params.parentName}'s paid reschedule (${formatDateWithDay(params.bookedDate)} ${params.bookedStartTime}). Booking is confirmed — update the calendar manually.`).catch(() => {});
   }
 }
 
@@ -1223,6 +1250,7 @@ async function finalizePlayerEditTopup(session: Stripe.Checkout.Session): Promis
     }
   } catch (err) {
     console.error("Calendar sync error (player-edit topup):", err);
+    await sendAdminSMS(`⚠️ Calendar sync FAILED for ${reg.parent_name}'s paid player-edit update (${reg.booked_date ? formatDateWithDay(reg.booked_date) : "?"} ${reg.booked_start_time || "?"}). Booking is confirmed — update the calendar manually.`).catch(() => {});
   }
 
   try {

@@ -66,8 +66,19 @@ async function createJwt(serviceAccountEmail: string, privateKeyPem: string): Pr
   return `${signingInput}.${signature}`;
 }
 
-/** Exchange a signed JWT for an OAuth2 access token */
+// Reused across calls within a warm serverless invocation/container — there
+// is only ever one service account, so a single module-level cache is safe.
+// Without this, a multi-date booking (weekly/camp/private-series) did a
+// full JWT-sign-and-token-exchange network round trip for EVERY single
+// calendar event it synced, on top of the event-creation call itself,
+// multiplying an already-sequential post-payment calendar loop and pushing
+// it closer to the serverless function's execution timeout.
+let cachedToken: { token: string; expiresAt: number } | null = null;
+
+/** Exchange a signed JWT for an OAuth2 access token (cached until near expiry) */
 async function getAccessToken(serviceAccountEmail: string, privateKeyPem: string): Promise<string> {
+  if (cachedToken && cachedToken.expiresAt > Date.now()) return cachedToken.token;
+
   const jwt = await createJwt(serviceAccountEmail, privateKeyPem);
   const resp = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
@@ -82,7 +93,12 @@ async function getAccessToken(serviceAccountEmail: string, privateKeyPem: string
     throw new Error(`Failed to get access token: ${resp.status} ${text}`);
   }
   const json = await resp.json();
-  return json.access_token as string;
+  const token = json.access_token as string;
+  const expiresInSec = typeof json.expires_in === "number" ? json.expires_in : 3600;
+  // Refresh a minute before actual expiry so a token already in flight
+  // never gets used right past its cutoff.
+  cachedToken = { token, expiresAt: Date.now() + (expiresInSec - 60) * 1000 };
+  return token;
 }
 
 // ---------------------------------------------------------------------------
