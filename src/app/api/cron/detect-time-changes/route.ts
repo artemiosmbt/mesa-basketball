@@ -4,7 +4,8 @@ import { getWeeklySchedule, getPrivateSlots } from "@/lib/sheets";
 import { sendTimeChangeNotification, sendCancellationNotification } from "@/lib/email";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import { addAccountCredit, addReferralCredit, countPackageSessionsUsed, setPackageSessions } from "@/lib/supabase";
-import { issueStripeRefund, resolvedSessionPrice } from "@/lib/booking-finalize";
+import { issueStripeRefund, resolvedSessionPrice, type StripeRefundResult } from "@/lib/booking-finalize";
+import { fmtMoney } from "@/lib/pricing";
 
 // A session the trainer removed from the schedule is never the client's
 // fault — this is always treated as an on-time cancellation (full refund,
@@ -23,27 +24,33 @@ async function refundTrainerCancelledBooking(r: {
   session_price: number | null;
   is_free: boolean | null;
   type: string;
-}): Promise<void> {
+}): Promise<{ stripeRefundResult?: StripeRefundResult; cancelCredit?: number }> {
   if (r.used_referral_credit && r.email) {
     await addReferralCredit(r.email).catch(() => {});
   }
   if (r.applied_account_credit && r.email) {
     await addAccountCredit(r.email, r.applied_account_credit).catch(() => {});
   }
+  let stripeRefundResult: StripeRefundResult | undefined;
+  let cancelCredit: number | undefined;
   const wasPaid = !!r.is_paid || !!r.stripe_payment_intent_id;
   if (wasPaid && r.email) {
     const paidAmount = Math.max(0, resolvedSessionPrice({ session_price: r.session_price, is_free: !!r.is_free, type: r.type }) - (r.applied_account_credit || 0));
     if (paidAmount > 0) {
       if (r.stripe_payment_intent_id) {
-        await issueStripeRefund({
+        stripeRefundResult = await issueStripeRefund({
           email: r.email,
           manageToken: r.manage_token,
           paymentIntentId: r.stripe_payment_intent_id,
           amountDollars: paidAmount,
           sessionLabel: r.session_details || "",
-        }).catch((err) => console.error("Trainer-deletion refund failed for", r.email, err));
+        }).catch((err) => {
+          console.error("Trainer-deletion refund failed for", r.email, err);
+          return { refundedAmount: 0, creditedAmount: 0, failed: true };
+        });
       } else {
         await addAccountCredit(r.email, paidAmount).catch(() => {});
+        cancelCredit = paidAmount;
       }
     }
   }
@@ -55,6 +62,25 @@ async function refundTrainerCancelledBooking(r: {
       console.error("Package usage recompute failed (trainer-deleted session):", err);
     }
   }
+  return { stripeRefundResult, cancelCredit };
+}
+
+// SMS suffix describing what happened to the client's money, so a
+// trainer-deleted-session cancellation SMS never goes out silent about a
+// refund/credit that Stripe or the account balance already reflects.
+function refundSmsLine(result: { stripeRefundResult?: StripeRefundResult; cancelCredit?: number }): string {
+  if (result.stripeRefundResult) {
+    const { refundedAmount, creditedAmount, failed } = result.stripeRefundResult;
+    if (failed) return "\nYour refund is being processed — you'll receive a separate confirmation once it's complete.";
+    const parts: string[] = [];
+    if (refundedAmount > 0) parts.push(`$${fmtMoney(refundedAmount)} refunded to your card`);
+    if (creditedAmount > 0) parts.push(`$${fmtMoney(creditedAmount)} credited to your account`);
+    return parts.length > 0 ? `\n${parts.join(", ")}.` : "";
+  }
+  if (result.cancelCredit && result.cancelCredit > 0) {
+    return `\n$${fmtMoney(result.cancelCredit)} credited to your account.`;
+  }
+  return "";
 }
 
 function sessionIsUpcoming(dateStr: string, startTimeStr: string): boolean {
@@ -239,6 +265,23 @@ export async function GET(req: NextRequest) {
   }
 
   // === DELETION DETECTION — WEEKLY SESSIONS ===
+  // A single sheet read is never trusted as proof of deletion — a transient
+  // formula-recalculation glitch or a torn read caught mid-edit elsewhere in
+  // the sheet could otherwise make a real, still-scheduled session look
+  // "gone" and trigger an irreversible cancel + Stripe refund. Re-fetch
+  // independently and only treat a session as deleted if BOTH reads agree
+  // it's missing; if the confirmation fetch itself fails, default to "still
+  // exists" so a fetch error can never look like a mass deletion.
+  let upcomingConfirm: typeof upcoming | null = null;
+  try {
+    const confirmSessions = await getWeeklySchedule({ noCache: true });
+    upcomingConfirm = confirmSessions.filter(
+      (s) => sessionIsUpcoming(s.date, s.startTime) && s.startTime && s.group
+    );
+  } catch (err) {
+    console.error("detect-time-changes: confirmation re-fetch failed (weekly)", err);
+  }
+
   // For each upcoming confirmed weekly registration, check if its session still
   // exists in the sheet. Uses the same substring match as time-change detection
   // (session_details contains the group name) so there's no fragile parsing.
@@ -258,10 +301,13 @@ export async function GET(req: NextRequest) {
 
     // Session still exists in sheet if any sheet row matches this date AND its
     // group name appears in session_details (same logic as time-change detection)
-    const sessionStillExists = upcoming.some(
+    const existsInFirstRead = upcoming.some(
       (s) => s.date === r.booked_date && (r.session_details || "").includes(s.group)
     );
-    if (sessionStillExists) continue;
+    const existsInConfirmRead = upcomingConfirm === null ? true : upcomingConfirm.some(
+      (s) => s.date === r.booked_date && (r.session_details || "").includes(s.group)
+    );
+    if (existsInFirstRead || existsInConfirmRead) continue;
 
     // Track for admin summary
     const summaryKey = `${r.booked_date}|${r.booked_start_time}`;
@@ -280,7 +326,7 @@ export async function GET(req: NextRequest) {
       .update({ status: "cancelled", is_late_cancel: false })
       .eq("id", r.id);
 
-    await refundTrainerCancelledBooking(r);
+    const moneyResult = await refundTrainerCancelledBooking(r);
 
     try {
       await sendCancellationNotification({
@@ -289,6 +335,8 @@ export async function GET(req: NextRequest) {
         sessionDetails: r.session_details || "",
         sessionType: r.type,
         isLateCancel: false,
+        stripeRefundResult: moneyResult.stripeRefundResult,
+        cancelCredit: moneyResult.cancelCredit,
       });
       cancelEmailsSent++;
     } catch (err) {
@@ -302,7 +350,7 @@ export async function GET(req: NextRequest) {
       try {
         await sendSMS(
           r.phone,
-          `CANCELLED\nMesa Basketball: ${(r.session_details || "").split(" — ")[0].trim()} on ${dateStr}\nTime: ${timeStr}${locName ? `\nLocation: ${locName}` : ""}\nSession cancelled by trainer.\nQuestions? (631) 599-1280\nReply STOP to opt out.`
+          `CANCELLED\nMesa Basketball: ${(r.session_details || "").split(" — ")[0].trim()} on ${dateStr}\nTime: ${timeStr}${locName ? `\nLocation: ${locName}` : ""}\nSession cancelled by trainer.${refundSmsLine(moneyResult)}\nQuestions? (631) 599-1280\nReply STOP to opt out.`
         );
         cancelSmsSent++;
       } catch (err) {
@@ -321,6 +369,16 @@ export async function GET(req: NextRequest) {
 
   const sheetPrivateKeys = new Set(privateSlots.map((s) => `${s.date}|${s.startTime}`));
 
+  // Same double-read safety net as the weekly deletion check above — one
+  // fresh CSV read is not enough evidence to cancel a paid private session.
+  let sheetPrivateKeysConfirm: Set<string> | null = null;
+  try {
+    const confirmSlots = await getPrivateSlots({ noCache: true });
+    sheetPrivateKeysConfirm = new Set(confirmSlots.map((s) => `${s.date}|${s.startTime}`));
+  } catch (err) {
+    console.error("detect-time-changes: confirmation re-fetch failed (private)", err);
+  }
+
   const { data: allPrivateRegs } = await supabase
     .from("registrations")
     .select("*")
@@ -329,7 +387,10 @@ export async function GET(req: NextRequest) {
 
   for (const r of (allPrivateRegs || [])) {
     if (!r.booked_date || !sessionIsUpcoming(r.booked_date, r.booked_start_time || "")) continue;
-    if (sheetPrivateKeys.has(`${r.booked_date}|${r.booked_start_time}`)) continue;
+    const privateKey = `${r.booked_date}|${r.booked_start_time}`;
+    const existsInFirstRead = sheetPrivateKeys.has(privateKey);
+    const existsInConfirmRead = sheetPrivateKeysConfirm === null ? true : sheetPrivateKeysConfirm.has(privateKey);
+    if (existsInFirstRead || existsInConfirmRead) continue;
 
     const summaryKey = `${r.booked_date}|${r.booked_start_time}`;
     if (!cancelledKeys.has(summaryKey)) {
@@ -347,7 +408,7 @@ export async function GET(req: NextRequest) {
       .update({ status: "cancelled", is_late_cancel: false })
       .eq("id", r.id);
 
-    await refundTrainerCancelledBooking(r);
+    const moneyResult = await refundTrainerCancelledBooking(r);
 
     try {
       await sendCancellationNotification({
@@ -356,6 +417,8 @@ export async function GET(req: NextRequest) {
         sessionDetails: r.session_details || "",
         sessionType: r.type,
         isLateCancel: false,
+        stripeRefundResult: moneyResult.stripeRefundResult,
+        cancelCredit: moneyResult.cancelCredit,
       });
       cancelEmailsSent++;
     } catch (err) {
@@ -369,7 +432,7 @@ export async function GET(req: NextRequest) {
       try {
         await sendSMS(
           r.phone,
-          `CANCELLED\nMesa Basketball: Private Session on ${dateStr}\nTime: ${timeStr}${locName ? `\nLocation: ${locName}` : ""}\nSession cancelled by trainer.\nQuestions? (631) 599-1280\nReply STOP to opt out.`
+          `CANCELLED\nMesa Basketball: Private Session on ${dateStr}\nTime: ${timeStr}${locName ? `\nLocation: ${locName}` : ""}\nSession cancelled by trainer.${refundSmsLine(moneyResult)}\nQuestions? (631) 599-1280\nReply STOP to opt out.`
         );
         cancelSmsSent++;
       } catch (err) {

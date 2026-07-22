@@ -64,6 +64,7 @@ interface Booking {
   bookedStartTime: string | null;
   bookedEndTime: string | null;
   bookedLocation: string | null;
+  bookedTrainer: string | null;
   bookedGroup: string | null;
   status: string;
   createdAt: string;
@@ -398,10 +399,26 @@ export default function ManageBooking({
       });
     });
 
+    // Subtract booked slots — but not this booking's own current slot, since
+    // rescheduling should be able to land back on (or overlap) the time this
+    // exact registration already holds. Without this exclusion, the client's
+    // own booking blocks out its own window, hiding any nearby reschedule
+    // option that overlaps the time they're already in.
+    const otherBookedSlots = bookedSlots.filter(
+      (b) =>
+        !(
+          b.date === booking?.bookedDate &&
+          b.startTime === booking?.bookedStartTime &&
+          b.endTime === booking?.bookedEndTime &&
+          b.location === booking?.bookedLocation &&
+          b.trainer === (booking?.bookedTrainer || "Artemios Gavalas")
+        )
+    );
+
     // Subtract booked slots
     const result: TimeWindow[] = [];
     for (const w of windows) {
-      const overlaps = bookedSlots.filter(
+      const overlaps = otherBookedSlots.filter(
         (b) => b.date === w.date && b.location === w.location && b.trainer === w.trainer
       );
       if (overlaps.length === 0) {
@@ -431,7 +448,7 @@ export default function ManageBooking({
       const windowStart = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate(), Math.floor(w.startMins / 60), w.startMins % 60);
       return windowStart > now;
     });
-  }, [privateSlots, bookedSlots]);
+  }, [privateSlots, bookedSlots, booking?.bookedDate, booking?.bookedStartTime, booking?.bookedEndTime, booking?.bookedLocation, booking?.bookedTrainer]);
 
   function openEditPlayers() {
     if (!booking) return;
