@@ -149,7 +149,14 @@ function toDateTime(date: string, time: string): string {
 /**
  * Search for an existing calendar event on a given day (timeMin/timeMax window)
  * whose description contains a specific tag string.
- * Returns the event id if found, otherwise null.
+ * Returns the event id if found, or null if the search genuinely found no
+ * match. Throws if the search API call itself failed (rate limit, expired
+ * token, network blip) — a failed search must never be silently treated as
+ * "no event exists", because deletePrivateSessionFromCalendar's caller
+ * always follows a failed/no-op delete with an unconditional create: if a
+ * transient search failure here were swallowed into a null (as it used to
+ * be), the old event would survive un-deleted AND a duplicate new event
+ * would get created right alongside it.
  */
 async function findExistingEvent(
   calendarId: string,
@@ -169,7 +176,9 @@ async function findExistingEvent(
   const resp = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (!resp.ok) return null;
+  if (!resp.ok) {
+    throw new Error(`Calendar event search failed (${resp.status}): ${await resp.text().catch(() => "")}`);
+  }
 
   const data = await resp.json();
   const items: Array<{ id: string; description?: string; summary?: string; etag?: string }> =

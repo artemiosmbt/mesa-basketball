@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getWeeklySchedule, getPrivateSlots, type WeeklySession } from "@/lib/sheets";
+import { deletePrivateSessionFromCalendar } from "@/lib/calendar";
 import { sendTimeChangeNotification, sendCancellationNotification } from "@/lib/email";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import { addAccountCredit, addReferralCredit, countPackageSessionsUsed, setPackageSessions } from "@/lib/supabase";
@@ -585,6 +586,18 @@ export async function GET(req: NextRequest) {
       .from("registrations")
       .update({ status: "cancelled", is_late_cancel: false })
       .eq("id", r.id);
+
+    // Every other cancellation path in this codebase (client cancel, admin
+    // cancel/delete, admin reschedule) removes the private session's Google
+    // Calendar event here — this trainer-deletion path was the one place
+    // that never did, so a session auto-cancelled by this cron stayed on
+    // the calendar forever (there's no daily reconciliation cron for
+    // private events like there is for weekly/camp events).
+    try {
+      await deletePrivateSessionFromCalendar({ email: r.email, bookedDate: r.booked_date, bookedStartTime: r.booked_start_time });
+    } catch (err) {
+      console.error("Calendar cleanup failed for trainer-deleted private session", r.email, err);
+    }
 
     const moneyResult = await refundTrainerCancelledBooking(r);
 
