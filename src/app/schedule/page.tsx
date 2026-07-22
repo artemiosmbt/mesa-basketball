@@ -4,7 +4,7 @@ import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import Image from "next/image";
 import { authClient, ADMIN_EMAIL } from "@/lib/auth";
 import LandingNav from "@/app/LandingNav";
-import { SERVICE_FEE, SERVICE_FEE_LABEL, packagePrice } from "@/lib/pricing";
+import { SERVICE_FEE, SERVICE_FEE_LABEL, packagePrice, PRIVATE_RATE, GROUP_PRIVATE_RATE, calcPrivatePrice as getPrivatePrice } from "@/lib/pricing";
 
 const LOCATION_LINKS: Record<string, { name: string; url: string }> = {
   "St. Pauls": { name: "St. Paul's Cathedral", url: "https://share.google/kgiqMxAj2iAFEAGI6" },
@@ -288,12 +288,6 @@ function formatTimeFromMins(mins: number): string {
   const period = h24 >= 12 ? "PM" : "AM";
   const h12 = h24 === 0 ? 12 : h24 > 12 ? h24 - 12 : h24;
   return `${h12}:${m.toString().padStart(2, "0")} ${period}`;
-}
-
-function getPrivatePrice(durationMin: number, kidCount: number): number {
-  const ratio = durationMin / 60;
-  const basePrice = kidCount >= 4 ? 250 : 150;
-  return Math.round(basePrice * ratio * 100) / 100;
 }
 
 function formatPrice(amount: number): string {
@@ -2561,11 +2555,11 @@ export default function Home() {
           <h2 className="font-[family-name:var(--font-oswald)] text-center text-3xl font-bold tracking-wide">Private Sessions</h2>
           <div className="mt-4 flex flex-wrap justify-center gap-6">
             <a href="#private-schedule" className="rounded-lg border border-mesa-accent bg-brown-800/60 px-4 py-2 text-center hover:bg-brown-700/60 hover:border-yellow-400 transition cursor-pointer">
-              <p className="text-lg font-bold text-mesa-accent">$150 / 60 min</p>
+              <p className="text-lg font-bold text-mesa-accent">${PRIVATE_RATE} / 60 min</p>
               <p className="text-xs text-brown-400">Up to 3 participants</p>
             </a>
             <a href="#private-schedule" className="rounded-lg border border-mesa-accent bg-brown-800/60 px-4 py-2 text-center hover:bg-brown-700/60 hover:border-yellow-400 transition cursor-pointer">
-              <p className="text-lg font-bold text-mesa-accent">$250 / 60 min</p>
+              <p className="text-lg font-bold text-mesa-accent">${GROUP_PRIVATE_RATE} / 60 min</p>
               <p className="text-xs text-brown-400">Group Private (4+ players)</p>
             </a>
           </div>
@@ -3565,7 +3559,7 @@ export default function Home() {
                           : "border-brown-700 text-brown-400 hover:border-brown-500"
                       }`}
                     >
-                      Private ($150/hr)
+                      Private (${PRIVATE_RATE}/hr)
                       <span className="block text-xs font-normal">Up to 3 players</span>
                     </button>
                     <button
@@ -3577,7 +3571,7 @@ export default function Home() {
                           : "border-brown-700 text-brown-400 hover:border-brown-500"
                       }`}
                     >
-                      Group ($250/hr)
+                      Group (${GROUP_PRIVATE_RATE}/hr)
                       <span className="block text-xs font-normal">4+ players</span>
                     </button>
                   </div>

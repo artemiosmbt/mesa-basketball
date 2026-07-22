@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getStripe } from "@/lib/stripe";
-import { SERVICE_FEE, fmtMoney } from "@/lib/pricing";
+import { SERVICE_FEE, fmtMoney, PRIVATE_RATE, GROUP_PRIVATE_RATE } from "@/lib/pricing";
 import { getWeeklySchedule, getCamps } from "@/lib/sheets";
 import {
   finalizeConfirmedPrivateBooking,
@@ -705,7 +705,7 @@ export async function POST(req: NextRequest) {
     function calcPrivateSessionPrice(startTime?: string, endTime?: string, kidCount = 1): number | undefined {
       if (!startTime || !endTime) return undefined;
       const duration = Math.max(60, parseMinsFromTime(endTime) - parseMinsFromTime(startTime));
-      const rate = kidCount >= 4 ? 250 : 150;
+      const rate = kidCount >= 4 ? GROUP_PRIVATE_RATE : PRIVATE_RATE;
       return Math.round(rate * (duration / 60) * 100) / 100;
     }
 

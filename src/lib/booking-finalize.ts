@@ -3,7 +3,7 @@ import { sendRegistrationNotification, sendReferralCreditNotification, sendResch
 import { addPrivateSessionToCalendar, deletePrivateSessionFromCalendar, upsertGroupSessionCalendarEvent } from "@/lib/calendar";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import { getStripe } from "@/lib/stripe";
-import { SERVICE_FEE, fmtMoney, packagePrice } from "@/lib/pricing";
+import { SERVICE_FEE, fmtMoney, packagePrice, fullPriceForType } from "@/lib/pricing";
 import {
   addReferralCredit,
   awardReferralCreditOnce,
@@ -72,8 +72,7 @@ export function isLateAction(dateStr: string, timeStr: string, createdAt: string
  */
 export function resolvedSessionPrice(reg: { session_price: number | null; is_free: boolean; type: string }): number {
   const isPrivateType = reg.type === "private" || reg.type === "group-private";
-  const fullPrice = reg.type === "group-private" ? 250 : reg.type === "private" ? 150 : 50;
-  const basePrice = reg.session_price ?? fullPrice;
+  const basePrice = reg.session_price ?? fullPriceForType(reg.type);
   return reg.is_free && isPrivateType ? Math.round(basePrice * 0.5 * 100) / 100 : basePrice;
 }
 

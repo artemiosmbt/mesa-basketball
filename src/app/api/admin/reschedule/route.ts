@@ -11,7 +11,7 @@ import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@
 import { getWeeklySchedule } from "@/lib/sheets";
 import { addAccountCredit, deductAccountCredit, addReferralCredit, logLateFeeEvent, getPackageById, countPackageSessionsUsed, setPackageSessions } from "@/lib/supabase";
 import { isLateAction, resolveOffSessionPaymentSource, chargeSavedCardOffSession, issueStripeRefund } from "@/lib/booking-finalize";
-import { SERVICE_FEE, SERVICE_FEE_LABEL, fmtMoney } from "@/lib/pricing";
+import { SERVICE_FEE, SERVICE_FEE_LABEL, fmtMoney, calcPrivatePrice, fullPriceForType } from "@/lib/pricing";
 
 
 function parseMinsFromTime(t: string): number {
@@ -25,19 +25,8 @@ function parseMinsFromTime(t: string): number {
   return h * 60 + min;
 }
 
-function calcPrivatePrice(durationMins: number, kidCount: number): number {
-  return Math.round((kidCount >= 4 ? 250 : 150) * (durationMins / 60) * 100) / 100;
-}
-
 function isPrivateType(type: string): boolean {
   return type === "private" || type === "group-private";
-}
-
-// Fallback when session_price is null (a real, common case — legacy rows)
-// rather than treating an unset price as $0, which would understate what's
-// actually owed. Mirrors fullPriceForType() in the admin dashboard.
-function fullPriceForType(type: string): number {
-  return type === "group-private" ? 250 : type === "private" ? 150 : 50;
 }
 
 // The DB always stores the FULL (undiscounted) session_price for private

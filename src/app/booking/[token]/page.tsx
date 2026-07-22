@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, use, useRef } from "react";
+import { PRIVATE_RATE, GROUP_PRIVATE_RATE, calcPrivatePrice as getPrivatePrice } from "@/lib/pricing";
 
 const LOCATION_LINKS: Record<string, { name: string; url: string }> = {
   "St. Pauls": { name: "St. Paul's Cathedral", url: "https://share.google/kVGkfSgr6SaShDWF7" },
@@ -9,12 +10,6 @@ const LOCATION_LINKS: Record<string, { name: string; url: string }> = {
   "Holy Resurrection": { name: "Holy Resurrection Brookville", url: "https://www.google.com/search?q=holy+resurrection+brookville" },
   "Holy Resurrection Brookville": { name: "Holy Resurrection Brookville", url: "https://www.google.com/search?q=holy+resurrection+brookville" },
 };
-
-function getPrivatePrice(durationMin: number, kidCount: number): number {
-  const ratio = durationMin / 60;
-  const basePrice = kidCount >= 4 ? 250 : 150;
-  return Math.round(basePrice * ratio * 100) / 100;
-}
 
 function formatPrice(amount: number): string {
   return amount % 1 === 0 ? `$${amount}` : `$${amount.toFixed(2)}`;
@@ -1336,11 +1331,11 @@ export default function ManageBooking({
                         </div>
                         {isGroupRate ? (
                           <p className="mt-1 text-xs text-yellow-400/80">
-                            Rate changed from $150/hr to $250/hr — {kidCount} players · {totalMins} min
+                            Rate changed from ${PRIVATE_RATE}/hr to ${GROUP_PRIVATE_RATE}/hr — {kidCount} players · {totalMins} min
                           </p>
                         ) : (
                           <p className="mt-0.5 text-xs text-brown-500">
-                            $150/hr · {kidCount} player{kidCount !== 1 ? "s" : ""} · {totalMins} min
+                            ${PRIVATE_RATE}/hr · {kidCount} player{kidCount !== 1 ? "s" : ""} · {totalMins} min
                           </p>
                         )}
                       </div>

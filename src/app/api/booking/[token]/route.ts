@@ -20,7 +20,7 @@ import {
 } from "@/lib/supabase";
 import { issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome, isLateAction, parseSessionDateTimeET } from "@/lib/booking-finalize";
 import { getStripe } from "@/lib/stripe";
-import { SERVICE_FEE, fmtMoney } from "@/lib/pricing";
+import { SERVICE_FEE, fmtMoney, calcPrivatePrice } from "@/lib/pricing";
 import {
   sendCancellationNotification,
   sendRescheduleNotification,
@@ -697,10 +697,6 @@ function parseMins(t: string): number {
   if (period === "PM" && h !== 12) h += 12;
   if (period === "AM" && h === 12) h = 0;
   return h * 60 + min;
-}
-
-function calcPrivatePrice(durationMins: number, kidCount: number): number {
-  return Math.round((kidCount >= 4 ? 250 : 150) * (durationMins / 60) * 100) / 100;
 }
 
 function playerLabel(playerStr: string): string {

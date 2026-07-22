@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { authClient, ADMIN_EMAIL } from "@/lib/auth";
 import type { WeeklySession, Camp, PrivateSlot } from "@/lib/sheets";
+import { fullPriceForType, calcPrivatePrice as calcPrivatePricePreview } from "@/lib/pricing";
 
 interface Registration {
   id: string;
@@ -130,12 +131,6 @@ function sessionText(details: string) {
 function formatPrice(price: number | null): string {
   if (price == null) return "—";
   return `$${price}`;
-}
-
-function fullPriceForType(type: string): number {
-  if (type === "group-private") return 250;
-  if (type === "private") return 150;
-  return 50;
 }
 
 function effectivePrice(r: Registration, weeklyDiscountRates?: Map<string, number>): number {
@@ -287,10 +282,6 @@ function getStartOptionsClient(window: { startMins: number; endMins: number }, m
     options.push(t);
   }
   return options;
-}
-
-function calcPrivatePricePreview(durationMins: number, kidCount: number): number {
-  return Math.round((kidCount >= 4 ? 250 : 150) * (durationMins / 60) * 100) / 100;
 }
 
 function isPrivateTypeClient(type: string): boolean {

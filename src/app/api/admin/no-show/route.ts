@@ -4,15 +4,7 @@ import { verifyAdmin } from "@/lib/auth";
 import { sendNoShowNotification } from "@/lib/email";
 import { sendSMS, sendAdminSMS } from "@/lib/sms";
 import { countPackageSessionsUsed, setPackageSessions } from "@/lib/supabase";
-import { fmtMoney } from "@/lib/pricing";
-
-
-// Full-price fallback by session type if session_price is not stored
-function fullPriceForType(type: string): number {
-  if (type === "group-private") return 250;
-  if (type === "private") return 150;
-  return 50; // weekly group
-}
+import { fmtMoney, fullPriceForType } from "@/lib/pricing";
 
 export async function POST(req: NextRequest) {
   if (!(await verifyAdmin(req))) {

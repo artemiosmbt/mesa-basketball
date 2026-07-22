@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { authClient, ADMIN_EMAIL } from "@/lib/auth";
+import { fullPriceForType } from "@/lib/pricing";
 
 interface Registration {
   id: string;
@@ -367,12 +368,6 @@ export default function PaymentsPage() {
       })
       .sort((a, b) => sessionDateTimeMs(a) - sessionDateTimeMs(b));
   }, [registrations, now]);
-
-  function fullPriceForType(type: string): number {
-    if (type === "group-private") return 250;
-    if (type === "private") return 150;
-    return 50;
-  }
 
   // Volume discount rates for group sessions booked together (where session_price was not stored)
   const weeklyDiscountRates = useMemo(() => {

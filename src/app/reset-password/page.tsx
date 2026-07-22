@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { authClient } from "@/lib/auth";
@@ -13,19 +13,43 @@ export default function ResetPasswordPage() {
   const [ready, setReady] = useState(false);
   const [done, setDone] = useState(false);
   const router = useRouter();
+  const readyRef = useRef(false);
 
   useEffect(() => {
-    // Supabase processes the recovery token from the URL hash automatically.
-    // Wait briefly for it to settle, then check for a valid session.
-    const timer = setTimeout(async () => {
-      const { data: { session } } = await authClient.auth.getSession();
-      if (session) {
+    // A plain "does a session exist" check (the old approach) is wrong: if
+    // this browser was ALREADY logged in as someone (a shared/public
+    // computer, or just a normal existing session) before an invalid or
+    // expired reset link was opened, that check would still pass and let
+    // the form through — silently changing the CURRENTLY LOGGED IN user's
+    // password instead of actually validating the recovery link. Supabase
+    // fires a PASSWORD_RECOVERY auth event specifically when it processes a
+    // real recovery token from the URL — that's the only trustworthy signal.
+    const { data: { subscription } } = authClient.auth.onAuthStateChange((event) => {
+      if (event === "PASSWORD_RECOVERY") {
+        readyRef.current = true;
         setReady(true);
-      } else {
-        setError("This reset link is invalid or has expired. Please request a new one.");
       }
-    }, 500);
-    return () => clearTimeout(timer);
+    });
+    // Fallback for the rare case the event fires before this listener
+    // attaches (a known Supabase timing gotcha on fast page loads) — only
+    // trust a session here if the URL itself actually carries a recovery
+    // token, not just because some session happens to exist.
+    const timer = setTimeout(async () => {
+      if (readyRef.current) return;
+      if (window.location.hash.includes("type=recovery")) {
+        const { data: { session } } = await authClient.auth.getSession();
+        if (session) {
+          readyRef.current = true;
+          setReady(true);
+          return;
+        }
+      }
+      setError("This reset link is invalid or has expired. Please request a new one.");
+    }, 800);
+    return () => {
+      subscription.unsubscribe();
+      clearTimeout(timer);
+    };
   }, []);
 
   async function handleSubmit(e: React.FormEvent) {

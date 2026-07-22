@@ -1,5 +1,5 @@
 import { Resend } from "resend";
-import { SERVICE_FEE, fmtMoney } from "./pricing";
+import { SERVICE_FEE, fmtMoney, PRIVATE_RATE, GROUP_PRIVATE_RATE } from "./pricing";
 
 const ARTEMI_EMAIL = "artemios@mesabasketballtraining.com";
 const FROM_EMAIL = "Mesa Basketball <noreply@mesabasketballtraining.com>";
@@ -185,9 +185,9 @@ export async function sendRegistrationNotification(data: {
   const priceNote = isPackageBooking || data.isFree
     ? ""
     : data.type === "private"
-      ? "<p><strong>Rate:</strong> $150 (up to 3 participants)</p>"
+      ? `<p><strong>Rate:</strong> $${PRIVATE_RATE} (up to 3 participants)</p>`
       : data.type === "group-private"
-        ? "<p><strong>Rate:</strong> $250 (4+ participants)</p>"
+        ? `<p><strong>Rate:</strong> $${GROUP_PRIVATE_RATE} (4+ participants)</p>`
         : "";
 
   // This function only ever runs once a booking is actually confirmed —
@@ -566,7 +566,7 @@ export async function sendPackageConfirmation(data: {
       <p style="background: #162d5a; color: #d4af37; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">Charged to your card: $${fmtMoney(totalWithFee)}</p>
       <p>Your next ${data.packageType} private session bookings this month are already covered — nothing further will be charged when you book them at <a href="${BASE_URL}/schedule" style="color: #d4af37; font-weight: bold;">mesabasketballtraining.com/schedule</a>, up to your package total.</p>
       <h3>Cancellation &amp; Rescheduling Policy</h3>
-      <p>Cancellations and reschedules within 24 hours of a scheduled session incur a <strong>$75 fee</strong> (50% of the standard $150 private rate). <strong>No-shows without prior notice will be charged the full session fee.</strong></p>
+      <p>Cancellations and reschedules within 24 hours of a scheduled session incur a <strong>$${fmtMoney(PRIVATE_RATE * 0.5)} fee</strong> (50% of the standard $${PRIVATE_RATE} private rate). <strong>No-shows without prior notice will be charged the full session fee.</strong></p>
       <h3>Track Your Sessions</h3>
       <p><a href="${BASE_URL}/my-bookings" style="color: #d4af37; font-weight: bold;">View My Bookings</a> — check how many sessions you've used this month.</p>
       <br/>

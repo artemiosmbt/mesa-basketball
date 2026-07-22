@@ -10,7 +10,7 @@ import {
 import { sendAdminSMS, sendSMS } from "@/lib/sms";
 import { getWeeklySchedule } from "@/lib/sheets";
 import { resolveOffSessionPaymentSource, chargeSavedCardOffSession, issueStripeRefund } from "@/lib/booking-finalize";
-import { SERVICE_FEE, SERVICE_FEE_LABEL, fmtMoney } from "@/lib/pricing";
+import { SERVICE_FEE, SERVICE_FEE_LABEL, fmtMoney, calcPrivatePrice, fullPriceForType } from "@/lib/pricing";
 
 
 function parseMinsFromTime(t: string): number {
@@ -24,23 +24,12 @@ function parseMinsFromTime(t: string): number {
   return h * 60 + min;
 }
 
-function calcPrivatePrice(durationMins: number, kidCount: number): number {
-  return Math.round((kidCount >= 4 ? 250 : 150) * (durationMins / 60) * 100) / 100;
-}
-
 function isPrivateType(type: string): boolean {
   return type === "private" || type === "group-private";
 }
 
 function effectiveAmount(fullPrice: number, isFree: boolean, isPriv: boolean): number {
   return isFree && isPriv ? Math.round(fullPrice * 0.5 * 100) / 100 : fullPrice;
-}
-
-// Fallback when session_price is null (a real, common case — legacy rows)
-// rather than treating an unset price as $0, which would understate what's
-// actually owed.
-function fullPriceForType(type: string): number {
-  return type === "group-private" ? 250 : type === "private" ? 150 : 50;
 }
 
 // Adds one player to an existing confirmed booking. Small, rarely-used admin
