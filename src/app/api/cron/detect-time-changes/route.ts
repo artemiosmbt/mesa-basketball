@@ -148,6 +148,17 @@ function privateBookingStillOnSheet(
   });
 }
 
+// Every weekly registration stores its own exact group name in booked_group
+// (added specifically to disambiguate — see the same pattern in
+// src/lib/supabase.ts's getCampGroupByReferralCode). Prefer that exact
+// match; only fall back to a substring check on session_details for legacy
+// rows booked before that column existed. Without this, a group name that
+// happens to be a substring of another (e.g. "Elite" inside "Elite
+// Advanced") could misattribute or "lose" registrations.
+function regMatchesGroup(r: { booked_group: string | null; session_details: string | null }, group: string): boolean {
+  return r.booked_group ? r.booked_group === group : (r.session_details || "").includes(group);
+}
+
 function sessionIsUpcoming(dateStr: string, startTimeStr: string): boolean {
   try {
     const now = new Date();
@@ -215,8 +226,7 @@ export async function GET(req: NextRequest) {
       .select("*")
       .eq("booked_date", session.date)
       .eq("type", "weekly")
-      .eq("status", "confirmed")
-      .ilike("session_details", `%${session.group}%`);
+      .eq("status", "confirmed");
 
     if (error) {
       console.error("detect-time-changes DB error", session.date, session.group, error);
@@ -225,9 +235,10 @@ export async function GET(req: NextRequest) {
 
     const stale = (allRegs || []).filter(
       (r) =>
-        r.booked_start_time !== session.startTime ||
-        r.booked_end_time !== session.endTime ||
-        r.booked_location !== session.location
+        regMatchesGroup(r, session.group) &&
+        (r.booked_start_time !== session.startTime ||
+          r.booked_end_time !== session.endTime ||
+          r.booked_location !== session.location)
     );
 
     if (stale.length === 0) continue;
@@ -348,8 +359,7 @@ export async function GET(req: NextRequest) {
   }
 
   // For each upcoming confirmed weekly registration, check if its session still
-  // exists in the sheet. Uses the same substring match as time-change detection
-  // (session_details contains the group name) so there's no fragile parsing.
+  // exists in the sheet.
   const { data: allWeeklyRegs } = await supabase
     .from("registrations")
     .select("*")
@@ -364,13 +374,20 @@ export async function GET(req: NextRequest) {
   for (const r of (allWeeklyRegs || [])) {
     if (!r.booked_date || !sessionIsUpcoming(r.booked_date, r.booked_start_time || "")) continue;
 
-    // Session still exists in sheet if any sheet row matches this date AND its
-    // group name appears in session_details (same logic as time-change detection)
+    // Session still exists in sheet if any sheet row matches this date, its
+    // exact group (regMatchesGroup), AND its exact start time — the time
+    // check matters because the time-change sync above already re-synced
+    // booked_start_time to the live sheet for any still-existing session, so
+    // by this point a genuinely-still-there session's time WILL match. It
+    // also stops a same-named group running twice on the same day at
+    // different times from masking the deletion of just one of those slots
+    // (without a time check, the other slot's mere existence would make the
+    // deleted one look like it's still there).
     const existsInFirstRead = upcoming.some(
-      (s) => s.date === r.booked_date && (r.session_details || "").includes(s.group)
+      (s) => s.date === r.booked_date && s.startTime === r.booked_start_time && regMatchesGroup(r, s.group)
     );
     const existsInConfirmRead = upcomingConfirm === null ? true : upcomingConfirm.some(
-      (s) => s.date === r.booked_date && (r.session_details || "").includes(s.group)
+      (s) => s.date === r.booked_date && s.startTime === r.booked_start_time && regMatchesGroup(r, s.group)
     );
     if (existsInFirstRead || existsInConfirmRead) continue;
 
