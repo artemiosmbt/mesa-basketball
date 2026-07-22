@@ -327,8 +327,18 @@ export async function POST(req: NextRequest) {
       let weeklyCreditApplied = 0;
       if (applyAccountCredit && weeklyTotal > 0) {
         const balance = await getAccountCreditBalance(email);
-        weeklyCreditApplied = Math.min(balance, weeklyTotal);
-        if (weeklyCreditApplied > 0) await deductAccountCredit(email, weeklyCreditApplied);
+        const wantCredit = Math.min(balance, weeklyTotal);
+        // deductAccountCredit is itself race-safe (compare-and-swap against
+        // the real balance), but its result must actually be checked — a
+        // double-submit (retry, double-click, two tabs) racing this same
+        // request would otherwise still confirm a second free booking here
+        // even though the second deduction correctly failed, since
+        // amountToCharge was computed from the balance snapshot above, not
+        // from whether the deduction actually happened.
+        if (wantCredit > 0) {
+          const deducted = await deductAccountCredit(email, wantCredit);
+          if (deducted) weeklyCreditApplied = wantCredit;
+        }
       }
       const weeklyCreditShares = weeklyCreditApplied > 0
         ? splitProportional(weeklyCreditApplied, perSessionPrices)
@@ -570,8 +580,16 @@ export async function POST(req: NextRequest) {
       let campCreditApplied = 0;
       if (applyAccountCredit) {
         const balance = await getAccountCreditBalance(email);
-        campCreditApplied = Math.min(balance, campTotalNum);
-        if (campCreditApplied > 0) await deductAccountCredit(email, campCreditApplied);
+        const wantCredit = Math.min(balance, campTotalNum);
+        // See the identical comment on the weekly-booking credit deduction
+        // above — deductAccountCredit's result must be checked, not just
+        // its pre-deduction balance snapshot, or a raced double-submit can
+        // confirm a second free booking whose credit was never actually
+        // taken.
+        if (wantCredit > 0) {
+          const deducted = await deductAccountCredit(email, wantCredit);
+          if (deducted) campCreditApplied = wantCredit;
+        }
       }
 
       const amountToCharge = Math.max(0, campTotalNum - campCreditApplied);
@@ -856,8 +874,16 @@ export async function POST(req: NextRequest) {
       let accountCreditApplied = 0;
       if (applyAccountCredit && totalBeforeCredit > 0) {
         const balance = await getAccountCreditBalance(email);
-        accountCreditApplied = Math.min(balance, totalBeforeCredit);
-        if (accountCreditApplied > 0) await deductAccountCredit(email, accountCreditApplied);
+        const wantCredit = Math.min(balance, totalBeforeCredit);
+        // See the identical comment on the weekly-booking credit deduction
+        // above — deductAccountCredit's result must be checked, not just
+        // its pre-deduction balance snapshot, or a raced double-submit can
+        // confirm a second free booking whose credit was never actually
+        // taken.
+        if (wantCredit > 0) {
+          const deducted = await deductAccountCredit(email, wantCredit);
+          if (deducted) accountCreditApplied = wantCredit;
+        }
       }
       const accountCreditShares = accountCreditApplied > 0
         ? splitProportional(accountCreditApplied, uncoveredSessions.map((s: PricedSession) => s.effectivePrice))
@@ -1028,8 +1054,16 @@ export async function POST(req: NextRequest) {
       let accountCreditApplied = 0;
       if (!packageCovered && applyAccountCredit && effectivePrice > 0) {
         const balance = await getAccountCreditBalance(email);
-        accountCreditApplied = Math.min(balance, effectivePrice);
-        if (accountCreditApplied > 0) await deductAccountCredit(email, accountCreditApplied);
+        const wantCredit = Math.min(balance, effectivePrice);
+        // See the identical comment on the weekly-booking credit deduction
+        // above — deductAccountCredit's result must be checked, not just
+        // its pre-deduction balance snapshot, or a raced double-submit can
+        // confirm a second free booking whose credit was never actually
+        // taken.
+        if (wantCredit > 0) {
+          const deducted = await deductAccountCredit(email, wantCredit);
+          if (deducted) accountCreditApplied = wantCredit;
+        }
       }
 
       const amountToCharge = Math.max(0, effectivePrice - accountCreditApplied);
