@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Resend } from "resend";
 import { createClient } from "@supabase/supabase-js";
+import { isRateLimited } from "@/lib/supabase";
 
 export async function POST(req: NextRequest) {
   const { email: rawEmail } = await req.json();
@@ -8,6 +9,15 @@ export async function POST(req: NextRequest) {
 
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) {
     return NextResponse.json({ error: "Invalid email" }, { status: 400 });
+  }
+
+  // The already-registered check below stops repeat spam to the SAME
+  // address, but a script rotating fake emails each request would still
+  // trigger the admin-alert email every single time — IP-keyed throttle
+  // closes that gap.
+  const ip = (req.headers.get("x-forwarded-for") || "").split(",")[0].trim() || "unknown";
+  if (await isRateLimited(`waitlist:ip:${ip}`, 8, 10 * 60 * 1000)) {
+    return NextResponse.json({ error: "Too many requests. Please wait a few minutes and try again." }, { status: 429 });
   }
 
   const key = process.env.RESEND_API_KEY;

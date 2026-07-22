@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getStalePendingBatches, getStalePendingPackages } from "@/lib/supabase";
+import { getStalePendingBatches, getStalePendingPackages, cleanupOldRateLimitHits } from "@/lib/supabase";
 import { expireAbandonedBookingBatch, expireAbandonedCheckoutSession, expireAbandonedPackage, finalizePaidCheckoutSession } from "@/lib/booking-finalize";
 import { getStripe } from "@/lib/stripe";
 
@@ -96,6 +96,8 @@ export async function GET(req: NextRequest) {
       skipped++;
     }
   }
+
+  await cleanupOldRateLimitHits();
 
   return NextResponse.json({ checked: batches.length + packages.length, healed, expired, skipped });
 }

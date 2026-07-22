@@ -46,9 +46,9 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const { id } = await enrollInPackage({ email, parentName, phone, packageType, monthYear });
-
     const totalPrice = packagePrice(packageType);
+
+    const { id } = await enrollInPackage({ email, parentName, phone, packageType, monthYear, totalPrice });
 
     // Real money is due — send them to Stripe. The package stays
     // pending_payment (unusable — getActivePackage won't return it) until

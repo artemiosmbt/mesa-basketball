@@ -1000,18 +1000,23 @@ export interface MonthlyPackage {
   stripe_checkout_session_id?: string | null;
   stripe_payment_intent_id?: string | null;
   stripe_customer_id?: string | null;
+  total_price?: number | null;
 }
 
 // Inserted as 'pending_payment' — the client is redirected to Stripe
 // Checkout right after this, and the package only becomes usable
 // (getActivePackage filters on status 'active') once the webhook confirms
-// payment via finalizePaidPackage below.
+// payment via finalizePaidPackage below. total_price is stamped at
+// enrollment time from the CURRENT packagePrice() so a later rate change
+// can never alter what a cancellation refunds — refunds must always match
+// what was actually charged, not the live rate at cancel time.
 export async function enrollInPackage(data: {
   email: string;
   parentName: string;
   phone: string;
   packageType: number;
   monthYear: string;
+  totalPrice: number;
 }): Promise<{ id: string }> {
   const supabase = getSupabase();
   const { data: row, error } = await supabase
@@ -1025,6 +1030,7 @@ export async function enrollInPackage(data: {
       sessions_used: 0,
       reminder_sent: false,
       status: "pending_payment",
+      total_price: data.totalPrice,
     })
     .select("id")
     .single();
@@ -1310,6 +1316,37 @@ function pendingPaymentGraceFilter(): string {
 }
 
 /** Check if a specific group session has capacity */
+// Throttles a scripted flood of requests to a public, unauthenticated route
+// (registration, waitlist) keyed by whatever identifies the caller (IP,
+// email, phone) — inserts a hit, then counts recent hits for that key. Not a
+// single atomic check-and-increment (no RPC), so two requests in the same
+// instant could both slip through once — acceptable here since this throttles
+// a flood over seconds/minutes, not a tight simultaneous race, and avoids
+// adding a Postgres function this codebase doesn't otherwise use. Fails OPEN
+// on a Supabase error — this is an abuse throttle, not a security boundary,
+// and must never block a real customer over a DB hiccup.
+export async function isRateLimited(key: string, maxHits: number, windowMs: number): Promise<boolean> {
+  const supabase = getSupabase();
+  const cutoff = new Date(Date.now() - windowMs).toISOString();
+  await supabase.from("rate_limit_hits").insert({ rate_key: key });
+  const { count, error } = await supabase
+    .from("rate_limit_hits")
+    .select("*", { count: "exact", head: true })
+    .eq("rate_key", key)
+    .gte("created_at", cutoff);
+  return !error && (count ?? 0) > maxHits;
+}
+
+// Piggybacks on the daily expire-pending-payments cron rather than needing
+// its own — 1-day retention is generous slack over the 10-minute windows
+// isRateLimited actually checks, and keeps row count trivial at this site's
+// traffic.
+export async function cleanupOldRateLimitHits(): Promise<void> {
+  const supabase = getSupabase();
+  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  await supabase.from("rate_limit_hits").delete().lt("created_at", cutoff);
+}
+
 export async function checkGroupSessionCapacity(
   date: string,
   startTime: string,

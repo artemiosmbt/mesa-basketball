@@ -156,7 +156,7 @@ async function findExistingEvent(
   token: string,
   date: string,
   tag: string
-): Promise<{ id: string; description: string } | null> {
+): Promise<{ id: string; description: string; etag: string } | null> {
   const isoDate = normalizeDate(date);
   // Use ET-aware bounds: midnight EST (-05:00) → 11:59 PM EDT (-04:00)
   // so evening sessions (e.g. 8 PM ET = midnight UTC) are never missed.
@@ -172,7 +172,7 @@ async function findExistingEvent(
   if (!resp.ok) return null;
 
   const data = await resp.json();
-  const items: Array<{ id: string; description?: string; summary?: string }> =
+  const items: Array<{ id: string; description?: string; summary?: string; etag?: string }> =
     data.items || [];
 
   const match = items.find(
@@ -180,7 +180,7 @@ async function findExistingEvent(
       (ev.description && ev.description.includes(tag)) ||
       (ev.summary && ev.summary.includes(tag))
   );
-  return match ? { id: match.id, description: match.description || "" } : null;
+  return match ? { id: match.id, description: match.description || "", etag: match.etag || "" } : null;
 }
 
 /**
@@ -285,15 +285,23 @@ export async function deleteStaleGroupSessionEvents(
 
   const timeMin = encodeURIComponent(`${today}T00:00:00Z`);
   const timeMax = encodeURIComponent(`${futureStr}T23:59:59Z`);
-  const url =
+  const baseUrl =
     `${CALENDAR_BASE}/${encodeURIComponent(calendarId)}/events` +
     `?timeMin=${timeMin}&timeMax=${timeMax}&singleEvents=true&maxResults=500`;
 
-  const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-  if (!resp.ok) return { deleted: 0 };
-
-  const data = await resp.json();
-  const items: Array<{ id: string; description?: string }> = data.items || [];
+  // Follow nextPageToken so a 120-day window with more than 500 events (one
+  // page's cap) doesn't silently drop the rest — those would never get
+  // checked against expectedTags and could accumulate as stale events forever.
+  const items: Array<{ id: string; description?: string }> = [];
+  let pageToken: string | undefined;
+  do {
+    const url = pageToken ? `${baseUrl}&pageToken=${encodeURIComponent(pageToken)}` : baseUrl;
+    const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!resp.ok) break;
+    const data = await resp.json();
+    items.push(...(data.items || []));
+    pageToken = data.nextPageToken;
+  } while (pageToken);
 
   let deleted = 0;
   for (const item of items) {
@@ -310,12 +318,25 @@ export async function deleteStaleGroupSessionEvents(
   return { deleted };
 }
 
-/** Patch an existing calendar event's description (and optionally summary) */
+/** Thrown when a patch's If-Match etag no longer matches the live event —
+ * meaning someone else updated it since it was read, and this write must
+ * not blindly overwrite that change (lost-update prevention). */
+class ConcurrentModificationError extends Error {}
+
+/**
+ * Patch an existing calendar event's description (and optionally summary).
+ * `etag`, when provided, is sent as If-Match so a concurrent update to the
+ * SAME event (two near-simultaneous registrations/cancellations racing on
+ * one shared group/camp session) fails with a 412 instead of silently
+ * overwriting the other write — the caller is expected to retry with a
+ * freshly-read event on that error.
+ */
 async function patchEvent(
   calendarId: string,
   token: string,
   eventId: string,
-  patch: Partial<Pick<CalendarEvent, "summary" | "description">>
+  patch: Partial<Pick<CalendarEvent, "summary" | "description">>,
+  etag?: string
 ): Promise<void> {
   const resp = await fetch(
     `${CALENDAR_BASE}/${encodeURIComponent(calendarId)}/events/${eventId}`,
@@ -324,10 +345,14 @@ async function patchEvent(
       headers: {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
+        ...(etag ? { "If-Match": etag } : {}),
       },
       body: JSON.stringify(patch),
     }
   );
+  if (resp.status === 412) {
+    throw new ConcurrentModificationError("Calendar event was modified concurrently");
+  }
   if (!resp.ok) {
     const text = await resp.text();
     throw new Error(`Failed to patch calendar event: ${resp.status} ${text}`);
@@ -593,6 +618,8 @@ export async function upsertGroupSessionCalendarEvent(
   const tag = `[mesa-session:${params.bookedDate}|${params.bookedStartTime}|${sanitizeTagLabel(params.sessionLabel)}]`;
 
   // Fetch current signup list from Supabase (includes the row just inserted).
+  // This already reflects the committed registration, so it's read once —
+  // a retry below only needs to re-fetch the CALENDAR event, not this.
   const rows = await getSessionRegistrations(
     params.bookedDate,
     params.bookedStartTime,
@@ -603,57 +630,71 @@ export async function upsertGroupSessionCalendarEvent(
   const totalSignedUp = rows.reduce((sum, r) => sum + (r.total_participants || 1), 0);
   const athleteNames = rows.map((r) => stripAthleteDetails(r.kids)).filter(Boolean).join(", ");
 
-  // Find the existing event first so we can recover maxSpots from its description
-  // if the caller (e.g. a cancellation handler) didn't pass it.
-  const existing = await findExistingEvent(calendarId, token, params.bookedDate, tag);
-
-  let resolvedMaxSpots = params.maxSpots;
-  if (!resolvedMaxSpots && existing) {
-    const m = existing.description.match(/\d+\/(\d+) signed up/);
-    if (m) resolvedMaxSpots = parseInt(m[1], 10);
-  }
-
-  const countLine = resolvedMaxSpots
-    ? `${totalSignedUp}/${resolvedMaxSpots} signed up`
-    : `${totalSignedUp} signed up`;
-
   const summary =
     params.sessionType === "camp"
       ? `Camp — ${params.sessionLabel} (${params.bookedDate})`
       : `Group — ${params.sessionLabel} (${params.bookedDate})`;
 
-  // Preserve existing workout notes, or generate a fresh template for new events.
-  const workoutSection = existing
-    ? extractWorkoutSection(existing.description) || generateWorkoutTemplate(params.bookedStartTime, params.bookedEndTime)
-    : generateWorkoutTemplate(params.bookedStartTime, params.bookedEndTime);
+  // Two near-simultaneous registrations/cancellations for the same shared
+  // session would otherwise both read the event, both compute a roster
+  // count, and race to PATCH — last write wins, silently dropping whichever
+  // update lost. patchEvent's If-Match etag makes a stale-based PATCH fail
+  // with 412 instead of overwriting; on that, re-read the event fresh and
+  // retry, since a concurrent write only changes the CALENDAR side (the
+  // Supabase roster read above is unaffected).
+  const MAX_ATTEMPTS = 3;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const existing = await findExistingEvent(calendarId, token, params.bookedDate, tag);
 
-  const descParts = [
-    countLine,
-    `Athletes: ${athleteNames}`,
-    `Location: ${params.bookedLocation}`,
-    "",
-  ];
-  if (workoutSection) {
-    descParts.push(workoutSection, "");
-  }
-  descParts.push(tag);
-  const description = descParts.join("\n");
-
-  if (existing) {
-    await patchEvent(calendarId, token, existing.id, { summary, description });
-  } else {
-    // No tagged event found — the tag may have been stripped (e.g. by Apple Calendar editing).
-    // Delete any orphaned Mesa group/camp events at this date+time before creating the updated one.
-    const orphans = await findMesaEventsAtTime(calendarId, token, params.bookedDate, params.bookedStartTime);
-    for (const orphan of orphans) {
-      await deleteEvent(calendarId, token, orphan.id);
+    let resolvedMaxSpots = params.maxSpots;
+    if (!resolvedMaxSpots && existing) {
+      const m = existing.description.match(/\d+\/(\d+) signed up/);
+      if (m) resolvedMaxSpots = parseInt(m[1], 10);
     }
-    const event: CalendarEvent = {
-      summary,
-      description,
-      start: { dateTime: toDateTime(params.bookedDate, params.bookedStartTime), timeZone: TIMEZONE },
-      end:   { dateTime: toDateTime(params.bookedDate, params.bookedEndTime),   timeZone: TIMEZONE },
-    };
-    await createEvent(calendarId, token, event);
+
+    const countLine = resolvedMaxSpots
+      ? `${totalSignedUp}/${resolvedMaxSpots} signed up`
+      : `${totalSignedUp} signed up`;
+
+    // Preserve existing workout notes, or generate a fresh template for new events.
+    const workoutSection = existing
+      ? extractWorkoutSection(existing.description) || generateWorkoutTemplate(params.bookedStartTime, params.bookedEndTime)
+      : generateWorkoutTemplate(params.bookedStartTime, params.bookedEndTime);
+
+    const descParts = [
+      countLine,
+      `Athletes: ${athleteNames}`,
+      `Location: ${params.bookedLocation}`,
+      "",
+    ];
+    if (workoutSection) {
+      descParts.push(workoutSection, "");
+    }
+    descParts.push(tag);
+    const description = descParts.join("\n");
+
+    try {
+      if (existing) {
+        await patchEvent(calendarId, token, existing.id, { summary, description }, existing.etag);
+      } else {
+        // No tagged event found — the tag may have been stripped (e.g. by Apple Calendar editing).
+        // Delete any orphaned Mesa group/camp events at this date+time before creating the updated one.
+        const orphans = await findMesaEventsAtTime(calendarId, token, params.bookedDate, params.bookedStartTime);
+        for (const orphan of orphans) {
+          await deleteEvent(calendarId, token, orphan.id);
+        }
+        const event: CalendarEvent = {
+          summary,
+          description,
+          start: { dateTime: toDateTime(params.bookedDate, params.bookedStartTime), timeZone: TIMEZONE },
+          end:   { dateTime: toDateTime(params.bookedDate, params.bookedEndTime),   timeZone: TIMEZONE },
+        };
+        await createEvent(calendarId, token, event);
+      }
+      return;
+    } catch (err) {
+      if (err instanceof ConcurrentModificationError && attempt < MAX_ATTEMPTS) continue;
+      throw err;
+    }
   }
 }

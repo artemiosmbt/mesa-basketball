@@ -23,6 +23,7 @@ import {
   attachStripeCheckoutSession,
   getActivePackage,
   countPackageSessionsUsed,
+  isRateLimited,
 } from "@/lib/supabase";
 
 // For each booked date (in order), the active package (if any) whose
@@ -185,6 +186,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         { error: "Missing required fields" },
         { status: 400 }
+      );
+    }
+
+    // Zero abuse protection existed here before — a script could repeatedly
+    // submit garbage bookings (within already-enforced participant bounds)
+    // to squat a session's capacity, or spam referral/notification side
+    // effects. Keyed by IP, email, AND phone together (not either/or) so a
+    // script rotating fake emails each time still trips the phone/IP key,
+    // and vice versa.
+    const ip = (req.headers.get("x-forwarded-for") || "").split(",")[0].trim() || "unknown";
+    const [ipLimited, emailLimited, phoneLimited] = await Promise.all([
+      isRateLimited(`register:ip:${ip}`, 20, 10 * 60 * 1000),
+      isRateLimited(`register:email:${email}`, 8, 10 * 60 * 1000),
+      isRateLimited(`register:phone:${phone}`, 8, 10 * 60 * 1000),
+    ]);
+    if (ipLimited || emailLimited || phoneLimited) {
+      return NextResponse.json(
+        { error: "Too many requests. Please wait a few minutes and try again." },
+        { status: 429 }
       );
     }
 

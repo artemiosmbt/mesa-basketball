@@ -6,9 +6,12 @@ import type { NextConfig } from "next";
 // no browser-level protection (clickjacking: disguising a real "Cancel
 // booking" or "Log in" button under an invisible overlay). Fonts are
 // self-hosted via next/font (no external font CDN), no client-side
-// Stripe.js or other embedded third-party widget runs anywhere (checkout
-// is a full-page redirect to Stripe-hosted Checkout), so this CSP doesn't
-// need to allowlist anything beyond 'self'.
+// Stripe.js runs anywhere (checkout is a full-page redirect to
+// Stripe-hosted Checkout). The Virtual Training portal and the /w/[token]
+// shared-workout page DO embed YouTube drill videos via <iframe>, so
+// frame-src must allowlist youtube.com — frame-ancestors 'none' (below) is
+// the separate, unrelated "can THIS site be framed by others" direction and
+// stays locked down.
 const securityHeaders = [
   { key: "X-Frame-Options", value: "DENY" },
   { key: "X-Content-Type-Options", value: "nosniff" },
@@ -23,6 +26,7 @@ const securityHeaders = [
       "img-src 'self' data: https:",
       "font-src 'self' data:",
       "connect-src 'self' https:",
+      "frame-src https://www.youtube.com",
       "frame-ancestors 'none'",
       "object-src 'none'",
       "base-uri 'self'",

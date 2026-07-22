@@ -25,6 +25,21 @@ async function authedJsonFetch(path: string): Promise<Record<string, unknown>> {
   return res.json();
 }
 
+// The server always resolves the balance to the SESSION's own email,
+// ignoring the ?email= query param entirely (that's the point — it can't be
+// trusted to prove ownership). So if a logged-in user types a DIFFERENT
+// email into the booking form (booking for a friend/relative under another
+// parent's account), fetching would silently preview the LOGGED-IN user's
+// own balance under the typed email's banner — a real person's credit could
+// look available here but never actually apply to this booking. Callers
+// should skip the fetch entirely unless the typed email matches the
+// session's own email (or there's no session at all, e.g. a guest checkout).
+async function sessionEmailMatches(typedEmailLower: string): Promise<boolean> {
+  const { data: { session } } = await authClient.auth.getSession();
+  const sessionEmail = session?.user?.email?.toLowerCase().trim();
+  return !sessionEmail || sessionEmail === typedEmailLower;
+}
+
 function parseDateForDisplay(dateStr: string): Date {
   // ISO format (YYYY-MM-DD) needs T12:00:00 appended to avoid UTC midnight off-by-one
   // All other formats (e.g. "April 25, 2026", "4/25/2026") parse fine with a space suffix
@@ -685,9 +700,15 @@ export default function Home() {
     if (!modal.open || !isPrivate || !isReturningClient) { setCreditBalance(null); return; }
     const trimmed = email.trim().toLowerCase();
     if (!trimmed || !trimmed.includes("@")) { setCreditBalance(null); return; }
-    authedJsonFetch(`/api/referral-credits?email=${encodeURIComponent(trimmed)}`)
-      .then((d) => setCreditBalance((d.credits as number) ?? 0))
-      .catch(() => setCreditBalance(0));
+    let cancelled = false;
+    sessionEmailMatches(trimmed).then((matches) => {
+      if (cancelled) return;
+      if (!matches) { setCreditBalance(null); return; }
+      authedJsonFetch(`/api/referral-credits?email=${encodeURIComponent(trimmed)}`)
+        .then((d) => { if (!cancelled) setCreditBalance((d.credits as number) ?? 0); })
+        .catch(() => { if (!cancelled) setCreditBalance(0); });
+    });
+    return () => { cancelled = true; };
   }, [email, modal.open, modal.type, isReturningClient]);
 
   // Fetch account credit balance (dollar credit, e.g. from a partial camp cancellation)
@@ -696,9 +717,15 @@ export default function Home() {
     if (!modal.open) { setAccountCreditBalance(null); return; }
     const trimmed = email.trim().toLowerCase();
     if (!trimmed || !trimmed.includes("@")) { setAccountCreditBalance(null); return; }
-    authedJsonFetch(`/api/account-credits?email=${encodeURIComponent(trimmed)}`)
-      .then((d) => setAccountCreditBalance((d.balance as number) ?? 0))
-      .catch(() => setAccountCreditBalance(0));
+    let cancelled = false;
+    sessionEmailMatches(trimmed).then((matches) => {
+      if (cancelled) return;
+      if (!matches) { setAccountCreditBalance(null); return; }
+      authedJsonFetch(`/api/account-credits?email=${encodeURIComponent(trimmed)}`)
+        .then((d) => { if (!cancelled) setAccountCreditBalance((d.balance as number) ?? 0); })
+        .catch(() => { if (!cancelled) setAccountCreditBalance(0); });
+    });
+    return () => { cancelled = true; };
   }, [email, modal.open]);
 
   // Fetch the client's active monthly package (if any) for the booked
@@ -715,12 +742,19 @@ export default function Home() {
     const d = new Date(modal.bookedDate);
     if (isNaN(d.getTime())) { setPackageSessionsRemaining(0); return; }
     const monthYear = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-    authedJsonFetch(`/api/packages?email=${encodeURIComponent(trimmed)}&monthYear=${monthYear}`)
-      .then((d) => {
-        const pkg = d.package as { package_type: number; sessions_used: number } | null;
-        setPackageSessionsRemaining(pkg ? Math.max(0, pkg.package_type - pkg.sessions_used) : 0);
-      })
-      .catch(() => setPackageSessionsRemaining(0));
+    let cancelled = false;
+    sessionEmailMatches(trimmed).then((matches) => {
+      if (cancelled) return;
+      if (!matches) { setPackageSessionsRemaining(0); return; }
+      authedJsonFetch(`/api/packages?email=${encodeURIComponent(trimmed)}&monthYear=${monthYear}`)
+        .then((d) => {
+          if (cancelled) return;
+          const pkg = d.package as { package_type: number; sessions_used: number } | null;
+          setPackageSessionsRemaining(pkg ? Math.max(0, pkg.package_type - pkg.sessions_used) : 0);
+        })
+        .catch(() => { if (!cancelled) setPackageSessionsRemaining(0); });
+    });
+    return () => { cancelled = true; };
   }, [email, modal.open, modal.type, modal.bookedDate, isGroupRate, kids.length]);
 
 

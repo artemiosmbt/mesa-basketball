@@ -72,8 +72,13 @@ export async function POST(req: NextRequest) {
     // The $4.50 service fee is never refunded, on any cancellation — it
     // covers Stripe's own (also non-refundable) processing cut, so giving
     // it back would mean paying that cut out of pocket. Only the package
-    // price itself is refunded/credited here.
-    const totalPrice = packagePrice(pkg.package_type);
+    // price itself is refunded/credited here. Always refund what was
+    // ACTUALLY CHARGED at enrollment (total_price), not packagePrice()'s
+    // current return value — if the rate changes between enrollment and
+    // cancellation, recomputing live would refund the wrong amount. The
+    // packagePrice() fallback only covers packages enrolled before this
+    // column existed (already backfilled by migration, but defensive here too).
+    const totalPrice = pkg.total_price ?? packagePrice(pkg.package_type);
 
     let refundResult: { refundedAmount: number; creditedAmount: number; failed: boolean } | undefined;
     let creditIssued = 0;
