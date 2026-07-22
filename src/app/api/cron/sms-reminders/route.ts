@@ -9,6 +9,14 @@ function formatPhone(phone: string): string {
   return `+${digits}`;
 }
 
+// Last 10 digits, ignoring any formatting ("(555) 123-4567" vs "5551234567")
+// or leading country code — used purely for matching/deduping the SAME real
+// phone number across rows that may have been entered differently, not for
+// the outgoing Twilio "to" field (formatPhone handles that).
+function normalizePhone(phone: string): string {
+  return phone.replace(/\D/g, "").slice(-10);
+}
+
 export async function GET(req: NextRequest) {
   const authHeader = req.headers.get("authorization");
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
@@ -38,6 +46,16 @@ export async function GET(req: NextRequest) {
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
 
+  // Claim this week BEFORE sending anything — week_start is the primary
+  // key, so an overlapping run (retry, manual re-trigger) fails to insert
+  // and skips the whole blast instead of texting every opted-in client twice.
+  const { error: claimError } = await supabase
+    .from("sms_reminder_runs")
+    .insert({ week_start: mondayStr });
+  if (claimError) {
+    return NextResponse.json({ sent: 0, message: "Already ran for this week" });
+  }
+
   // Get all opted-in phone numbers
   const { data: optedIn, error: optedInError } = await supabase
     .from("registrations")
@@ -62,12 +80,24 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "DB error" }, { status: 500 });
   }
 
-  const bookedPhones = new Set(alreadyBooked.map((r) => r.phone));
+  // Matched on normalized digits — the same real phone number stored with
+  // different formatting across rows ("(555) 123-4567" vs "5551234567")
+  // must still be recognized as already-booked (and deduped), or someone
+  // could get texted despite already having a session this week, or get
+  // texted twice under two differently-formatted entries.
+  const bookedPhones = new Set(
+    alreadyBooked.map((r) => normalizePhone(r.phone || "")).filter(Boolean)
+  );
 
-  // Deduplicate opted-in phones and exclude anyone already booked this week
-  const phonesToText = [
-    ...new Set(optedIn.map((r) => r.phone)),
-  ].filter((phone) => phone && !bookedPhones.has(phone));
+  const seenNormalized = new Set<string>();
+  const phonesToText: string[] = [];
+  for (const r of optedIn) {
+    if (!r.phone) continue;
+    const norm = normalizePhone(r.phone);
+    if (!norm || seenNormalized.has(norm) || bookedPhones.has(norm)) continue;
+    seenNormalized.add(norm);
+    phonesToText.push(r.phone);
+  }
 
   const client = twilio(
     process.env.TWILIO_ACCOUNT_SID,
@@ -90,6 +120,8 @@ export async function GET(req: NextRequest) {
       failed++;
     }
   }
+
+  await supabase.from("sms_reminder_runs").update({ texts_sent: sent }).eq("week_start", mondayStr);
 
   return NextResponse.json({ sent, failed, skipped: bookedPhones.size, total: optedIn.length });
 }

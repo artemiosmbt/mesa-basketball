@@ -1246,12 +1246,23 @@ export async function getPackagesNeedingReminder(monthYear: string): Promise<Mon
   return (data as MonthlyPackage[]).filter((p) => p.sessions_used < p.package_type);
 }
 
-export async function markReminderSent(id: string): Promise<void> {
+/**
+ * Returns true only if THIS call actually flipped reminder_sent from false
+ * to true — used to atomically CLAIM a package before sending its reminder
+ * email, not just record that one was sent afterward. Two overlapping cron
+ * runs (retry, manual re-trigger) would otherwise both read reminder_sent:
+ * false and both send a duplicate reminder before either one got around to
+ * marking it done.
+ */
+export async function markReminderSent(id: string): Promise<boolean> {
   const supabase = getSupabase();
-  await supabase
+  const { data } = await supabase
     .from("monthly_packages")
     .update({ reminder_sent: true })
-    .eq("id", id);
+    .eq("id", id)
+    .eq("reminder_sent", false)
+    .select("id");
+  return !!data && data.length > 0;
 }
 
 /** Count confirmed weekly/camp registrations per session (by date + start time + group) */

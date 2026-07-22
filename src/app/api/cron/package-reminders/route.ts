@@ -26,6 +26,11 @@ export async function GET(req: NextRequest) {
   let sent = 0;
   for (const pkg of packages) {
     try {
+      // Claim BEFORE sending — an overlapping run (retry, manual re-trigger)
+      // would otherwise also read reminder_sent: false and also send,
+      // duplicating the email before either run marks it done.
+      const claimed = await markReminderSent(pkg.id);
+      if (!claimed) continue;
       await sendPackageReminder({
         parentName: pkg.parent_name,
         email: pkg.email,
@@ -33,7 +38,6 @@ export async function GET(req: NextRequest) {
         sessionsUsed: pkg.sessions_used,
         monthYear: pkg.month_year,
       });
-      await markReminderSent(pkg.id);
       sent++;
     } catch (err) {
       console.error(`Failed to send reminder for package ${pkg.id}:`, err);
