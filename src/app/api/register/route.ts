@@ -787,9 +787,11 @@ export async function POST(req: NextRequest) {
         } else if (useReferralCredit) {
           const credits = await getReferralCredits(email);
           if (credits > 0) {
-            firstIsFree = true;
-            usedReferralCredit = true;
-            await decrementReferralCredit(email);
+            const decremented = await decrementReferralCredit(email);
+            if (decremented) {
+              firstIsFree = true;
+              usedReferralCredit = true;
+            }
           }
         }
       }
@@ -1030,9 +1032,11 @@ export async function POST(req: NextRequest) {
         } else if (useReferralCredit) {
           const credits = await getReferralCredits(email);
           if (credits > 0) {
-            isFree = true;
-            usedReferralCredit = true;
-            await decrementReferralCredit(email);
+            const decremented = await decrementReferralCredit(email);
+            if (decremented) {
+              isFree = true;
+              usedReferralCredit = true;
+            }
           }
         }
       }

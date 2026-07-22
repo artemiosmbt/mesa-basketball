@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
   // Fetch registration details before deleting so we can clean up the calendar
   const { data: reg } = await supabase
     .from("registrations")
-    .select("type, email, booked_date, booked_start_time, booked_end_time, booked_location, booked_group, kids, session_details, total_participants, status, is_paid, stripe_payment_intent_id")
+    .select("type, email, booked_date, booked_start_time, booked_end_time, booked_location, booked_group, kids, session_details, total_participants, status, is_paid, stripe_payment_intent_id, applied_account_credit, used_referral_credit")
     .eq("id", id)
     .single();
 
@@ -28,10 +28,16 @@ export async function POST(req: NextRequest) {
   // making a paid booking's money disappear with no refund trail — unlike
   // /api/admin/cancel, this route has no refund/credit logic at all. A
   // confirmed row that was actually paid for must go through Cancel instead,
-  // which correctly refunds or credits it.
-  if (reg && reg.status === "confirmed" && (reg.is_paid || reg.stripe_payment_intent_id)) {
+  // which correctly refunds or credits it. This also covers a booking that
+  // cost the client something WITHOUT a Stripe charge ever happening — fully
+  // covered by account credit or a referral credit — which is_paid/
+  // stripe_payment_intent_id alone would miss entirely, silently erasing the
+  // credit the client spent on it with no way to get it back.
+  const wasPaidViaStripe = !!(reg?.is_paid || reg?.stripe_payment_intent_id);
+  const wasPaidViaCredit = !!(reg && ((reg.applied_account_credit || 0) > 0 || reg.used_referral_credit));
+  if (reg && reg.status === "confirmed" && (wasPaidViaStripe || wasPaidViaCredit)) {
     return NextResponse.json(
-      { error: "This booking was paid for — use Cancel instead of Delete so the client is properly refunded or credited." },
+      { error: "This booking was paid for (card or credit) — use Cancel instead of Delete so the client is properly refunded or credited." },
       { status: 400 }
     );
   }

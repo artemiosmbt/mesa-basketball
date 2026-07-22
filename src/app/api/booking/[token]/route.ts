@@ -1021,9 +1021,18 @@ export async function PUT(
   if (useReferralCredit && isPrivateReschedule) {
     const credits = await getReferralCredits(reg.email).catch(() => 0);
     if (credits > 0) {
-      newIsFree = true;
-      newUsedReferralCredit = true;
-      await decrementReferralCredit(reg.email).catch(() => {});
+      // decrementReferralCredit is itself race-safe, but its result must be
+      // checked — see the identical fix in register/route.ts. A raced
+      // concurrent reschedule/booking request could have this specific
+      // decrement fail while the credit was actually consumed elsewhere,
+      // and without checking the result this reschedule would still get
+      // persisted as referral-credit-covered with no credit ever reserved
+      // for it.
+      const decremented = await decrementReferralCredit(reg.email).catch(() => false);
+      if (decremented) {
+        newIsFree = true;
+        newUsedReferralCredit = true;
+      }
     }
   }
 

@@ -409,7 +409,17 @@ export async function addReferralCredit(email: string): Promise<void> {
  * starting count and both successfully decrement, letting two sessions get
  * the discount off of what should have only covered one.
  */
-export async function decrementReferralCredit(email: string): Promise<void> {
+// Returns whether a credit was actually decremented — callers MUST check
+// this before treating a session as referral-credit-covered. This is
+// internally race-safe on its own (compare-and-swap, won't double-decrement
+// a shared balance), but a caller that ignores the return value can still
+// confirm a free/discounted booking on the LOSING side of a double-submit
+// race (retry, double-click, two tabs) with exactly one credit available:
+// both requests read credits > 0 from a separate earlier check, only one
+// CAS update actually succeeds, and without checking this return value the
+// other request would still confirm its booking as covered even though no
+// credit was ever taken for it.
+export async function decrementReferralCredit(email: string): Promise<boolean> {
   const supabase = getSupabase();
 
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -418,7 +428,7 @@ export async function decrementReferralCredit(email: string): Promise<void> {
       .select("credits")
       .eq("email", email)
       .single();
-    if (!data || (data.credits || 0) <= 0) return;
+    if (!data || (data.credits || 0) <= 0) return false;
 
     const currentCredits = data.credits;
     const { data: updated, error } = await supabase
@@ -427,11 +437,12 @@ export async function decrementReferralCredit(email: string): Promise<void> {
       .eq("email", email)
       .eq("credits", currentCredits)
       .select("email");
-    if (!error && updated && updated.length > 0) return;
+    if (!error && updated && updated.length > 0) return true;
     // Someone else updated it concurrently — retry with a fresh read rather
     // than decrement against a count that's no longer accurate.
   }
   console.error(`decrementReferralCredit: gave up after retries (email=${email}) — concurrent writes kept colliding`);
+  return false;
 }
 
 // --- Account Credit Helpers (dollar-value credit, e.g. from a partial camp
