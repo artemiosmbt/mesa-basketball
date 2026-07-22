@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { getWeeklySchedule, getPrivateSlots } from "@/lib/sheets";
+import { getWeeklySchedule, getPrivateSlots, type WeeklySession } from "@/lib/sheets";
 import { sendTimeChangeNotification, sendCancellationNotification } from "@/lib/email";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import { addAccountCredit, addReferralCredit, countPackageSessionsUsed, setPackageSessions } from "@/lib/supabase";
@@ -151,12 +151,129 @@ function privateBookingStillOnSheet(
 // Every weekly registration stores its own exact group name in booked_group
 // (added specifically to disambiguate — see the same pattern in
 // src/lib/supabase.ts's getCampGroupByReferralCode). Prefer that exact
-// match; only fall back to a substring check on session_details for legacy
-// rows booked before that column existed. Without this, a group name that
-// happens to be a substring of another (e.g. "Elite" inside "Elite
-// Advanced") could misattribute or "lose" registrations.
-function regMatchesGroup(r: { booked_group: string | null; session_details: string | null }, group: string): boolean {
-  return r.booked_group ? r.booked_group === group : (r.session_details || "").includes(group);
+// value; only fall back to parsing session_details for legacy rows booked
+// before that column existed. Returns the actual group name string (needed
+// to bucket registrations by date+group), not just a yes/no match — without
+// this, a group name that happens to be a substring of another (e.g.
+// "Elite" inside "Elite Advanced") could misattribute or "lose"
+// registrations under a plain substring check.
+function regGroupKey(r: { booked_group: string | null; session_details: string | null }): string {
+  return r.booked_group || (r.session_details || "").split(" — ")[0].trim() || "";
+}
+
+interface WeeklyRegLike {
+  id: string;
+  booked_date: string | null;
+  booked_start_time: string;
+  booked_end_time: string | null;
+  booked_location: string | null;
+  booked_group: string | null;
+  session_details: string | null;
+  parent_name: string;
+  email: string;
+  kids: string;
+  phone: string;
+  sms_consent: boolean | null;
+  type: string;
+  manage_token: string;
+  used_referral_credit: boolean | null;
+  applied_account_credit: number | null;
+  is_paid: boolean | null;
+  stripe_payment_intent_id: string | null;
+  package_id: string | null;
+  session_price: number | null;
+  is_free: boolean | null;
+}
+
+// A group name can legitimately run more than once on the same calendar day
+// at different times (e.g. an AM and PM session sharing the exact same
+// name) — matching purely on date+group would then let one slot's deletion
+// or time-change be masked by the other slot still existing. This buckets
+// registrations by date+group, then by each registration's own currently-
+// stored start time (each distinct time = one session instance as last
+// synced), and matches every bucket against the live sheet rows for that
+// date+group:
+//   - a bucket whose stored start/end/location exactly matches a sheet row
+//     is unchanged — no action needed.
+//   - if exactly one bucket is left unmatched and exactly one sheet row is
+//     unclaimed, that's an unambiguous time/location change.
+//   - if every sheet row for that date+group ends up claimed by some other
+//     bucket (zero unclaimed rows left), the remaining unmatched bucket(s)
+//     were genuinely deleted.
+//   - anything else (multiple unmatched buckets and/or multiple unclaimed
+//     rows at once) can't be resolved without guessing which bucket maps to
+//     which row — flagged as ambiguous instead of risking a wrong
+//     auto-cancel/refund or auto-reschedule of a real booking.
+function buildWeeklyPlan<T extends WeeklyRegLike>(sheetRows: WeeklySession[], regs: T[]) {
+  const changes: { reg: T; newSession: WeeklySession }[] = [];
+  const deletions: T[] = [];
+  const ambiguous: { date: string; group: string; regCount: number }[] = [];
+
+  const sheetByKey = new Map<string, WeeklySession[]>();
+  for (const s of sheetRows) {
+    const key = `${s.date}|${s.group}`;
+    if (!sheetByKey.has(key)) sheetByKey.set(key, []);
+    sheetByKey.get(key)!.push(s);
+  }
+
+  const regsByKey = new Map<string, T[]>();
+  for (const r of regs) {
+    if (!r.booked_date) continue;
+    const g = regGroupKey(r);
+    if (!g) continue;
+    const key = `${r.booked_date}|${g}`;
+    if (!regsByKey.has(key)) regsByKey.set(key, []);
+    regsByKey.get(key)!.push(r);
+  }
+
+  for (const [key, keyRegs] of regsByKey) {
+    const sheetRowsForKey = sheetByKey.get(key) || [];
+
+    const bucketsByTime = new Map<string, T[]>();
+    for (const r of keyRegs) {
+      const t = r.booked_start_time || "";
+      if (!bucketsByTime.has(t)) bucketsByTime.set(t, []);
+      bucketsByTime.get(t)!.push(r);
+    }
+
+    const claimedRowIdx = new Set<number>();
+    const unresolvedBuckets: { regs: T[] }[] = [];
+
+    for (const bucketRegs of bucketsByTime.values()) {
+      const sample = bucketRegs[0];
+      const matchIdx = sheetRowsForKey.findIndex(
+        (s, i) =>
+          !claimedRowIdx.has(i) &&
+          s.startTime === sample.booked_start_time &&
+          s.endTime === (sample.booked_end_time || "") &&
+          s.location === (sample.booked_location || "")
+      );
+      if (matchIdx !== -1) {
+        claimedRowIdx.add(matchIdx);
+        continue;
+      }
+      unresolvedBuckets.push({ regs: bucketRegs });
+    }
+
+    if (unresolvedBuckets.length === 0) continue;
+
+    const unclaimedRows = sheetRowsForKey.filter((_, i) => !claimedRowIdx.has(i));
+
+    if (unresolvedBuckets.length === 1 && unclaimedRows.length === 1) {
+      for (const r of unresolvedBuckets[0].regs) changes.push({ reg: r, newSession: unclaimedRows[0] });
+      continue;
+    }
+
+    if (unclaimedRows.length === 0) {
+      for (const bucket of unresolvedBuckets) for (const r of bucket.regs) deletions.push(r);
+      continue;
+    }
+
+    const [date, group] = key.split("|");
+    ambiguous.push({ date, group, regCount: unresolvedBuckets.reduce((n, b) => n + b.regs.length, 0) });
+  }
+
+  return { changes, deletions, ambiguous };
 }
 
 function sessionIsUpcoming(dateStr: string, startTimeStr: string): boolean {
@@ -219,30 +336,58 @@ export async function GET(req: NextRequest) {
   let totalEmailsSent = 0;
   let totalSmsSent = 0;
 
-  // === TIME / LOCATION CHANGE DETECTION ===
-  for (const session of upcoming) {
-    const { data: allRegs, error } = await supabase
-      .from("registrations")
-      .select("*")
-      .eq("booked_date", session.date)
-      .eq("type", "weekly")
-      .eq("status", "confirmed");
-
-    if (error) {
-      console.error("detect-time-changes DB error", session.date, session.group, error);
-      continue;
-    }
-
-    const stale = (allRegs || []).filter(
-      (r) =>
-        regMatchesGroup(r, session.group) &&
-        (r.booked_start_time !== session.startTime ||
-          r.booked_end_time !== session.endTime ||
-          r.booked_location !== session.location)
+  // A single sheet read is never trusted as proof of deletion — a transient
+  // formula-recalculation glitch or a torn read caught mid-edit elsewhere in
+  // the sheet could otherwise make a real, still-scheduled session look
+  // "gone" and trigger an irreversible cancel + Stripe refund. Re-fetch
+  // independently and only cancel a registration if BOTH reads' plans agree
+  // it was deleted; if the confirmation fetch itself fails, confirm nothing
+  // this run rather than act on a single read.
+  let upcomingConfirm: typeof upcoming | null = null;
+  try {
+    const confirmSessions = await getWeeklySchedule({ noCache: true });
+    upcomingConfirm = confirmSessions.filter(
+      (s) => sessionIsUpcoming(s.date, s.startTime) && s.startTime && s.group
     );
+  } catch (err) {
+    console.error("detect-time-changes: confirmation re-fetch failed (weekly)", err);
+  }
 
-    if (stale.length === 0) continue;
+  const { data: allWeeklyRegsRaw } = await supabase
+    .from("registrations")
+    .select("*")
+    .eq("type", "weekly")
+    .eq("status", "confirmed");
+  const weeklyRegsUpcoming = (allWeeklyRegsRaw || []).filter(
+    (r) => r.booked_date && sessionIsUpcoming(r.booked_date, r.booked_start_time || "")
+  );
 
+  // === TIME / LOCATION CHANGE + DELETION DETECTION — WEEKLY SESSIONS ===
+  const firstPlan = buildWeeklyPlan(upcoming, weeklyRegsUpcoming);
+  const confirmPlan = upcomingConfirm === null ? null : buildWeeklyPlan(upcomingConfirm, weeklyRegsUpcoming);
+  const confirmedDeletionIds = confirmPlan === null ? new Set<string>() : new Set(confirmPlan.deletions.map((r) => r.id));
+  const weeklyDeletions = confirmPlan === null ? [] : firstPlan.deletions.filter((r) => confirmedDeletionIds.has(r.id));
+
+  if (firstPlan.ambiguous.length > 0) {
+    const summary = firstPlan.ambiguous
+      .map((a) => `• ${a.date} "${a.group}" — ${a.regCount} booking${a.regCount !== 1 ? "s" : ""}`)
+      .join("\n");
+    await sendAdminSMS(
+      `NEEDS MANUAL REVIEW:\nCan't tell which booking goes with which sheet row without guessing (same group name, multiple sessions changed on the same day at once):\n${summary}\nPlease check these manually — nothing was auto-cancelled or auto-rescheduled for them.`
+    ).catch((err) => console.error("Ambiguous-weekly-change admin SMS failed:", err));
+  }
+
+  // Group the resolved (unambiguous) time/location moves back by target
+  // session so the admin summary reads one line per session, not one per
+  // registrant — mirrors how this worked before bucketing was introduced.
+  const changesBySession = new Map<string, { session: WeeklySession; regs: WeeklyRegLike[] }>();
+  for (const { reg, newSession } of firstPlan.changes) {
+    const key = `${newSession.date}|${newSession.group}|${newSession.startTime}|${newSession.endTime}|${newSession.location}`;
+    if (!changesBySession.has(key)) changesBySession.set(key, { session: newSession, regs: [] });
+    changesBySession.get(key)!.regs.push(reg);
+  }
+
+  for (const { session, regs: stale } of changesBySession.values()) {
     const firstOldStart: string = stale[0].booked_start_time;
     const firstOldEnd: string = stale[0].booked_end_time || firstOldStart;
     const firstOldLocation: string = stale[0].booked_location || "";
@@ -340,57 +485,12 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // === DELETION DETECTION — WEEKLY SESSIONS ===
-  // A single sheet read is never trusted as proof of deletion — a transient
-  // formula-recalculation glitch or a torn read caught mid-edit elsewhere in
-  // the sheet could otherwise make a real, still-scheduled session look
-  // "gone" and trigger an irreversible cancel + Stripe refund. Re-fetch
-  // independently and only treat a session as deleted if BOTH reads agree
-  // it's missing; if the confirmation fetch itself fails, default to "still
-  // exists" so a fetch error can never look like a mass deletion.
-  let upcomingConfirm: typeof upcoming | null = null;
-  try {
-    const confirmSessions = await getWeeklySchedule({ noCache: true });
-    upcomingConfirm = confirmSessions.filter(
-      (s) => sessionIsUpcoming(s.date, s.startTime) && s.startTime && s.group
-    );
-  } catch (err) {
-    console.error("detect-time-changes: confirmation re-fetch failed (weekly)", err);
-  }
-
-  // For each upcoming confirmed weekly registration, check if its session still
-  // exists in the sheet.
-  const { data: allWeeklyRegs } = await supabase
-    .from("registrations")
-    .select("*")
-    .eq("type", "weekly")
-    .eq("status", "confirmed");
-
   const deletedFound: { session: string; date: string; count: number }[] = [];
   const cancelledKeys = new Map<string, number>(); // key → index in deletedFound
   let cancelEmailsSent = 0;
   let cancelSmsSent = 0;
 
-  for (const r of (allWeeklyRegs || [])) {
-    if (!r.booked_date || !sessionIsUpcoming(r.booked_date, r.booked_start_time || "")) continue;
-
-    // Session still exists in sheet if any sheet row matches this date, its
-    // exact group (regMatchesGroup), AND its exact start time — the time
-    // check matters because the time-change sync above already re-synced
-    // booked_start_time to the live sheet for any still-existing session, so
-    // by this point a genuinely-still-there session's time WILL match. It
-    // also stops a same-named group running twice on the same day at
-    // different times from masking the deletion of just one of those slots
-    // (without a time check, the other slot's mere existence would make the
-    // deleted one look like it's still there).
-    const existsInFirstRead = upcoming.some(
-      (s) => s.date === r.booked_date && s.startTime === r.booked_start_time && regMatchesGroup(r, s.group)
-    );
-    const existsInConfirmRead = upcomingConfirm === null ? true : upcomingConfirm.some(
-      (s) => s.date === r.booked_date && s.startTime === r.booked_start_time && regMatchesGroup(r, s.group)
-    );
-    if (existsInFirstRead || existsInConfirmRead) continue;
-
+  for (const r of weeklyDeletions) {
     // Track for admin summary
     const summaryKey = `${r.booked_date}|${r.booked_start_time}`;
     if (!cancelledKeys.has(summaryKey)) {
