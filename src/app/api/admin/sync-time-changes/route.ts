@@ -4,19 +4,14 @@ import { verifyAdmin } from "@/lib/auth";
 import { getWeeklySchedule } from "@/lib/sheets";
 import { sendTimeChangeNotification } from "@/lib/email";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
+import { buildWeeklyPlan, claimWeeklyTimeChange, type WeeklyRegKeyFields } from "@/lib/weekly-schedule-matching";
 
 
-interface WeeklyRegistration {
-  id: string;
+interface WeeklyRegistration extends WeeklyRegKeyFields {
   parent_name: string;
   email: string;
   phone: string;
   kids: string;
-  booked_date: string;
-  booked_start_time: string;
-  booked_end_time: string | null;
-  booked_location: string | null;
-  session_details: string | null;
   sms_consent: boolean;
 }
 
@@ -95,27 +90,29 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const regsByDate = new Map<string, WeeklyRegistration[]>();
-  for (const r of candidateRegs) {
-    const key = r.booked_date as string;
-    if (!regsByDate.has(key)) regsByDate.set(key, []);
-    regsByDate.get(key)!.push(r);
+  // Bucket-matches by exact booked_group (falling back to session_details
+  // parsing only for legacy rows) instead of a plain substring check, and
+  // is aware of a group name running twice on the same day at different
+  // times — same matching logic the detect-time-changes cron uses, shared
+  // via src/lib/weekly-schedule-matching.ts so the two never drift apart
+  // again (they already did once: this route was still doing a substring
+  // match on session_details after the cron was fixed to use exact
+  // booked_group matching).
+  // plan.deletions/plan.ambiguous are intentionally unused here — this
+  // route only ever synced time/location changes, never cancellations, and
+  // the detect-time-changes cron already sends its own admin alert for any
+  // ambiguous case, so duplicating that alert on every dashboard load would
+  // just be noise.
+  const plan = buildWeeklyPlan(upcoming, candidateRegs);
+
+  const changesBySession = new Map<string, { session: (typeof upcoming)[number]; regs: WeeklyRegistration[] }>();
+  for (const { reg, newSession } of plan.changes) {
+    const key = `${newSession.date}|${newSession.group}|${newSession.startTime}|${newSession.endTime}|${newSession.location}`;
+    if (!changesBySession.has(key)) changesBySession.set(key, { session: newSession, regs: [] });
+    changesBySession.get(key)!.regs.push(reg);
   }
 
-  for (const session of upcoming) {
-    const allRegs = (regsByDate.get(session.date) || []).filter((r) =>
-      r.session_details?.toLowerCase().includes(session.group.toLowerCase())
-    );
-
-    const stale = allRegs.filter(
-      (r) =>
-        r.booked_start_time !== session.startTime ||
-        r.booked_end_time !== session.endTime ||
-        r.booked_location !== session.location
-    );
-
-    if (stale.length === 0) continue;
-
+  for (const { session, regs: stale } of changesBySession.values()) {
     const oldStartTime: string = stale[0].booked_start_time;
     const oldEndTime: string = stale[0].booked_end_time || oldStartTime;
 
@@ -146,16 +143,18 @@ export async function POST(req: NextRequest) {
         newDetails = newDetails.replace(`at ${rOldLocation}`, `at ${session.location}`);
       }
 
-      await supabase
-        .from("registrations")
-        .update({
-          booked_start_time: session.startTime,
-          booked_end_time: session.endTime,
-          ...(locationChanged ? { booked_location: session.location } : {}),
-          session_details: newDetails,
-          admin_change_at: new Date().toISOString(),
-        })
-        .eq("id", r.id);
+      // The detect-time-changes cron watches for the exact same changes
+      // independently (fires on every sheet edit, this route fires on every
+      // admin dashboard load) — conditioning the update on the OLD values
+      // still matching means whichever of the two "wins" the race is the
+      // only one that proceeds to notify the client below.
+      const won = await claimWeeklyTimeChange(supabase, r, {
+        booked_start_time: session.startTime,
+        booked_end_time: session.endTime,
+        ...(locationChanged ? { booked_location: session.location } : {}),
+        session_details: newDetails,
+      });
+      if (!won) continue; // the cron already caught and notified this one
 
       try {
         await sendTimeChangeNotification({
