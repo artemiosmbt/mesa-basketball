@@ -1013,6 +1013,7 @@ export interface MonthlyPackage {
   stripe_payment_intent_id?: string | null;
   stripe_customer_id?: string | null;
   total_price?: number | null;
+  sms_consent: boolean;
 }
 
 // Inserted as 'pending_payment' — the client is redirected to Stripe
@@ -1063,11 +1064,18 @@ export async function attachPackageCheckoutSession(packageId: string, checkoutSe
  * pending_payment to active and records the PaymentIntent. Row-count guard
  * (eq status pending_payment) means a duplicate webhook delivery is a no-op
  * — the confirmation email/SMS only fire when this actually flips something.
+ *
+ * Persists smsConsent here (rather than leaving it only in the Stripe
+ * Checkout metadata it arrives from) so a LATER, separate request —
+ * package cancellation, any future package-related SMS — can still honor
+ * the client's actual consent choice instead of having no record of it at
+ * all once the one-time purchase-confirmation SMS has been sent.
  */
 export async function finalizePaidPackage(
   packageId: string,
   stripePaymentIntentId: string,
-  stripeCustomerId: string | null
+  stripeCustomerId: string | null,
+  smsConsent: boolean
 ): Promise<MonthlyPackage | null> {
   const supabase = getSupabase();
   const { data, error } = await supabase
@@ -1075,6 +1083,7 @@ export async function finalizePaidPackage(
     .update({
       status: "active",
       stripe_payment_intent_id: stripePaymentIntentId,
+      sms_consent: smsConsent,
       ...(stripeCustomerId ? { stripe_customer_id: stripeCustomerId } : {}),
     })
     .eq("id", packageId)

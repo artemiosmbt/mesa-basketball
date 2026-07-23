@@ -108,7 +108,7 @@ export async function POST(req: NextRequest) {
     const refundedToCard = refundResult?.refundedAmount ?? 0;
     const totalCredited = creditIssued + (refundResult?.creditedAmount ?? 0);
     try {
-      if (pkg.phone) {
+      if (pkg.sms_consent && pkg.phone) {
         const message = refundFailed
           ? `Mesa Basketball: Your ${pkg.package_type}-session package for ${pkg.month_year} has been cancelled. Your refund is being processed — you'll receive a separate confirmation once it's complete.`
           : refundedToCard > 0 && totalCredited > 0

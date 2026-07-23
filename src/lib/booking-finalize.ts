@@ -1104,7 +1104,8 @@ async function finalizePaidPackageEnrollment(
   customerId: string | null,
   metadata: Record<string, string>
 ): Promise<void> {
-  const pkg = await finalizePaidPackage(packageId, paymentIntentId, customerId);
+  const smsConsent = metadata.sms_consent === "true";
+  const pkg = await finalizePaidPackage(packageId, paymentIntentId, customerId, smsConsent);
   if (!pkg) return; // already handled (duplicate webhook delivery) or not found
 
   const referrerEmail = metadata.referrer_email || undefined;
@@ -1119,7 +1120,6 @@ async function finalizePaidPackageEnrollment(
   }
 
   const kids = metadata.kids || "";
-  const smsConsent = metadata.sms_consent === "true";
   const submittedReferralCode = metadata.submitted_referral_code || undefined;
   const totalPrice = packagePrice(pkg.package_type);
 
