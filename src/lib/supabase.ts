@@ -1,4 +1,5 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import { sendAdminSMS } from "@/lib/sms";
 
 let _supabase: SupabaseClient | null = null;
 
@@ -1195,23 +1196,6 @@ export async function hasPendingOrActivePackage(email: string, monthYear: string
   return !!data && data.length > 0;
 }
 
-export async function incrementPackageSessions(id: string, currentUsed: number): Promise<void> {
-  const supabase = getSupabase();
-  await supabase
-    .from("monthly_packages")
-    .update({ sessions_used: currentUsed + 1 })
-    .eq("id", id);
-}
-
-export async function decrementPackageSessions(id: string, currentUsed: number): Promise<void> {
-  const supabase = getSupabase();
-  if (currentUsed <= 0) return;
-  await supabase
-    .from("monthly_packages")
-    .update({ sessions_used: currentUsed - 1 })
-    .eq("id", id);
-}
-
 /** Set sessions_used to an exact value (used for recalculation) */
 export async function setPackageSessions(id: string, count: number): Promise<void> {
   const supabase = getSupabase();
@@ -1249,6 +1233,31 @@ export async function getPackageById(packageId: string): Promise<MonthlyPackage 
     .single();
   if (error || !data) return null;
   return data as MonthlyPackage;
+}
+
+// register/route.ts's allocatePackageCoverage reads a package's remaining
+// capacity, then — in a LATER, separate step — inserts the registration
+// row(s) that consume it, with no atomic claim/lock spanning the gap
+// between the two. A double-submit (retry, double-click, two tabs) or two
+// different sessions booked against the same package in quick succession
+// can both read the same "capacity available" count and both get
+// allocated, overdrawing the package's actual paid-for session count —
+// making this cheaply fully atomic would need a broader restructure of the
+// booking flow (the claim would have to span price computation, an
+// optional Stripe branch, and the insert, not just the capacity check), so
+// instead: re-verify from source of truth (countPackageSessionsUsed)
+// immediately after the insert, and alert admin right away if it happened,
+// rather than let a silent overdraw go unnoticed. Called once per distinct
+// package touched by a request, after that request's own inserts land.
+export async function alertIfPackageOverdrawn(packageId: string, parentName: string): Promise<void> {
+  const pkg = await getPackageById(packageId);
+  if (!pkg) return;
+  const used = await countPackageSessionsUsed(packageId);
+  if (used > pkg.package_type) {
+    await sendAdminSMS(
+      `⚠️ PACKAGE OVERDRAWN: ${parentName}'s ${pkg.month_year} package (${pkg.package_type} sessions paid for) now has ${used} confirmed/no-show sessions against it — likely two bookings raced each other at once. Review and charge the difference manually if needed.`
+    ).catch(() => {});
+  }
 }
 
 export async function getPackagesNeedingReminder(monthYear: string): Promise<MonthlyPackage[]> {

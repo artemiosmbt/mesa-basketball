@@ -20,7 +20,7 @@ export async function POST(req: NextRequest) {
   // Fetch registration details before deleting so we can clean up the calendar
   const { data: reg } = await supabase
     .from("registrations")
-    .select("type, email, booked_date, booked_start_time, booked_end_time, booked_location, booked_group, kids, session_details, total_participants, status, is_paid, stripe_payment_intent_id, applied_account_credit, used_referral_credit")
+    .select("type, email, booked_date, booked_start_time, booked_end_time, booked_location, booked_group, kids, session_details, total_participants, status, is_paid, stripe_payment_intent_id, applied_account_credit, used_referral_credit, package_id")
     .eq("id", id)
     .single();
 
@@ -29,15 +29,19 @@ export async function POST(req: NextRequest) {
   // /api/admin/cancel, this route has no refund/credit logic at all. A
   // confirmed row that was actually paid for must go through Cancel instead,
   // which correctly refunds or credits it. This also covers a booking that
-  // cost the client something WITHOUT a Stripe charge ever happening — fully
-  // covered by account credit or a referral credit — which is_paid/
-  // stripe_payment_intent_id alone would miss entirely, silently erasing the
-  // credit the client spent on it with no way to get it back.
+  // cost the client something WITHOUT a Stripe charge ever happening: fully
+  // covered by account credit or a referral credit (is_paid/
+  // stripe_payment_intent_id alone would miss those entirely), OR covered by
+  // a monthly package (the money was collected up front for the whole
+  // package, not this row — deleting it would silently hand back a session
+  // slot for one the trainer already delivered, or free capacity that
+  // should stay spent, with nothing anywhere correcting the package's count).
   const wasPaidViaStripe = !!(reg?.is_paid || reg?.stripe_payment_intent_id);
   const wasPaidViaCredit = !!(reg && ((reg.applied_account_credit || 0) > 0 || reg.used_referral_credit));
-  if (reg && reg.status === "confirmed" && (wasPaidViaStripe || wasPaidViaCredit)) {
+  const wasPackageCovered = !!reg?.package_id;
+  if (reg && reg.status === "confirmed" && (wasPaidViaStripe || wasPaidViaCredit || wasPackageCovered)) {
     return NextResponse.json(
-      { error: "This booking was paid for (card or credit) — use Cancel instead of Delete so the client is properly refunded or credited." },
+      { error: "This booking was paid for (card, credit, or package) — use Cancel instead of Delete so it's properly refunded, credited, or the package's session count stays correct." },
       { status: 400 }
     );
   }

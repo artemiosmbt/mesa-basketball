@@ -51,6 +51,21 @@ export async function DELETE(req: NextRequest) {
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
 
+  // Registrations reference a package by package_id, and there's no refund
+  // logic anywhere in this route — deleting a package that still has real
+  // bookings against it would both orphan those rows (pointing at a
+  // package_id that no longer exists) and make whatever was collected for
+  // it disappear with no trail. This only blocks that specific case, not a
+  // genuinely-erroneous/unused package row, which is exactly what this
+  // button is for.
+  const sessionsUsed = await countPackageSessionsUsed(id);
+  if (sessionsUsed > 0) {
+    return NextResponse.json(
+      { error: `This package has ${sessionsUsed} session${sessionsUsed !== 1 ? "s" : ""} already booked against it — cancel or reassign those bookings first, or handle the refund manually before deleting.` },
+      { status: 400 }
+    );
+  }
+
   const { error } = await supabase.from("monthly_packages").delete().eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ success: true });
