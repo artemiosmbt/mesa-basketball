@@ -379,7 +379,7 @@ export async function DELETE(
     } catch (notifyErr) {
       console.error("Cancellation email failed (camp day cancel, cancel/refund already applied):", notifyErr);
     }
-    if (reg.phone) {
+    if (reg.sms_consent && reg.phone) {
       const moneyOutcome = isPaid ? describeMoneyOutcome(stripeRefundResult, creditGranted, false, false) : "";
       const adjustmentLine = isPaid
         ? (moneyOutcome ? ` ${moneyOutcome}.` : "")

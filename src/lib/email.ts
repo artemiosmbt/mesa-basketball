@@ -38,15 +38,23 @@ function escapeHtml(s: string): string {
     .replace(/'/g, "&#39;");
 }
 
+// sessionDetails can be client-submitted (the single private/group-private
+// booking branch in register/route.ts inserts it verbatim, unlike
+// weekly/camp/private-series, which build their own from trusted sheet
+// data) and this function's output goes straight into an HTML email to
+// BOTH the admin and the client at every stage of a booking's lifecycle
+// (registration, cancellation, no-show, player-update notifications) — so,
+// same reasoning as escapeHtml above, anything that isn't our own trusted
+// LOCATION_MAP replacement link must be escaped. Splits on each matched
+// location name (not a single indexOf) to preserve the original
+// replaceAll behavior for a name that appears more than once.
 function formatSessionDetailsForEmail(details: string): string {
-  let result = details;
   for (const [key, { name, url }] of Object.entries(LOCATION_MAP)) {
-    if (result.includes(key)) {
-      result = result.replaceAll(key, `<a href="${url}" style="color: #d4af37;">${name}</a>`);
-      break;
-    }
+    if (!details.includes(key)) continue;
+    const link = `<a href="${url}" style="color: #d4af37;">${name}</a>`;
+    return details.split(key).map(escapeHtml).join(link);
   }
-  return result;
+  return escapeHtml(details);
 }
 
 function getResend() {
@@ -285,7 +293,7 @@ export async function sendReferralCreditNotification(data: {
   newClientName: string;
 }) {
   const resend = getResend();
-  await resend.emails.send({
+  const result = await resend.emails.send({
     from: FROM_EMAIL,
     to: data.referrerEmail,
     replyTo: ARTEMI_EMAIL,
@@ -301,6 +309,7 @@ export async function sendReferralCreditNotification(data: {
       <p>— Mesa Basketball Training</p>
     `,
   });
+  if (result.error) console.error("Resend referral-credit email error:", result.error, "to:", data.referrerEmail);
 }
 
 interface StripeRefundOutcome {
@@ -409,7 +418,7 @@ export async function sendCancellationNotification(data: {
     : "";
 
   // Email to Artemi
-  await resend.emails.send({
+  const adminResult = await resend.emails.send({
     from: FROM_EMAIL,
     to: ARTEMI_EMAIL,
     subject: `${isPickupCancel ? "Pickup " : ""}Cancellation: ${data.parentName}`,
@@ -422,9 +431,10 @@ export async function sendCancellationNotification(data: {
       ${data.campAdjustment ? `<p><strong>New total: $${fmtMoney(data.campAdjustment.finalAmount)} (was $${fmtMoney(data.campAdjustment.originalAmount)}).</strong> ${data.campAdjustment.isPaid ? adminCampSummary : `Due: $${fmtMoney(data.campAdjustment.finalAmount)}`}</p>` : ""}
     `,
   });
+  if (adminResult.error) console.error("Resend admin cancellation email error:", adminResult.error);
 
   // Confirmation to parent
-  await resend.emails.send({
+  const clientResult = await resend.emails.send({
     from: FROM_EMAIL,
     to: data.email,
     replyTo: ARTEMI_EMAIL,
@@ -443,6 +453,7 @@ export async function sendCancellationNotification(data: {
       <p>— Mesa Basketball Training</p>
     `,
   });
+  if (clientResult.error) console.error("Resend cancellation email error:", clientResult.error, "to:", data.email);
 }
 
 export async function sendNoShowNotification(data: {
@@ -467,7 +478,7 @@ export async function sendNoShowNotification(data: {
       </p>`;
 
   // Email to Artemi
-  await resend.emails.send({
+  const adminResult = await resend.emails.send({
     from: FROM_EMAIL,
     to: ARTEMI_EMAIL,
     subject: `No-Show: ${data.parentName}`,
@@ -478,9 +489,10 @@ export async function sendNoShowNotification(data: {
       <p><strong>${data.wasPaid ? "Already paid — fee kept" : "Full fee due"}:</strong> $${fmtMoney(data.feeAmount)}</p>
     `,
   });
+  if (adminResult.error) console.error("Resend admin no-show email error:", adminResult.error);
 
   // Email to parent
-  await resend.emails.send({
+  const clientResult = await resend.emails.send({
     from: FROM_EMAIL,
     to: data.email,
     replyTo: ARTEMI_EMAIL,
@@ -498,6 +510,7 @@ export async function sendNoShowNotification(data: {
       <p>— Mesa Basketball Training</p>
     `,
   });
+  if (clientResult.error) console.error("Resend no-show email error:", clientResult.error, "to:", data.email);
 }
 
 function formatMonthYear(monthYear: string): string {
@@ -531,7 +544,7 @@ export async function sendPackageConfirmation(data: {
   const totalWithFee = Math.round((data.totalPrice + SERVICE_FEE) * 100) / 100;
 
   // Notify Artemi
-  await resend.emails.send({
+  const adminResult = await resend.emails.send({
     from: FROM_EMAIL,
     to: ARTEMI_EMAIL,
     subject: `New Package Enrollment: ${data.parentName} — ${data.packageType} sessions (${monthLabel})`,
@@ -547,9 +560,10 @@ export async function sendPackageConfirmation(data: {
       ${data.referralCode ? `<p><strong>Referral Code:</strong> ${data.referralCode}</p>` : ""}
     `,
   });
+  if (adminResult.error) console.error("Resend admin package-confirmation email error:", adminResult.error);
 
   // Confirmation to parent
-  await resend.emails.send({
+  const clientResult = await resend.emails.send({
     from: FROM_EMAIL,
     to: data.email,
     subject: `Package Confirmed — Mesa Basketball Training (${monthLabel})`,
@@ -574,6 +588,7 @@ export async function sendPackageConfirmation(data: {
       <p>— Mesa Basketball Training</p>
     `,
   });
+  if (clientResult.error) console.error("Resend package-confirmation email error:", clientResult.error, "to:", data.email);
 }
 
 export async function sendPackageReminder(data: {
@@ -588,7 +603,7 @@ export async function sendPackageReminder(data: {
   const monthLabel = formatMonthYear(data.monthYear);
 
   // Reminder to parent
-  await resend.emails.send({
+  const clientResult = await resend.emails.send({
     from: FROM_EMAIL,
     to: data.email,
     subject: `Your Mesa Basketball sessions are expiring soon!`,
@@ -604,9 +619,10 @@ export async function sendPackageReminder(data: {
       <p>— Mesa Basketball Training</p>
     `,
   });
+  if (clientResult.error) console.error("Resend package-reminder email error:", clientResult.error, "to:", data.email);
 
   // Notify Artemi
-  await resend.emails.send({
+  const adminResult = await resend.emails.send({
     from: FROM_EMAIL,
     to: ARTEMI_EMAIL,
     subject: `Package Reminder Sent: ${data.parentName} — ${sessionsRemaining} session(s) remaining`,
@@ -618,6 +634,7 @@ export async function sendPackageReminder(data: {
       <p>A reminder email has been sent to the parent.</p>
     `,
   });
+  if (adminResult.error) console.error("Resend admin package-reminder email error:", adminResult.error);
 }
 
 export async function sendPlayerUpdateNotification(data: {
@@ -658,7 +675,7 @@ export async function sendPlayerUpdateNotification(data: {
       </p>`
     : "";
 
-  await resend.emails.send({
+  const adminResult = await resend.emails.send({
     from: FROM_EMAIL,
     to: ARTEMI_EMAIL,
     subject: `Player Update${data.isLate && data.removedPlayers.length > 0 ? " ⚠️ LATE" : ""}: ${data.parentName}`,
@@ -672,8 +689,9 @@ export async function sendPlayerUpdateNotification(data: {
       ${data.isLate && data.removedPlayers.length > 0 ? `<p style="color:#ef4444;"><strong>⚠️ Late removal${data.lateFeeDue ? ` — $${fmtMoney(data.lateFeeDue)} fee due` : ""}</strong></p>` : ""}
     `,
   });
+  if (adminResult.error) console.error("Resend admin player-update email error:", adminResult.error);
 
-  await resend.emails.send({
+  const clientResult = await resend.emails.send({
     from: FROM_EMAIL,
     to: data.email,
     replyTo: ARTEMI_EMAIL,
@@ -693,6 +711,7 @@ export async function sendPlayerUpdateNotification(data: {
       <p>— Mesa Basketball Training</p>
     `,
   });
+  if (clientResult.error) console.error("Resend player-update email error:", clientResult.error, "to:", data.email);
 }
 
 export async function sendTimeChangeNotification(data: {
@@ -853,7 +872,7 @@ export async function sendRescheduleNotification(data: {
       : "";
 
   // Email to Artemi
-  await resend.emails.send({
+  const adminResult = await resend.emails.send({
     from: FROM_EMAIL,
     to: ARTEMI_EMAIL,
     subject: `Reschedule${data.isLateReschedule ? " ⚠️ LATE" : ""}: ${data.parentName}`,
@@ -875,9 +894,10 @@ export async function sendRescheduleNotification(data: {
       ${lateFeeNote}
     `,
   });
+  if (adminResult.error) console.error("Resend admin reschedule email error:", adminResult.error);
 
   // Confirmation to parent
-  await resend.emails.send({
+  const clientResult = await resend.emails.send({
     from: FROM_EMAIL,
     to: data.email,
     replyTo: ARTEMI_EMAIL,
@@ -897,6 +917,7 @@ export async function sendRescheduleNotification(data: {
       <p>— Mesa Basketball Training</p>
     `,
   });
+  if (clientResult.error) console.error("Resend reschedule email error:", clientResult.error, "to:", data.email);
 }
 
 // Admin-only — a client started Stripe Checkout and never finished (backed
@@ -927,7 +948,7 @@ export async function sendAbandonedCheckoutEmail(data: {
     : data.refundedAmount != null && data.refundedAmount > 0
       ? `<p style="color: #999; font-size: 13px;">This was a reschedule's price-increase topup — the client's original session was already cancelled, so <strong>$${fmtMoney(data.refundedAmount)} was automatically refunded</strong> back to their card for it. This booking was never confirmed and the slot has already been released.</p>`
       : `<p style="color: #999; font-size: 13px;">They were sent to Stripe to pay but never finished — no charge was made, this booking was never confirmed, and the slot has already been released.</p>`;
-  await resend.emails.send({
+  const result = await resend.emails.send({
     from: FROM_EMAIL,
     to: ARTEMI_EMAIL,
     subject: `Abandoned Checkout: ${data.parentName}`,
@@ -942,6 +963,7 @@ export async function sendAbandonedCheckoutEmail(data: {
       ${closingNote}
     `,
   });
+  if (result.error) console.error("Resend abandoned-checkout email error:", result.error);
 }
 
 // Admin-only — same as above, for a monthly package enrollment that never
@@ -954,7 +976,7 @@ export async function sendAbandonedPackageEmail(data: {
   monthYear: string;
 }) {
   const resend = getResend();
-  await resend.emails.send({
+  const result = await resend.emails.send({
     from: FROM_EMAIL,
     to: ARTEMI_EMAIL,
     subject: `Abandoned Package Checkout: ${data.parentName}`,
@@ -967,4 +989,5 @@ export async function sendAbandonedPackageEmail(data: {
       <p style="color: #999; font-size: 13px;">No charge was made and this package was never activated.</p>
     `,
   });
+  if (result.error) console.error("Resend abandoned-package email error:", result.error);
 }
