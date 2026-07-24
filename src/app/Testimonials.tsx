@@ -12,14 +12,19 @@ interface Testimonial {
 
 const testimonials: Testimonial[] = [
   {
+    name: "Billy Antonopoulos",
+    color: "bg-amber-600",
+    text: "My son and daughter both train with Artemios and I can't say enough good things about the experience. He's an outstanding trainer who offers both one-on-one and group sessions, and every workout is organized, challenging, and fun. What really stands out is how well he connects with each player. He understands that every child learns differently and takes the time to coach them in a way that helps them succeed. No matter their skill level, every player leaves each session better than when they arrived. He's not just teaching basketball skills—he's helping kids become smarter, more confident, and more well-rounded players. His passion for the game and genuine investment in each athlete's development really show. If you're looking for a trainer who truly cares about helping young players improve and reach their potential, I highly recommend him. My son and daughter have both grown tremendously because of his training, and we're grateful to have found him!",
+  },
+  {
     name: "Dianna Kazakis",
     color: "bg-orange-600",
     text: "For over a year, both of my children—a 14-year-old son and a 12-year-old daughter—have trained with Coach Artemios. During that time, their skills, confidence, and love for the game have grown tremendously. Coach Artemios tailors each lesson to the individual player's level, helping them develop both technically and mentally. I've watched my children go from players with limited experience to key contributors on their teams. His dedication, patience, and ability to bring out the best in each athlete have made a tremendous impact. We are so grateful for everything he has done and highly recommend him to any player looking to improve their game.",
   },
   {
-    name: "Daniel O'Connell",
-    color: "bg-indigo-600",
-    text: "We are so lucky to have found Artemios. Not only is he a great trainer, he's a great person and role model for our son. He takes the time to get to know his players, identify strengths and weaknesses and work on both the physical skills and mind set.",
+    name: "Maria Vorkas",
+    color: "bg-purple-600",
+    text: "Artemios has been an incredible trainer for my daughter. Over the past year, her confidence on the court has grown so much, and the improvement in her game has been amazing. He knows exactly when to be tough, pushes her to be her best, and truly believes in his players. What really sets him apart is how committed he is—he even takes the time to come watch their games and support them. We're so grateful for everything he's done, and I highly recommend him to any player looking to take their game to the next level.",
   },
   {
     name: "Chris Katerinakis",
@@ -27,9 +32,9 @@ const testimonials: Testimonial[] = [
     text: "Artemios has completely changed my relationship with basketball. I started as someone who struggled just to handle the ball confidently, and through his coaching, I've developed the skills and confidence to soon play in a men's pickup league. What I appreciate most is that he never just taught basketball skills. He taught me how to believe in my ability to improve. Watching him coach other athletes has only increased my respect for him. His skill level as a player is obvious, but what truly stands out is his ability to communicate, motivate, and connect with each athlete. I'm incredibly thankful for everything he's invested in me and would recommend Mesa Basketball Training, especially for athletes looking to take their game to the next level.",
   },
   {
-    name: "Rex Espineli",
-    color: "bg-purple-600",
-    text: "Coach A brings professional basketball experience to guide young athletes on their basketball journey building skills & confidence.",
+    name: "Daniel O'Connell",
+    color: "bg-indigo-600",
+    text: "We are so lucky to have found Artemios. Not only is he a great trainer, he's a great person and role model for our son. He takes the time to get to know his players, identify strengths and weaknesses and work on both the physical skills and mind set.",
   },
 ];
 
@@ -53,7 +58,11 @@ export default function Testimonials() {
   }
 
   const t = testimonials[index];
-  const initial = t.name.charAt(0);
+  const nameParts = t.name.split(" ").filter(Boolean);
+  const initial =
+    nameParts.length > 1
+      ? nameParts[0].charAt(0) + nameParts[nameParts.length - 1].charAt(0)
+      : nameParts[0].charAt(0);
 
   const dots = (
     <div className="flex justify-center gap-2">
