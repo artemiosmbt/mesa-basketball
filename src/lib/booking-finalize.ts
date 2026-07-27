@@ -547,6 +547,7 @@ export async function finalizeConfirmedWeeklyBooking(params: FinalizeWeeklyBooki
       trainer: weeklySessions[0]?.trainer,
       calendarEvent: weeklySessions[0] ? { date: weeklySessions[0].date, startTime: weeklySessions[0].startTime, endTime: weeklySessions[0].endTime, location: weeklySessions[0].location } : undefined,
       isPickup: isPickupBooking,
+      sessionDetailsIsHtml: true,
     });
 
     if (weeklyReferrer) {
@@ -670,6 +671,7 @@ export async function finalizeConfirmedCampBooking(params: FinalizeCampBookingPa
       referredBy: campReferrer?.name,
       referralCodeUsed: params.submittedReferralCode || undefined,
       calendarEvent: { date: firstSession.date, startTime: firstSession.startTime, endTime: firstSession.endTime || firstSession.startTime, location: firstSession.location },
+      sessionDetailsIsHtml: true,
     });
 
     if (campReferrer) {
@@ -844,6 +846,7 @@ export async function finalizeConfirmedPrivateSeriesBooking(params: FinalizePriv
       calendarEvent: privateSessions[0] ? { date: privateSessions[0].date, startTime: privateSessions[0].startTime, endTime: privateSessions[0].endTime, location: privateSessions[0].location } : undefined,
       accountCreditApplied: params.accountCreditApplied,
       fullPrice: totalPaid,
+      sessionDetailsIsHtml: true,
     });
   } catch (notifyErr) {
     console.error("Private series booking email failed (booking was paid):", notifyErr);

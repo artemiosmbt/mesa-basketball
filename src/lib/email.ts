@@ -39,16 +39,33 @@ function escapeHtml(s: string): string {
 }
 
 // sessionDetails can be client-submitted (the single private/group-private
-// booking branch in register/route.ts inserts it verbatim, unlike
-// weekly/camp/private-series, which build their own from trusted sheet
-// data) and this function's output goes straight into an HTML email to
-// BOTH the admin and the client at every stage of a booking's lifecycle
-// (registration, cancellation, no-show, player-update notifications) — so,
-// same reasoning as escapeHtml above, anything that isn't our own trusted
-// LOCATION_MAP replacement link must be escaped. Splits on each matched
-// location name (not a single indexOf) to preserve the original
-// replaceAll behavior for a name that appears more than once.
-function formatSessionDetailsForEmail(details: string): string {
+// booking branch in register/route.ts inserts it verbatim) and this
+// function's output goes straight into an HTML email to BOTH the admin and
+// the client at every stage of a booking's lifecycle (registration,
+// cancellation, no-show, player-update notifications) — so, same reasoning
+// as escapeHtml above, anything that isn't our own trusted LOCATION_MAP
+// replacement link must be escaped. Splits on each matched location name
+// (not a single indexOf) to preserve the original replaceAll behavior for a
+// name that appears more than once.
+//
+// weekly/camp/private-series bookings are the one exception: booking-finalize.ts
+// builds their sessionDetails itself, as server-controlled HTML (`<br/>`,
+// `<strong>`, `<p>` for line breaks and the price summary) wrapped around
+// sheet-verified dates/times/locations — never raw client input. Escaping
+// that blindly renders the literal tags as text ("...<br/><p><strong>Total:
+// </strong>...") instead of formatting the email, so the caller marks it
+// `isHtml: true` to pass it through as-is (only doing location-link
+// substitution, not escaping).
+function formatSessionDetailsForEmail(details: string, isHtml = false): string {
+  if (isHtml) {
+    let result = details;
+    for (const [key, { name, url }] of Object.entries(LOCATION_MAP)) {
+      if (!result.includes(key)) continue;
+      const link = `<a href="${url}" style="color: #d4af37;">${name}</a>`;
+      result = result.split(key).join(link);
+    }
+    return result;
+  }
   for (const [key, { name, url }] of Object.entries(LOCATION_MAP)) {
     if (!details.includes(key)) continue;
     const link = `<a href="${url}" style="color: #d4af37;">${name}</a>`;
@@ -143,6 +160,9 @@ export async function sendRegistrationNotification(data: {
   // legitimately contain the word "pickup" (e.g. "1 High School Skills and 1
   // Pickup") without the whole booking being a pickup booking.
   isPickup?: boolean;
+  // True when sessionDetails is server-built HTML (weekly/camp/private-series
+  // batch bookings), not raw client input — see formatSessionDetailsForEmail.
+  sessionDetailsIsHtml?: boolean;
 }) {
   const resend = getResend();
 
@@ -175,7 +195,7 @@ export async function sendRegistrationNotification(data: {
       <p><strong>Email:</strong> ${escapeHtml(data.email)}</p>
       <p><strong>Phone:</strong> ${escapeHtml(data.phone)}</p>
       <p><strong>Players:</strong> ${escapeHtml(data.kids)}</p>
-      <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails)}</p>
+      <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails, data.sessionDetailsIsHtml)}</p>
       ${data.trainer ? `<p><strong>Trainer:</strong> ${data.trainer}</p>` : ""}
       <p><strong>Total Participants:</strong> ${data.totalParticipants}</p>
       ${isPackageBooking ? `<p><strong>Package:</strong> ${data.packageType}-session monthly plan — ${data.packageSessionsRemaining} session${data.packageSessionsRemaining !== 1 ? "s" : ""} remaining after this booking</p>` : ""}
@@ -272,7 +292,7 @@ export async function sendRegistrationNotification(data: {
       <h2>You're booked!</h2>
       <p>Hi ${escapeHtml(data.parentName)},</p>
       <p>Your ${typeLabel.toLowerCase()} has been confirmed.</p>
-      <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails)}</p>
+      <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails, data.sessionDetailsIsHtml)}</p>
       ${data.trainer ? `<p><strong>Trainer:</strong> ${data.trainer}</p>` : ""}
       <p><strong>Players:</strong> ${escapeHtml(data.kids)}</p>
       ${packageNote}
