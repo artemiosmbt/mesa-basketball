@@ -3,6 +3,18 @@ import { Resend } from "resend";
 import { createClient } from "@supabase/supabase-js";
 import { isRateLimited } from "@/lib/supabase";
 
+// The email regex below allows HTML-special characters (only whitespace and
+// having exactly one "@" are disallowed), so a value is embedded raw into
+// the admin alert's HTML below without this it could render as a live link.
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 export async function POST(req: NextRequest) {
   const { email: rawEmail } = await req.json();
   const email = typeof rawEmail === "string" ? rawEmail.toLowerCase().trim() : rawEmail;
@@ -48,7 +60,7 @@ export async function POST(req: NextRequest) {
       from: "Mesa Basketball <noreply@mesabasketballtraining.com>",
       to: "artemios@mesabasketballtraining.com",
       subject: "New Virtual Training Waitlist Sign-Up",
-      html: `<p><strong>${email}</strong> just joined the virtual training waitlist.</p>`,
+      html: `<p><strong>${escapeHtml(email)}</strong> just joined the virtual training waitlist.</p>`,
     }),
     resend.emails.send({
       from: "Mesa Basketball <noreply@mesabasketballtraining.com>",

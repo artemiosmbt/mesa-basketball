@@ -196,7 +196,7 @@ export async function sendRegistrationNotification(data: {
       <p><strong>Phone:</strong> ${escapeHtml(data.phone)}</p>
       <p><strong>Players:</strong> ${escapeHtml(data.kids)}</p>
       <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails, data.sessionDetailsIsHtml)}</p>
-      ${data.trainer ? `<p><strong>Trainer:</strong> ${data.trainer}</p>` : ""}
+      ${data.trainer ? `<p><strong>Trainer:</strong> ${escapeHtml(data.trainer)}</p>` : ""}
       <p><strong>Total Participants:</strong> ${data.totalParticipants}</p>
       ${isPackageBooking ? `<p><strong>Package:</strong> ${data.packageType}-session monthly plan — ${data.packageSessionsRemaining} session${data.packageSessionsRemaining !== 1 ? "s" : ""} remaining after this booking</p>` : ""}
       ${data.isFree && !isPackageBooking ? `<p><strong style="color: #d4af37;">${data.isFirstTime ? "First-Time Discount" : "Referral Credit"}: 50% off applied</strong></p>` : ""}
@@ -293,7 +293,7 @@ export async function sendRegistrationNotification(data: {
       <p>Hi ${escapeHtml(data.parentName)},</p>
       <p>Your ${typeLabel.toLowerCase()} has been confirmed.</p>
       <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails, data.sessionDetailsIsHtml)}</p>
-      ${data.trainer ? `<p><strong>Trainer:</strong> ${data.trainer}</p>` : ""}
+      ${data.trainer ? `<p><strong>Trainer:</strong> ${escapeHtml(data.trainer)}</p>` : ""}
       <p><strong>Players:</strong> ${escapeHtml(data.kids)}</p>
       ${packageNote}
       ${freeNote}
@@ -583,7 +583,7 @@ export async function sendPackageConfirmation(data: {
       <p><strong>Month:</strong> ${monthLabel}</p>
       <p><strong>Charged:</strong> $${fmtMoney(totalWithFee)}</p>
       ${data.kids ? `<p><strong>Player(s):</strong> ${escapeHtml(data.kids)}</p>` : ""}
-      ${data.referralCode ? `<p><strong>Referral Code:</strong> ${data.referralCode}</p>` : ""}
+      ${data.referralCode ? `<p><strong>Referral Code:</strong> ${escapeHtml(data.referralCode)}</p>` : ""}
     `,
   });
   if (adminResult.error) console.error("Resend admin package-confirmation email error:", adminResult.error);
@@ -907,7 +907,7 @@ export async function sendRescheduleNotification(data: {
       <p><strong>Parent:</strong> ${escapeHtml(data.parentName)}</p>
       <p><strong>Old Session:</strong> ${formatSessionDetailsForEmail(data.oldSessionDetails)}</p>
       <p><strong>New Session:</strong> ${formatSessionDetailsForEmail(data.newSessionDetails)}</p>
-      ${data.newTrainer ? `<p><strong>Trainer:</strong> ${data.newTrainer}</p>` : ""}
+      ${data.newTrainer ? `<p><strong>Trainer:</strong> ${escapeHtml(data.newTrainer)}</p>` : ""}
       ${data.priceAdjustment
         ? data.priceAdjustment.kind === "refund"
           ? `<p><strong>${data.priceAdjustment.failed ? "REFUND FAILED — needs manual action" : [data.priceAdjustment.refundedAmount > 0 ? `$${fmtMoney(data.priceAdjustment.refundedAmount)} refunded` : "", data.priceAdjustment.creditedAmount > 0 ? `$${fmtMoney(data.priceAdjustment.creditedAmount)} credited` : ""].filter(Boolean).join(", ")}</strong></p>`
@@ -934,7 +934,7 @@ export async function sendRescheduleNotification(data: {
       <p>Your session has been rescheduled.</p>
       <p><strong>Old Session:</strong> ${formatSessionDetailsForEmail(data.oldSessionDetails)}</p>
       <p><strong>New Session:</strong> ${formatSessionDetailsForEmail(data.newSessionDetails)}</p>
-      ${data.newTrainer ? `<p><strong>Trainer:</strong> ${data.newTrainer}</p>` : ""}
+      ${data.newTrainer ? `<p><strong>Trainer:</strong> ${escapeHtml(data.newTrainer)}</p>` : ""}
       ${priceAdjustmentNote}
       ${lateFeeNote}
       <p><a href="${BASE_URL}/my-bookings" style="color: #d4af37; font-weight: bold;">View My Bookings</a> — Manage all your sessions</p>
