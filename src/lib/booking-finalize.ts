@@ -63,6 +63,15 @@ export function isLateAction(dateStr: string, timeStr: string, createdAt: string
   return now >= graceEnd;
 }
 
+// "1 High School Skills, 2 Pickup" -> "1 High School Skills and 2 Pickup"; a
+// third group joins as "A, B, and C". Used to summarize mixed-group bookings
+// in notifications instead of naming just one group.
+function joinWithAnd(parts: string[]): string {
+  if (parts.length <= 1) return parts[0] || "";
+  if (parts.length === 2) return `${parts[0]} and ${parts[1]}`;
+  return `${parts.slice(0, -1).join(", ")}, and ${parts[parts.length - 1]}`;
+}
+
 /**
  * The actual price owed for a session, respecting the is_free 50%-off
  * discount for privates (first-time clients / redeemed referral credit) —
@@ -485,9 +494,23 @@ export interface FinalizeWeeklyBookingParams {
 export async function finalizeConfirmedWeeklyBooking(params: FinalizeWeeklyBookingParams): Promise<void> {
   const { weeklySessions, weeklyReferrer, weeklyCreditApplied, weeklyTotalPrice } = params;
 
-  const isPickupBooking = weeklySessions[0]?.group?.toLowerCase().includes("pickup");
+  // A single booking can now span more than one distinct group at once (e.g.
+  // a group skills session cross-sold with a companion pickup slot), so
+  // notifications must name each group with its own count rather than
+  // assuming every row shares the first row's group.
+  const groupCounts = new Map<string, number>();
+  for (const s of weeklySessions) {
+    if (s.group) groupCounts.set(s.group, (groupCounts.get(s.group) || 0) + 1);
+  }
+  const groupEntries = Array.from(groupCounts.entries());
+  const isMixedGroups = groupEntries.length > 1;
+  const primaryGroupLabel = groupEntries[0]?.[0] || "Group";
+  const groupSummary = isMixedGroups
+    ? joinWithAnd(groupEntries.map(([group, count]) => `${count} ${group}`))
+    : primaryGroupLabel;
+  const isPickupBooking = !isMixedGroups && primaryGroupLabel.toLowerCase().includes("pickup");
   const allSessionsList = weeklySessions
-    .map((s) => `${s.date} ${s.startTime}-${s.endTime} at ${s.location}`)
+    .map((s) => `${s.date} ${s.startTime}-${s.endTime} at ${s.location}${isMixedGroups ? ` (${s.group})` : ""}`)
     .join("<br/>");
 
   // What actually got charged via Stripe (net of credit) — 0 if fully
@@ -516,13 +539,14 @@ export async function finalizeConfirmedWeeklyBooking(params: FinalizeWeeklyBooki
       phone: params.phone,
       kids: params.kids,
       type: "weekly",
-      sessionDetails: `${isPickupBooking ? "Pickup" : "Group"} Session${weeklySessions.length !== 1 ? "s" : ""} (${weeklySessions.length} ${weeklySessions.length !== 1 ? "dates" : "date"}):<br/>${allSessionsList}${priceNote ? "<br/>" + priceNote : ""}`,
+      sessionDetails: `${isMixedGroups ? groupSummary : primaryGroupLabel} Session${weeklySessions.length !== 1 ? "s" : ""} (${weeklySessions.length} ${weeklySessions.length !== 1 ? "dates" : "date"}):<br/>${allSessionsList}${priceNote ? "<br/>" + priceNote : ""}`,
       totalParticipants: params.totalParticipants,
       referralCode: params.referralCode,
       referredBy: weeklyReferrer?.name,
       referralCodeUsed: params.submittedReferralCode || undefined,
       trainer: weeklySessions[0]?.trainer,
       calendarEvent: weeklySessions[0] ? { date: weeklySessions[0].date, startTime: weeklySessions[0].startTime, endTime: weeklySessions[0].endTime, location: weeklySessions[0].location } : undefined,
+      isPickup: isPickupBooking,
     });
 
     if (weeklyReferrer) {
@@ -532,27 +556,24 @@ export async function finalizeConfirmedWeeklyBooking(params: FinalizeWeeklyBooki
     console.error("Weekly booking email failed (booking was paid):", notifyErr);
   }
 
-  const groupNames: string[] = Array.from(new Set(
-    weeklySessions.map((s) => s.group).filter((g): g is string => !!g)
-  ));
-  const sessionTypeSMS = isPickupBooking ? "pickup" : (groupNames.length === 1 ? groupNames[0] : "group");
   const weeklyTrainerLine = weeklySessions[0]?.trainer ? `\nTrainer: ${weeklySessions[0].trainer}` : "";
+  const totalCount = weeklySessions.length;
+  const confirmLabel = isMixedGroups
+    ? `${groupSummary} sessions`
+    : (totalCount === 1 ? `${primaryGroupLabel} session` : `${totalCount} ${primaryGroupLabel} sessions`);
   if (params.smsConsent && params.phone) {
     const sessionLines = weeklySessions.map((s) =>
-      `${formatDateWithDay(s.date)} | ${s.startTime}-${s.endTime}\nLocation: ${resolveLocationName(s.location)}`
+      `${formatDateWithDay(s.date)} | ${s.startTime}-${s.endTime}\nLocation: ${resolveLocationName(s.location)}${isMixedGroups ? `\nGroup: ${s.group}` : ""}`
     ).join("\n");
-    const count = weeklySessions.length;
-    const capitalizedType = sessionTypeSMS.charAt(0).toUpperCase() + sessionTypeSMS.slice(1);
-    const confirmLabel = count === 1 ? `${capitalizedType} session` : `${count} ${sessionTypeSMS} sessions`;
     const creditLine = weeklyCreditApplied > 0 ? `\n$${fmtMoney(weeklyCreditApplied)} account credit applied.` : "";
     const chargeLine = weeklyAmountCharged > 0 ? `\nCharged: $${fmtMoney(weeklyTotalWithFee)}.` : "";
     await sendSMS(params.phone, `Mesa Basketball: ${confirmLabel} confirmed!\n${sessionLines}${weeklyTrainerLine}\nAthlete: ${params.kids}${creditLine}${chargeLine}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
   }
 
   const adminLines = weeklySessions.map((s) =>
-    `${formatDateWithDay(s.date)} | ${s.startTime}-${s.endTime}\nLocation: ${resolveLocationName(s.location)}`
+    `${formatDateWithDay(s.date)} | ${s.startTime}-${s.endTime}\nLocation: ${resolveLocationName(s.location)}${isMixedGroups ? `\nGroup: ${s.group}` : ""}`
   ).join("\n");
-  await sendAdminSMS(`NEW BOOKING (paid): ${params.parentName}\n${weeklySessions.length} ${sessionTypeSMS} session${weeklySessions.length !== 1 ? "s" : ""}:\n${adminLines}${weeklyTrainerLine}\nPlayers: ${params.kids}${params.submittedReferralCode ? `\nRef code: ${params.submittedReferralCode} ${weeklyReferrer ? "✓ applied" : "✗ NOT applied"}` : ""}`).catch(() => {});
+  await sendAdminSMS(`NEW BOOKING (paid): ${params.parentName}\n${confirmLabel}:\n${adminLines}${weeklyTrainerLine}\nPlayers: ${params.kids}${params.submittedReferralCode ? `\nRef code: ${params.submittedReferralCode} ${weeklyReferrer ? "✓ applied" : "✗ NOT applied"}` : ""}`).catch(() => {});
 
   const calendarSyncFailures: string[] = [];
   for (const session of weeklySessions) {

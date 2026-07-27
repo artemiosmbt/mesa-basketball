@@ -137,12 +137,18 @@ export async function sendRegistrationNotification(data: {
   // this function only ever runs after payment already succeeded (or never
   // needed to happen), so it must never claim payment is still "due."
   amountCharged?: number;
+  // Explicit flag from the caller for whether this weekly booking is a
+  // single-group Pickup booking. Must be passed explicitly rather than
+  // sniffed from sessionDetails — a mixed booking's sessionDetails can
+  // legitimately contain the word "pickup" (e.g. "1 High School Skills and 1
+  // Pickup") without the whole booking being a pickup booking.
+  isPickup?: boolean;
 }) {
   const resend = getResend();
 
   const isPackageBooking = data.packageSessionsRemaining !== undefined;
 
-  const isPickup = data.type === "weekly" && data.sessionDetails.toLowerCase().includes("pickup");
+  const isPickup = data.type === "weekly" && !!data.isPickup;
   const typeLabel =
     data.type === "camp"
       ? "Camp Registration"
