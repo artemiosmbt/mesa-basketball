@@ -39,6 +39,9 @@ export const metadata: Metadata = {
     "Mesa Basketball Training",
   ],
   metadataBase: new URL("https://www.mesabasketballtraining.com"),
+  alternates: {
+    canonical: "/",
+  },
   openGraph: {
     title: "Long Island Basketball Training | Mesa Basketball Training",
     description: "Long Island basketball training with former D1 and international professional player Artemios Gavalas.",

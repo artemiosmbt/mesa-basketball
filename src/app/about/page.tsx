@@ -18,6 +18,9 @@ export const metadata: Metadata = {
     "elite basketball coaching Long Island",
     "Mesa Basketball Training about",
   ],
+  alternates: {
+    canonical: "/about",
+  },
   openGraph: {
     title: "Artemios Gavalas | Mesa Basketball Training",
     description: "Former D1 point guard at St. John's and Butler University, international professional player, and founder of Mesa Basketball Training on Long Island.",

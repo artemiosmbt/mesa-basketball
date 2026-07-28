@@ -12,6 +12,9 @@ export const metadata: Metadata = {
     "private basketball training sessions",
     "basketball group training Long Island",
   ],
+  alternates: {
+    canonical: "/schedule",
+  },
   openGraph: {
     title: "Schedule & Programs | Mesa Basketball Training",
     description: "Browse and register for basketball training sessions on Long Island. Group sessions, private lessons, and mini camps.",
