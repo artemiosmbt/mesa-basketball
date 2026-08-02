@@ -4,7 +4,7 @@ import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import Image from "next/image";
 import { authClient, ADMIN_EMAIL } from "@/lib/auth";
 import LandingNav from "@/app/LandingNav";
-import { SERVICE_FEE, SERVICE_FEE_LABEL, packagePrice, PRIVATE_RATE, GROUP_PRIVATE_RATE, calcPrivatePrice as getPrivatePrice } from "@/lib/pricing";
+import { calcServiceFee, serviceFeeLabel, packagePrice, PRIVATE_RATE, GROUP_PRIVATE_RATE, calcPrivatePrice as getPrivatePrice } from "@/lib/pricing";
 
 const LOCATION_LINKS: Record<string, { name: string; url: string }> = {
   "St. Pauls": { name: "St. Paul's Cathedral", url: "https://share.google/kgiqMxAj2iAFEAGI6" },
@@ -1601,7 +1601,7 @@ export default function Home() {
     ? Math.min(accountCreditBalance, creditEstimate.total)
     : 0;
   const orderRemainder = creditEstimate ? Math.max(0, Math.round((creditEstimate.total - creditAppliedToOrder) * 100) / 100) : 0;
-  const orderTotalDue = Math.round((orderRemainder + (orderRemainder > 0 ? SERVICE_FEE : 0)) * 100) / 100;
+  const orderTotalDue = Math.round((orderRemainder + (orderRemainder > 0 ? calcServiceFee(orderRemainder) : 0)) * 100) / 100;
 
   // The companion pickup/skills session for whatever's currently selected in
   // a weekly booking — one per date already selected, skipping any group
@@ -3588,7 +3588,7 @@ export default function Home() {
                     {orderRemainder > 0 && (
                       <div className="flex items-center justify-between gap-3">
                         <span className="text-brown-300">Service Fee</span>
-                        <span className="text-white shrink-0">{SERVICE_FEE_LABEL}</span>
+                        <span className="text-white shrink-0">{serviceFeeLabel(orderRemainder)}</span>
                       </div>
                     )}
                     {creditAppliedToOrder > 0 && (
@@ -3652,7 +3652,7 @@ export default function Home() {
               <button onClick={() => setPkgModal({ open: false, packageType: null })} className="text-2xl text-brown-400 hover:text-white">&times;</button>
             </div>
             <p className="mt-1 text-sm text-brown-400">
-              ${packagePrice(pkgModal.packageType || 4)} + {SERVICE_FEE_LABEL} service fee — paid securely by card via Stripe
+              ${packagePrice(pkgModal.packageType || 4)} + {serviceFeeLabel(packagePrice(pkgModal.packageType || 4))} service fee — paid securely by card via Stripe
             </p>
 
             {pkgResult?.success ? (

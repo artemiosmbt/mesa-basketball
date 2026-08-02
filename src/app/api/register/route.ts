@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getStripe } from "@/lib/stripe";
-import { SERVICE_FEE, fmtMoney, PRIVATE_RATE, GROUP_PRIVATE_RATE } from "@/lib/pricing";
+import { calcServiceFee, fmtMoney, PRIVATE_RATE, GROUP_PRIVATE_RATE } from "@/lib/pricing";
 import { getWeeklySchedule, getCamps } from "@/lib/sheets";
 import {
   finalizeConfirmedPrivateBooking,
@@ -441,7 +441,7 @@ export async function POST(req: NextRequest) {
             price_data: {
               currency: "usd",
               product_data: { name: "Service Fee" },
-              unit_amount: Math.round(SERVICE_FEE * 100),
+              unit_amount: Math.round(calcServiceFee(amountToCharge) * 100),
             },
             quantity: 1,
           },
@@ -691,7 +691,7 @@ export async function POST(req: NextRequest) {
             price_data: {
               currency: "usd",
               product_data: { name: "Service Fee" },
-              unit_amount: Math.round(SERVICE_FEE * 100),
+              unit_amount: Math.round(calcServiceFee(amountToCharge) * 100),
             },
             quantity: 1,
           },
@@ -987,7 +987,7 @@ export async function POST(req: NextRequest) {
             price_data: {
               currency: "usd",
               product_data: { name: "Service Fee" },
-              unit_amount: Math.round(SERVICE_FEE * 100),
+              unit_amount: Math.round(calcServiceFee(amountToCharge) * 100),
             },
             quantity: 1,
           },
@@ -1186,7 +1186,7 @@ export async function POST(req: NextRequest) {
             price_data: {
               currency: "usd",
               product_data: { name: "Service Fee" },
-              unit_amount: Math.round(SERVICE_FEE * 100),
+              unit_amount: Math.round(calcServiceFee(amountToCharge) * 100),
             },
             quantity: 1,
           },

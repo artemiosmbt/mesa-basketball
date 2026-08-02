@@ -1,5 +1,5 @@
 import { Resend } from "resend";
-import { SERVICE_FEE, fmtMoney, PRIVATE_RATE, GROUP_PRIVATE_RATE } from "./pricing";
+import { calcServiceFee, fmtMoney, PRIVATE_RATE, GROUP_PRIVATE_RATE } from "./pricing";
 
 const ARTEMI_EMAIL = "artemios@mesabasketballtraining.com";
 const FROM_EMAIL = "Mesa Basketball <noreply@mesabasketballtraining.com>";
@@ -201,7 +201,7 @@ export async function sendRegistrationNotification(data: {
       ${isPackageBooking ? `<p><strong>Package:</strong> ${data.packageType}-session monthly plan — ${data.packageSessionsRemaining} session${data.packageSessionsRemaining !== 1 ? "s" : ""} remaining after this booking</p>` : ""}
       ${data.isFree && !isPackageBooking ? `<p><strong style="color: #d4af37;">${data.isFirstTime ? "First-Time Discount" : "Referral Credit"}: 50% off applied</strong></p>` : ""}
       ${data.accountCreditApplied && data.accountCreditApplied > 0 ? `<p><strong style="color: #93c5fd;">Account credit applied: $${fmtMoney(data.accountCreditApplied)}</strong></p>` : ""}
-      ${data.amountCharged != null && data.amountCharged > 0 ? `<p><strong>Charged: $${fmtMoney(data.amountCharged + SERVICE_FEE)}</strong></p>` : ""}
+      ${data.amountCharged != null && data.amountCharged > 0 ? `<p><strong>Charged: $${fmtMoney(data.amountCharged + calcServiceFee(data.amountCharged))}</strong></p>` : ""}
       ${data.referredBy ? `<p><strong>Referred by:</strong> ${escapeHtml(data.referredBy)}</p>` : ""}
       ${data.referralCodeUsed ? `<p><strong>Referral code used:</strong> ${escapeHtml(data.referralCodeUsed)}</p>` : ""}
     `,
@@ -239,12 +239,12 @@ export async function sendRegistrationNotification(data: {
     ? `<p style="background: #162d5a; color: #d4af37; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">Referral Credit Applied — 50% Off This Session!</p>`
     : "";
 
-  // The actual card charge, including the $4.50 service fee — this is the
+  // The actual card charge, including the service fee — this is the
   // one number that should match what shows on the client's bank/card
   // statement, so it's shown plainly rather than folded into the other
   // price notes above (which describe the session's rate, not the charge).
   const chargedNote = data.amountCharged != null && data.amountCharged > 0
-    ? `<p style="background: #162d5a; color: #d4af37; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">Charged to your card: $${fmtMoney(data.amountCharged + SERVICE_FEE)}</p>`
+    ? `<p style="background: #162d5a; color: #d4af37; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">Charged to your card: $${fmtMoney(data.amountCharged + calcServiceFee(data.amountCharged))}</p>`
     : "";
 
   const accountCreditNote = data.accountCreditApplied && data.accountCreditApplied > 0 && data.fullPrice != null
@@ -567,7 +567,7 @@ export async function sendPackageConfirmation(data: {
   // This only ever sends once the Stripe charge for the package has already
   // succeeded (see finalizePaidPackageEnrollment) — never claim payment is
   // still "due."
-  const totalWithFee = Math.round((data.totalPrice + SERVICE_FEE) * 100) / 100;
+  const totalWithFee = Math.round((data.totalPrice + calcServiceFee(data.totalPrice)) * 100) / 100;
 
   // Notify Artemi
   const adminResult = await resend.emails.send({
@@ -885,8 +885,8 @@ export async function sendRescheduleNotification(data: {
         <p style="margin: 0; color: #ffffff; font-size: 14px;">${data.priceAdjustment.kind === "refund"
           ? refundAdjustmentBody(data.priceAdjustment)
           : data.isLateReschedule
-            ? `50% of your original payment${data.lateFeeCredited ? ` ($${fmtMoney(data.lateFeeCredited)})` : ""} was kept as a late reschedule fee${data.lateFeeCreditApplied ? `, <strong>$${fmtMoney(data.lateFeeCreditApplied)}</strong> of which was applied directly to your new session` : ""}, and <strong>$${fmtMoney(data.priceAdjustment.amount + SERVICE_FEE)}</strong> was charged to cover the rest.`
-            : `<strong>$${fmtMoney(data.priceAdjustment.amount + SERVICE_FEE)}</strong> was charged to complete your reschedule (new session is higher-priced).`}</p>
+            ? `50% of your original payment${data.lateFeeCredited ? ` ($${fmtMoney(data.lateFeeCredited)})` : ""} was kept as a late reschedule fee${data.lateFeeCreditApplied ? `, <strong>$${fmtMoney(data.lateFeeCreditApplied)}</strong> of which was applied directly to your new session` : ""}, and <strong>$${fmtMoney(data.priceAdjustment.amount + calcServiceFee(data.priceAdjustment.amount))}</strong> was charged to cover the rest.`
+            : `<strong>$${fmtMoney(data.priceAdjustment.amount + calcServiceFee(data.priceAdjustment.amount))}</strong> was charged to complete your reschedule (new session is higher-priced).`}</p>
       </div>`
     : !data.priceAdjustment && data.lateFeeCredited
       ? `<div style="background: #1e3a5f; border-left: 4px solid #3b82f6; border-radius: 6px; padding: 14px 16px; margin: 16px 0;">
@@ -911,7 +911,7 @@ export async function sendRescheduleNotification(data: {
       ${data.priceAdjustment
         ? data.priceAdjustment.kind === "refund"
           ? `<p><strong>${data.priceAdjustment.failed ? "REFUND FAILED — needs manual action" : [data.priceAdjustment.refundedAmount > 0 ? `$${fmtMoney(data.priceAdjustment.refundedAmount)} refunded` : "", data.priceAdjustment.creditedAmount > 0 ? `$${fmtMoney(data.priceAdjustment.creditedAmount)} credited` : ""].filter(Boolean).join(", ")}</strong></p>`
-          : `<p><strong>Charged: $${fmtMoney(data.priceAdjustment.amount + SERVICE_FEE)}</strong>${data.lateFeeCreditApplied ? ` (plus $${fmtMoney(data.lateFeeCreditApplied)} late-fee credit applied)` : ""}</p>`
+          : `<p><strong>Charged: $${fmtMoney(data.priceAdjustment.amount + calcServiceFee(data.priceAdjustment.amount))}</strong>${data.lateFeeCreditApplied ? ` (plus $${fmtMoney(data.lateFeeCreditApplied)} late-fee credit applied)` : ""}</p>`
         : data.lateFeeCredited
           ? data.lateFeeCreditApplied
             ? `<p><strong>$${fmtMoney(data.lateFeeCreditApplied)} late-fee credit applied to new session</strong>${leftoverLateFeeCredit > 0 ? ` ($${fmtMoney(leftoverLateFeeCredit)} left in account)` : ""}</p>`

@@ -18,7 +18,7 @@ import {
   recordCampDayRefund,
 } from "@/lib/supabase";
 import { getStripe } from "@/lib/stripe";
-import { SERVICE_FEE, fmtMoney, calcPrivatePrice } from "@/lib/pricing";
+import { calcServiceFee, fmtMoney, calcPrivatePrice } from "@/lib/pricing";
 
 
 function parseMinsFromTime(t: string): number {
@@ -391,7 +391,7 @@ export async function POST(req: NextRequest) {
               price_data: {
                 currency: "usd",
                 product_data: { name: "Service Fee" },
-                unit_amount: Math.round(SERVICE_FEE * 100),
+                unit_amount: Math.round(calcServiceFee(packageLateFeeAmount) * 100),
               },
               quantity: 1,
             },
@@ -508,7 +508,7 @@ export async function POST(req: NextRequest) {
         const moneyOutcome = wasPaid ? describeMoneyOutcome(stripeRefundResult, creditIssued, chargeLateFee, false) : "";
         const moneyNote = reg.package_id
           ? (packageLateFeeCheckoutUrl
-              ? `\nLate cancellation fee: $${fmtMoney((packageLateFeeAmount || 0) + SERVICE_FEE)}. Finish payment here: ${packageLateFeeCheckoutUrl}`
+              ? `\nLate cancellation fee: $${fmtMoney((packageLateFeeAmount || 0) + calcServiceFee(packageLateFeeAmount || 0))}. Finish payment here: ${packageLateFeeCheckoutUrl}`
               : "\nYour package session is available for you to rebook.")
           : moneyOutcome ? `\n${moneyOutcome}.` : "";
         await sendSMS(reg.phone, `Mesa Basketball: Session cancelled by your trainer.${sessionLine}\nAthlete: ${reg.kids}${moneyNote}\nQuestions? mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
@@ -516,7 +516,7 @@ export async function POST(req: NextRequest) {
       const adminMoneyOutcome = wasPaid ? describeMoneyOutcome(stripeRefundResult, creditIssued, chargeLateFee, true) : "";
       const adminPackageNote = reg.package_id
         ? packageLateFeeCheckoutUrl
-          ? `\nPackage session — late fee checkout sent: $${fmtMoney((packageLateFeeAmount || 0) + SERVICE_FEE)}`
+          ? `\nPackage session — late fee checkout sent: $${fmtMoney((packageLateFeeAmount || 0) + calcServiceFee(packageLateFeeAmount || 0))}`
           : "\nPackage session — slot freed"
         : "";
       await sendAdminSMS(`CANCELLED: ${reg.parent_name}\n${sessionDetails}\nPlayers: ${reg.kids}${chargeLateFee ? "\n(Late fee charged)" : isLate ? "\n(Late fee waived)" : ""}${adminMoneyOutcome ? `\n${adminMoneyOutcome}` : ""}${adminPackageNote}`);

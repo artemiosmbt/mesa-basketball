@@ -1,13 +1,32 @@
-// Flat fee added on top of every real Stripe charge (new bookings and
-// reschedule topups) — covers Stripe's own processing cost. Applies
-// uniformly regardless of card type/payment method, which keeps it outside
-// NY's credit-card-surcharge rules (those only restrict fees charged for
+// Fee added on top of every real Stripe charge (new bookings and reschedule
+// topups) — covers Stripe's own processing cost. Applies uniformly
+// regardless of card type/payment method, which keeps it outside NY's
+// credit-card-surcharge rules (those only restrict fees charged for
 // choosing credit over some other payment method — Stripe is the only way
 // to pay here, so there's no "other method" being surcharged against).
 // Never applied when nothing is actually being charged (e.g. a booking
 // fully covered by a discount or account credit).
-export const SERVICE_FEE = 4.5;
-export const SERVICE_FEE_LABEL = `$${SERVICE_FEE.toFixed(2)}`;
+//
+// Flat $4.50 undercharges on larger transactions (Stripe's own cut is
+// percentage-based), so above the threshold the fee switches to a flat
+// percentage instead. The threshold is chosen so the switch is roughly
+// continuous — 3.2% of $140 is ~$4.48, just under the flat $4.50 — rather
+// than jumping sharply at the boundary.
+const SERVICE_FEE_FLAT = 4.5;
+const SERVICE_FEE_THRESHOLD = 140;
+const SERVICE_FEE_PERCENT = 0.032;
+
+// `chargeAmount` must be the actual pre-fee amount being charged to the
+// card for THIS transaction (i.e. after any account credit/discount is
+// subtracted) — not the full pre-credit order subtotal.
+export function calcServiceFee(chargeAmount: number): number {
+  if (chargeAmount <= SERVICE_FEE_THRESHOLD) return SERVICE_FEE_FLAT;
+  return Math.round(chargeAmount * SERVICE_FEE_PERCENT * 100) / 100;
+}
+
+export function serviceFeeLabel(chargeAmount: number): string {
+  return `$${calcServiceFee(chargeAmount).toFixed(2)}`;
+}
 
 // Always renders a dollar amount with two decimal places (e.g. 154.5 ->
 // "154.50") — used anywhere a price appears in client-facing copy so it

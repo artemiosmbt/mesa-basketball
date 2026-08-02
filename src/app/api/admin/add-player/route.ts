@@ -10,7 +10,7 @@ import {
 import { sendAdminSMS, sendSMS } from "@/lib/sms";
 import { getWeeklySchedule } from "@/lib/sheets";
 import { resolveOffSessionPaymentSource, chargeSavedCardOffSession, issueStripeRefund } from "@/lib/booking-finalize";
-import { SERVICE_FEE, SERVICE_FEE_LABEL, fmtMoney, calcPrivatePrice, fullPriceForType } from "@/lib/pricing";
+import { calcServiceFee, serviceFeeLabel, fmtMoney, calcPrivatePrice, fullPriceForType } from "@/lib/pricing";
 
 
 function parseMinsFromTime(t: string): number {
@@ -158,13 +158,13 @@ export async function POST(req: NextRequest) {
     const chargeResult = await chargeSavedCardOffSession({
       customerId: source.customerId,
       paymentMethodId: source.paymentMethodId,
-      amountDollars: Math.round((priceDelta + SERVICE_FEE) * 100) / 100,
+      amountDollars: Math.round((priceDelta + calcServiceFee(priceDelta)) * 100) / 100,
       description: `Added player: ${plainSessionDetails || "Mesa Basketball Training Session"}`,
     });
     if (!chargeResult.success) {
       await releaseClaim();
       return NextResponse.json(
-        { error: `Couldn't automatically charge the $${priceDelta} owed (+ ${SERVICE_FEE_LABEL} fee) — ${chargeResult.reason} Nothing was changed.` },
+        { error: `Couldn't automatically charge the $${priceDelta} owed (+ ${serviceFeeLabel(priceDelta)} fee) — ${chargeResult.reason} Nothing was changed.` },
         { status: 402 }
       );
     }
@@ -183,7 +183,7 @@ export async function POST(req: NextRequest) {
       await issueStripeRefund({
         email: reg.email,
         paymentIntentId: autoChargePaymentIntentId,
-        amountDollars: Math.round((autoChargedAmount + SERVICE_FEE) * 100) / 100,
+        amountDollars: Math.round((autoChargedAmount + calcServiceFee(autoChargedAmount)) * 100) / 100,
         sessionLabel: reg.session_details || "",
       }).catch((err) => console.error("Failed to refund add-player charge after failed update:", err));
     }
@@ -240,7 +240,7 @@ export async function POST(req: NextRequest) {
       : creditGranted > 0
         ? ` $${fmtMoney(oldAmount)} -> $${fmtMoney(newAmount)}, $${fmtMoney(creditGranted)} credited for their next booking.`
         : autoChargedAmount > 0
-          ? ` $${fmtMoney(oldAmount)} -> $${fmtMoney(newAmount)}, $${fmtMoney(autoChargedAmount + SERVICE_FEE)} charged to the card on file.`
+          ? ` $${fmtMoney(oldAmount)} -> $${fmtMoney(newAmount)}, $${fmtMoney(autoChargedAmount + calcServiceFee(autoChargedAmount))} charged to the card on file.`
           : priceDelta !== 0
             ? ` $${fmtMoney(oldAmount)} -> $${fmtMoney(newAmount)}.`
             : "";

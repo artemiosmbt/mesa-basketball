@@ -11,7 +11,7 @@ import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@
 import { getWeeklySchedule } from "@/lib/sheets";
 import { addAccountCredit, deductAccountCredit, addReferralCredit, logLateFeeEvent, getPackageById, countPackageSessionsUsed, setPackageSessions } from "@/lib/supabase";
 import { isLateAction, resolveOffSessionPaymentSource, chargeSavedCardOffSession, issueStripeRefund } from "@/lib/booking-finalize";
-import { SERVICE_FEE, SERVICE_FEE_LABEL, fmtMoney, calcPrivatePrice, fullPriceForType } from "@/lib/pricing";
+import { calcServiceFee, serviceFeeLabel, fmtMoney, calcPrivatePrice, fullPriceForType } from "@/lib/pricing";
 
 
 function parseMinsFromTime(t: string): number {
@@ -290,13 +290,13 @@ export async function POST(req: NextRequest) {
     const chargeResult = await chargeSavedCardOffSession({
       customerId: source.customerId,
       paymentMethodId: source.paymentMethodId,
-      amountDollars: Math.round((amountToCharge + SERVICE_FEE) * 100) / 100,
+      amountDollars: Math.round((amountToCharge + calcServiceFee(amountToCharge)) * 100) / 100,
       description: `Reschedule${chargeLateFee ? " (late fee remainder)" : ""}: ${plainSessionDetails || "Mesa Basketball Training Session"}`,
     });
     if (!chargeResult.success) {
       await releaseClaim();
       return NextResponse.json(
-        { error: `Couldn't automatically charge the $${amountToCharge} owed (+ ${SERVICE_FEE_LABEL} fee) — ${chargeResult.reason} The reschedule was NOT applied; the original session is unchanged.` },
+        { error: `Couldn't automatically charge the $${amountToCharge} owed (+ ${serviceFeeLabel(amountToCharge)} fee) — ${chargeResult.reason} The reschedule was NOT applied; the original session is unchanged.` },
         { status: 402 }
       );
     }
@@ -338,7 +338,7 @@ export async function POST(req: NextRequest) {
       const refundResult = await issueStripeRefund({
         email: reg.email,
         paymentIntentId: autoChargePaymentIntentId,
-        amountDollars: Math.round((autoChargedAmount + SERVICE_FEE) * 100) / 100,
+        amountDollars: Math.round((autoChargedAmount + calcServiceFee(autoChargedAmount)) * 100) / 100,
         sessionLabel: reg.session_details || "",
       }).catch((err) => {
         console.error("Failed to refund admin reschedule charge after lost race:", err);
@@ -361,7 +361,7 @@ export async function POST(req: NextRequest) {
       const refundResult = await issueStripeRefund({
         email: reg.email,
         paymentIntentId: autoChargePaymentIntentId,
-        amountDollars: Math.round((autoChargedAmount + SERVICE_FEE) * 100) / 100,
+        amountDollars: Math.round((autoChargedAmount + calcServiceFee(autoChargedAmount)) * 100) / 100,
         sessionLabel: reg.session_details || "",
       }).catch((err) => {
         console.error("Failed to refund admin reschedule charge after DB update error:", err);
@@ -440,7 +440,7 @@ export async function POST(req: NextRequest) {
       amountKept: Math.round((oldAmount - lateFeeCredited) * 100) / 100,
       amountCredited: lateFeeCredited,
       amountApplied: lateFeeCreditApplied,
-      amountChargedExtra: autoChargedAmount > 0 ? Math.round((autoChargedAmount + SERVICE_FEE) * 100) / 100 : 0,
+      amountChargedExtra: autoChargedAmount > 0 ? Math.round((autoChargedAmount + calcServiceFee(autoChargedAmount)) * 100) / 100 : 0,
       newSessionDetails,
     });
   } else if (wasPaid && priceDelta < 0) {
@@ -467,7 +467,7 @@ export async function POST(req: NextRequest) {
       bookedStartTime: oldBookedStartTime,
       action: "reschedule",
       initiatedBy: "admin",
-      amountChargedExtra: Math.round((autoChargedAmount + SERVICE_FEE) * 100) / 100,
+      amountChargedExtra: Math.round((autoChargedAmount + calcServiceFee(autoChargedAmount)) * 100) / 100,
       newSessionDetails,
     });
   }
@@ -532,21 +532,21 @@ export async function POST(req: NextRequest) {
   // "no change" vs "credited" vs "due".
   const priceNote = reg.package_id
     ? [
-        chargeLateFee && packageLateFeeAmount > 0 ? `\nLate reschedule fee: $${fmtMoney(packageLateFeeAmount + SERVICE_FEE)} charged to your card on file.` : "",
+        chargeLateFee && packageLateFeeAmount > 0 ? `\nLate reschedule fee: $${fmtMoney(packageLateFeeAmount + calcServiceFee(packageLateFeeAmount))} charged to your card on file.` : "",
         clearPackageId
           ? packageMoveOutCharge > 0
-            ? `\nThis date falls outside your package month, so it's priced as a regular session: $${fmtMoney(packageMoveOutCharge + (chargeLateFee ? 0 : SERVICE_FEE))} charged to your card on file.`
+            ? `\nThis date falls outside your package month, so it's priced as a regular session: $${fmtMoney(packageMoveOutCharge + (chargeLateFee ? 0 : calcServiceFee(packageMoveOutCharge)))} charged to your card on file.`
             : "\nThis date falls outside your package month, so it's no longer covered by it."
           : "\nStill covered by your monthly package — nothing further due for this session.",
       ].filter(Boolean).join("")
     : chargeLateFee
-      ? `\nLate reschedule fee: $${fmtMoney(lateFeeCredited)} (50% of what you paid) credited to your account${lateFeeCreditApplied > 0 ? `, $${fmtMoney(lateFeeCreditApplied)} applied to your new session` : ""}.${autoChargedAmount > 0 ? ` $${fmtMoney(autoChargedAmount + SERVICE_FEE)} was charged to your card on file to cover the rest.` : ""}`
+      ? `\nLate reschedule fee: $${fmtMoney(lateFeeCredited)} (50% of what you paid) credited to your account${lateFeeCreditApplied > 0 ? `, $${fmtMoney(lateFeeCreditApplied)} applied to your new session` : ""}.${autoChargedAmount > 0 ? ` $${fmtMoney(autoChargedAmount + calcServiceFee(autoChargedAmount))} was charged to your card on file to cover the rest.` : ""}`
       : newFullPrice === undefined
         ? ""
         : creditGranted > 0
           ? `\n$${fmtMoney(oldAmount)} → $${fmtMoney(newAmount)}. $${fmtMoney(creditGranted)} credited to your account for your next booking.`
           : autoChargedAmount > 0
-            ? `\n$${fmtMoney(oldAmount)} → $${fmtMoney(newAmount)}. $${fmtMoney(autoChargedAmount + SERVICE_FEE)} was charged to your card on file.`
+            ? `\n$${fmtMoney(oldAmount)} → $${fmtMoney(newAmount)}. $${fmtMoney(autoChargedAmount + calcServiceFee(autoChargedAmount))} was charged to your card on file.`
             : priceDelta !== 0
               ? `\n$${fmtMoney(oldAmount)} → $${fmtMoney(newAmount)}.`
               : "";
@@ -581,21 +581,21 @@ export async function POST(req: NextRequest) {
     }
     const adminPriceNote = reg.package_id
       ? [
-          chargeLateFee && packageLateFeeAmount > 0 ? `\nPackage late fee: $${fmtMoney(packageLateFeeAmount + SERVICE_FEE)} auto-charged to their card on file (${autoChargePaymentIntentId}).` : "",
+          chargeLateFee && packageLateFeeAmount > 0 ? `\nPackage late fee: $${fmtMoney(packageLateFeeAmount + calcServiceFee(packageLateFeeAmount))} auto-charged to their card on file (${autoChargePaymentIntentId}).` : "",
           clearPackageId
             ? packageMoveOutCharge > 0
-              ? `\nOutside package month — $${fmtMoney(packageMoveOutCharge + (chargeLateFee ? 0 : SERVICE_FEE))} auto-charged to their card on file (${autoChargePaymentIntentId}), package slot freed.`
+              ? `\nOutside package month — $${fmtMoney(packageMoveOutCharge + (chargeLateFee ? 0 : calcServiceFee(packageMoveOutCharge)))} auto-charged to their card on file (${autoChargePaymentIntentId}), package slot freed.`
               : "\nOutside package month — package slot freed, no charge."
             : "\nStill within package month — no charge.",
         ].filter(Boolean).join("")
       : chargeLateFee
-        ? `\nLate fee charged: $${fmtMoney(lateFeeCredited)} credited (50% of $${fmtMoney(oldAmount)} paid)${lateFeeCreditApplied > 0 ? `, $${fmtMoney(lateFeeCreditApplied)} applied to new session ($${fmtMoney(newAmount)})` : ""}.${autoChargedAmount > 0 ? ` $${fmtMoney(autoChargedAmount + SERVICE_FEE)} auto-charged to their card on file (${autoChargePaymentIntentId}).` : ""}`
+        ? `\nLate fee charged: $${fmtMoney(lateFeeCredited)} credited (50% of $${fmtMoney(oldAmount)} paid)${lateFeeCreditApplied > 0 ? `, $${fmtMoney(lateFeeCreditApplied)} applied to new session ($${fmtMoney(newAmount)})` : ""}.${autoChargedAmount > 0 ? ` $${fmtMoney(autoChargedAmount + calcServiceFee(autoChargedAmount))} auto-charged to their card on file (${autoChargePaymentIntentId}).` : ""}`
         : newFullPrice === undefined
           ? ""
           : creditGranted > 0
             ? `\n$${fmtMoney(oldAmount)} -> $${fmtMoney(newAmount)}: $${fmtMoney(creditGranted)} credited to their account (already paid)`
             : autoChargedAmount > 0
-              ? `\n$${fmtMoney(oldAmount)} -> $${fmtMoney(newAmount)}: $${fmtMoney(autoChargedAmount + SERVICE_FEE)} auto-charged to their card on file (${autoChargePaymentIntentId}).`
+              ? `\n$${fmtMoney(oldAmount)} -> $${fmtMoney(newAmount)}: $${fmtMoney(autoChargedAmount + calcServiceFee(autoChargedAmount))} auto-charged to their card on file (${autoChargePaymentIntentId}).`
               : priceDelta !== 0
                 ? `\nPrice: $${fmtMoney(oldAmount)} -> $${fmtMoney(newAmount)}`
                 : "";

@@ -20,7 +20,7 @@ import {
 } from "@/lib/supabase";
 import { issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome, isLateAction, parseSessionDateTimeET } from "@/lib/booking-finalize";
 import { getStripe } from "@/lib/stripe";
-import { SERVICE_FEE, fmtMoney, calcPrivatePrice } from "@/lib/pricing";
+import { calcServiceFee, fmtMoney, calcPrivatePrice } from "@/lib/pricing";
 import {
   sendCancellationNotification,
   sendRescheduleNotification,
@@ -566,7 +566,7 @@ export async function DELETE(
               price_data: {
                 currency: "usd",
                 product_data: { name: "Service Fee" },
-                unit_amount: Math.round(SERVICE_FEE * 100),
+                unit_amount: Math.round(calcServiceFee(packageLateFeeAmount) * 100),
               },
               quantity: 1,
             },
@@ -628,7 +628,7 @@ export async function DELETE(
     const moneyOutcome = wasPaid ? describeMoneyOutcome(stripeRefundResult, cancelCredit, isLateCancel, false) : "";
     const lateNote = reg.package_id
       ? (packageLateFeeCheckoutUrl
-          ? `\nLate cancellation fee: $${fmtMoney((packageLateFeeAmount || 0) + SERVICE_FEE)}. Finish payment here: ${packageLateFeeCheckoutUrl}`
+          ? `\nLate cancellation fee: $${fmtMoney((packageLateFeeAmount || 0) + calcServiceFee(packageLateFeeAmount || 0))}. Finish payment here: ${packageLateFeeCheckoutUrl}`
           : isLateCancel ? "\nA late cancellation fee applies — we'll be in touch." : "\nYour package session is available for you to rebook.")
       : wasPaid
         ? (moneyOutcome ? `\n${moneyOutcome}.` : "\nNothing additional is due — your account credit already covered this.")
@@ -638,7 +638,7 @@ export async function DELETE(
   const adminMoneyOutcome = describeMoneyOutcome(stripeRefundResult, cancelCredit, isLateCancel, true);
   const adminPackageNote = reg.package_id
     ? packageLateFeeCheckoutUrl
-      ? `\nPackage session — late fee checkout sent: $${fmtMoney((packageLateFeeAmount || 0) + SERVICE_FEE)}`
+      ? `\nPackage session — late fee checkout sent: $${fmtMoney((packageLateFeeAmount || 0) + calcServiceFee(packageLateFeeAmount || 0))}`
       : "\nPackage session — on-time, no fee, slot freed"
     : "";
   await sendAdminSMS(`CANCELLED: ${reg.parent_name}\n${cancelSessionDetails}${isLateCancel ? " (late)" : ""}${adminMoneyOutcome ? `\n${adminMoneyOutcome}` : ""}${adminPackageNote}\nPlayers: ${reg.kids}`);
@@ -846,7 +846,7 @@ export async function PATCH(
             price_data: {
               currency: "usd",
               product_data: { name: "Service Fee" },
-              unit_amount: Math.round(SERVICE_FEE * 100),
+              unit_amount: Math.round(calcServiceFee(totalOwedViaCheckout) * 100),
             },
             quantity: 1,
           },
@@ -1197,7 +1197,7 @@ export async function PUT(
                 price_data: {
                   currency: "usd",
                   product_data: { name: "Service Fee" },
-                  unit_amount: Math.round(SERVICE_FEE * 100),
+                  unit_amount: Math.round(calcServiceFee(packageLateFeeAmount) * 100),
                 },
                 quantity: 1,
               },
@@ -1309,7 +1309,7 @@ export async function PUT(
           price_data: {
             currency: "usd",
             product_data: { name: "Service Fee" },
-            unit_amount: Math.round(SERVICE_FEE * 100),
+            unit_amount: Math.round(calcServiceFee(priceReconciliation.amount) * 100),
           },
           quantity: 1,
         },
@@ -1442,7 +1442,7 @@ export async function PUT(
   const refundOutcomeText = refundAdjustment ? describeMoneyOutcome(refundAdjustment, 0, false, false) : "";
   const refundOutcomeAdminText = refundAdjustment ? describeMoneyOutcome(refundAdjustment, 0, false, true) : "";
   const leftoverLateFeeCredit = Math.max(0, lateFeeCredited - lateFeeCreditApplied);
-  const packageFeeTotal = packageLateFeeAmount != null ? Math.round((packageLateFeeAmount + SERVICE_FEE) * 100) / 100 : undefined;
+  const packageFeeTotal = packageLateFeeAmount != null ? Math.round((packageLateFeeAmount + calcServiceFee(packageLateFeeAmount)) * 100) / 100 : undefined;
   if (reg.sms_consent && reg.phone) {
     const rescheduleLabel = newSessionDetails.split(" — ")[0] || "Session";
     const lateNote = reg.package_id

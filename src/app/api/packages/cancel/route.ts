@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { getPackageById, packageHasAnyBookedSession, cancelPackage, revertPackageCancellation, addAccountCredit } from "@/lib/supabase";
 import { issueStripeRefund } from "@/lib/booking-finalize";
 import { sendSMS, sendAdminSMS } from "@/lib/sms";
-import { fmtMoney, packagePrice } from "@/lib/pricing";
+import { fmtMoney, packagePrice, calcServiceFee } from "@/lib/pricing";
 
 // The ownership check below must never trust a client-supplied email —
 // only the caller's OWN authenticated session can prove which package is
@@ -69,16 +69,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "This package can't be cancelled anymore — a session has already been booked against it." }, { status: 400 });
     }
 
-    // The $4.50 service fee is never refunded, on any cancellation — it
-    // covers Stripe's own (also non-refundable) processing cut, so giving
-    // it back would mean paying that cut out of pocket. Only the package
-    // price itself is refunded/credited here. Always refund what was
-    // ACTUALLY CHARGED at enrollment (total_price), not packagePrice()'s
-    // current return value — if the rate changes between enrollment and
+    // The service fee is never refunded, on any cancellation — it covers
+    // Stripe's own (also non-refundable) processing cut, so giving it back
+    // would mean paying that cut out of pocket. Only the package price
+    // itself is refunded/credited here. Always refund what was ACTUALLY
+    // CHARGED at enrollment (total_price), not packagePrice()'s current
+    // return value — if the rate changes between enrollment and
     // cancellation, recomputing live would refund the wrong amount. The
     // packagePrice() fallback only covers packages enrolled before this
     // column existed (already backfilled by migration, but defensive here too).
     const totalPrice = pkg.total_price ?? packagePrice(pkg.package_type);
+    const serviceFeeText = fmtMoney(calcServiceFee(totalPrice));
 
     let refundResult: { refundedAmount: number; creditedAmount: number; failed: boolean } | undefined;
     let creditIssued = 0;
@@ -112,10 +113,10 @@ export async function POST(req: NextRequest) {
         const message = refundFailed
           ? `Mesa Basketball: Your ${pkg.package_type}-session package for ${pkg.month_year} has been cancelled. Your refund is being processed — you'll receive a separate confirmation once it's complete.`
           : refundedToCard > 0 && totalCredited > 0
-            ? `Mesa Basketball: Your ${pkg.package_type}-session package for ${pkg.month_year} has been cancelled. $${fmtMoney(refundedToCard)} has been refunded to your original payment method and $${fmtMoney(totalCredited)} credited to your account (the $4.50 service fee isn't refundable).`
+            ? `Mesa Basketball: Your ${pkg.package_type}-session package for ${pkg.month_year} has been cancelled. $${fmtMoney(refundedToCard)} has been refunded to your original payment method and $${fmtMoney(totalCredited)} credited to your account (the $${serviceFeeText} service fee isn't refundable).`
             : totalCredited > 0
-              ? `Mesa Basketball: Your ${pkg.package_type}-session package for ${pkg.month_year} has been cancelled. $${fmtMoney(totalCredited)} has been credited to your account (the $4.50 service fee isn't refundable).`
-              : `Mesa Basketball: Your ${pkg.package_type}-session package for ${pkg.month_year} has been cancelled. $${fmtMoney(refundedToCard)} has been refunded to your original payment method (the $4.50 service fee isn't refundable).`;
+              ? `Mesa Basketball: Your ${pkg.package_type}-session package for ${pkg.month_year} has been cancelled. $${fmtMoney(totalCredited)} has been credited to your account (the $${serviceFeeText} service fee isn't refundable).`
+              : `Mesa Basketball: Your ${pkg.package_type}-session package for ${pkg.month_year} has been cancelled. $${fmtMoney(refundedToCard)} has been refunded to your original payment method (the $${serviceFeeText} service fee isn't refundable).`;
         await sendSMS(pkg.phone, message);
       }
       const adminMoney = refundFailed
@@ -126,7 +127,13 @@ export async function POST(req: NextRequest) {
       console.error("Package cancellation notification error:", err);
     }
 
-    return NextResponse.json({ success: true, refundedAmount: refundedToCard, creditedAmount: totalCredited, refundFailed });
+    return NextResponse.json({
+      success: true,
+      refundedAmount: refundedToCard,
+      creditedAmount: totalCredited,
+      refundFailed,
+      serviceFee: calcServiceFee(totalPrice),
+    });
   } catch (error) {
     console.error("Package cancellation error:", error);
     return NextResponse.json({ error: "Cancellation failed. Please try again." }, { status: 500 });

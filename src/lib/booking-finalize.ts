@@ -3,7 +3,7 @@ import { sendRegistrationNotification, sendReferralCreditNotification, sendResch
 import { addPrivateSessionToCalendar, deletePrivateSessionFromCalendar, upsertGroupSessionCalendarEvent } from "@/lib/calendar";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import { getStripe } from "@/lib/stripe";
-import { SERVICE_FEE, fmtMoney, packagePrice, fullPriceForType } from "@/lib/pricing";
+import { calcServiceFee, fmtMoney, packagePrice, fullPriceForType } from "@/lib/pricing";
 import {
   addReferralCredit,
   awardReferralCreditOnce,
@@ -427,7 +427,7 @@ export async function finalizeConfirmedPrivateBooking(params: FinalizePrivateBoo
       : "";
     const privateTrainerLine = isPrivateType && params.bookedTrainer ? `\nTrainer: ${params.bookedTrainer}` : "";
     const creditLine = params.accountCreditApplied > 0 ? `\n$${fmtMoney(params.accountCreditApplied)} account credit applied.` : "";
-    const chargeLine = amountCharged > 0 ? `\nCharged: $${fmtMoney(amountCharged + SERVICE_FEE)}.` : "";
+    const chargeLine = amountCharged > 0 ? `\nCharged: $${fmtMoney(amountCharged + calcServiceFee(amountCharged))}.` : "";
     await sendSMS(params.phone, `Mesa Basketball: Your ${typeStr} is confirmed!${dateLine}${privateTrainerLine}${pkgNote}${creditLine}${chargeLine}\nAthlete: ${params.kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
   }
 
@@ -517,7 +517,7 @@ export async function finalizeConfirmedWeeklyBooking(params: FinalizeWeeklyBooki
   // covered by credit. Worded as "Charged," never "Due," since this only
   // sends once the booking is already confirmed/paid.
   const weeklyAmountCharged = weeklyTotalPrice ? Math.max(0, weeklyTotalPrice - weeklyCreditApplied) : 0;
-  const weeklyTotalWithFee = weeklyAmountCharged > 0 ? Math.round((weeklyAmountCharged + SERVICE_FEE) * 100) / 100 : 0;
+  const weeklyTotalWithFee = weeklyAmountCharged > 0 ? Math.round((weeklyAmountCharged + calcServiceFee(weeklyAmountCharged)) * 100) / 100 : 0;
   const priceNote = weeklyTotalPrice
     ? `<p><strong>Total:</strong> $${fmtMoney(weeklyTotalPrice)}${weeklyCreditApplied > 0 ? ` — $${fmtMoney(weeklyCreditApplied)} account credit applied` : ""}${weeklyAmountCharged > 0 ? ` — <strong>Charged:</strong> $${fmtMoney(weeklyTotalWithFee)}` : ""}</p>`
     : "";
@@ -642,7 +642,7 @@ export async function finalizeConfirmedCampBooking(params: FinalizeCampBookingPa
     .map((s) => `${s.date} ${s.startTime}${s.endTime ? `-${s.endTime}` : ""}`)
     .join("<br/>");
   const campAmountCharged = Math.max(0, (campTotalNum ?? sessionPrice ?? 0) - campCreditApplied);
-  const campTotalWithFee = campAmountCharged > 0 ? Math.round((campAmountCharged + SERVICE_FEE) * 100) / 100 : 0;
+  const campTotalWithFee = campAmountCharged > 0 ? Math.round((campAmountCharged + calcServiceFee(campAmountCharged)) * 100) / 100 : 0;
   const priceNote = campTotalPrice
     ? `<br/><strong>Total:</strong> ${campTotalPrice}${campCreditApplied > 0 ? ` — $${fmtMoney(campCreditApplied)} account credit applied` : ""}${campAmountCharged > 0 ? ` — <strong>Charged:</strong> $${fmtMoney(campTotalWithFee)}` : ""}`
     : "";
@@ -823,7 +823,7 @@ export async function finalizeConfirmedPrivateSeriesBooking(params: FinalizePriv
     .join("<br/>");
   const totalPaid = privateSessions.reduce((sum, s) => sum + (s.packageCovered ? 0 : s.isFree ? Math.round(s.fullPrice * 0.5 * 100) / 100 : s.fullPrice), 0);
   const seriesAmountCharged = Math.max(0, totalPaid - params.accountCreditApplied);
-  const seriesTotalWithFee = seriesAmountCharged > 0 ? Math.round((seriesAmountCharged + SERVICE_FEE) * 100) / 100 : 0;
+  const seriesTotalWithFee = seriesAmountCharged > 0 ? Math.round((seriesAmountCharged + calcServiceFee(seriesAmountCharged)) * 100) / 100 : 0;
   const priceNote = `<p><strong>Total:</strong> $${fmtMoney(totalPaid)}${params.accountCreditApplied > 0 ? ` — $${fmtMoney(params.accountCreditApplied)} account credit applied` : ""}${seriesAmountCharged > 0 ? ` — <strong>Charged:</strong> $${fmtMoney(seriesTotalWithFee)}` : ""}</p>`;
 
   try {
@@ -1071,7 +1071,7 @@ export async function finalizeRescheduleTopup(params: FinalizeRescheduleTopupPar
     console.error("Reschedule email failed (topup booking was paid):", err);
   }
 
-  const topupTotalWithFee = Math.round((params.amountCharged + SERVICE_FEE) * 100) / 100;
+  const topupTotalWithFee = Math.round((params.amountCharged + calcServiceFee(params.amountCharged)) * 100) / 100;
   const creditAppliedNote = params.lateFeeCreditApplied
     ? ` ($${fmtMoney(params.lateFeeCreditApplied)} late-fee credit applied, remainder charged)`
     : "";
@@ -1162,7 +1162,7 @@ async function finalizePaidPackageEnrollment(
     console.error("Package confirmation email failed (booking was paid):", notifyErr);
   }
 
-  const totalWithFee = Math.round((totalPrice + SERVICE_FEE) * 100) / 100;
+  const totalWithFee = Math.round((totalPrice + calcServiceFee(totalPrice)) * 100) / 100;
   if (smsConsent && pkg.phone) {
     await sendSMS(pkg.phone, `Mesa Basketball: Your ${pkg.package_type}-session package is confirmed for ${pkg.month_year}! Charged: $${fmtMoney(totalWithFee)}.\nBook your private sessions at mesabasketballtraining.com/schedule and we'll track them automatically.\nReply STOP to opt out.`);
   }
@@ -1298,7 +1298,7 @@ async function finalizePlayerEditTopup(session: Stripe.Checkout.Session): Promis
     ].filter(Boolean).join(" | ");
     const sessionLabel = reg.session_details.split(" — ")[0] || reg.session_details;
     const totalOwed = metadata.total_owed ? parseFloat(metadata.total_owed) : 0;
-    await sendAdminSMS(`PLAYERS UPDATED & PAID (${sessionLabel}): ${reg.parent_name}\n${changeNote || "Roster order/details changed"}\nNow: ${newKids}\n$${fmtMoney(totalOwed + SERVICE_FEE)} charged (incl. service fee).`).catch(() => {});
+    await sendAdminSMS(`PLAYERS UPDATED & PAID (${sessionLabel}): ${reg.parent_name}\n${changeNote || "Roster order/details changed"}\nNow: ${newKids}\n$${fmtMoney(totalOwed + calcServiceFee(totalOwed))} charged (incl. service fee).`).catch(() => {});
   } catch (err) {
     console.error("Player update notification error (paid topup):", err);
   }

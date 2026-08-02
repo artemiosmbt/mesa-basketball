@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { authClient } from "@/lib/auth";
-import { fmtMoney } from "@/lib/pricing";
+import { fmtMoney, packagePrice, calcServiceFee } from "@/lib/pricing";
 
 const LOCATION_NAMES: Record<string, string> = {
   "St. Pauls": "St. Paul's Cathedral",
@@ -129,10 +129,10 @@ export default function MyBookings() {
           message: data.refundFailed
             ? "Your package has been cancelled. Your refund is being processed — you'll get a separate confirmation once it's complete."
             : data.refundedAmount > 0 && data.creditedAmount > 0
-              ? `Your package has been cancelled — $${fmtMoney(data.refundedAmount)} has been refunded to your original payment method and $${fmtMoney(data.creditedAmount)} credited to your account (the $4.50 service fee isn't refundable).`
+              ? `Your package has been cancelled — $${fmtMoney(data.refundedAmount)} has been refunded to your original payment method and $${fmtMoney(data.creditedAmount)} credited to your account (the $${fmtMoney(data.serviceFee)} service fee isn't refundable).`
               : data.creditedAmount > 0
-                ? `Your package has been cancelled and $${fmtMoney(data.creditedAmount)} has been credited to your account (the $4.50 service fee isn't refundable).`
-                : `Your package has been cancelled and $${fmtMoney(data.refundedAmount)} has been refunded to your original payment method (the $4.50 service fee isn't refundable).`,
+                ? `Your package has been cancelled and $${fmtMoney(data.creditedAmount)} has been credited to your account (the $${fmtMoney(data.serviceFee)} service fee isn't refundable).`
+                : `Your package has been cancelled and $${fmtMoney(data.refundedAmount)} has been refunded to your original payment method (the $${fmtMoney(data.serviceFee)} service fee isn't refundable).`,
         });
         setActivePackage(null);
       } else {
@@ -249,7 +249,7 @@ export default function MyBookings() {
 
                       {showPackageCancelConfirm ? (
                         <div className="mt-4 rounded-lg border border-red-800/50 bg-red-900/10 p-3">
-                          <p className="text-xs text-brown-300 mb-3">Cancel this package and refund the package price to your card? (The $4.50 service fee isn&apos;t refundable.)</p>
+                          <p className="text-xs text-brown-300 mb-3">Cancel this package and refund the package price to your card? (The {`$${fmtMoney(calcServiceFee(packagePrice(activePackage.packageType)))}`} service fee isn&apos;t refundable.)</p>
                           <div className="flex gap-2">
                             <button
                               type="button"
