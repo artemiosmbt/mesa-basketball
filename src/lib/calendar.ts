@@ -508,7 +508,7 @@ export async function addPrivateSessionToCalendar(
 
   const token = await getAccessToken(saEmail, privateKey);
 
-  const summary = `Private — ${params.parentName} (${params.kids})`;
+  const summary = `Private Session — ${stripAthleteDetails(params.kids)}`;
   // Includes start time — email+date alone collides when the same family
   // has two private sessions on the same day (e.g. two kids at different
   // times), which would make delete/reschedule target whichever event
