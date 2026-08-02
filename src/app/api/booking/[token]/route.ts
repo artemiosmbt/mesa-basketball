@@ -20,7 +20,7 @@ import {
 } from "@/lib/supabase";
 import { issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome, isLateAction, parseSessionDateTimeET } from "@/lib/booking-finalize";
 import { getStripe } from "@/lib/stripe";
-import { calcServiceFee, fmtMoney, calcPrivatePrice } from "@/lib/pricing";
+import { calcServiceFee, serviceFeeItemName, fmtMoney, calcPrivatePrice } from "@/lib/pricing";
 import {
   sendCancellationNotification,
   sendRescheduleNotification,
@@ -565,7 +565,7 @@ export async function DELETE(
             {
               price_data: {
                 currency: "usd",
-                product_data: { name: "Service Fee" },
+                product_data: { name: serviceFeeItemName(packageLateFeeAmount) },
                 unit_amount: Math.round(calcServiceFee(packageLateFeeAmount) * 100),
               },
               quantity: 1,
@@ -845,7 +845,7 @@ export async function PATCH(
           {
             price_data: {
               currency: "usd",
-              product_data: { name: "Service Fee" },
+              product_data: { name: serviceFeeItemName(totalOwedViaCheckout) },
               unit_amount: Math.round(calcServiceFee(totalOwedViaCheckout) * 100),
             },
             quantity: 1,
@@ -1196,7 +1196,7 @@ export async function PUT(
               {
                 price_data: {
                   currency: "usd",
-                  product_data: { name: "Service Fee" },
+                  product_data: { name: serviceFeeItemName(packageLateFeeAmount) },
                   unit_amount: Math.round(calcServiceFee(packageLateFeeAmount) * 100),
                 },
                 quantity: 1,
@@ -1308,7 +1308,7 @@ export async function PUT(
         {
           price_data: {
             currency: "usd",
-            product_data: { name: "Service Fee" },
+            product_data: { name: serviceFeeItemName(priceReconciliation.amount) },
             unit_amount: Math.round(calcServiceFee(priceReconciliation.amount) * 100),
           },
           quantity: 1,

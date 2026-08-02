@@ -15,6 +15,9 @@
 const SERVICE_FEE_FLAT = 4.5;
 const SERVICE_FEE_THRESHOLD = 140;
 const SERVICE_FEE_PERCENT = 0.032;
+// Shared display string so the percentage shown in copy (registration form,
+// Stripe checkout, etc.) can never drift from the actual rate above.
+export const SERVICE_FEE_PERCENT_TEXT = `${(SERVICE_FEE_PERCENT * 100).toFixed(1)}%`;
 
 // `chargeAmount` must be the actual pre-fee amount being charged to the
 // card for THIS transaction (i.e. after any account credit/discount is
@@ -26,6 +29,20 @@ export function calcServiceFee(chargeAmount: number): number {
 
 export function serviceFeeLabel(chargeAmount: number): string {
   return `$${calcServiceFee(chargeAmount).toFixed(2)}`;
+}
+
+// True when this charge falls in the percentage tier rather than the flat
+// $4.50 tier — used to decide whether to show "(3.2%)" next to the "Service
+// Fee" label, so customers can see why a larger charge's fee is bigger.
+export function isPercentServiceFee(chargeAmount: number): boolean {
+  return chargeAmount > SERVICE_FEE_THRESHOLD;
+}
+
+// "Service Fee" item name shown on the registration form, Stripe Checkout's
+// own line items, and Stripe's receipt — appends "(3.2%)" only when this
+// specific charge is actually in the percentage tier, never for the flat fee.
+export function serviceFeeItemName(chargeAmount: number): string {
+  return isPercentServiceFee(chargeAmount) ? `Service Fee (${SERVICE_FEE_PERCENT_TEXT})` : "Service Fee";
 }
 
 // Always renders a dollar amount with two decimal places (e.g. 154.5 ->

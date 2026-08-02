@@ -18,7 +18,7 @@ import {
   recordCampDayRefund,
 } from "@/lib/supabase";
 import { getStripe } from "@/lib/stripe";
-import { calcServiceFee, fmtMoney, calcPrivatePrice } from "@/lib/pricing";
+import { calcServiceFee, serviceFeeItemName, fmtMoney, calcPrivatePrice } from "@/lib/pricing";
 
 
 function parseMinsFromTime(t: string): number {
@@ -390,7 +390,7 @@ export async function POST(req: NextRequest) {
             {
               price_data: {
                 currency: "usd",
-                product_data: { name: "Service Fee" },
+                product_data: { name: serviceFeeItemName(packageLateFeeAmount) },
                 unit_amount: Math.round(calcServiceFee(packageLateFeeAmount) * 100),
               },
               quantity: 1,

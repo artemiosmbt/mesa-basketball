@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { enrollInPackage, getActivePackage, hasPendingOrActivePackage, isNewClient, findReferrerInfoByCode, attachPackageCheckoutSession } from "@/lib/supabase";
 import { getStripe } from "@/lib/stripe";
-import { calcServiceFee, packagePrice } from "@/lib/pricing";
+import { calcServiceFee, serviceFeeItemName, packagePrice } from "@/lib/pricing";
 import { resolveRequestEmail } from "@/lib/request-email";
 
 export async function POST(req: NextRequest) {
@@ -88,7 +88,7 @@ export async function POST(req: NextRequest) {
         {
           price_data: {
             currency: "usd",
-            product_data: { name: "Service Fee" },
+            product_data: { name: serviceFeeItemName(totalPrice) },
             unit_amount: Math.round(calcServiceFee(totalPrice) * 100),
           },
           quantity: 1,

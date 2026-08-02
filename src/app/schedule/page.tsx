@@ -4,7 +4,7 @@ import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import Image from "next/image";
 import { authClient, ADMIN_EMAIL } from "@/lib/auth";
 import LandingNav from "@/app/LandingNav";
-import { calcServiceFee, serviceFeeLabel, packagePrice, PRIVATE_RATE, GROUP_PRIVATE_RATE, calcPrivatePrice as getPrivatePrice } from "@/lib/pricing";
+import { calcServiceFee, serviceFeeLabel, serviceFeeItemName, isPercentServiceFee, SERVICE_FEE_PERCENT_TEXT, packagePrice, PRIVATE_RATE, GROUP_PRIVATE_RATE, calcPrivatePrice as getPrivatePrice } from "@/lib/pricing";
 
 const LOCATION_LINKS: Record<string, { name: string; url: string }> = {
   "St. Pauls": { name: "St. Paul's Cathedral", url: "https://share.google/kgiqMxAj2iAFEAGI6" },
@@ -3587,7 +3587,7 @@ export default function Home() {
                     ))}
                     {orderRemainder > 0 && (
                       <div className="flex items-center justify-between gap-3">
-                        <span className="text-brown-300">Service Fee</span>
+                        <span className="text-brown-300">{serviceFeeItemName(orderRemainder)}</span>
                         <span className="text-white shrink-0">{serviceFeeLabel(orderRemainder)}</span>
                       </div>
                     )}
@@ -3652,7 +3652,7 @@ export default function Home() {
               <button onClick={() => setPkgModal({ open: false, packageType: null })} className="text-2xl text-brown-400 hover:text-white">&times;</button>
             </div>
             <p className="mt-1 text-sm text-brown-400">
-              ${packagePrice(pkgModal.packageType || 4)} + {serviceFeeLabel(packagePrice(pkgModal.packageType || 4))} service fee — paid securely by card via Stripe
+              ${packagePrice(pkgModal.packageType || 4)} + {serviceFeeLabel(packagePrice(pkgModal.packageType || 4))} service fee{isPercentServiceFee(packagePrice(pkgModal.packageType || 4)) ? ` (${SERVICE_FEE_PERCENT_TEXT})` : ""} — paid securely by card via Stripe
             </p>
 
             {pkgResult?.success ? (
