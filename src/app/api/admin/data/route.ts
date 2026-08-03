@@ -31,7 +31,10 @@ export async function GET(req: NextRequest) {
     supabase.from("registrations").select("*").order("created_at", { ascending: false }),
     supabase.from("profiles").select("email, video_consent"),
     supabase.from("referral_credits").select("email, credits, total_referrals"),
-    supabase.from("monthly_packages").select("id, email, package_type, month_year, is_paid"),
+    // Same payment_abandoned exclusion as /api/admin/packages — an
+    // never-completed Checkout Session shouldn't count as a real package
+    // when deciding whether a private session is "within" a paid package.
+    supabase.from("monthly_packages").select("id, email, package_type, month_year, is_paid").neq("status", "payment_abandoned"),
     supabase.from("account_credits").select("email, balance").gt("balance", 0),
     // Recent-activity feed only — older rows are irrelevant clutter, so the
     // query itself narrows to the last week rather than filtering client-side.

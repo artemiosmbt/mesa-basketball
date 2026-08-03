@@ -1082,6 +1082,7 @@ export async function finalizePaidPackage(
     .from("monthly_packages")
     .update({
       status: "active",
+      is_paid: true,
       stripe_payment_intent_id: stripePaymentIntentId,
       sms_consent: smsConsent,
       ...(stripeCustomerId ? { stripe_customer_id: stripeCustomerId } : {}),

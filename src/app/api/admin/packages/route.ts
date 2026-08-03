@@ -14,9 +14,17 @@ export async function GET(req: NextRequest) {
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
 
+  // payment_abandoned = a Stripe Checkout that was started and never
+  // completed (closed the tab, card declined, etc.) — nothing was charged,
+  // so it has no business cluttering this list forever. Deleting the row
+  // outright (rather than just filtering client-side) isn't safe here since
+  // some other view might still want the historical record; excluding it
+  // from this admin list is enough to stop it looking like a stuck "unpaid"
+  // package that needs chasing.
   const { data, error } = await supabase
     .from("monthly_packages")
     .select("*")
+    .neq("status", "payment_abandoned")
     .order("created_at", { ascending: false });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
