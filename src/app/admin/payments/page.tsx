@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, type FormEvent } from "react";
+import { useState, useEffect, useMemo, useCallback, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { authClient, ADMIN_EMAIL } from "@/lib/auth";
@@ -287,6 +287,71 @@ export default function PaymentsPage() {
     return date.getTime();
   }
 
+  // Volume discount rates for group sessions booked together (where session_price was not stored)
+  const weeklyDiscountRates = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const r of registrations) {
+      if (r.type === "weekly" && !r.is_full_camp && r.referral_code && r.session_price == null) {
+        counts.set(r.referral_code, (counts.get(r.referral_code) || 0) + 1);
+      }
+    }
+    const rateMap = new Map<string, number>();
+    for (const [code, count] of counts) {
+      if (count >= 8) rateMap.set(code, 0.15);
+      else if (count >= 4) rateMap.set(code, 0.10);
+    }
+    return rateMap;
+  }, [registrations]);
+
+  // Recomputed current total per full-camp referral_code group (capped at the
+  // original full-week price), shared by effectiveAmount() and campAdjustments
+  // below so both agree on the same number for a given family.
+  const campGroupFinalAmounts = useMemo(() => {
+    const groups = new Map<string, Registration[]>();
+    for (const r of registrations) {
+      if (!r.is_full_camp || !r.referral_code) continue;
+      const key = campGroupKey(r);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(r);
+    }
+    const map = new Map<string, number>();
+    for (const [key, rows] of groups) {
+      const originalAmount = rows[0].session_price ?? 0;
+      const confirmed = rows.filter((r) => r.status === "confirmed");
+      const cancelled = rows.filter((r) => r.status === "cancelled");
+      const perDayRate = rows[0].camp_drop_in_rate ?? Math.round(originalAmount / rows.length);
+      const recomputedPrice = Math.min(confirmed.length * perDayRate, originalAmount);
+      const accruedFees = cancelled.reduce((sum, r) => sum + (r.camp_day_late_fee || 0), 0);
+      map.set(key, Math.min(originalAmount, recomputedPrice + accruedFees));
+    }
+    return map;
+  }, [registrations]);
+
+  // Shared by the unpaid/paid filters below (a booking effectively owing $0
+  // after credit can't be "unpaid") and by the amount column in the tables.
+  // useCallback (not a plain function) so the unpaid useMemo below can
+  // declare it as a real dependency instead of silently closing over
+  // campGroupFinalAmounts/weeklyDiscountRates.
+  const effectiveAmount = useCallback((r: Registration): number => {
+    const isPrivateType = r.type === "private" || r.type === "group-private";
+    let basePrice: number;
+    if (r.is_full_camp && r.referral_code && campGroupFinalAmounts.has(campGroupKey(r))) {
+      basePrice = campGroupFinalAmounts.get(campGroupKey(r))!;
+    } else if (r.session_price != null) {
+      basePrice = r.session_price;
+    } else if (r.type === "weekly" && !r.is_full_camp && r.referral_code && weeklyDiscountRates.has(r.referral_code)) {
+      const discount = weeklyDiscountRates.get(r.referral_code)!;
+      basePrice = Math.round(50 * (r.total_participants || 1) * (1 - discount));
+    } else {
+      basePrice = fullPriceForType(r.type);
+    }
+    const discounted = r.is_free && isPrivateType ? Math.round(basePrice * 0.5 * 100) / 100 : basePrice;
+    // session_price/basePrice is always the full pre-credit rate — account
+    // credit applied at booking time is a separate field and has to be
+    // subtracted here, or this shows what they'd owe with no credit at all.
+    return Math.max(0, discounted - (r.applied_account_credit || 0));
+  }, [campGroupFinalAmounts, weeklyDiscountRates]);
+
   const packageMembership = useMemo(() => {
     const result = new Map<string, { withinPackage: boolean; packagePaid: boolean }>();
 
@@ -343,6 +408,12 @@ export default function PaymentsPage() {
         if (r.status !== "confirmed" || r.is_paid || r.stripe_payment_intent_id) return false;
         const mem = packageMembership.get(r.id);
         if (mem?.withinPackage && mem.packagePaid) return false;
+        // A booking fully covered by account credit at booking time never
+        // touches Stripe (no payment_intent) and is_paid is never set for
+        // it either — same shape as a real pre-Stripe unpaid row, but
+        // nothing is actually owed. Without this it shows up here as a
+        // nonsensical "$0 unpaid" line.
+        if (effectiveAmount(r) === 0) return false;
         // Full camps are one payment covering all days — only show one row per camp group
         if (r.is_full_camp && r.referral_code) {
           const key = campGroupKey(r);
@@ -352,7 +423,7 @@ export default function PaymentsPage() {
         return true;
       })
       .sort((a, b) => dateMs(a.booked_date) - dateMs(b.booked_date));
-  }, [registrations, packageMembership]);
+  }, [registrations, packageMembership, effectiveAmount]);
 
   const paid = useMemo(() => {
     const seenCamps = new Set<string>();
@@ -368,67 +439,6 @@ export default function PaymentsPage() {
       })
       .sort((a, b) => sessionDateTimeMs(a) - sessionDateTimeMs(b));
   }, [registrations, now]);
-
-  // Volume discount rates for group sessions booked together (where session_price was not stored)
-  const weeklyDiscountRates = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const r of registrations) {
-      if (r.type === "weekly" && !r.is_full_camp && r.referral_code && r.session_price == null) {
-        counts.set(r.referral_code, (counts.get(r.referral_code) || 0) + 1);
-      }
-    }
-    const rateMap = new Map<string, number>();
-    for (const [code, count] of counts) {
-      if (count >= 8) rateMap.set(code, 0.15);
-      else if (count >= 4) rateMap.set(code, 0.10);
-    }
-    return rateMap;
-  }, [registrations]);
-
-  // Recomputed current total per full-camp referral_code group (capped at the
-  // original full-week price), shared by effectiveAmount() and campAdjustments
-  // below so both agree on the same number for a given family.
-  const campGroupFinalAmounts = useMemo(() => {
-    const groups = new Map<string, Registration[]>();
-    for (const r of registrations) {
-      if (!r.is_full_camp || !r.referral_code) continue;
-      const key = campGroupKey(r);
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key)!.push(r);
-    }
-    const map = new Map<string, number>();
-    for (const [key, rows] of groups) {
-      const originalAmount = rows[0].session_price ?? 0;
-      const confirmed = rows.filter((r) => r.status === "confirmed");
-      const cancelled = rows.filter((r) => r.status === "cancelled");
-      const perDayRate = rows[0].camp_drop_in_rate ?? Math.round(originalAmount / rows.length);
-      const recomputedPrice = Math.min(confirmed.length * perDayRate, originalAmount);
-      const accruedFees = cancelled.reduce((sum, r) => sum + (r.camp_day_late_fee || 0), 0);
-      map.set(key, Math.min(originalAmount, recomputedPrice + accruedFees));
-    }
-    return map;
-  }, [registrations]);
-
-  function effectiveAmount(r: Registration): number {
-    const isPrivateType = r.type === "private" || r.type === "group-private";
-    let basePrice: number;
-    if (r.is_full_camp && r.referral_code && campGroupFinalAmounts.has(campGroupKey(r))) {
-      basePrice = campGroupFinalAmounts.get(campGroupKey(r))!;
-    } else if (r.session_price != null) {
-      basePrice = r.session_price;
-    } else if (r.type === "weekly" && !r.is_full_camp && r.referral_code && weeklyDiscountRates.has(r.referral_code)) {
-      const discount = weeklyDiscountRates.get(r.referral_code)!;
-      basePrice = Math.round(50 * (r.total_participants || 1) * (1 - discount));
-    } else {
-      basePrice = fullPriceForType(r.type);
-    }
-    const discounted = r.is_free && isPrivateType ? Math.round(basePrice * 0.5 * 100) / 100 : basePrice;
-    // session_price/basePrice is always the full pre-credit rate — account
-    // credit applied at booking time is a separate field and has to be
-    // subtracted here, or this shows what they'd owe with no credit at all.
-    return Math.max(0, discounted - (r.applied_account_credit || 0));
-  }
-
 
   if (loading) {
     return (
