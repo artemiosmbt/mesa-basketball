@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
-import { authClient, ADMIN_EMAIL } from "@/lib/auth";
+import { authClient, resolveAuthRole } from "@/lib/auth";
 
 const chevron = (open?: boolean) => (
   <svg xmlns="http://www.w3.org/2000/svg" className={`h-3 w-3 mt-0.5 transition-transform ${open ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -18,6 +18,7 @@ export default function AboutNav() {
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const router = useRouter();
   const pathname = usePathname();
+  const hasAdminAccess = !!resolveAuthRole(userEmail);
 
   useEffect(() => {
     authClient.auth.getSession().then(({ data: { session } }) => {
@@ -73,7 +74,7 @@ export default function AboutNav() {
                   </div>
                   <Link href="/my-bookings" className="block px-4 py-2 text-brown-600 hover:text-mesa-dark hover:bg-gray-50">My Bookings</Link>
                   <Link href="/settings" className="block px-4 py-2 text-brown-600 hover:text-mesa-dark hover:bg-gray-50">Settings</Link>
-                  {userEmail === ADMIN_EMAIL && (
+                  {hasAdminAccess && (
                     <Link href="/admin" className="block px-4 py-2 text-mesa-accent hover:text-yellow-600 hover:bg-gray-50 font-medium">Admin</Link>
                   )}
                   <div className="border-t border-gray-100 mt-1 pt-1">
@@ -147,7 +148,7 @@ export default function AboutNav() {
                   <p className="text-xs text-brown-400 py-1">Signed in as <span className="font-medium text-brown-600">{userEmail}</span></p>
                   <Link href="/my-bookings" onClick={() => setMobileMenuOpen(false)} className="block text-brown-500 hover:text-mesa-dark py-1">My Bookings</Link>
                   <Link href="/settings" onClick={() => setMobileMenuOpen(false)} className="block text-brown-500 hover:text-mesa-dark py-1">Settings</Link>
-                  {userEmail === ADMIN_EMAIL && (
+                  {hasAdminAccess && (
                     <Link href="/admin" onClick={() => setMobileMenuOpen(false)} className="block text-mesa-accent hover:text-yellow-600 py-1 font-medium">Admin</Link>
                   )}
                   <button onClick={handleSignOut} className="block text-brown-500 hover:text-mesa-dark py-1">Sign Out</button>
