@@ -757,14 +757,18 @@ function CalendarView({ list, packageMembership, weeklyDiscountRates, weeklyCapa
                 {priceDisplay(r, weeklyDiscountRates)}
               </span>
             )}
-            {canEdit && r.status === "confirmed" && (
+            {r.status === "confirmed" && (
               <div className="flex gap-2">
-                <button onClick={() => cancelRegistration(r.id)} disabled={cancelling === r.id} className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50">
-                  {cancelling === r.id ? "..." : "Cancel"}
-                </button>
-                <button onClick={() => openReschedule(r)} className="text-xs text-blue-400 hover:text-blue-300 transition">
-                  Reschedule
-                </button>
+                {canEdit && (
+                  <button onClick={() => cancelRegistration(r.id)} disabled={cancelling === r.id} className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50">
+                    {cancelling === r.id ? "..." : "Cancel"}
+                  </button>
+                )}
+                {canEdit && (
+                  <button onClick={() => openReschedule(r)} className="text-xs text-blue-400 hover:text-blue-300 transition">
+                    Reschedule
+                  </button>
+                )}
                 {noShowConfirm !== r.id ? (
                   <button onClick={() => setNoShowConfirm(r.id)} disabled={noShowing === r.id} className="text-xs text-orange-400 hover:text-orange-300 transition disabled:opacity-50">
                     No Show
@@ -1272,6 +1276,12 @@ export default function AdminPage() {
     if (notes.length > 0) alert(`Rescheduled. ${notes.join(" ")}`);
   }
 
+  // Cancel/Reschedule/Delete/Add-Player/payment edits are admin-only; No
+  // Show is the one exception every trainer tier can still take (see RegCard
+  // and CalendarView's regRowJSX) since a trainer is the one who'd actually
+  // know a client didn't show up.
+  const canEdit = authCtx?.role === "admin";
+
   // Everything the dashboard displays is scoped through this — "all" is a
   // no-op for a basic trainer account anyway, since the server already only
   // ever sent them their own sessions. packageMembership/weeklyDiscountRates
@@ -1540,15 +1550,17 @@ export default function AdminPage() {
               <p className="text-brown-200 whitespace-pre-line leading-relaxed">{fullSession}</p>
             </div>
 
-            {/* Actions — admin only; trainer accounts are read-only */}
-            {authCtx?.role === "admin" && (r.status === "confirmed" || isPast || isDeletablePending(r)) && (
+            {/* Actions — Cancel/Reschedule/Delete are admin-only; No Show is
+                the one action every trainer tier can also take, since
+                they're the one who'd actually know a client didn't show. */}
+            {(r.status === "confirmed" || (canEdit && (isPast || isDeletablePending(r)))) && (
               <div className="flex flex-wrap gap-3 pt-1 border-t border-brown-800">
-                {r.status === "confirmed" && !isPast && (
+                {canEdit && r.status === "confirmed" && !isPast && (
                   <button onClick={() => cancelRegistration(r.id)} disabled={cancelling === r.id} className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50">
                     {cancelling === r.id ? "Cancelling..." : "Cancel"}
                   </button>
                 )}
-                {r.status === "confirmed" && !isPast && (
+                {canEdit && r.status === "confirmed" && !isPast && (
                   <button onClick={() => openReschedule(r)} className="text-xs text-blue-400 hover:text-blue-300 transition">
                     Reschedule
                   </button>
@@ -1576,8 +1588,8 @@ export default function AdminPage() {
                     pending_payment/payment_abandoned row was never a real
                     booking — nothing was charged, no slot needs freeing — so
                     it's safe to delete right away, upcoming or not, rather
-                    than waiting on the automatic abandonment sweep. */}
-                {(isPast || isDeletablePending(r)) && (
+                    than waiting on the automatic abandonment sweep. Admin only. */}
+                {canEdit && (isPast || isDeletablePending(r)) && (
                   <button onClick={() => deleteRegistration(r.id)} disabled={deleting === r.id} className="text-xs text-brown-600 hover:text-red-500 transition disabled:opacity-50">
                     {deleting === r.id ? "Deleting..." : "Delete"}
                   </button>
@@ -1855,7 +1867,7 @@ export default function AdminPage() {
               weeklyDiscountRates={weeklyDiscountRates}
               weeklyCapacity={weeklyCapacity}
               campCapacity={campCapacity}
-              canEdit={authCtx?.role === "admin"}
+              canEdit={canEdit}
               cancelRegistration={cancelRegistration}
               markNoShow={markNoShow}
               openReschedule={openReschedule}

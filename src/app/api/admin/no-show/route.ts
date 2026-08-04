@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { verifyAdmin } from "@/lib/auth";
+import { verifyDashboardAccess } from "@/lib/auth";
 import { sendAdminSMS } from "@/lib/sms";
 import { countPackageSessionsUsed, setPackageSessions } from "@/lib/supabase";
 import { fmtMoney, fullPriceForType } from "@/lib/pricing";
 
+// The one write action every trainer tier (not just full admin) can take —
+// they're the one who'd actually know a client didn't show up.
 export async function POST(req: NextRequest) {
-  if (!(await verifyAdmin(req))) {
+  const ctx = await verifyDashboardAccess(req);
+  if (!ctx) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -20,11 +23,19 @@ export async function POST(req: NextRequest) {
 
   const { data: reg } = await supabase
     .from("registrations")
-    .select("parent_name, email, session_details, type, session_price, is_free, phone, sms_consent, is_paid, stripe_payment_intent_id, applied_account_credit, package_id")
+    .select("parent_name, email, session_details, type, session_price, is_free, phone, sms_consent, is_paid, stripe_payment_intent_id, applied_account_credit, package_id, booked_trainer")
     .eq("id", id)
     .single();
 
   if (!reg) return NextResponse.json({ error: "Registration not found" }, { status: 404 });
+
+  // A plain trainer account can only ever mark no-show on their own
+  // sessions — the UI already only ever shows them their own, but this is
+  // the actual enforcement (a crafted request with someone else's id must
+  // not work just because the caller is a recognized trainer account).
+  if (ctx.role === "trainer" && reg.booked_trainer !== ctx.trainerName) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+  }
 
   // Only flip a row still actually confirmed — guards against double-marking
   // the same booking (double click, retry) from running this whole flow twice.
