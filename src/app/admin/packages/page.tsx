@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { authClient, ADMIN_EMAIL } from "@/lib/auth";
+import { authClient, resolveAuthRole, type AuthContext } from "@/lib/auth";
 
 interface Package {
   id: string;
@@ -54,13 +54,16 @@ export default function PackagesPage() {
   const [search, setSearch] = useState("");
   const [monthFilter, setMonthFilter] = useState("all");
   const [pkgTab, setPkgTab] = useState<"live" | "past">("live");
+  const [authCtx, setAuthCtx] = useState<AuthContext | null>(null);
 
   useEffect(() => {
     authClient.auth.getSession().then(({ data: { session } }) => {
-      if (!session || session.user.email !== ADMIN_EMAIL) {
+      const ctx = session ? resolveAuthRole(session.user.email) : null;
+      if (!session || !ctx) {
         router.replace("/login");
         return;
       }
+      setAuthCtx(ctx);
       setToken(session.access_token);
       fetch("/api/admin/packages", {
         headers: { Authorization: `Bearer ${session.access_token}` },
@@ -210,28 +213,36 @@ export default function PackagesPage() {
           </div>
           <div>
             <p className="text-brown-500 uppercase tracking-wider mb-0.5">Payment</p>
-            <button
-              onClick={() => togglePaid(pkg)}
-              disabled={toggling === pkg.id}
-              className={`rounded-full px-3 py-1 text-xs font-semibold transition disabled:opacity-50 ${
-                pkg.is_paid
-                  ? "bg-green-900/50 text-green-400 hover:bg-green-900/70"
-                  : "bg-red-900/40 text-red-400 hover:bg-red-900/60"
-              }`}
-            >
-              {toggling === pkg.id ? "..." : pkg.is_paid ? "Paid ✓" : "Unpaid"}
-            </button>
+            {authCtx?.role === "admin" ? (
+              <button
+                onClick={() => togglePaid(pkg)}
+                disabled={toggling === pkg.id}
+                className={`rounded-full px-3 py-1 text-xs font-semibold transition disabled:opacity-50 ${
+                  pkg.is_paid
+                    ? "bg-green-900/50 text-green-400 hover:bg-green-900/70"
+                    : "bg-red-900/40 text-red-400 hover:bg-red-900/60"
+                }`}
+              >
+                {toggling === pkg.id ? "..." : pkg.is_paid ? "Paid ✓" : "Unpaid"}
+              </button>
+            ) : (
+              <span className={`rounded-full px-3 py-1 text-xs font-semibold ${pkg.is_paid ? "bg-green-900/50 text-green-400" : "bg-red-900/40 text-red-400"}`}>
+                {pkg.is_paid ? "Paid ✓" : "Unpaid"}
+              </span>
+            )}
           </div>
         </div>
-        <div className="border-t border-brown-800 pt-2">
-          <button
-            onClick={() => deletePackage(pkg.id)}
-            disabled={deleting === pkg.id}
-            className="text-xs text-brown-600 hover:text-red-500 transition disabled:opacity-50"
-          >
-            {deleting === pkg.id ? "Deleting..." : "Delete"}
-          </button>
-        </div>
+        {authCtx?.role === "admin" && (
+          <div className="border-t border-brown-800 pt-2">
+            <button
+              onClick={() => deletePackage(pkg.id)}
+              disabled={deleting === pkg.id}
+              className="text-xs text-brown-600 hover:text-red-500 transition disabled:opacity-50"
+            >
+              {deleting === pkg.id ? "Deleting..." : "Delete"}
+            </button>
+          </div>
+        )}
       </div>
       {/* Expanded session list */}
       {isExpanded && (
@@ -285,10 +296,10 @@ export default function PackagesPage() {
       {/* Mobile tab bar */}
       <div className="md:hidden border-b border-gray-200 bg-white px-4 flex items-center gap-1 overflow-x-auto">
         <Link href="/admin" className="shrink-0 px-3 py-2.5 text-sm text-brown-400 border-b-2 border-transparent">Dashboard</Link>
-        <Link href="/admin/payments" className="shrink-0 px-3 py-2.5 text-sm text-brown-400 border-b-2 border-transparent">Payments</Link>
+        {authCtx?.role === "admin" && <Link href="/admin/payments" className="shrink-0 px-3 py-2.5 text-sm text-brown-400 border-b-2 border-transparent">Payments</Link>}
         <Link href="/admin/packages" className="shrink-0 px-3 py-2.5 text-sm font-semibold text-mesa-dark border-b-2 border-mesa-dark">Packages</Link>
-        <Link href="/admin/virtual-training" className="shrink-0 px-3 py-2.5 text-sm text-brown-400 border-b-2 border-transparent">Virtual Training</Link>
-        <Link href="/admin/virtual-training/drills" className="shrink-0 px-3 py-2.5 text-sm text-brown-400 border-b-2 border-transparent">Drills</Link>
+        {authCtx?.role === "admin" && <Link href="/admin/virtual-training" className="shrink-0 px-3 py-2.5 text-sm text-brown-400 border-b-2 border-transparent">Virtual Training</Link>}
+        {authCtx?.role === "admin" && <Link href="/admin/virtual-training/drills" className="shrink-0 px-3 py-2.5 text-sm text-brown-400 border-b-2 border-transparent">Drills</Link>}
         <div className="ml-auto flex items-center gap-3 shrink-0 pl-2">
           <Link href="/" className="text-xs text-brown-400">← Site</Link>
         </div>
@@ -301,18 +312,24 @@ export default function PackagesPage() {
             <Link href="/admin" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-brown-400 hover:text-white hover:bg-brown-800 transition">
               Dashboard
             </Link>
-            <Link href="/admin/payments" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-brown-400 hover:text-white hover:bg-brown-800 transition">
-              Payments
-            </Link>
+            {authCtx?.role === "admin" && (
+              <Link href="/admin/payments" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-brown-400 hover:text-white hover:bg-brown-800 transition">
+                Payments
+              </Link>
+            )}
             <Link href="/admin/packages" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold bg-brown-800 text-white">
               Packages
             </Link>
-            <Link href="/admin/virtual-training" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-brown-400 hover:text-white hover:bg-brown-800 transition">
-              Virtual Training
-            </Link>
-            <Link href="/admin/virtual-training/drills" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-brown-400 hover:text-white hover:bg-brown-800 transition">
-              Drills
-            </Link>
+            {authCtx?.role === "admin" && (
+              <>
+                <Link href="/admin/virtual-training" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-brown-400 hover:text-white hover:bg-brown-800 transition">
+                  Virtual Training
+                </Link>
+                <Link href="/admin/virtual-training/drills" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-brown-400 hover:text-white hover:bg-brown-800 transition">
+                  Drills
+                </Link>
+              </>
+            )}
           </nav>
           <div className="border-t border-brown-800 pt-4 mt-4 space-y-1">
             <Link href="/" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-brown-400 hover:text-white hover:bg-brown-800 transition">
@@ -471,26 +488,32 @@ export default function PackagesPage() {
                         </span>
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
-                        <div className="flex items-center gap-3">
-                          <button
-                            onClick={() => togglePaid(pkg)}
-                            disabled={toggling === pkg.id}
-                            className={`rounded-full px-3 py-1 text-xs font-semibold transition disabled:opacity-50 ${
-                              pkg.is_paid
-                                ? "bg-green-900/50 text-green-400 hover:bg-green-900/70"
-                                : "bg-red-900/40 text-red-400 hover:bg-red-900/60"
-                            }`}
-                          >
-                            {toggling === pkg.id ? "..." : pkg.is_paid ? "Paid ✓" : "Unpaid"}
-                          </button>
-                          <button
-                            onClick={() => deletePackage(pkg.id)}
-                            disabled={deleting === pkg.id}
-                            className="text-xs text-brown-600 hover:text-red-500 transition disabled:opacity-50"
-                          >
-                            {deleting === pkg.id ? "..." : "Delete"}
-                          </button>
-                        </div>
+                        {authCtx?.role === "admin" ? (
+                          <div className="flex items-center gap-3">
+                            <button
+                              onClick={() => togglePaid(pkg)}
+                              disabled={toggling === pkg.id}
+                              className={`rounded-full px-3 py-1 text-xs font-semibold transition disabled:opacity-50 ${
+                                pkg.is_paid
+                                  ? "bg-green-900/50 text-green-400 hover:bg-green-900/70"
+                                  : "bg-red-900/40 text-red-400 hover:bg-red-900/60"
+                              }`}
+                            >
+                              {toggling === pkg.id ? "..." : pkg.is_paid ? "Paid ✓" : "Unpaid"}
+                            </button>
+                            <button
+                              onClick={() => deletePackage(pkg.id)}
+                              disabled={deleting === pkg.id}
+                              className="text-xs text-brown-600 hover:text-red-500 transition disabled:opacity-50"
+                            >
+                              {deleting === pkg.id ? "..." : "Delete"}
+                            </button>
+                          </div>
+                        ) : (
+                          <span className={`rounded-full px-3 py-1 text-xs font-semibold ${pkg.is_paid ? "bg-green-900/50 text-green-400" : "bg-red-900/40 text-red-400"}`}>
+                            {pkg.is_paid ? "Paid ✓" : "Unpaid"}
+                          </span>
+                        )}
                       </td>
                     </tr>
                     {isExpanded && (

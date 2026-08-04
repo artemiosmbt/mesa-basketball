@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { authClient, ADMIN_EMAIL } from "@/lib/auth";
+import { authClient, resolveAuthRole, type AuthContext } from "@/lib/auth";
 import type { WeeklySession, Camp, PrivateSlot } from "@/lib/sheets";
 import { fullPriceForType, calcPrivatePrice as calcPrivatePricePreview } from "@/lib/pricing";
 
@@ -702,6 +702,7 @@ interface CalendarViewProps {
   weeklyDiscountRates: Map<string, number>;
   weeklyCapacity: Map<string, number>;
   campCapacity: Map<string, number>;
+  canEdit: boolean;
   cancelRegistration: (id: string) => Promise<void>;
   markNoShow: (id: string) => Promise<void>;
   openReschedule: (r: Registration) => void;
@@ -713,7 +714,7 @@ interface CalendarViewProps {
   deleting: string | null;
 }
 
-function CalendarView({ list, packageMembership, weeklyDiscountRates, weeklyCapacity, campCapacity, cancelRegistration, markNoShow, openReschedule, deleteRegistration, cancelling, noShowing, noShowConfirm, setNoShowConfirm, deleting }: CalendarViewProps) {
+function CalendarView({ list, packageMembership, weeklyDiscountRates, weeklyCapacity, campCapacity, canEdit, cancelRegistration, markNoShow, openReschedule, deleteRegistration, cancelling, noShowing, noShowConfirm, setNoShowConfirm, deleting }: CalendarViewProps) {
   const [currentMonth, setCurrentMonth] = useState(() => {
     const n = new Date();
     return new Date(n.getFullYear(), n.getMonth(), 1);
@@ -756,7 +757,7 @@ function CalendarView({ list, packageMembership, weeklyDiscountRates, weeklyCapa
                 {priceDisplay(r, weeklyDiscountRates)}
               </span>
             )}
-            {r.status === "confirmed" && (
+            {canEdit && r.status === "confirmed" && (
               <div className="flex gap-2">
                 <button onClick={() => cancelRegistration(r.id)} disabled={cancelling === r.id} className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50">
                   {cancelling === r.id ? "..." : "Cancel"}
@@ -779,7 +780,7 @@ function CalendarView({ list, packageMembership, weeklyDiscountRates, weeklyCapa
                 )}
               </div>
             )}
-            {isDeletablePending(r) && (
+            {canEdit && isDeletablePending(r) && (
               // Never a real booking — nothing charged, no slot to
               // free — safe to delete right away.
               <button onClick={() => deleteRegistration(r.id)} disabled={deleting === r.id} className="text-xs text-brown-500 hover:text-red-400 transition disabled:opacity-50">
@@ -954,6 +955,8 @@ export default function AdminPage() {
   const [noShowConfirm, setNoShowConfirm] = useState<string | null>(null);
   const [noShowing, setNoShowing] = useState<string | null>(null);
   const [token, setToken] = useState<string | null>(null);
+  const [authCtx, setAuthCtx] = useState<AuthContext | null>(null);
+  const [trainerFilter, setTrainerFilter] = useState("all");
   const [selectedClient, setSelectedClient] = useState<string | null>(null);
 
   // Admin reschedule state
@@ -978,10 +981,12 @@ export default function AdminPage() {
 
   useEffect(() => {
     authClient.auth.getSession().then(({ data: { session } }) => {
-      if (!session || session.user.email !== ADMIN_EMAIL) {
+      const ctx = session ? resolveAuthRole(session.user.email) : null;
+      if (!session || !ctx) {
         router.replace("/login");
         return;
       }
+      setAuthCtx(ctx);
       setToken(session.access_token);
 
       // Load registrations first so the dashboard renders right away
@@ -1005,6 +1010,12 @@ export default function AdminPage() {
         setReferralCreditsMap(creditsMap);
         setPackages(adminData.packages || []);
       }).finally(() => setLoading(false));
+
+      // Trainer accounts are read-only — nothing below this point is theirs
+      // to trigger or needs loading (time-change sync writes data; the
+      // schedule feed only exists to power the reschedule modal they never
+      // see a button for).
+      if (ctx.role !== "admin") return;
 
       // Auto-sync time changes in the background — banner appears when it's done,
       // but it no longer holds up the rest of the dashboard from rendering.
@@ -1261,18 +1272,34 @@ export default function AdminPage() {
     if (notes.length > 0) alert(`Rescheduled. ${notes.join(" ")}`);
   }
 
+  // Everything the dashboard displays is scoped through this — "all" is a
+  // no-op for a basic trainer account anyway, since the server already only
+  // ever sent them their own sessions. packageMembership/weeklyDiscountRates
+  // deliberately do NOT use this (see their own comments) — narrowing the
+  // registrations that feed those would make their cross-session math wrong,
+  // not just narrower.
+  const visibleRegistrations = useMemo(
+    () => (trainerFilter === "all" ? registrations : registrations.filter((r) => r.booked_trainer === trainerFilter)),
+    [registrations, trainerFilter]
+  );
+
+  const availableTrainers = useMemo(
+    () => uniqueSorted(registrations.map((r) => r.booked_trainer || "")),
+    [registrations]
+  );
+
   const upcoming = useMemo(() => {
     const now = Date.now();
-    return registrations
+    return visibleRegistrations
       // pending_payment holds a real slot (someone's mid-checkout) — worth
       // seeing here, not just hidden until the webhook confirms it.
       .filter((r) => (r.status === "confirmed" || r.status === "pending_payment") && sessionMs(r.booked_date, r.booked_start_time) > now)
       .sort((a, b) => sessionMs(a.booked_date, a.booked_start_time) - sessionMs(b.booked_date, b.booked_start_time));
-  }, [registrations]);
+  }, [visibleRegistrations]);
 
   const past = useMemo(() => {
     const now = Date.now();
-    return registrations
+    return visibleRegistrations
       // An abandoned checkout never became a real booking — nothing to see
       // here once its date passes, same as it never shows as upcoming. A
       // cancelled row (including the leftover row a client reschedule
@@ -1285,13 +1312,13 @@ export default function AdminPage() {
         return ms > 0 && ms <= now;
       })
       .sort((a, b) => sessionMs(b.booked_date, b.booked_start_time) - sessionMs(a.booked_date, a.booked_start_time));
-  }, [registrations]);
+  }, [visibleRegistrations]);
 
   // Unique clients sorted by name — an abandoned checkout never counts
   // toward a client's history (they never actually booked or paid).
   const clients = useMemo(() => {
     const map = new Map<string, { name: string; email: string; phone: string; kids: string; count: number; lastDate: number; videoConsent: boolean | null; referralsAvailable: number; referralsTotal: number }>();
-    for (const r of registrations) {
+    for (const r of visibleRegistrations) {
       if (r.status === "payment_abandoned") continue;
       const key = r.email || r.parent_name;
       const existing = map.get(key);
@@ -1306,7 +1333,7 @@ export default function AdminPage() {
       }
     }
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
-  }, [registrations, videoConsentMap, referralCreditsMap]);
+  }, [visibleRegistrations, videoConsentMap, referralCreditsMap]);
 
   const filteredClients = useMemo(
     () => clients.filter((c) => clientMatchesSearch(c, clientSearch)),
@@ -1315,10 +1342,10 @@ export default function AdminPage() {
 
   const clientRegistrations = useMemo(() => {
     if (!selectedClient) return [];
-    return registrations
+    return visibleRegistrations
       .filter((r) => (r.email || r.parent_name) === selectedClient && r.status !== "payment_abandoned")
       .sort((a, b) => dateMs(b.booked_date) - dateMs(a.booked_date));
-  }, [registrations, selectedClient]);
+  }, [visibleRegistrations, selectedClient]);
 
   // Volume discount rates for group sessions booked together (no stored session_price)
   const weeklyDiscountRates = useMemo(() => {
@@ -1355,14 +1382,19 @@ export default function AdminPage() {
   }
 
   const stats = useMemo(() => ({
-    total: registrations.length,
-    confirmed: registrations.filter((r) => r.status === "confirmed").length,
-    cancelled: registrations.filter((r) => r.status === "cancelled").length,
-    camps: registrations.filter((r) => r.type === "camp" && r.status === "confirmed").length,
-    groups: registrations.filter((r) => r.type === "weekly" && r.status === "confirmed").length,
-  }), [registrations]);
+    total: visibleRegistrations.length,
+    confirmed: visibleRegistrations.filter((r) => r.status === "confirmed").length,
+    cancelled: visibleRegistrations.filter((r) => r.status === "cancelled").length,
+    camps: visibleRegistrations.filter((r) => r.type === "camp" && r.status === "confirmed").length,
+    groups: visibleRegistrations.filter((r) => r.type === "weekly" && r.status === "confirmed").length,
+  }), [visibleRegistrations]);
 
-  // Map each registration id to whether it falls within a monthly package
+  // Map each registration id to whether it falls within a monthly package —
+  // deliberately built from the FULL registrations, not visibleRegistrations,
+  // because package membership is a positional index across every private
+  // session in that email+month, trainer filter or not; narrowing the input
+  // here would make sessions look "within package" (or not) incorrectly
+  // rather than just hiding ones outside the current filter.
   const packageMembership = useMemo(() => {
     const result = new Map<string, { withinPackage: boolean; packagePaid: boolean }>();
 
@@ -1479,7 +1511,7 @@ export default function AdminPage() {
             <div>
               <p className="text-brown-500 uppercase tracking-wider mb-0.5">Athletes</p>
               <p className="text-brown-200">{r.kids ? r.kids.split(",").map((k) => k.trim()).join("\n") : "—"}</p>
-              {r.status === "confirmed" && (
+              {authCtx?.role === "admin" && r.status === "confirmed" && (
                 addPlayerOpenId === r.id ? (
                   <div className="mt-2 flex gap-2">
                     <input
@@ -1508,8 +1540,8 @@ export default function AdminPage() {
               <p className="text-brown-200 whitespace-pre-line leading-relaxed">{fullSession}</p>
             </div>
 
-            {/* Actions */}
-            {(r.status === "confirmed" || isPast || isDeletablePending(r)) && (
+            {/* Actions — admin only; trainer accounts are read-only */}
+            {authCtx?.role === "admin" && (r.status === "confirmed" || isPast || isDeletablePending(r)) && (
               <div className="flex flex-wrap gap-3 pt-1 border-t border-brown-800">
                 {r.status === "confirmed" && !isPast && (
                   <button onClick={() => cancelRegistration(r.id)} disabled={cancelling === r.id} className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50">
@@ -1631,10 +1663,10 @@ export default function AdminPage() {
       {/* Mobile tab bar */}
       <div className="md:hidden border-b border-gray-200 bg-white px-4 flex items-center gap-1 overflow-x-auto">
         <Link href="/admin" className="shrink-0 px-3 py-2.5 text-sm font-semibold text-mesa-dark border-b-2 border-mesa-dark">Dashboard</Link>
-        <Link href="/admin/payments" className="shrink-0 px-3 py-2.5 text-sm text-brown-400 border-b-2 border-transparent">Payments</Link>
+        {authCtx?.role === "admin" && <Link href="/admin/payments" className="shrink-0 px-3 py-2.5 text-sm text-brown-400 border-b-2 border-transparent">Payments</Link>}
         <Link href="/admin/packages" className="shrink-0 px-3 py-2.5 text-sm text-brown-400 border-b-2 border-transparent">Packages</Link>
-        <Link href="/admin/virtual-training" className="shrink-0 px-3 py-2.5 text-sm text-brown-400 border-b-2 border-transparent">Virtual Training</Link>
-        <Link href="/admin/virtual-training/drills" className="shrink-0 px-3 py-2.5 text-sm text-brown-400 border-b-2 border-transparent">Drills</Link>
+        {authCtx?.role === "admin" && <Link href="/admin/virtual-training" className="shrink-0 px-3 py-2.5 text-sm text-brown-400 border-b-2 border-transparent">Virtual Training</Link>}
+        {authCtx?.role === "admin" && <Link href="/admin/virtual-training/drills" className="shrink-0 px-3 py-2.5 text-sm text-brown-400 border-b-2 border-transparent">Drills</Link>}
         <div className="ml-auto flex items-center gap-3 shrink-0 pl-2">
           <Link href="/" className="text-xs text-brown-400">← Site</Link>
         </div>
@@ -1647,18 +1679,24 @@ export default function AdminPage() {
             <Link href="/admin" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold bg-brown-800 text-white">
               Dashboard
             </Link>
-            <Link href="/admin/payments" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-brown-400 hover:text-white hover:bg-brown-800 transition">
-              Payments
-            </Link>
+            {authCtx?.role === "admin" && (
+              <Link href="/admin/payments" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-brown-400 hover:text-white hover:bg-brown-800 transition">
+                Payments
+              </Link>
+            )}
             <Link href="/admin/packages" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-brown-400 hover:text-white hover:bg-brown-800 transition">
               Packages
             </Link>
-            <Link href="/admin/virtual-training" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-brown-400 hover:text-white hover:bg-brown-800 transition">
-              Virtual Training
-            </Link>
-            <Link href="/admin/virtual-training/drills" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-brown-400 hover:text-white hover:bg-brown-800 transition">
-              Drills
-            </Link>
+            {authCtx?.role === "admin" && (
+              <>
+                <Link href="/admin/virtual-training" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-brown-400 hover:text-white hover:bg-brown-800 transition">
+                  Virtual Training
+                </Link>
+                <Link href="/admin/virtual-training/drills" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-brown-400 hover:text-white hover:bg-brown-800 transition">
+                  Drills
+                </Link>
+              </>
+            )}
           </nav>
           <div className="border-t border-brown-800 pt-4 mt-4 space-y-1">
             <Link href="/" className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-brown-400 hover:text-white hover:bg-brown-800 transition">
@@ -1674,21 +1712,23 @@ export default function AdminPage() {
         </aside>
 
       <div className="flex-1 min-w-0 px-4 sm:px-6 py-8">
-        {/* Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
-          {[
-            { label: "Total", value: stats.total },
-            { label: "Confirmed", value: stats.confirmed },
-            { label: "Cancelled", value: stats.cancelled },
-            { label: "Camp Bookings", value: stats.camps },
-            { label: "Group Bookings", value: stats.groups },
-          ].map((s) => (
-            <div key={s.label} className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-4 text-center">
-              <p className="font-[family-name:var(--font-oswald)] text-3xl font-bold text-mesa-accent">{s.value}</p>
-              <p className="text-xs text-brown-400 mt-1">{s.label}</p>
-            </div>
-          ))}
-        </div>
+        {/* Stats — admin only */}
+        {authCtx?.role === "admin" && (
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
+            {[
+              { label: "Total", value: stats.total },
+              { label: "Confirmed", value: stats.confirmed },
+              { label: "Cancelled", value: stats.cancelled },
+              { label: "Camp Bookings", value: stats.camps },
+              { label: "Group Bookings", value: stats.groups },
+            ].map((s) => (
+              <div key={s.label} className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-4 text-center">
+                <p className="font-[family-name:var(--font-oswald)] text-3xl font-bold text-mesa-accent">{s.value}</p>
+                <p className="text-xs text-brown-400 mt-1">{s.label}</p>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Time Change Sync — auto-runs on load, button is manual re-run */}
         {tcResult && tcResult.changesFound.length > 0 && (
@@ -1707,7 +1747,7 @@ export default function AdminPage() {
 
         {/* Tabs */}
         <div className="flex flex-wrap gap-2 mb-6">
-          {(["upcoming", "past", "calendar", "clients"] as const).map((t) => (
+          {(authCtx?.role === "trainer" ? (["upcoming", "past", "calendar"] as const) : (["upcoming", "past", "calendar", "clients"] as const)).map((t) => (
             <button
               key={t}
               onClick={() => { setTab(t); setSelectedClient(null); }}
@@ -1722,6 +1762,21 @@ export default function AdminPage() {
             </button>
           ))}
         </div>
+
+        {/* Trainer filter — admin and elevated trainer accounts only; applies across Upcoming/Past/Calendar/Clients */}
+        {(authCtx?.role === "admin" || authCtx?.role === "elevated_trainer") && availableTrainers.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 mb-6">
+            <span className="text-xs uppercase tracking-wider text-brown-500">Trainer</span>
+            <select
+              value={trainerFilter}
+              onChange={(e) => setTrainerFilter(e.target.value)}
+              className="rounded-lg border border-brown-700 bg-brown-800/60 px-3 py-1.5 text-sm text-white focus:border-mesa-accent focus:outline-none"
+            >
+              <option value="all">All Trainers</option>
+              {availableTrainers.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+        )}
 
         {/* Filters — list tabs only */}
         {(tab === "upcoming" || tab === "past") && (
@@ -1800,6 +1855,7 @@ export default function AdminPage() {
               weeklyDiscountRates={weeklyDiscountRates}
               weeklyCapacity={weeklyCapacity}
               campCapacity={campCapacity}
+              canEdit={authCtx?.role === "admin"}
               cancelRegistration={cancelRegistration}
               markNoShow={markNoShow}
               openReschedule={openReschedule}
@@ -1814,7 +1870,7 @@ export default function AdminPage() {
         )}
 
         {/* Clients */}
-        {tab === "clients" && !selectedClient && (
+        {tab === "clients" && authCtx?.role !== "trainer" && !selectedClient && (
           <>
             <input
               type="text"
@@ -1864,7 +1920,7 @@ export default function AdminPage() {
         )}
 
         {/* Client detail */}
-        {tab === "clients" && selectedClient && (() => {
+        {tab === "clients" && authCtx?.role !== "trainer" && selectedClient && (() => {
           const clientData = clients.find((c) => (c.email || c.name) === selectedClient);
           const profile = clientData?.email ? profilesMap[clientData.email] : undefined;
           const kids: ProfileKid[] = profile?.kids?.length

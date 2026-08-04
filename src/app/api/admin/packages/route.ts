@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { verifyAdmin } from "@/lib/auth";
+import { verifyAdmin, verifyDashboardAccess } from "@/lib/auth";
 import { countPackageSessionsUsed, setPackageSessions } from "@/lib/supabase";
 
 
 export async function GET(req: NextRequest) {
-  if (!(await verifyAdmin(req))) {
+  // Every recognized dashboard account (admin or any trainer tier) sees the
+  // exact same, unfiltered package list — only the mutating endpoints below
+  // stay admin-only.
+  if (!(await verifyDashboardAccess(req))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
