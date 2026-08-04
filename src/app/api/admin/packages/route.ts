@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { verifyAdmin, verifyDashboardAccess } from "@/lib/auth";
-import { countPackageSessionsUsed, setPackageSessions } from "@/lib/supabase";
+import { countPackageSessionsUsed, setPackageSessions, backfillPackageLinks } from "@/lib/supabase";
 
 
 export async function GET(req: NextRequest) {
@@ -34,11 +34,17 @@ export async function GET(req: NextRequest) {
 
   const packages = data || [];
 
-  // Recalculate sessions_used from registrations actually tagged with this
-  // package's id on every load — exact, unlike the old "any private session
-  // this email had this month" guess (which could count an individually-
-  // paid overflow session against the package that never covered it).
+  // First, link any of this client's matching sessions that were never
+  // tagged with this package's id (see backfillPackageLinks) — otherwise
+  // the recalculation below would just confirm 0 used forever, no matter
+  // how many times it re-runs, since it only ever counts already-linked
+  // rows. Then recalculate sessions_used from registrations actually
+  // tagged with this package's id on every load — exact, unlike the old
+  // "any private session this email had this month" guess (which could
+  // count an individually-paid overflow session against a package that
+  // never covered it).
   await Promise.all(packages.map(async (pkg) => {
+    await backfillPackageLinks(pkg);
     const actual = await countPackageSessionsUsed(pkg.id);
     if (actual !== pkg.sessions_used) {
       await setPackageSessions(pkg.id, actual);

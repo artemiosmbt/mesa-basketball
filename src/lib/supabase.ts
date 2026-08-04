@@ -1234,6 +1234,68 @@ export async function countPackageSessionsUsed(packageId: string): Promise<numbe
   return data.length;
 }
 
+// Links any of this client's CONFIRMED/NO_SHOW private sessions that fall
+// within the package's month but were never tagged with this package_id —
+// the gap that leaves a package showing its full session count as
+// "remaining" forever even after every session actually happened, since
+// countPackageSessionsUsed only ever counts rows that already carry this
+// exact package_id (a historical booking made before the row got linked,
+// or one entered some other way that skipped allocatePackageCoverage).
+// Mirrors allocatePackageCoverage's own chronological, capacity-respecting
+// assignment (earliest sessions first, never more than package_type total),
+// so a client who genuinely booked extra sessions beyond the package on
+// purpose keeps those unlinked rather than wrongly absorbing them. Never
+// touches a row that's already linked to ANY package (this one or another).
+// Returns how many rows it linked.
+export async function backfillPackageLinks(pkg: { id: string; email: string; month_year: string; package_type: number }): Promise<number> {
+  const supabase = getSupabase();
+  const alreadyLinked = await countPackageSessionsUsed(pkg.id);
+  const capacity = pkg.package_type - alreadyLinked;
+  if (capacity <= 0) return 0;
+
+  const { data, error } = await supabase
+    .from("registrations")
+    .select("id, booked_date, booked_start_time")
+    .ilike("email", pkg.email)
+    .in("type", ["private", "group-private"])
+    .in("status", ["confirmed", "no_show"])
+    .is("package_id", null);
+  if (error || !data || data.length === 0) return 0;
+
+  const [year, month] = pkg.month_year.split("-").map(Number);
+  const inMonth = data.filter((r) => {
+    if (!r.booked_date) return false;
+    const d = new Date(r.booked_date);
+    return !isNaN(d.getTime()) && d.getFullYear() === year && d.getMonth() + 1 === month;
+  });
+  if (inMonth.length === 0) return 0;
+
+  function toMins(t: string | null): number {
+    if (!t) return 0;
+    const m = t.match(/(\d+):(\d+)\s*(AM|PM)/i);
+    if (!m) return 0;
+    let h = parseInt(m[1]);
+    const min = parseInt(m[2]);
+    if (m[3].toUpperCase() === "PM" && h !== 12) h += 12;
+    if (m[3].toUpperCase() === "AM" && h === 12) h = 0;
+    return h * 60 + min;
+  }
+
+  inMonth.sort((a, b) => {
+    const diff = new Date(a.booked_date!).getTime() - new Date(b.booked_date!).getTime();
+    return diff !== 0 ? diff : toMins(a.booked_start_time) - toMins(b.booked_start_time);
+  });
+
+  const toLink = inMonth.slice(0, capacity).map((r) => r.id);
+  if (toLink.length === 0) return 0;
+
+  const { error: updateError } = await supabase
+    .from("registrations")
+    .update({ package_id: pkg.id })
+    .in("id", toLink);
+  return updateError ? 0 : toLink.length;
+}
+
 export async function getPackageById(packageId: string): Promise<MonthlyPackage | null> {
   const supabase = getSupabase();
   const { data, error } = await supabase
