@@ -53,6 +53,7 @@ export default function PackagesPage() {
   const [loadingPkg, setLoadingPkg] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [monthFilter, setMonthFilter] = useState("all");
+  const [pkgTab, setPkgTab] = useState<"live" | "past">("live");
 
   useEffect(() => {
     authClient.auth.getSession().then(({ data: { session } }) => {
@@ -120,6 +121,9 @@ export default function PackagesPage() {
     return months;
   }, [packages]);
 
+  const liveCount = useMemo(() => packages.filter((p) => daysUntilExpiry(p.month_year) >= 0).length, [packages]);
+  const pastCount = useMemo(() => packages.filter((p) => daysUntilExpiry(p.month_year) < 0).length, [packages]);
+
   const currentMonthYear = useMemo(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -127,6 +131,8 @@ export default function PackagesPage() {
 
   const filtered = useMemo(() => {
     return packages.filter((p) => {
+      const isPast = daysUntilExpiry(p.month_year) < 0;
+      if (isPast !== (pkgTab === "past")) return false;
       if (monthFilter !== "all" && p.month_year !== monthFilter) return false;
       if (search) {
         const q = search.toLowerCase();
@@ -134,7 +140,7 @@ export default function PackagesPage() {
       }
       return true;
     });
-  }, [packages, monthFilter, search]);
+  }, [packages, monthFilter, search, pkgTab]);
 
   const stats = useMemo(() => ({
     total: filtered.length,
@@ -334,6 +340,19 @@ export default function PackagesPage() {
                 <p className="font-[family-name:var(--font-oswald)] text-3xl font-bold text-mesa-accent">{s.value}</p>
                 <p className="text-xs text-brown-400 mt-1">{s.label}</p>
               </div>
+            ))}
+          </div>
+
+          {/* Live / Past */}
+          <div className="flex flex-wrap gap-2 mb-6">
+            {(["live", "past"] as const).map((t) => (
+              <button
+                key={t}
+                onClick={() => setPkgTab(t)}
+                className={`px-3 py-2 rounded-lg text-sm font-semibold capitalize transition ${pkgTab === t ? "bg-mesa-accent text-white" : "bg-brown-900 text-brown-400 hover:text-white"}`}
+              >
+                {t === "live" ? `Live (${liveCount})` : `Past (${pastCount})`}
+              </button>
             ))}
           </div>
 
