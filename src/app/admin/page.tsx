@@ -126,6 +126,21 @@ function athleteNames(kids: string) {
   return kids ? kids.split(",").map((k) => k.split("(")[0].trim()).filter(Boolean).join(", ") : "—";
 }
 
+function nameTokens(name: string): string[] {
+  return name.toLowerCase().split(/\s+/).filter(Boolean);
+}
+
+// Matches on a first OR last name token from either the parent or any
+// player — "smith" finds "John Smith" the parent, and separately finds any
+// client with a player named "Smith", not just an exact full-name match.
+function clientMatchesSearch(c: { name: string; kids: string }, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  const parentTokens = nameTokens(c.name);
+  const playerTokens = c.kids === "—" ? [] : c.kids.split(",").flatMap((k) => nameTokens(k));
+  return [...parentTokens, ...playerTokens].some((t) => t.includes(q));
+}
+
 function sessionText(details: string) {
   return details ? details.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "").split("\n")[0] : "—";
 }
@@ -914,6 +929,7 @@ export default function AdminPage() {
   const [tab, setTab] = useState<"upcoming" | "past" | "clients" | "calendar">("upcoming");
   const [typeFilter, setTypeFilter] = useState("all");
   const [search, setSearch] = useState("");
+  const [clientSearch, setClientSearch] = useState("");
   const [cancelling, setCancelling] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [noShowConfirm, setNoShowConfirm] = useState<string | null>(null);
@@ -1268,6 +1284,11 @@ export default function AdminPage() {
     }
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
   }, [registrations, videoConsentMap, referralCreditsMap]);
+
+  const filteredClients = useMemo(
+    () => clients.filter((c) => clientMatchesSearch(c, clientSearch)),
+    [clients, clientSearch]
+  );
 
   const clientRegistrations = useMemo(() => {
     if (!selectedClient) return [];
@@ -1771,8 +1792,19 @@ export default function AdminPage() {
 
         {/* Clients */}
         {tab === "clients" && !selectedClient && (
-          <div className="space-y-2">
-            {clients.map((c) => (
+          <>
+            <input
+              type="text"
+              placeholder="Search by parent or player first or last name..."
+              value={clientSearch}
+              onChange={(e) => setClientSearch(e.target.value)}
+              className="mb-4 rounded-lg border border-brown-700 bg-brown-800/60 px-4 py-2 text-sm text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none w-full sm:w-80"
+            />
+            <div className="space-y-2">
+              {filteredClients.length === 0 && (
+                <p className="text-sm text-brown-500 py-4 text-center">No clients found.</p>
+              )}
+              {filteredClients.map((c) => (
               <button
                 key={c.email || c.name}
                 onClick={() => setSelectedClient(c.email || c.name)}
@@ -1803,8 +1835,9 @@ export default function AdminPage() {
                   </div>
                 </div>
               </button>
-            ))}
-          </div>
+              ))}
+            </div>
+          </>
         )}
 
         {/* Client detail */}
