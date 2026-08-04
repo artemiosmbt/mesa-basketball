@@ -569,10 +569,88 @@ function groupByDate(list: Registration[]): { key: string; label: string; sessio
   return groups;
 }
 
+// --- Session folders (group/pickup/camp signups sharing one real session) --
+
+interface Folder {
+  key: string;
+  // true = a weekly/pickup/camp session, shown as an expandable folder.
+  // Private/group-private bookings are always their own one-off session, so
+  // they never fold — grouped stays false and regs has exactly one entry.
+  grouped: boolean;
+  regs: Registration[];
+  maxSpots?: number;
+}
+
+// Same identity checkGroupSessionCapacity/checkCampCapacity use to pool
+// signups for one real session — so folders always match what the site
+// itself treats as "the same session" and enforces capacity against.
+function folderKeyFor(r: Registration): string {
+  if (r.type === "weekly" || r.type === "camp") {
+    return `${r.type}|${r.booked_date ?? ""}|${r.booked_start_time ?? ""}|${r.booked_group ?? ""}`;
+  }
+  return `single|${r.id}`;
+}
+
+function buildFolders(list: Registration[], weeklyCapacity: Map<string, number>, campCapacity: Map<string, number>): Folder[] {
+  const order: string[] = [];
+  const byKey = new Map<string, Registration[]>();
+  for (const r of list) {
+    const key = folderKeyFor(r);
+    if (!byKey.has(key)) { byKey.set(key, []); order.push(key); }
+    byKey.get(key)!.push(r);
+  }
+  return order.map((key) => {
+    const regs = byKey.get(key)!;
+    const sample = regs[0];
+    const grouped = sample.type === "weekly" || sample.type === "camp";
+    let maxSpots: number | undefined;
+    if (grouped) {
+      maxSpots = sample.type === "weekly"
+        ? weeklyCapacity.get(`${sample.booked_date ?? ""}|${sample.booked_start_time ?? ""}|${sample.booked_group ?? ""}`)
+        : campCapacity.get(sample.booked_group ?? "");
+    }
+    return { key, grouped, regs, maxSpots };
+  });
+}
+
+// Only confirmed + pending_payment count toward "signed up" — the same
+// statuses the real capacity check counts — so the folder header number
+// always lines up with what actually blocks a new booking. Cancelled/no-show
+// rows still show up once the folder is expanded.
+function folderSignedUpCount(regs: Registration[]): number {
+  return regs
+    .filter((r) => r.status === "confirmed" || r.status === "pending_payment")
+    .reduce((sum, r) => sum + (r.total_participants || 1), 0);
+}
+
+function buildWeeklyCapacityMap(weeklySchedule: WeeklySession[]): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const s of weeklySchedule) {
+    map.set(`${s.date}|${s.startTime}|${s.group}`, s.maxSpots);
+  }
+  return map;
+}
+
+function buildCampCapacityMap(camps: Camp[]): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const c of camps) {
+    if (!map.has(c.name)) map.set(c.name, c.maxSpots);
+  }
+  return map;
+}
+
+function folderLabel(sample: Registration): string {
+  if (sample.type === "camp") return sample.booked_group || sessionText(sample.session_details);
+  if (isPickup(sample)) return "Pickup";
+  return sample.booked_group || "Group Session";
+}
+
 interface CalendarViewProps {
   list: Registration[];
   packageMembership: Map<string, { withinPackage: boolean; packagePaid: boolean }>;
   weeklyDiscountRates: Map<string, number>;
+  weeklyCapacity: Map<string, number>;
+  campCapacity: Map<string, number>;
   cancelRegistration: (id: string) => Promise<void>;
   markNoShow: (id: string) => Promise<void>;
   openReschedule: (r: Registration) => void;
@@ -584,12 +662,112 @@ interface CalendarViewProps {
   deleting: string | null;
 }
 
-function CalendarView({ list, packageMembership, weeklyDiscountRates, cancelRegistration, markNoShow, openReschedule, deleteRegistration, cancelling, noShowing, noShowConfirm, setNoShowConfirm, deleting }: CalendarViewProps) {
+function CalendarView({ list, packageMembership, weeklyDiscountRates, weeklyCapacity, campCapacity, cancelRegistration, markNoShow, openReschedule, deleteRegistration, cancelling, noShowing, noShowConfirm, setNoShowConfirm, deleting }: CalendarViewProps) {
   const [currentMonth, setCurrentMonth] = useState(() => {
     const n = new Date();
     return new Date(n.getFullYear(), n.getMonth(), 1);
   });
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+
+  function toggleFolder(key: string) {
+    setExpandedFolders((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }
+
+  function regRowJSX(r: Registration) {
+    return (
+      <div key={r.id} className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mb-1">
+              <span className="font-medium text-sm">{r.parent_name}</span>
+              <span className={`rounded-full px-2 py-0.5 text-xs ${typePill(r.type, r.session_details)}`}>{typePillLabel(r.type, r.session_details)}</span>
+              {packageMembership.get(r.id)?.withinPackage && (
+                <span className="rounded-full bg-teal-900/40 text-teal-400 px-2 py-0.5 text-xs font-medium">pkg</span>
+              )}
+            </div>
+            <div className="text-xs text-brown-300">{athleteNames(r.kids || "")}</div>
+            <div className="text-xs text-brown-500 mt-0.5">{r.email} · {r.phone}</div>
+            <div className="text-xs text-brown-400 mt-1 leading-relaxed whitespace-pre-line">
+              {r.session_details ? r.session_details.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim() : "—"}
+            </div>
+          </div>
+          <div className="shrink-0 flex flex-col items-end gap-2">
+            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusBadge(r.status).cls}`}>
+              {statusBadge(r.status).label}
+            </span>
+            {!packageMembership.get(r.id)?.withinPackage && (
+              <span className="text-xs font-medium text-green-400">
+                {formatPrice(effectivePrice(r, weeklyDiscountRates))}
+              </span>
+            )}
+            {r.status === "confirmed" && (
+              <div className="flex gap-2">
+                <button onClick={() => cancelRegistration(r.id)} disabled={cancelling === r.id} className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50">
+                  {cancelling === r.id ? "..." : "Cancel"}
+                </button>
+                <button onClick={() => openReschedule(r)} className="text-xs text-blue-400 hover:text-blue-300 transition">
+                  Reschedule
+                </button>
+                {noShowConfirm !== r.id ? (
+                  <button onClick={() => setNoShowConfirm(r.id)} disabled={noShowing === r.id} className="text-xs text-orange-400 hover:text-orange-300 transition disabled:opacity-50">
+                    No Show
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-1">
+                    <span className="text-xs text-orange-300 font-semibold">Sure?</span>
+                    <button onClick={() => markNoShow(r.id)} disabled={noShowing === r.id} className="text-xs text-orange-400 hover:text-orange-300 font-semibold transition disabled:opacity-50">
+                      {noShowing === r.id ? "..." : "Yes"}
+                    </button>
+                    <button onClick={() => setNoShowConfirm(null)} className="text-xs text-brown-500 hover:text-brown-300 transition">No</button>
+                  </div>
+                )}
+              </div>
+            )}
+            {isDeletablePending(r) && (
+              // Never a real booking — nothing charged, no slot to
+              // free — safe to delete right away.
+              <button onClick={() => deleteRegistration(r.id)} disabled={deleting === r.id} className="text-xs text-brown-500 hover:text-red-400 transition disabled:opacity-50">
+                {deleting === r.id ? "..." : "Delete"}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function folderRowJSX(folder: Folder) {
+    const sample = folder.regs[0];
+    const signedUp = folderSignedUpCount(folder.regs);
+    const timeLabel = sample.booked_start_time ? `${sample.booked_start_time}${sample.booked_end_time ? `-${sample.booked_end_time}` : ""}` : null;
+    const expanded = expandedFolders.has(folder.key);
+    return (
+      <div key={folder.key} className="rounded-xl border border-brown-700 bg-brown-900/40 overflow-hidden">
+        <button type="button" onClick={() => toggleFolder(folder.key)} className="w-full text-left px-4 py-3 flex items-center justify-between gap-3">
+          <div className="min-w-0 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+            <span className={`text-brown-500 transition-transform duration-200 shrink-0 ${expanded ? "rotate-180" : ""}`}>▾</span>
+            <span className={`rounded-full px-2 py-0.5 text-xs ${typePill(sample.type, sample.session_details)}`}>{typePillLabel(sample.type, sample.session_details)}</span>
+            <span className="font-medium text-sm">{folderLabel(sample)}</span>
+            {timeLabel && <span className="text-xs text-brown-400">{timeLabel}</span>}
+            {sample.booked_location && <span className="text-xs text-brown-500">· {sample.booked_location}</span>}
+          </div>
+          <span className="shrink-0 text-xs font-medium text-mesa-accent whitespace-nowrap">
+            {signedUp} signed up{typeof folder.maxSpots === "number" ? ` / ${folder.maxSpots}` : ""}
+          </span>
+        </button>
+        {expanded && (
+          <div className="border-t border-brown-700 px-3 py-3 space-y-2 bg-brown-950/40">
+            {folder.regs.map((r) => regRowJSX(r))}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   const sessionsByDay = useMemo(() => {
     const map = new Map<string, Registration[]>();
@@ -699,66 +877,9 @@ function CalendarView({ list, packageMembership, weeklyDiscountRates, cancelRegi
             <span className="ml-2 text-mesa-accent font-normal">{selectedSessions.length} session{selectedSessions.length !== 1 ? "s" : ""}</span>
           </h3>
           <div className="space-y-2">
-            {selectedSessions.map((r) => (
-              <div key={r.id} className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mb-1">
-                      <span className="font-medium text-sm">{r.parent_name}</span>
-                      <span className={`rounded-full px-2 py-0.5 text-xs ${typePill(r.type, r.session_details)}`}>{typePillLabel(r.type, r.session_details)}</span>
-                      {packageMembership.get(r.id)?.withinPackage && (
-                        <span className="rounded-full bg-teal-900/40 text-teal-400 px-2 py-0.5 text-xs font-medium">pkg</span>
-                      )}
-                    </div>
-                    <div className="text-xs text-brown-300">{athleteNames(r.kids || "")}</div>
-                    <div className="text-xs text-brown-500 mt-0.5">{r.email} · {r.phone}</div>
-                    <div className="text-xs text-brown-400 mt-1 leading-relaxed whitespace-pre-line">
-                      {r.session_details ? r.session_details.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim() : "—"}
-                    </div>
-                  </div>
-                  <div className="shrink-0 flex flex-col items-end gap-2">
-                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusBadge(r.status).cls}`}>
-                      {statusBadge(r.status).label}
-                    </span>
-                    {!packageMembership.get(r.id)?.withinPackage && (
-                      <span className="text-xs font-medium text-green-400">
-                        {formatPrice(effectivePrice(r, weeklyDiscountRates))}
-                      </span>
-                    )}
-                    {r.status === "confirmed" && (
-                      <div className="flex gap-2">
-                        <button onClick={() => cancelRegistration(r.id)} disabled={cancelling === r.id} className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50">
-                          {cancelling === r.id ? "..." : "Cancel"}
-                        </button>
-                        <button onClick={() => openReschedule(r)} className="text-xs text-blue-400 hover:text-blue-300 transition">
-                          Reschedule
-                        </button>
-                        {noShowConfirm !== r.id ? (
-                          <button onClick={() => setNoShowConfirm(r.id)} disabled={noShowing === r.id} className="text-xs text-orange-400 hover:text-orange-300 transition disabled:opacity-50">
-                            No Show
-                          </button>
-                        ) : (
-                          <div className="flex items-center gap-1">
-                            <span className="text-xs text-orange-300 font-semibold">Sure?</span>
-                            <button onClick={() => markNoShow(r.id)} disabled={noShowing === r.id} className="text-xs text-orange-400 hover:text-orange-300 font-semibold transition disabled:opacity-50">
-                              {noShowing === r.id ? "..." : "Yes"}
-                            </button>
-                            <button onClick={() => setNoShowConfirm(null)} className="text-xs text-brown-500 hover:text-brown-300 transition">No</button>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    {isDeletablePending(r) && (
-                      // Never a real booking — nothing charged, no slot to
-                      // free — safe to delete right away.
-                      <button onClick={() => deleteRegistration(r.id)} disabled={deleting === r.id} className="text-xs text-brown-500 hover:text-red-400 transition disabled:opacity-50">
-                        {deleting === r.id ? "..." : "Delete"}
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))}
+            {buildFolders(selectedSessions, weeklyCapacity, campCapacity).map((folder) =>
+              folder.grouped ? folderRowJSX(folder) : regRowJSX(folder.regs[0])
+            )}
           </div>
         </div>
       )}
@@ -1213,6 +1334,11 @@ export default function AdminPage() {
     return result;
   }, [registrations, packages]);
 
+  // Session-slot capacity from the live schedule sheet, keyed the same way
+  // folders are — powers the "X signed up / Y" folder header.
+  const weeklyCapacity = useMemo(() => buildWeeklyCapacityMap(scheduleData?.weeklySchedule || []), [scheduleData]);
+  const campCapacity = useMemo(() => buildCampCapacityMap(scheduleData?.camps || []), [scheduleData]);
+
   function RegCard({ r, isPast = false }: { r: Registration; isPast?: boolean }) {
     const [expanded, setExpanded] = useState(false);
     const fullSession = r.session_details
@@ -1367,6 +1493,54 @@ export default function AdminPage() {
     );
   }
 
+  // A collapsed folder for one real weekly/pickup/camp session — expands to
+  // the individual RegCards (with each athlete's info) that make it up.
+  function FolderCard({ folder, isPast = false }: { folder: Folder; isPast?: boolean }) {
+    const [expanded, setExpanded] = useState(false);
+    const sample = folder.regs[0];
+    const signedUp = folderSignedUpCount(folder.regs);
+    const timeLabel = sample.booked_start_time ? `${sample.booked_start_time}${sample.booked_end_time ? `-${sample.booked_end_time}` : ""}` : null;
+    return (
+      <div className="rounded-xl border border-brown-700 bg-brown-900/40 overflow-hidden">
+        <button type="button" onClick={() => setExpanded((v) => !v)} className="w-full text-left px-4 py-3 flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+              <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${isPickup(sample) ? "bg-orange-500 text-white" : "bg-amber-400 text-blue-900"}`}>{typePillLabel(sample.type, sample.session_details)}</span>
+              <span className="font-medium text-sm">{folderLabel(sample)}</span>
+              {(() => { const da = daysAway(sample.booked_date); return da ? <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${da.cls}`}>{da.label}</span> : null; })()}
+            </div>
+            <div className="text-xs text-brown-400 mt-1">
+              {timeLabel && <span>{timeLabel}</span>}{sample.booked_location ? ` · ${sample.booked_location}` : ""}
+            </div>
+          </div>
+          <div className="shrink-0 flex flex-col items-end justify-between self-stretch gap-1">
+            <span className={`text-brown-500 transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}>▾</span>
+            <span className="text-mesa-accent font-medium text-xs whitespace-nowrap">
+              {signedUp} signed up{typeof folder.maxSpots === "number" ? ` / ${folder.maxSpots}` : ""}
+            </span>
+          </div>
+        </button>
+        {expanded && (
+          <div className="border-t border-brown-700 px-3 py-3 space-y-2 bg-brown-950/40">
+            {folder.regs.map((r) => <RegCard key={r.id} r={r} isPast={isPast} />)}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function FolderAwareCardList({ list, isPast = false }: { list: Registration[]; isPast?: boolean }) {
+    return (
+      <div className="space-y-3">
+        {buildFolders(list, weeklyCapacity, campCapacity).map((folder) =>
+          folder.grouped
+            ? <FolderCard key={folder.key} folder={folder} isPast={isPast} />
+            : <RegCard key={folder.regs[0].id} r={folder.regs[0]} isPast={isPast} />
+        )}
+      </div>
+    );
+  }
+
   function RegTableRows({ list, isPast = false }: { list: Registration[]; isPast?: boolean }) {
     return (
       <>
@@ -1443,6 +1617,48 @@ export default function AdminPage() {
         ))}
         {list.length === 0 && (
           <tr><td colSpan={8} className="px-4 py-8 text-center text-brown-500">No registrations found.</td></tr>
+        )}
+      </>
+    );
+  }
+
+  // Desktop table equivalent of FolderCard — a single summary row spanning
+  // every column that expands into the normal RegTableRows for that session.
+  function FolderTableGroup({ folder, isPast = false }: { folder: Folder; isPast?: boolean }) {
+    const [expanded, setExpanded] = useState(false);
+    const sample = folder.regs[0];
+    const signedUp = folderSignedUpCount(folder.regs);
+    const timeLabel = sample.booked_start_time ? `${sample.booked_start_time}${sample.booked_end_time ? `-${sample.booked_end_time}` : ""}` : null;
+    return (
+      <>
+        <tr className="hover:bg-brown-900/30 transition cursor-pointer border-b border-brown-600/70" onClick={() => setExpanded((v) => !v)}>
+          <td colSpan={8} className="px-4 py-2.5">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-2 min-w-0">
+                <span className={`text-brown-500 transition-transform duration-200 shrink-0 ${expanded ? "rotate-180" : ""}`}>▾</span>
+                <span className={`rounded-full px-2 py-0.5 text-xs font-semibold shrink-0 ${isPickup(sample) ? "bg-orange-500 text-white" : "bg-amber-400 text-blue-900"}`}>{typePillLabel(sample.type, sample.session_details)}</span>
+                <span className="font-medium text-sm truncate">{folderLabel(sample)}</span>
+                {timeLabel && <span className="text-xs text-brown-400 shrink-0">{timeLabel}</span>}
+                {sample.booked_location && <span className="text-xs text-brown-500 shrink-0">· {sample.booked_location}</span>}
+              </div>
+              <span className="text-xs font-medium text-mesa-accent shrink-0">
+                {signedUp} signed up{typeof folder.maxSpots === "number" ? ` / ${folder.maxSpots}` : ""}
+              </span>
+            </div>
+          </td>
+        </tr>
+        {expanded && <RegTableRows list={folder.regs} isPast={isPast} />}
+      </>
+    );
+  }
+
+  function FolderAwareTableRows({ list, isPast = false }: { list: Registration[]; isPast?: boolean }) {
+    return (
+      <>
+        {buildFolders(list, weeklyCapacity, campCapacity).map((folder) =>
+          folder.grouped
+            ? <FolderTableGroup key={folder.key} folder={folder} isPast={isPast} />
+            : <RegTableRows key={folder.regs[0].id} list={folder.regs} isPast={isPast} />
         )}
       </>
     );
@@ -1603,13 +1819,13 @@ export default function AdminPage() {
                       <div className="text-xs font-semibold text-mesa-accent border-b border-brown-700 pb-1.5 mb-2">Today — {todayLabel}</div>
                       {todaySessions.length === 0
                         ? <p className="text-xs text-brown-500 italic py-1">No sessions scheduled for today.</p>
-                        : <div className="space-y-3">{todaySessions.map((r) => <RegCard key={r.id} r={r} />)}</div>
+                        : <FolderAwareCardList list={todaySessions} />
                       }
                     </div>
                     {groupByDate(futureSessions).map(({ key, label, sessions }) => (
                       <div key={key}>
                         <div className="text-xs font-semibold text-mesa-accent border-b border-brown-700 pb-1.5 mb-2">{label}</div>
-                        <div className="space-y-3">{sessions.map((r) => <RegCard key={r.id} r={r} />)}</div>
+                        <FolderAwareCardList list={sessions} />
                       </div>
                     ))}
                   </div>
@@ -1623,12 +1839,12 @@ export default function AdminPage() {
                         <tr><td colSpan={8} className="px-4 py-2 bg-brown-900/70 text-xs font-semibold text-mesa-accent">Today — {todayLabel}</td></tr>
                         {todaySessions.length === 0
                           ? <tr><td colSpan={8} className="px-4 py-3 text-xs text-brown-500 italic">No sessions scheduled for today.</td></tr>
-                          : <RegTableRows list={todaySessions} />
+                          : <FolderAwareTableRows list={todaySessions} />
                         }
                         {groupByDate(futureSessions).map(({ key, label, sessions }) => (
                           <Fragment key={key}>
                             <tr><td colSpan={8} className="px-4 py-2 bg-brown-900/70 border-t-2 border-brown-600 text-xs font-semibold text-mesa-accent">{label}</td></tr>
-                            <RegTableRows list={sessions} />
+                            <FolderAwareTableRows list={sessions} />
                           </Fragment>
                         ))}
                       </tbody>
@@ -1650,7 +1866,7 @@ export default function AdminPage() {
               {groupByDate(displayedPast).map(({ key, label, sessions }) => (
                 <div key={key}>
                   <div className="text-xs font-semibold text-mesa-accent border-b border-brown-700 pb-1.5 mb-2">{label}</div>
-                  <div className="space-y-3">{sessions.map((r) => <RegCard key={r.id} r={r} isPast />)}</div>
+                  <FolderAwareCardList list={sessions} isPast />
                 </div>
               ))}
             </div>
@@ -1665,7 +1881,7 @@ export default function AdminPage() {
                   {groupByDate(displayedPast).map(({ key, label, sessions }) => (
                     <Fragment key={key}>
                       <tr><td colSpan={8} className="px-4 py-2 bg-brown-900/70 border-t-2 border-brown-600 text-xs font-semibold text-mesa-accent">{label}</td></tr>
-                      <RegTableRows list={sessions} isPast />
+                      <FolderAwareTableRows list={sessions} isPast />
                     </Fragment>
                   ))}
                 </tbody>
@@ -1681,6 +1897,8 @@ export default function AdminPage() {
               list={[...upcoming, ...past.filter(r => r.status !== "cancelled")]}
               packageMembership={packageMembership}
               weeklyDiscountRates={weeklyDiscountRates}
+              weeklyCapacity={weeklyCapacity}
+              campCapacity={campCapacity}
               cancelRegistration={cancelRegistration}
               markNoShow={markNoShow}
               openReschedule={openReschedule}
