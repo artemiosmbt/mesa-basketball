@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, Fragment } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { authClient, ADMIN_EMAIL } from "@/lib/auth";
@@ -32,6 +32,8 @@ interface Registration {
   used_referral_credit: boolean;
   is_paid?: boolean;
   applied_account_credit?: number | null;
+  is_late_cancel?: boolean;
+  camp_day_late_fee?: number | null;
 }
 
 interface PackageData {
@@ -191,6 +193,14 @@ function isDeletablePending(r: Registration): boolean {
   if (r.status === "payment_abandoned") return true;
   if (r.status !== "pending_payment") return false;
   return Date.now() - new Date(r.created_at).getTime() > 3 * 60 * 1000;
+}
+
+// A cancelled row is worth keeping in history only if a late fee actually
+// changed hands on it — a plain on-time cancellation (or the leftover
+// "cancelled" row a client reschedule leaves behind for the old session) is
+// just clutter once its date has passed.
+function keepCancelledInHistory(r: Registration): boolean {
+  return !!r.is_late_cancel || (r.camp_day_late_fee || 0) > 0;
 }
 
 function toDateKey(d: Date): string {
@@ -623,6 +633,14 @@ function folderSignedUpCount(regs: Registration[]): number {
     .reduce((sum, r) => sum + (r.total_participants || 1), 0);
 }
 
+// Same "X/Y signed up" label everywhere a folder header appears (Upcoming,
+// Past, Calendar) — falls back to just "X signed up" when the schedule
+// sheet has no matching capacity for this session.
+function folderCountLabel(folder: Folder): string {
+  const signedUp = folderSignedUpCount(folder.regs);
+  return typeof folder.maxSpots === "number" ? `${signedUp}/${folder.maxSpots} signed up` : `${signedUp} signed up`;
+}
+
 function buildWeeklyCapacityMap(weeklySchedule: WeeklySession[]): Map<string, number> {
   const map = new Map<string, number>();
   for (const s of weeklySchedule) {
@@ -743,7 +761,6 @@ function CalendarView({ list, packageMembership, weeklyDiscountRates, weeklyCapa
 
   function folderRowJSX(folder: Folder) {
     const sample = folder.regs[0];
-    const signedUp = folderSignedUpCount(folder.regs);
     const timeLabel = sample.booked_start_time ? `${sample.booked_start_time}${sample.booked_end_time ? `-${sample.booked_end_time}` : ""}` : null;
     const expanded = expandedFolders.has(folder.key);
     return (
@@ -757,7 +774,7 @@ function CalendarView({ list, packageMembership, weeklyDiscountRates, weeklyCapa
             {sample.booked_location && <span className="text-xs text-brown-500">· {sample.booked_location}</span>}
           </div>
           <span className="shrink-0 text-xs font-medium text-mesa-accent whitespace-nowrap">
-            {signedUp} signed up{typeof folder.maxSpots === "number" ? ` / ${folder.maxSpots}` : ""}
+            {folderCountLabel(folder)}
           </span>
         </button>
         {expanded && (
@@ -1218,9 +1235,13 @@ export default function AdminPage() {
     const now = Date.now();
     return registrations
       // An abandoned checkout never became a real booking — nothing to see
-      // here once its date passes, same as it never shows as upcoming.
+      // here once its date passes, same as it never shows as upcoming. A
+      // cancelled row (including the leftover row a client reschedule
+      // leaves behind) is likewise just clutter unless a late fee was
+      // actually charged on it — see keepCancelledInHistory.
       .filter((r) => {
         if (r.status === "payment_abandoned") return false;
+        if (r.status === "cancelled" && !keepCancelledInHistory(r)) return false;
         const ms = sessionMs(r.booked_date, r.booked_start_time);
         return ms > 0 && ms <= now;
       })
@@ -1498,7 +1519,6 @@ export default function AdminPage() {
   function FolderCard({ folder, isPast = false }: { folder: Folder; isPast?: boolean }) {
     const [expanded, setExpanded] = useState(false);
     const sample = folder.regs[0];
-    const signedUp = folderSignedUpCount(folder.regs);
     const timeLabel = sample.booked_start_time ? `${sample.booked_start_time}${sample.booked_end_time ? `-${sample.booked_end_time}` : ""}` : null;
     return (
       <div className="rounded-xl border border-brown-700 bg-brown-900/40 overflow-hidden">
@@ -1516,7 +1536,7 @@ export default function AdminPage() {
           <div className="shrink-0 flex flex-col items-end justify-between self-stretch gap-1">
             <span className={`text-brown-500 transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}>▾</span>
             <span className="text-mesa-accent font-medium text-xs whitespace-nowrap">
-              {signedUp} signed up{typeof folder.maxSpots === "number" ? ` / ${folder.maxSpots}` : ""}
+              {folderCountLabel(folder)}
             </span>
           </div>
         </button>
@@ -1538,129 +1558,6 @@ export default function AdminPage() {
             : <RegCard key={folder.regs[0].id} r={folder.regs[0]} isPast={isPast} />
         )}
       </div>
-    );
-  }
-
-  function RegTableRows({ list, isPast = false }: { list: Registration[]; isPast?: boolean }) {
-    return (
-      <>
-        {list.map((r) => (
-          <tr key={r.id} className="hover:bg-brown-900/30 transition align-top border-b border-brown-600/70">
-            <td className="px-4 py-2.5 text-brown-400 whitespace-nowrap text-xs">
-              <div>{new Date(r.created_at).toLocaleDateString()}</div>
-              {r.booked_date && <div className="text-mesa-accent font-medium mt-0.5">↳ {formatDate(r.booked_date)}</div>}
-            </td>
-            <td className="px-4 py-2.5 max-w-[190px]">
-              <div className="font-medium truncate">{r.parent_name}</div>
-              <div className="text-brown-400 text-xs mt-0.5 truncate" title={r.email}>{r.email}</div>
-              <div className="text-brown-500 text-xs">{r.phone}</div>
-            </td>
-            <td className="px-4 py-2.5 text-brown-300 text-xs max-w-[140px]">{athleteNames(r.kids || "")}</td>
-            <td className="px-4 py-2.5 whitespace-nowrap">
-              <div className="flex flex-wrap gap-1">
-                <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${isPickup(r) ? "bg-orange-500 text-white" : "bg-amber-400 text-blue-900"}`}>{typePillLabel(r.type, r.session_details)}</span>
-                {packageMembership.get(r.id)?.withinPackage && (
-                  <span className="rounded-full bg-teal-900/40 text-teal-400 px-2 py-0.5 text-xs font-medium">pkg</span>
-                )}
-                {(() => { const da = daysAway(r.booked_date); return da ? <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${da.cls}`}>{da.label}</span> : null; })()}
-              </div>
-            </td>
-            <td className="px-4 py-2.5 text-brown-400 text-xs min-w-[220px] max-w-[380px]">
-              <div className="whitespace-pre-line leading-snug">{r.session_details ? r.session_details.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim() : "—"}</div>
-            </td>
-            <td className="px-4 py-2.5 whitespace-nowrap">
-              <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusBadge(r.status, isPast).cls}`}>
-                {statusBadge(r.status, isPast).label}
-              </span>
-            </td>
-            <td className="px-4 py-2.5 whitespace-nowrap text-xs">
-              {packageMembership.get(r.id)?.withinPackage ? (
-                <span className="text-brown-600">—</span>
-              ) : (
-                <span className="text-green-400 font-medium">{formatPrice(effectivePrice(r, weeklyDiscountRates))}</span>
-              )}
-            </td>
-            <td className="px-4 py-2.5 whitespace-nowrap">
-              {isPast ? (
-                <div className="flex items-center gap-3">
-                  {r.status === "confirmed" && (
-                    <button onClick={() => { if (window.confirm("Mark as no show?")) markNoShow(r.id); }} disabled={noShowing === r.id} className="text-xs text-orange-400 hover:text-orange-300 transition disabled:opacity-50">
-                      {noShowing === r.id ? "..." : "No Show"}
-                    </button>
-                  )}
-                  <button onClick={() => { if (window.confirm("Delete this record permanently?")) deleteRegistration(r.id); }} disabled={deleting === r.id} className="text-xs text-brown-500 hover:text-red-400 transition disabled:opacity-50">
-                    {deleting === r.id ? "..." : "Delete"}
-                  </button>
-                </div>
-              ) : r.status === "confirmed" ? (
-                <div className="flex items-center gap-3">
-                  <button onClick={() => cancelRegistration(r.id)} disabled={cancelling === r.id} className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50">
-                    {cancelling === r.id ? "..." : "Cancel"}
-                  </button>
-                  <button onClick={() => openReschedule(r)} className="text-xs text-blue-400 hover:text-blue-300 transition">
-                    Reschedule
-                  </button>
-                  <button onClick={() => { if (window.confirm("Mark as no show?")) markNoShow(r.id); }} disabled={noShowing === r.id} className="text-xs text-orange-400 hover:text-orange-300 transition disabled:opacity-50">
-                    {noShowing === r.id ? "..." : "No Show"}
-                  </button>
-                </div>
-              ) : isDeletablePending(r) ? (
-                // Never a real booking — nothing charged, no slot to free —
-                // so it's safe to delete immediately rather than waiting on
-                // the automatic abandonment sweep.
-                <button onClick={() => { if (window.confirm("Delete this record permanently?")) deleteRegistration(r.id); }} disabled={deleting === r.id} className="text-xs text-brown-500 hover:text-red-400 transition disabled:opacity-50">
-                  {deleting === r.id ? "..." : "Delete"}
-                </button>
-              ) : null}
-            </td>
-          </tr>
-        ))}
-        {list.length === 0 && (
-          <tr><td colSpan={8} className="px-4 py-8 text-center text-brown-500">No registrations found.</td></tr>
-        )}
-      </>
-    );
-  }
-
-  // Desktop table equivalent of FolderCard — a single summary row spanning
-  // every column that expands into the normal RegTableRows for that session.
-  function FolderTableGroup({ folder, isPast = false }: { folder: Folder; isPast?: boolean }) {
-    const [expanded, setExpanded] = useState(false);
-    const sample = folder.regs[0];
-    const signedUp = folderSignedUpCount(folder.regs);
-    const timeLabel = sample.booked_start_time ? `${sample.booked_start_time}${sample.booked_end_time ? `-${sample.booked_end_time}` : ""}` : null;
-    return (
-      <>
-        <tr className="hover:bg-brown-900/30 transition cursor-pointer border-b border-brown-600/70" onClick={() => setExpanded((v) => !v)}>
-          <td colSpan={8} className="px-4 py-2.5">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-2 min-w-0">
-                <span className={`text-brown-500 transition-transform duration-200 shrink-0 ${expanded ? "rotate-180" : ""}`}>▾</span>
-                <span className={`rounded-full px-2 py-0.5 text-xs font-semibold shrink-0 ${isPickup(sample) ? "bg-orange-500 text-white" : "bg-amber-400 text-blue-900"}`}>{typePillLabel(sample.type, sample.session_details)}</span>
-                <span className="font-medium text-sm truncate">{folderLabel(sample)}</span>
-                {timeLabel && <span className="text-xs text-brown-400 shrink-0">{timeLabel}</span>}
-                {sample.booked_location && <span className="text-xs text-brown-500 shrink-0">· {sample.booked_location}</span>}
-              </div>
-              <span className="text-xs font-medium text-mesa-accent shrink-0">
-                {signedUp} signed up{typeof folder.maxSpots === "number" ? ` / ${folder.maxSpots}` : ""}
-              </span>
-            </div>
-          </td>
-        </tr>
-        {expanded && <RegTableRows list={folder.regs} isPast={isPast} />}
-      </>
-    );
-  }
-
-  function FolderAwareTableRows({ list, isPast = false }: { list: Registration[]; isPast?: boolean }) {
-    return (
-      <>
-        {buildFolders(list, weeklyCapacity, campCapacity).map((folder) =>
-          folder.grouped
-            ? <FolderTableGroup key={folder.key} folder={folder} isPast={isPast} />
-            : <RegTableRows key={folder.regs[0].id} list={folder.regs} isPast={isPast} />
-        )}
-      </>
     );
   }
 
@@ -1813,8 +1710,7 @@ export default function AdminPage() {
               return (
                 <>
                   <p className="text-xs text-brown-500 mb-3">{displayedUpcoming.length} session{displayedUpcoming.length !== 1 ? "s" : ""}</p>
-                  {/* Mobile */}
-                  <div className="md:hidden space-y-4">
+                  <div className="space-y-4">
                     <div>
                       <div className="text-xs font-semibold text-mesa-accent border-b border-brown-700 pb-1.5 mb-2">Today — {todayLabel}</div>
                       {todaySessions.length === 0
@@ -1829,27 +1725,6 @@ export default function AdminPage() {
                       </div>
                     ))}
                   </div>
-                  {/* Desktop */}
-                  <div className="hidden md:block rounded-xl border border-brown-700 overflow-hidden">
-                    <table className="w-full text-sm">
-                      <thead className="bg-brown-900/60 text-xs uppercase tracking-wider text-brown-400">
-                        <tr><th className="px-4 py-3 text-left">Registered</th><th className="px-4 py-3 text-left">Client</th><th className="px-4 py-3 text-left">Athletes</th><th className="px-4 py-3 text-left">Type</th><th className="px-4 py-3 text-left">Session</th><th className="px-4 py-3 text-left">Status</th><th className="px-4 py-3 text-left">Price</th><th className="px-4 py-3 text-left">Action</th></tr>
-                      </thead>
-                      <tbody>
-                        <tr><td colSpan={8} className="px-4 py-2 bg-brown-900/70 text-xs font-semibold text-mesa-accent">Today — {todayLabel}</td></tr>
-                        {todaySessions.length === 0
-                          ? <tr><td colSpan={8} className="px-4 py-3 text-xs text-brown-500 italic">No sessions scheduled for today.</td></tr>
-                          : <FolderAwareTableRows list={todaySessions} />
-                        }
-                        {groupByDate(futureSessions).map(({ key, label, sessions }) => (
-                          <Fragment key={key}>
-                            <tr><td colSpan={8} className="px-4 py-2 bg-brown-900/70 border-t-2 border-brown-600 text-xs font-semibold text-mesa-accent">{label}</td></tr>
-                            <FolderAwareTableRows list={sessions} />
-                          </Fragment>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
                 </>
               );
             })()}
@@ -1860,8 +1735,7 @@ export default function AdminPage() {
         {tab === "past" && (
           <>
             <p className="text-xs text-brown-500 mb-3">{displayedPast.length} session{displayedPast.length !== 1 ? "s" : ""}</p>
-            {/* Mobile */}
-            <div className="md:hidden space-y-4">
+            <div className="space-y-4">
               {displayedPast.length === 0 && <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-8 text-center text-brown-500 text-sm">No past sessions.</div>}
               {groupByDate(displayedPast).map(({ key, label, sessions }) => (
                 <div key={key}>
@@ -1870,23 +1744,6 @@ export default function AdminPage() {
                 </div>
               ))}
             </div>
-            {/* Desktop */}
-            <div className="hidden md:block rounded-xl border border-brown-700 overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-brown-900/60 text-xs uppercase tracking-wider text-brown-400">
-                  <tr><th className="px-4 py-3 text-left">Registered</th><th className="px-4 py-3 text-left">Client</th><th className="px-4 py-3 text-left">Athletes</th><th className="px-4 py-3 text-left">Type</th><th className="px-4 py-3 text-left">Session</th><th className="px-4 py-3 text-left">Status</th><th className="px-4 py-3 text-left">Price</th><th className="px-4 py-3 text-left">Action</th></tr>
-                </thead>
-                <tbody>
-                  {displayedPast.length === 0 && <tr><td colSpan={8} className="px-4 py-8 text-center text-brown-500">No past sessions.</td></tr>}
-                  {groupByDate(displayedPast).map(({ key, label, sessions }) => (
-                    <Fragment key={key}>
-                      <tr><td colSpan={8} className="px-4 py-2 bg-brown-900/70 border-t-2 border-brown-600 text-xs font-semibold text-mesa-accent">{label}</td></tr>
-                      <FolderAwareTableRows list={sessions} isPast />
-                    </Fragment>
-                  ))}
-                </tbody>
-              </table>
-            </div>
           </>
         )}
 
@@ -1894,7 +1751,7 @@ export default function AdminPage() {
         {tab === "calendar" && (
           <div className="rounded-xl border border-brown-700 bg-brown-900/20 p-4">
             <CalendarView
-              list={[...upcoming, ...past.filter(r => r.status !== "cancelled")]}
+              list={[...upcoming, ...past]}
               packageMembership={packageMembership}
               weeklyDiscountRates={weeklyDiscountRates}
               weeklyCapacity={weeklyCapacity}
