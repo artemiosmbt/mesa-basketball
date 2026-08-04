@@ -3,16 +3,17 @@ import type { NextRequest } from "next/server";
 
 export const ADMIN_EMAIL = "artemios@mesabasketballtraining.com";
 
-// Trainer dashboard accounts — read-only everywhere except marking a
-// session No Show (Cancel/Reschedule/Delete/Add-Player/payment edits stay
-// exclusive to ADMIN_EMAIL). "elevated" additionally gets the all-trainers
-// filter dropdown and the Clients tab, same as admin — reserved for
-// whoever oversees every trainer (e.g. the gym's on-site overseer), not a
-// regular trainer. A plain "trainer" only ever sees their own schedule —
-// trainerName must exactly match the booked_trainer values on the schedule
-// sheet/registrations, and is enforced server-side (not just hidden in the
-// UI) so that account's browser never even receives another trainer's
-// clients' contact info.
+// Trainer dashboard accounts — Upcoming/Past/Calendar/Packages only, no
+// Clients tab, no stats row, read-only everywhere except marking a session
+// No Show (Cancel/Reschedule/Delete/Add-Player/payment edits stay exclusive
+// to ADMIN_EMAIL). "elevated" additionally gets the all-trainers filter
+// dropdown on Upcoming/Past/Calendar and sees every trainer's bookings
+// there instead of just their own — reserved for whoever oversees every
+// trainer (e.g. the gym's on-site overseer), not a regular trainer. A plain
+// "trainer" only ever sees their own schedule — trainerName must exactly
+// match the booked_trainer values on the schedule sheet/registrations, and
+// is enforced server-side (not just hidden in the UI) so that account's
+// browser never even receives another trainer's clients' contact info.
 // To add a trainer: have them sign up normally on the site, then add a row
 // here with their login email and redeploy. trainerName is only needed
 // (and only meaningful) for role "trainer" — omit it for "elevated_trainer".

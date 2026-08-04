@@ -1759,7 +1759,7 @@ export default function AdminPage() {
 
         {/* Tabs */}
         <div className="flex flex-wrap gap-2 mb-6">
-          {(authCtx?.role === "trainer" ? (["upcoming", "past", "calendar"] as const) : (["upcoming", "past", "calendar", "clients"] as const)).map((t) => (
+          {(authCtx?.role === "admin" ? (["upcoming", "past", "calendar", "clients"] as const) : (["upcoming", "past", "calendar"] as const)).map((t) => (
             <button
               key={t}
               onClick={() => { setTab(t); setSelectedClient(null); }}
@@ -1775,7 +1775,7 @@ export default function AdminPage() {
           ))}
         </div>
 
-        {/* Trainer filter — admin and elevated trainer accounts only; applies across Upcoming/Past/Calendar/Clients */}
+        {/* Trainer filter — admin and elevated trainer accounts only; applies across Upcoming/Past/Calendar (admin also gets Clients, elevated trainer does not) */}
         {(authCtx?.role === "admin" || authCtx?.role === "elevated_trainer") && availableTrainers.length > 0 && (
           <div className="flex flex-wrap items-center gap-2 mb-6">
             <span className="text-xs uppercase tracking-wider text-brown-500">Trainer</span>
@@ -1882,7 +1882,7 @@ export default function AdminPage() {
         )}
 
         {/* Clients */}
-        {tab === "clients" && authCtx?.role !== "trainer" && !selectedClient && (
+        {tab === "clients" && authCtx?.role === "admin" && !selectedClient && (
           <>
             <input
               type="text"
@@ -1932,7 +1932,7 @@ export default function AdminPage() {
         )}
 
         {/* Client detail */}
-        {tab === "clients" && authCtx?.role !== "trainer" && selectedClient && (() => {
+        {tab === "clients" && authCtx?.role === "admin" && selectedClient && (() => {
           const clientData = clients.find((c) => (c.email || c.name) === selectedClient);
           const profile = clientData?.email ? profilesMap[clientData.email] : undefined;
           const kids: ProfileKid[] = profile?.kids?.length
