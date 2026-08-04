@@ -20,17 +20,13 @@ export const metadata: Metadata = {
     default: "Long Island Basketball Training | Mesa Basketball Training",
     template: "%s | Mesa Basketball Training",
   },
-  icons: {
-    // Declaring `icons` at all disables Next's automatic detection of
-    // src/app/icon.png, so the browser-tab icon must be listed explicitly
-    // here too — otherwise every browser falls back to fetching
-    // /favicon.ico directly with no <link rel="icon"> hint at all.
-    icon: [
-      { url: "/favicon.ico", sizes: "any" },
-      { url: "/favicon.png", type: "image/png", sizes: "512x512" },
-    ],
-    apple: "/apple-touch-icon.png",
-  },
+  // No manual `icons` field here on purpose — src/app/icon.png and
+  // src/app/apple-icon.png are Next's file-convention names, auto-detected
+  // and auto-linked (<link rel="icon">/<link rel="apple-touch-icon">) with
+  // zero config. Declaring `icons` manually (even just for one of the two)
+  // silently disables that auto-detection for BOTH, which is exactly what
+  // regressed the browser-tab icon down to the small public/favicon.ico
+  // fallback instead of a smoothly-downscaled 512x512 PNG.
   description:
     "Long Island basketball training with former D1 and international professional player Artemios Gavalas. Group sessions, private lessons, and mini camps for all ages.",
   keywords: [
