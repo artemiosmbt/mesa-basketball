@@ -6,7 +6,6 @@ const FROM_EMAIL = "Mesa Basketball <noreply@mesabasketballtraining.com>";
 const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || "https://mesa-basketball-h8lk.vercel.app";
 
 const VENMO_LINK = `<a href="https://venmo.com/u/Artemios-Gavalas" target="_blank" style="color: #008CFF; font-weight: bold;">@Artemios-Gavalas</a>`;
-const PAYMENT_OPTIONS = `Zelle (artemios@mesabasketballtraining.com), Venmo (${VENMO_LINK}), or Cash`;
 const PAYMENT_LINES = `<p style="margin: 10px 0 0 0; color: #ffffff; font-size: 14px; line-height: 1.8;">
   Zelle: artemios@mesabasketballtraining.com<br/>
   Venmo: ${VENMO_LINK}<br/>
@@ -480,63 +479,6 @@ export async function sendCancellationNotification(data: {
     `,
   });
   if (clientResult.error) console.error("Resend cancellation email error:", clientResult.error, "to:", data.email);
-}
-
-export async function sendNoShowNotification(data: {
-  parentName: string;
-  email: string;
-  sessionDetails: string;
-  sessionType?: string;
-  feeAmount: number;
-  // True when the session was already paid for (Stripe or the old manual
-  // cash toggle) — no-shows keep the full charge per policy, so a paid
-  // client is told nothing further is due, never asked to pay again.
-  wasPaid: boolean;
-}) {
-  const resend = getResend();
-  const alreadyPaidNote = data.wasPaid
-    ? `<p style="background: #1e3a5f; color: #ffffff; padding: 14px; border-radius: 8px; margin: 12px 0;">
-        Per our no-show policy, your <strong>$${fmtMoney(data.feeAmount)} payment is being kept</strong> as the session fee — no refund applies. Nothing further is due.
-      </p>`
-    : `<p style="background: #3b1515; color: #fca5a5; padding: 14px; border-radius: 8px; margin: 12px 0;">
-        Per our policy, <strong>no-shows without prior notice are charged the full session fee</strong>.<br/>
-        <strong>Amount due: $${fmtMoney(data.feeAmount)}</strong>
-      </p>`;
-
-  // Email to Artemi
-  const adminResult = await resend.emails.send({
-    from: FROM_EMAIL,
-    to: ARTEMI_EMAIL,
-    subject: `No-Show: ${data.parentName}`,
-    html: `
-      <h2>No-Show Recorded</h2>
-      <p><strong>Parent:</strong> ${escapeHtml(data.parentName)}</p>
-      <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails)}</p>
-      <p><strong>${data.wasPaid ? "Already paid — fee kept" : "Full fee due"}:</strong> $${fmtMoney(data.feeAmount)}</p>
-    `,
-  });
-  if (adminResult.error) console.error("Resend admin no-show email error:", adminResult.error);
-
-  // Email to parent
-  const clientResult = await resend.emails.send({
-    from: FROM_EMAIL,
-    to: data.email,
-    replyTo: ARTEMI_EMAIL,
-    subject: data.wasPaid ? `No-Show on File — Mesa Basketball Training` : `No-Show — Session Fee Due — Mesa Basketball Training`,
-    html: `
-      <h2>No-Show on File</h2>
-      <p>Hi ${escapeHtml(data.parentName)},</p>
-      <p>You were marked as a <strong>no-show</strong> for the following session:</p>
-      <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails)}</p>
-      ${alreadyPaidNote}
-      ${!data.wasPaid ? `<p>Please send payment via ${PAYMENT_OPTIONS}.</p>` : ""}
-      <p>If you believe this was marked in error, please reply to this email or contact Artemios directly.</p>
-      <br/>
-      <p>Questions? Contact Artemios at (631) 599-1280 or <a href="mailto:artemios@mesabasketballtraining.com">artemios@mesabasketballtraining.com</a>.</p>
-      <p>— Mesa Basketball Training</p>
-    `,
-  });
-  if (clientResult.error) console.error("Resend no-show email error:", clientResult.error, "to:", data.email);
 }
 
 function formatMonthYear(monthYear: string): string {

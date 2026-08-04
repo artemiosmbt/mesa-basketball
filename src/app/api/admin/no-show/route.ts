@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { verifyAdmin } from "@/lib/auth";
-import { sendNoShowNotification } from "@/lib/email";
-import { sendSMS, sendAdminSMS } from "@/lib/sms";
+import { sendAdminSMS } from "@/lib/sms";
 import { countPackageSessionsUsed, setPackageSessions } from "@/lib/supabase";
 import { fmtMoney, fullPriceForType } from "@/lib/pricing";
 
@@ -56,10 +55,6 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-      if (reg.sms_consent && reg.phone) {
-        const noShowLabel = reg.session_details.split(" — ")[0] || "session";
-        await sendSMS(reg.phone, `Mesa Basketball: You were marked as a no-show for today's ${noShowLabel}. No payment is due — this session has been used from your package. Reply here with any questions. Reply STOP to opt out.`);
-      }
       await sendAdminSMS(`NO-SHOW (package session): ${reg.parent_name} — ${reg.session_details} | No fee — session used from package`);
     } catch (err) {
       console.error("No-show notification error (package session):", err);
@@ -81,22 +76,6 @@ export async function POST(req: NextRequest) {
   const wasPaid = !!reg.is_paid || !!reg.stripe_payment_intent_id;
   const feeAmount = wasPaid ? fullFeeAmount : Math.max(0, fullFeeAmount - (reg.applied_account_credit || 0));
 
-  await sendNoShowNotification({
-    parentName: reg.parent_name,
-    email: reg.email,
-    sessionDetails: reg.session_details,
-    sessionType: reg.type,
-    feeAmount,
-    wasPaid,
-  });
-
-  if (reg.sms_consent && reg.phone) {
-    const noShowLabel = reg.session_details.split(" — ")[0] || "session";
-    const message = wasPaid
-      ? `Mesa Basketball: You were marked as a no-show for today's ${noShowLabel}. Per our policy, your $${fmtMoney(feeAmount)} payment is being kept as the session fee — no refund applies, nothing further is due. Reply here with any questions. Reply STOP to opt out.`
-      : `Mesa Basketball: You were marked as a no-show for today's ${noShowLabel}. The full session fee of $${fmtMoney(feeAmount)} is due. Reply here with any questions. Reply STOP to opt out.`;
-    await sendSMS(reg.phone, message);
-  }
   await sendAdminSMS(`NO-SHOW: ${reg.parent_name} — ${reg.session_details} | ${wasPaid ? "Already paid — fee kept" : "Fee due"}: $${fmtMoney(feeAmount)}`);
 
   return NextResponse.json({ ok: true, feeAmount, wasPaid });
