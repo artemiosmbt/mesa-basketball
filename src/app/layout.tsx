@@ -21,6 +21,14 @@ export const metadata: Metadata = {
     template: "%s | Mesa Basketball Training",
   },
   icons: {
+    // Declaring `icons` at all disables Next's automatic detection of
+    // src/app/icon.png, so the browser-tab icon must be listed explicitly
+    // here too — otherwise every browser falls back to fetching
+    // /favicon.ico directly with no <link rel="icon"> hint at all.
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/favicon.png", type: "image/png", sizes: "512x512" },
+    ],
     apple: "/apple-touch-icon.png",
   },
   description:
