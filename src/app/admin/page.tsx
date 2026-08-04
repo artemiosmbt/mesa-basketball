@@ -36,6 +36,13 @@ interface Registration {
   camp_day_late_fee?: number | null;
 }
 
+interface ProfileKid {
+  name: string;
+  dob: string;
+  grade: string;
+  gender?: string;
+}
+
 interface PackageData {
   id: string;
   email: string;
@@ -150,7 +157,9 @@ function formatPrice(price: number | null): string {
   return `$${price}`;
 }
 
-function effectivePrice(r: Registration, weeklyDiscountRates?: Map<string, number>): number {
+// Full session rate before any account credit is netted out — the base
+// priceDisplay() builds on.
+function preCreditPrice(r: Registration, weeklyDiscountRates?: Map<string, number>): number {
   const isPrivateType = r.type === "private" || r.type === "group-private";
   let basePrice: number;
   if (r.session_price != null) {
@@ -161,11 +170,20 @@ function effectivePrice(r: Registration, weeklyDiscountRates?: Map<string, numbe
   } else {
     basePrice = fullPriceForType(r.type);
   }
-  const discounted = r.is_free && isPrivateType ? Math.round(basePrice * 0.5 * 100) / 100 : basePrice;
-  // session_price/basePrice is always the full pre-credit rate — account
-  // credit applied at booking time is a separate field and has to be
-  // subtracted here, or this shows what they'd owe with no credit at all.
-  return Math.max(0, discounted - (r.applied_account_credit || 0));
+  return r.is_free && isPrivateType ? Math.round(basePrice * 0.5 * 100) / 100 : basePrice;
+}
+
+// A flat dollar figure would hide that a $0 (or reduced) balance came from
+// spending account credit, not from nothing being owed — so break it out:
+// "$X credit" when credit covered it in full, "$X credit, $Y card" when it
+// only covered part, otherwise the plain amount exactly as before.
+function priceDisplay(r: Registration, weeklyDiscountRates?: Map<string, number>): string {
+  const total = preCreditPrice(r, weeklyDiscountRates);
+  const credit = Math.min(r.applied_account_credit || 0, total);
+  const owed = Math.max(0, total - credit);
+  if (credit <= 0) return formatPrice(owed);
+  if (owed <= 0) return `$${credit} credit`;
+  return `$${credit} credit, $${owed} card`;
 }
 
 function daysAway(dateStr: string | null): { label: string; cls: string } | null {
@@ -315,7 +333,7 @@ function isPrivateTypeClient(type: string): boolean {
 
 // The DB stores the FULL (undiscounted) session_price for private sessions —
 // the 50% referral-credit/first-time discount is applied at display time via
-// is_free, mirroring effectivePrice() and the server's identical logic.
+// is_free, mirroring preCreditPrice() and the server's identical logic.
 function effectiveAmountPreview(fullPrice: number, isFree: boolean, isPriv: boolean): number {
   return isFree && isPriv ? Math.round(fullPrice * 0.5 * 100) / 100 : fullPrice;
 }
@@ -735,7 +753,7 @@ function CalendarView({ list, packageMembership, weeklyDiscountRates, weeklyCapa
             </span>
             {!packageMembership.get(r.id)?.withinPackage && (
               <span className="text-xs font-medium text-green-400">
-                {formatPrice(effectivePrice(r, weeklyDiscountRates))}
+                {priceDisplay(r, weeklyDiscountRates)}
               </span>
             )}
             {r.status === "confirmed" && (
@@ -924,6 +942,7 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true);
   const [registrations, setRegistrations] = useState<Registration[]>([]);
   const [videoConsentMap, setVideoConsentMap] = useState<Record<string, boolean>>({});
+  const [profilesMap, setProfilesMap] = useState<Record<string, { phone: string; kids: ProfileKid[] }>>({});
   const [referralCreditsMap, setReferralCreditsMap] = useState<Record<string, { available: number; total: number }>>({});
   const [packages, setPackages] = useState<PackageData[]>([]);
   const [tab, setTab] = useState<"upcoming" | "past" | "clients" | "calendar">("upcoming");
@@ -971,10 +990,14 @@ export default function AdminPage() {
       }).then((r) => r.json()).then((adminData) => {
         setRegistrations(adminData.registrations || []);
         const map: Record<string, boolean> = {};
+        const profMap: Record<string, { phone: string; kids: ProfileKid[] }> = {};
         for (const p of (adminData.profiles || [])) {
-          if (p.email) map[p.email] = p.video_consent ?? true;
+          if (!p.email) continue;
+          map[p.email] = p.video_consent ?? true;
+          profMap[p.email] = { phone: p.phone || "", kids: Array.isArray(p.kids) ? p.kids : [] };
         }
         setVideoConsentMap(map);
+        setProfilesMap(profMap);
         const creditsMap: Record<string, { available: number; total: number }> = {};
         for (const rc of (adminData.referralCredits || [])) {
           if (rc.email) creditsMap[rc.email] = { available: rc.credits || 0, total: rc.total_referrals || 0 };
@@ -1415,7 +1438,7 @@ export default function AdminPage() {
           <div className="shrink-0 flex flex-col items-end justify-between self-stretch">
             <span className={`text-brown-500 transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}>▾</span>
             {!packageMembership.get(r.id)?.withinPackage && (
-              <span className="text-white font-medium text-xs">{formatPrice(effectivePrice(r, weeklyDiscountRates))}</span>
+              <span className="text-white font-medium text-xs">{priceDisplay(r, weeklyDiscountRates)}</span>
             )}
           </div>
         </button>
@@ -1449,7 +1472,7 @@ export default function AdminPage() {
               {!packageMembership.get(r.id)?.withinPackage && (
                 <div>
                   <p className="text-brown-500 uppercase tracking-wider mb-0.5">Price</p>
-                  <p className="text-green-400 font-medium">{formatPrice(effectivePrice(r, weeklyDiscountRates))}</p>
+                  <p className="text-green-400 font-medium">{priceDisplay(r, weeklyDiscountRates)}</p>
                 </div>
               )}
             </div>
@@ -1843,9 +1866,44 @@ export default function AdminPage() {
         {/* Client detail */}
         {tab === "clients" && selectedClient && (() => {
           const clientData = clients.find((c) => (c.email || c.name) === selectedClient);
+          const profile = clientData?.email ? profilesMap[clientData.email] : undefined;
+          const kids: ProfileKid[] = profile?.kids?.length
+            ? profile.kids
+            : clientData && clientData.kids !== "—"
+              ? clientData.kids.split(",").map((n) => ({ name: n.trim(), dob: "", grade: "" }))
+              : [];
+          const phone = profile?.phone || clientData?.phone || "";
           return (
             <>
               <button onClick={() => setSelectedClient(null)} className="text-sm text-mesa-accent hover:underline mb-4 inline-block">← All Clients</button>
+              {clientData && (
+                <div className="mb-4 rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-3">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="font-semibold text-base text-white">{clientData.name}</p>
+                      <div className="mt-1 text-sm text-brown-300 space-y-0.5">
+                        <p className="break-all">{clientData.email || "—"}</p>
+                        <p>{phone || "—"}</p>
+                      </div>
+                    </div>
+                    {kids.length > 0 && (
+                      <div className="min-w-0">
+                        <p className="text-brown-500 uppercase tracking-wider text-[10px] mb-1">Players</p>
+                        <div className="space-y-0.5">
+                          {kids.map((k, i) => (
+                            <p key={i} className="text-sm text-brown-200">
+                              <span className="font-medium">{k.name}</span>
+                              {k.dob && <span className="text-brown-400"> · DOB {k.dob}</span>}
+                              {k.grade && <span className="text-brown-400"> · Grade {k.grade}</span>}
+                              {k.gender && <span className="text-brown-400"> · {k.gender}</span>}
+                            </p>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
               {clientData && (
                 <div className="mb-4 rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-3 flex items-center gap-6">
                   <div className="text-center">

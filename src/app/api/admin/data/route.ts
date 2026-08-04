@@ -29,7 +29,7 @@ export async function GET(req: NextRequest) {
 
   const [{ data: registrations }, { data: profiles }, { data: referralCredits }, { data: packages }, { data: accountCredits }, { data: lateFeeEvents }] = await Promise.all([
     supabase.from("registrations").select("*").order("created_at", { ascending: false }),
-    supabase.from("profiles").select("email, video_consent"),
+    supabase.from("profiles").select("email, phone, kids, video_consent"),
     supabase.from("referral_credits").select("email, credits, total_referrals"),
     // Same payment_abandoned exclusion as /api/admin/packages — an
     // never-completed Checkout Session shouldn't count as a real package

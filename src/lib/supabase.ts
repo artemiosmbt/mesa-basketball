@@ -1256,13 +1256,18 @@ export async function getPackageById(packageId: string): Promise<MonthlyPackage 
 // booking flow (the claim would have to span price computation, an
 // optional Stripe branch, and the insert, not just the capacity check), so
 // instead: re-verify from source of truth (countPackageSessionsUsed)
-// immediately after the insert, and alert admin right away if it happened,
-// rather than let a silent overdraw go unnoticed. Called once per distinct
-// package touched by a request, after that request's own inserts land.
-export async function alertIfPackageOverdrawn(packageId: string, parentName: string): Promise<void> {
+// immediately after the insert. That same re-verified count is also the
+// ONLY place sessions_used gets written after a package-covered booking is
+// created — nothing at booking time itself persisted it, so a package with
+// no cancellation/reschedule/no-show ever against it (the common case) kept
+// showing its full, unused count forever even once every session had come
+// and gone. Called once per distinct package touched by a request, after
+// that request's own inserts land.
+export async function syncPackageSessionsUsed(packageId: string, parentName: string): Promise<void> {
   const pkg = await getPackageById(packageId);
   if (!pkg) return;
   const used = await countPackageSessionsUsed(packageId);
+  await setPackageSessions(packageId, used);
   if (used > pkg.package_type) {
     await sendAdminSMS(
       `⚠️ PACKAGE OVERDRAWN: ${parentName}'s ${pkg.month_year} package (${pkg.package_type} sessions paid for) now has ${used} confirmed/no-show sessions against it — likely two bookings raced each other at once. Review and charge the difference manually if needed.`

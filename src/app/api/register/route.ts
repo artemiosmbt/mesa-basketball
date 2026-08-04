@@ -23,7 +23,7 @@ import {
   attachStripeCheckoutSession,
   getActivePackage,
   countPackageSessionsUsed,
-  alertIfPackageOverdrawn,
+  syncPackageSessionsUsed,
   isRateLimited,
 } from "@/lib/supabase";
 
@@ -850,7 +850,7 @@ export async function POST(req: NextRequest) {
         // paid-for session count.
         const touchedPackageIds: string[] = coveredSessions.map((s: PricedSession) => s.packageId).filter((id: string | null): id is string => !!id);
         const distinctPackageIds: string[] = [...new Set(touchedPackageIds)];
-        await Promise.all(distinctPackageIds.map((id: string) => alertIfPackageOverdrawn(id, parentName)));
+        await Promise.all(distinctPackageIds.map((id: string) => syncPackageSessionsUsed(id, parentName)));
         await finalizeConfirmedPrivateSeriesBooking({
           parentName,
           email,
@@ -1111,7 +1111,7 @@ export async function POST(req: NextRequest) {
       // verify from source of truth now and alert admin immediately if this
       // booking (raced against another) pushed the package over its
       // paid-for session count.
-      if (packageId) await alertIfPackageOverdrawn(packageId, parentName);
+      if (packageId) await syncPackageSessionsUsed(packageId, parentName);
 
       if (amountToCharge === 0) {
         // Fully covered by discount + credit — nothing to actually charge,
