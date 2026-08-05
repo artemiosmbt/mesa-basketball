@@ -1,5 +1,6 @@
 import { Resend } from "resend";
 import { calcServiceFee, fmtMoney, PRIVATE_RATE, GROUP_PRIVATE_RATE } from "./pricing";
+import { formatMonthYear } from "./sms";
 
 const ARTEMI_EMAIL = "artemios@mesabasketballtraining.com";
 const FROM_EMAIL = "Mesa Basketball <noreply@mesabasketballtraining.com>";
@@ -481,12 +482,6 @@ export async function sendCancellationNotification(data: {
   if (clientResult.error) console.error("Resend cancellation email error:", clientResult.error, "to:", data.email);
 }
 
-function formatMonthYear(monthYear: string): string {
-  const [year, month] = monthYear.split("-");
-  const d = new Date(parseInt(year), parseInt(month) - 1, 1);
-  return d.toLocaleDateString("en-US", { month: "long", year: "numeric" });
-}
-
 function lastDayOfMonth(monthYear: string): string {
   const [year, month] = monthYear.split("-");
   const d = new Date(parseInt(year), parseInt(month), 0);
@@ -500,16 +495,30 @@ export async function sendPackageConfirmation(data: {
   packageType: number;
   monthYear: string;
   totalPrice: number;
+  appliedAccountCredit?: number;
   kids?: string;
   referralCode?: string;
 }) {
   const resend = getResend();
   const monthLabel = formatMonthYear(data.monthYear);
   const expiry = lastDayOfMonth(data.monthYear);
-  // This only ever sends once the Stripe charge for the package has already
+  // This only ever sends once payment (or full credit coverage) has already
   // succeeded (see finalizePaidPackageEnrollment) — never claim payment is
-  // still "due."
-  const totalWithFee = Math.round((data.totalPrice + calcServiceFee(data.totalPrice)) * 100) / 100;
+  // still "due." The fee itself was computed on whatever was left AFTER
+  // account credit at enrollment (see /api/packages), not the full package
+  // price — match that here, and keep "total price" (what the package is
+  // worth, credit + card combined) distinct from "charged to card" (what
+  // actually hit Stripe), or a partially-credit-covered package either
+  // overstates its card charge or misreports its total.
+  const appliedCredit = data.appliedAccountCredit ?? 0;
+  const amountCharged = Math.max(0, data.totalPrice - appliedCredit);
+  const fee = amountCharged > 0 ? calcServiceFee(amountCharged) : 0;
+  const totalWithFee = Math.round((data.totalPrice + fee) * 100) / 100;
+  const chargedToCard = Math.round((amountCharged + fee) * 100) / 100;
+  const creditLine = appliedCredit > 0 ? `<p><strong>Account credit applied:</strong> $${fmtMoney(appliedCredit)}</p>` : "";
+  const chargedLabel = chargedToCard > 0
+    ? `<p><strong>Charged to card:</strong> $${fmtMoney(chargedToCard)}</p>`
+    : `<p><strong>Charged to card:</strong> $0 (fully covered by account credit)</p>`;
 
   // Notify Artemi
   const adminResult = await resend.emails.send({
@@ -523,7 +532,9 @@ export async function sendPackageConfirmation(data: {
       <p><strong>Phone:</strong> ${escapeHtml(data.phone)}</p>
       <p><strong>Package:</strong> ${data.packageType} sessions / month</p>
       <p><strong>Month:</strong> ${monthLabel}</p>
-      <p><strong>Charged:</strong> $${fmtMoney(totalWithFee)}</p>
+      <p><strong>Total:</strong> $${fmtMoney(totalWithFee)}</p>
+      ${creditLine}
+      ${chargedLabel}
       ${data.kids ? `<p><strong>Player(s):</strong> ${escapeHtml(data.kids)}</p>` : ""}
       ${data.referralCode ? `<p><strong>Referral Code:</strong> ${escapeHtml(data.referralCode)}</p>` : ""}
     `,
@@ -544,8 +555,10 @@ export async function sendPackageConfirmation(data: {
         <li><strong>Sessions:</strong> ${data.packageType} private sessions</li>
         <li><strong>Month:</strong> ${monthLabel}</li>
         <li><strong>Sessions expire:</strong> ${expiry} — unused sessions do not carry over</li>
+        <li><strong>Total price:</strong> $${fmtMoney(totalWithFee)}</li>
+        ${appliedCredit > 0 ? `<li><strong>Account credit applied:</strong> $${fmtMoney(appliedCredit)}</li>` : ""}
       </ul>
-      <p style="background: #162d5a; color: #d4af37; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">Charged to your card: $${fmtMoney(totalWithFee)}</p>
+      <p style="background: #162d5a; color: #d4af37; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">${chargedToCard > 0 ? `Charged to your card: $${fmtMoney(chargedToCard)}` : "Fully covered by your account credit — no card was charged"}</p>
       <p>Your next ${data.packageType} private session bookings this month are already covered — nothing further will be charged when you book them at <a href="${BASE_URL}/schedule" style="color: #d4af37; font-weight: bold;">mesabasketballtraining.com/schedule</a>, up to your package total.</p>
       <h3>Cancellation &amp; Rescheduling Policy</h3>
       <p>Cancellations and reschedules within 24 hours of a scheduled session incur a <strong>$${fmtMoney(PRIVATE_RATE * 0.5)} fee</strong> (50% of the standard $${PRIVATE_RATE} private rate). <strong>No-shows without prior notice will be charged the full session fee.</strong></p>

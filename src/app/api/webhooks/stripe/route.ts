@@ -3,7 +3,7 @@ import Stripe from "stripe";
 import { getStripe } from "@/lib/stripe";
 import { finalizePaidCheckoutSession, expireAbandonedCheckoutSession } from "@/lib/booking-finalize";
 import { findConfirmedByPaymentIntent } from "@/lib/supabase";
-import { sendAdminSMS } from "@/lib/sms";
+import { sendAdminSMS, formatMonthYear } from "@/lib/sms";
 
 // A refund/dispute created OUTSIDE the app (Stripe Dashboard, a chargeback)
 // has no code path back to the booking it belongs to otherwise — the DB
@@ -20,7 +20,7 @@ async function alertOnExternalMoneyEvent(label: string, paymentIntentId: string 
   }
   const { registrations, package: pkg } = await findConfirmedByPaymentIntent(piId);
   const context = pkg
-    ? `${pkg.parent_name} — ${pkg.package_type}-session package (${pkg.month_year})`
+    ? `${pkg.parent_name} — ${pkg.package_type}-session package (${formatMonthYear(pkg.month_year)})`
     : registrations.length > 0
       ? registrations.map((r) => `${r.parent_name} — ${r.session_details}`).join("; ")
       : "no matching confirmed booking found — may already be handled";

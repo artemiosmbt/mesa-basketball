@@ -1,7 +1,7 @@
 import Stripe from "stripe";
 import { sendRegistrationNotification, sendReferralCreditNotification, sendRescheduleNotification, sendPackageConfirmation, sendAbandonedCheckoutEmail, sendAbandonedPackageEmail, sendPlayerUpdateNotification } from "@/lib/email";
 import { addPrivateSessionToCalendar, deletePrivateSessionFromCalendar, upsertGroupSessionCalendarEvent } from "@/lib/calendar";
-import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
+import { sendSMS, sendAdminSMS, formatDateWithDay, formatMonthYear, resolveLocationName } from "@/lib/sms";
 import { getStripe } from "@/lib/stripe";
 import { calcServiceFee, fmtMoney, packagePrice, fullPriceForType } from "@/lib/pricing";
 import {
@@ -1146,6 +1146,16 @@ export async function finalizePaidPackageEnrollment(
   const kids = metadata.kids || "";
   const submittedReferralCode = metadata.submitted_referral_code || undefined;
   const totalPrice = packagePrice(pkg.package_type);
+  // The fee was computed on whatever was left AFTER account credit at
+  // enrollment (see /api/packages), not the full package price — using
+  // totalPrice here would overstate it for any credit-covered enrollment,
+  // and claim a card was charged for a package credit covered in full.
+  const appliedCredit = pkg.applied_account_credit || 0;
+  const amountCharged = Math.max(0, totalPrice - appliedCredit);
+  const fee = amountCharged > 0 ? calcServiceFee(amountCharged) : 0;
+  const totalWithFee = Math.round((totalPrice + fee) * 100) / 100;
+  const chargedToCard = Math.round((amountCharged + fee) * 100) / 100;
+  const monthLabel = formatMonthYear(pkg.month_year);
 
   try {
     await sendPackageConfirmation({
@@ -1155,6 +1165,7 @@ export async function finalizePaidPackageEnrollment(
       packageType: pkg.package_type,
       monthYear: pkg.month_year,
       totalPrice,
+      appliedAccountCredit: appliedCredit,
       kids: kids || undefined,
       referralCode: submittedReferralCode,
     });
@@ -1162,11 +1173,15 @@ export async function finalizePaidPackageEnrollment(
     console.error("Package confirmation email failed (booking was paid):", notifyErr);
   }
 
-  const totalWithFee = Math.round((totalPrice + calcServiceFee(totalPrice)) * 100) / 100;
   if (smsConsent && pkg.phone) {
-    await sendSMS(pkg.phone, `Mesa Basketball: Your ${pkg.package_type}-session package is confirmed for ${pkg.month_year}! Charged: $${fmtMoney(totalWithFee)}.\nBook your private sessions at mesabasketballtraining.com/schedule and we'll track them automatically.\nReply STOP to opt out.`);
+    const creditLine = appliedCredit > 0 ? `\n$${fmtMoney(appliedCredit)} account credit applied.` : "";
+    const chargeLine = chargedToCard > 0 ? `\nCharged: $${fmtMoney(chargedToCard)}.` : "\nFully covered by account credit — no card was charged.";
+    await sendSMS(pkg.phone, `Mesa Basketball: Your ${pkg.package_type}-session package is confirmed for ${monthLabel}! Total: $${fmtMoney(totalWithFee)}.${creditLine}${chargeLine}\nBook your private sessions at mesabasketballtraining.com/schedule and we'll track them automatically.\nReply STOP to opt out.`);
   }
-  await sendAdminSMS(`NEW PACKAGE (paid $${fmtMoney(totalWithFee)}): ${pkg.parent_name}\n${pkg.package_type}-session package — ${pkg.month_year}\nPhone: ${pkg.phone}${kids ? `\nPlayers: ${kids}` : ""}${submittedReferralCode ? `\nRef code: ${submittedReferralCode} ${referrerEmail ? "✓ applied" : "✗ NOT applied"}` : ""}`).catch(() => {});
+  const adminMoney = appliedCredit > 0
+    ? `total $${fmtMoney(totalWithFee)} — $${fmtMoney(appliedCredit)} credit applied, $${fmtMoney(chargedToCard)} charged`
+    : `paid $${fmtMoney(totalWithFee)}`;
+  await sendAdminSMS(`NEW PACKAGE (${adminMoney}): ${pkg.parent_name}\n${pkg.package_type}-session package — ${monthLabel}\nPhone: ${pkg.phone}${kids ? `\nPlayers: ${kids}` : ""}${submittedReferralCode ? `\nRef code: ${submittedReferralCode} ${referrerEmail ? "✓ applied" : "✗ NOT applied"}` : ""}`).catch(() => {});
 }
 
 /**

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getPackageById, packageHasAnyBookedSession, cancelPackage, revertPackageCancellation, addAccountCredit } from "@/lib/supabase";
 import { issueStripeRefund } from "@/lib/booking-finalize";
-import { sendSMS, sendAdminSMS } from "@/lib/sms";
+import { sendSMS, sendAdminSMS, formatMonthYear } from "@/lib/sms";
 import { fmtMoney, packagePrice, calcServiceFee } from "@/lib/pricing";
 
 // The ownership check below must never trust a client-supplied email —
@@ -91,6 +91,7 @@ export async function POST(req: NextRequest) {
     // charged — nothing to mention as non-refundable in that case.
     const serviceFeeText = fmtMoney(calcServiceFee(cardChargedAmount));
     const feeClause = cardChargedAmount > 0 ? ` (the $${serviceFeeText} service fee isn't refundable)` : "";
+    const monthLabel = formatMonthYear(pkg.month_year);
 
     let refundResult: { refundedAmount: number; creditedAmount: number; failed: boolean } | undefined;
     let creditIssued = 0;
@@ -99,7 +100,7 @@ export async function POST(req: NextRequest) {
         email: pkg.email,
         paymentIntentId: pkg.stripe_payment_intent_id,
         amountDollars: cardChargedAmount,
-        sessionLabel: `${pkg.package_type}-session package (${pkg.month_year})`,
+        sessionLabel: `${pkg.package_type}-session package (${monthLabel})`,
       });
     } else if (!pkg.stripe_payment_intent_id && cardChargedAmount > 0) {
       // Legacy package enrolled before Stripe existed for packages — no
@@ -128,18 +129,18 @@ export async function POST(req: NextRequest) {
     try {
       if (pkg.sms_consent && pkg.phone) {
         const message = refundFailed
-          ? `Mesa Basketball: Your ${pkg.package_type}-session package for ${pkg.month_year} has been cancelled. Your refund is being processed — you'll receive a separate confirmation once it's complete.`
+          ? `Mesa Basketball: Your ${pkg.package_type}-session package for ${monthLabel} has been cancelled. Your refund is being processed — you'll receive a separate confirmation once it's complete.`
           : refundedToCard > 0 && totalCredited > 0
-            ? `Mesa Basketball: Your ${pkg.package_type}-session package for ${pkg.month_year} has been cancelled. $${fmtMoney(refundedToCard)} has been refunded to your original payment method and $${fmtMoney(totalCredited)} credited to your account.${feeClause}`
+            ? `Mesa Basketball: Your ${pkg.package_type}-session package for ${monthLabel} has been cancelled. $${fmtMoney(refundedToCard)} has been refunded to your original payment method and $${fmtMoney(totalCredited)} credited to your account.${feeClause}`
             : totalCredited > 0
-              ? `Mesa Basketball: Your ${pkg.package_type}-session package for ${pkg.month_year} has been cancelled. $${fmtMoney(totalCredited)} has been credited to your account.${feeClause}`
-              : `Mesa Basketball: Your ${pkg.package_type}-session package for ${pkg.month_year} has been cancelled. $${fmtMoney(refundedToCard)} has been refunded to your original payment method.${feeClause}`;
+              ? `Mesa Basketball: Your ${pkg.package_type}-session package for ${monthLabel} has been cancelled. $${fmtMoney(totalCredited)} has been credited to your account.${feeClause}`
+              : `Mesa Basketball: Your ${pkg.package_type}-session package for ${monthLabel} has been cancelled. $${fmtMoney(refundedToCard)} has been refunded to your original payment method.${feeClause}`;
         await sendSMS(pkg.phone, message);
       }
       const adminMoney = refundFailed
         ? "REFUND FAILED — needs manual action"
         : [refundedToCard > 0 ? `$${fmtMoney(refundedToCard)} refunded` : "", totalCredited > 0 ? `$${fmtMoney(totalCredited)} credited` : ""].filter(Boolean).join(", ") || "$0 due";
-      await sendAdminSMS(`PACKAGE CANCELLED (never used): ${pkg.parent_name}\n${pkg.package_type}-session package — ${pkg.month_year}\n${adminMoney}`);
+      await sendAdminSMS(`PACKAGE CANCELLED (never used): ${pkg.parent_name}\n${pkg.package_type}-session package — ${monthLabel}\n${adminMoney}`);
     } catch (err) {
       console.error("Package cancellation notification error:", err);
     }
@@ -149,7 +150,11 @@ export async function POST(req: NextRequest) {
       refundedAmount: refundedToCard,
       creditedAmount: totalCredited,
       refundFailed,
-      serviceFee: calcServiceFee(totalPrice),
+      // 0 whenever nothing was ever actually charged to a card (fully
+      // credit-covered enrollment) — matches feeClause's logic above, so
+      // the client's own confirmation message doesn't cite a fee that was
+      // never charged.
+      serviceFee: cardChargedAmount > 0 ? calcServiceFee(cardChargedAmount) : 0,
     });
   } catch (error) {
     console.error("Package cancellation error:", error);

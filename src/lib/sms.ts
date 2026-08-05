@@ -22,6 +22,15 @@ export function formatDateWithDay(dateStr: string): string {
   return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 }
 
+/** "2026-08" -> "August 2026" — every package-related message (SMS, email,
+ *  admin alert) should show this, never the raw "YYYY-MM" DB value. */
+export function formatMonthYear(monthYear: string): string {
+  const [year, month] = monthYear.split("-");
+  const d = new Date(parseInt(year), parseInt(month) - 1, 1);
+  if (isNaN(d.getTime())) return monthYear;
+  return d.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+}
+
 function formatPhone(phone: string): string {
   const digits = phone.replace(/\D/g, "");
   if (digits.length === 10) return `+1${digits}`;

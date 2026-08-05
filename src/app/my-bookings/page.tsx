@@ -124,15 +124,19 @@ export default function MyBookings() {
       });
       const data = await res.json();
       if (data.success) {
+        // serviceFee is 0 whenever nothing was ever actually charged to a
+        // card (fully credit-covered enrollment) — don't cite a fee that
+        // was never charged in that case.
+        const feeClause = data.serviceFee > 0 ? ` (the $${fmtMoney(data.serviceFee)} service fee isn't refundable)` : "";
         setPackageCancelResult({
           success: true,
           message: data.refundFailed
             ? "Your package has been cancelled. Your refund is being processed — you'll get a separate confirmation once it's complete."
             : data.refundedAmount > 0 && data.creditedAmount > 0
-              ? `Your package has been cancelled — $${fmtMoney(data.refundedAmount)} has been refunded to your original payment method and $${fmtMoney(data.creditedAmount)} credited to your account (the $${fmtMoney(data.serviceFee)} service fee isn't refundable).`
+              ? `Your package has been cancelled — $${fmtMoney(data.refundedAmount)} has been refunded to your original payment method and $${fmtMoney(data.creditedAmount)} credited to your account${feeClause}.`
               : data.creditedAmount > 0
-                ? `Your package has been cancelled and $${fmtMoney(data.creditedAmount)} has been credited to your account (the $${fmtMoney(data.serviceFee)} service fee isn't refundable).`
-                : `Your package has been cancelled and $${fmtMoney(data.refundedAmount)} has been refunded to your original payment method (the $${fmtMoney(data.serviceFee)} service fee isn't refundable).`,
+                ? `Your package has been cancelled and $${fmtMoney(data.creditedAmount)} has been credited to your account${feeClause}.`
+                : `Your package has been cancelled and $${fmtMoney(data.refundedAmount)} has been refunded to your original payment method${feeClause}.`,
         });
         setActivePackage(null);
       } else {
