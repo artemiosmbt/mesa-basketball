@@ -752,7 +752,7 @@ function CalendarView({ list, packageMembership, weeklyDiscountRates, weeklyCapa
             <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusBadge(r.status).cls}`}>
               {statusBadge(r.status).label}
             </span>
-            {!packageMembership.get(r.id)?.withinPackage && (
+            {canEdit && !packageMembership.get(r.id)?.withinPackage && (
               <span className="text-xs font-medium text-green-400">
                 {priceDisplay(r, weeklyDiscountRates)}
               </span>
@@ -1015,25 +1015,24 @@ export default function AdminPage() {
         setPackages(adminData.packages || []);
       }).finally(() => setLoading(false));
 
-      // Trainer accounts are read-only — nothing below this point is theirs
-      // to trigger or needs loading (time-change sync writes data; the
-      // schedule feed only exists to power the reschedule modal they never
-      // see a button for).
-      if (ctx.role !== "admin") return;
+      // Time-change sync writes data — trainer accounts are read-only, so
+      // only admin ever triggers this.
+      if (ctx.role === "admin") {
+        // Auto-sync time changes in the background — banner appears when it's done,
+        // but it no longer holds up the rest of the dashboard from rendering.
+        fetch("/api/admin/sync-time-changes", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${session.access_token}` },
+        }).then((r) => r.json()).then((syncResult) => {
+          if (syncResult?.changesFound?.length > 0) {
+            setTcResult(syncResult);
+          }
+        }).catch(() => {});
+      }
 
-      // Auto-sync time changes in the background — banner appears when it's done,
-      // but it no longer holds up the rest of the dashboard from rendering.
-      fetch("/api/admin/sync-time-changes", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      }).then((r) => r.json()).then((syncResult) => {
-        if (syncResult?.changesFound?.length > 0) {
-          setTcResult(syncResult);
-        }
-      }).catch(() => {});
-
-      // Load the current schedule (groups/camps/private slots) so the reschedule
-      // modal can offer real dropdown options instead of free text.
+      // Load the current schedule (groups/camps/private slots) — every role
+      // needs this for folder capacity ("X/Y signed up"), not just admin's
+      // reschedule modal.
       fetch("/api/schedule").then((r) => r.json()).then((d) => {
         setScheduleData({
           weeklySchedule: d.weeklySchedule || [],
@@ -1479,7 +1478,7 @@ export default function AdminPage() {
           </div>
           <div className="shrink-0 flex flex-col items-end justify-between self-stretch">
             <span className={`text-brown-500 transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}>▾</span>
-            {!packageMembership.get(r.id)?.withinPackage && (
+            {canEdit && !packageMembership.get(r.id)?.withinPackage && (
               <span className="text-white font-medium text-xs">{priceDisplay(r, weeklyDiscountRates)}</span>
             )}
           </div>
@@ -1511,7 +1510,7 @@ export default function AdminPage() {
                   <p className="text-brown-200">{r.booked_trainer}</p>
                 </div>
               )}
-              {!packageMembership.get(r.id)?.withinPackage && (
+              {canEdit && !packageMembership.get(r.id)?.withinPackage && (
                 <div>
                   <p className="text-brown-500 uppercase tracking-wider mb-0.5">Price</p>
                   <p className="text-green-400 font-medium">{priceDisplay(r, weeklyDiscountRates)}</p>
