@@ -4,6 +4,7 @@ import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import Image from "next/image";
 import { authClient, ADMIN_EMAIL } from "@/lib/auth";
 import LandingNav from "@/app/LandingNav";
+import { REFERRAL_PROGRAM_ENABLED } from "@/lib/feature-flags";
 import { calcServiceFee, serviceFeeLabel, serviceFeeItemName, isPercentServiceFee, SERVICE_FEE_PERCENT_TEXT, packagePrice, PRIVATE_RATE, GROUP_PRIVATE_RATE, calcPrivatePrice as getPrivatePrice } from "@/lib/pricing";
 
 const LOCATION_LINKS: Record<string, { name: string; url: string }> = {
@@ -3381,7 +3382,7 @@ export default function Home() {
                 </div>
 
                 {/* Referral Code — only shown to first-time clients */}
-                {!isReturningClient && (modal.type === "private" || modal.type === "group-private" || modal.type === "weekly" || modal.type === "camp") && (
+                {REFERRAL_PROGRAM_ENABLED && !isReturningClient && (modal.type === "private" || modal.type === "group-private" || modal.type === "weekly" || modal.type === "camp") && (
                   <div>
                     <div className="mb-1 flex items-center gap-2">
                       <label className="text-sm font-medium text-brown-300">Referral Code <span className="text-brown-500 font-normal">(optional)</span></label>
@@ -3430,7 +3431,7 @@ export default function Home() {
                 )}
 
                 {/* Referral Credit — shown for returning clients booking private sessions */}
-                {isReturningClient && (modal.type === "private" || modal.type === "group-private") && (
+                {REFERRAL_PROGRAM_ENABLED && isReturningClient && (modal.type === "private" || modal.type === "group-private") && (
                   <div className={`rounded-lg border px-4 py-3 transition ${creditBalance !== null && creditBalance > 0 ? "border-green-700 bg-green-900/20" : "border-brown-700 bg-brown-800/30 opacity-60"}`}>
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
@@ -3796,7 +3797,7 @@ export default function Home() {
                     ))}
                   </select>
                 </div>
-                {!isReturningClient && (
+                {REFERRAL_PROGRAM_ENABLED && !isReturningClient && (
                   <div>
                     <label className="mb-1 block text-sm font-medium text-brown-300">Referral Code <span className="text-brown-500 font-normal">(optional)</span></label>
                     <input

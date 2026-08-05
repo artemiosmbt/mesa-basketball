@@ -3,6 +3,7 @@ import { getStripe, buildCreditDiscount } from "@/lib/stripe";
 import { calcServiceFee, serviceFeeItemName, fmtMoney, PRIVATE_RATE, GROUP_PRIVATE_RATE } from "@/lib/pricing";
 import { getWeeklySchedule, getCamps } from "@/lib/sheets";
 import { resolveRequestEmail } from "@/lib/request-email";
+import { NEW_CLIENT_DISCOUNT_ENABLED } from "@/lib/feature-flags";
 import {
   finalizeConfirmedPrivateBooking,
   finalizeConfirmedPrivateSeriesBooking,
@@ -781,7 +782,7 @@ export async function POST(req: NextRequest) {
       let firstIsFree = false;
       let usedReferralCredit = false;
       if (!packageCoverage[0]?.covered) {
-        if (newClient) {
+        if (newClient && NEW_CLIENT_DISCOUNT_ENABLED) {
           firstIsFree = true;
           isFirstTime = true;
         } else if (useReferralCredit) {
@@ -1034,7 +1035,7 @@ export async function POST(req: NextRequest) {
       let isFirstTime = false;
       let usedReferralCredit = false;
       if (!packageCovered) {
-        if (newClient) {
+        if (newClient && NEW_CLIENT_DISCOUNT_ENABLED) {
           isFree = true; // first-time 50% off
           isFirstTime = true;
         } else if (useReferralCredit) {

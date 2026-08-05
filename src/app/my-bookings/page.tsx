@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { authClient } from "@/lib/auth";
 import { fmtMoney, packagePrice, calcServiceFee } from "@/lib/pricing";
+import { REFERRAL_PROGRAM_ENABLED } from "@/lib/feature-flags";
 
 const LOCATION_NAMES: Record<string, string> = {
   "St. Pauls": "St. Paul's Cathedral",
@@ -188,7 +189,9 @@ export default function MyBookings() {
                       <p className="text-xs text-brown-500 mb-1">Your Referral Code</p>
                       <p className="text-2xl font-bold text-mesa-accent">{rewards.referralCode || "—"}</p>
                       <p className="mt-2 text-xs text-brown-500 leading-relaxed">
-                        Share your code — when a new client books with it, you earn 50% off your next private session.
+                        {REFERRAL_PROGRAM_ENABLED
+                          ? "Share your code — when a new client books with it, you earn 50% off your next private session."
+                          : "Referrals are paused for now, so sharing your code won't earn new credits at the moment."}
                       </p>
                     </div>
 
@@ -201,7 +204,9 @@ export default function MyBookings() {
                       </div>
                       <p className={`mt-1 text-xs leading-relaxed ${rewards.referralCredits > 0 ? "text-mesa-accent/80" : "text-brown-600"}`}>
                         {rewards.referralCredits > 0
-                          ? `${rewards.referralCredits} half-off session${rewards.referralCredits !== 1 ? "s" : ""} ready to use — applied automatically at checkout.`
+                          ? REFERRAL_PROGRAM_ENABLED
+                            ? `${rewards.referralCredits} half-off session${rewards.referralCredits !== 1 ? "s" : ""} ready to use — applied automatically at checkout.`
+                            : `${rewards.referralCredits} half-off session${rewards.referralCredits !== 1 ? "s" : ""} saved, but redemption is paused for now — they'll be available again once referrals are back on.`
                           : "No credits yet. Start sharing your code!"}
                       </p>
                     </div>

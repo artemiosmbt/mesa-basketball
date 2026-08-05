@@ -1,5 +1,6 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { sendAdminSMS } from "@/lib/sms";
+import { REFERRAL_PROGRAM_ENABLED } from "@/lib/feature-flags";
 
 let _supabase: SupabaseClient | null = null;
 
@@ -421,6 +422,10 @@ export async function addReferralCredit(email: string): Promise<void> {
 // other request would still confirm its booking as covered even though no
 // credit was ever taken for it.
 export async function decrementReferralCredit(email: string): Promise<boolean> {
+  // Referral program is paused — existing balances are left untouched in the
+  // DB, they just can't be spent while this is off.
+  if (!REFERRAL_PROGRAM_ENABLED) return false;
+
   const supabase = getSupabase();
 
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -728,6 +733,10 @@ export async function findReferrerByCode(code: string): Promise<string | null> {
 
 /** Look up the name and email of the family that owns a referral code (checks profiles first, then registrations) */
 export async function findReferrerInfoByCode(code: string): Promise<{ email: string; name: string } | null> {
+  // Referral program is paused — no new credits should be earned off a code
+  // right now, regardless of whether the code itself is still valid.
+  if (!REFERRAL_PROGRAM_ENABLED) return null;
+
   const supabase = getSupabase();
   const upper = code.toUpperCase();
   const { data: profile } = await supabase
