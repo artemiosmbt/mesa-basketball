@@ -5,6 +5,7 @@ import Image from "next/image";
 import { authClient, ADMIN_EMAIL } from "@/lib/auth";
 import LandingNav from "@/app/LandingNav";
 import { REFERRAL_PROGRAM_ENABLED, NEW_CLIENT_DISCOUNT_ENABLED } from "@/lib/feature-flags";
+import { getTrainerBioSlug } from "@/lib/trainers";
 import { calcServiceFee, serviceFeeLabel, serviceFeeItemName, isPercentServiceFee, SERVICE_FEE_PERCENT_TEXT, packagePrice, PRIVATE_RATE, GROUP_PRIVATE_RATE, calcPrivatePrice as getPrivatePrice } from "@/lib/pricing";
 
 const LOCATION_LINKS: Record<string, { name: string; url: string }> = {
@@ -138,6 +139,25 @@ function LocationLink({ location, className }: { location: string; className?: s
     );
   }
   return <span className={className}>{location}</span>;
+}
+
+// Only renders once the trainer has a bio section on /about — see
+// TRAINER_BIO_SLUGS. stopPropagation keeps a click from also toggling the
+// checkbox when this sits inside a session-row <label>.
+function TrainerBioLink({ trainer }: { trainer: string }) {
+  const slug = getTrainerBioSlug(trainer);
+  if (!slug) return null;
+  return (
+    <a
+      href={`/about#${slug}`}
+      target="_blank"
+      rel="noopener noreferrer"
+      onClick={(e) => e.stopPropagation()}
+      className="ml-1 underline hover:text-mesa-accent"
+    >
+      Show Bio
+    </a>
+  );
 }
 
 interface WeeklySession {
@@ -2274,6 +2294,7 @@ export default function Home() {
                                   <p className="font-medium text-sm">{dayName}, {s.date}</p>
                                   <p className="text-xs text-brown-400">
                                     {s.startTime} - {s.endTime} &bull; <LocationLink location={s.location} /> &bull; {s.trainer || "Artemios Gavalas"}
+                                    <TrainerBioLink trainer={s.trainer || "Artemios Gavalas"} />
                                   </p>
                                 </div>
                                 <div className="text-right shrink-0">
@@ -2343,6 +2364,7 @@ export default function Home() {
                                   <p className="font-medium text-sm">{dayName}, {s.date}</p>
                                   <p className="text-xs text-brown-400">
                                     {s.startTime} - {s.endTime} &bull; <LocationLink location={s.location} /> &bull; {s.trainer || "Artemios Gavalas"}
+                                    <TrainerBioLink trainer={s.trainer || "Artemios Gavalas"} />
                                   </p>
                                 </div>
                                 <div className="text-right shrink-0">
@@ -2828,6 +2850,7 @@ export default function Home() {
                               >
                                 <p className="text-sm text-brown-400 mb-3">
                                   <LocationLink location={window.location} className="text-brown-400" /> &bull; Available {window.startLabel} - {window.endLabel} &bull; {window.trainer}
+                                  <TrainerBioLink trainer={window.trainer} />
                                 </p>
                                 <div className="flex flex-wrap items-end gap-4">
                                   <div>

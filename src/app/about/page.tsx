@@ -64,7 +64,7 @@ export default function AboutPage() {
       <LandingNav />
 
       {/* Hero */}
-      <section className="relative overflow-hidden bg-gradient-to-br from-mesa-dark via-brown-900 to-brown-800 py-20 md:py-28">
+      <section id="artemios-gavalas" className="relative overflow-hidden bg-gradient-to-br from-mesa-dark via-brown-900 to-brown-800 py-20 md:py-28 scroll-mt-20">
         <div className="mx-auto max-w-6xl px-6">
           <div className="flex flex-col items-center text-center">
             <p className="mb-4 text-sm font-semibold uppercase tracking-widest text-mesa-accent">
