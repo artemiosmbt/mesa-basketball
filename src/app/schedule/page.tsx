@@ -751,6 +751,11 @@ export default function Home() {
     return () => { cancelled = true; };
   }, [email, modal.open, modal.type, modal.bookedDate, isGroupRate, kids.length]);
 
+  // Package coverage per month, keyed "YYYY-MM" — lets the private session
+  // list itself say "Included in your package" instead of "From $150" for
+  // logged-in clients with sessions left, before they ever open the modal.
+  // (Populated further down, once timeWindows/userEmail are in scope.)
+  const [packageRemainingByMonth, setPackageRemainingByMonth] = useState<Record<string, number>>({});
 
   const [recurringWeeks, setRecurringWeeks] = useState<
     { date: string; startTime: string; endTime: string; location: string; trainer: string; selected: boolean }[]
@@ -946,6 +951,34 @@ export default function Home() {
     }
     return result;
   }, [privateSlots, bookedSlots]);
+
+  const privateMonthYears = useMemo(() => {
+    const months = new Set<string>();
+    timeWindows.forEach((w) => {
+      if (w.endMins - w.startMins < 60) return;
+      const d = parseDateForDisplay(w.date);
+      months.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+    });
+    return Array.from(months);
+  }, [timeWindows]);
+
+  useEffect(() => {
+    if (!userEmail || privateMonthYears.length === 0) { setPackageRemainingByMonth({}); return; }
+    let cancelled = false;
+    Promise.all(
+      privateMonthYears.map((monthYear) =>
+        authedJsonFetch(`/api/packages?email=${encodeURIComponent(userEmail)}&monthYear=${monthYear}`)
+          .then((d) => {
+            const pkg = d.package as { package_type: number; sessions_used: number } | null;
+            return [monthYear, pkg ? Math.max(0, pkg.package_type - pkg.sessions_used) : 0] as const;
+          })
+          .catch(() => [monthYear, 0] as const)
+      )
+    ).then((entries) => {
+      if (!cancelled) setPackageRemainingByMonth(Object.fromEntries(entries));
+    });
+    return () => { cancelled = true; };
+  }, [userEmail, privateMonthYears]);
 
   function updateWindowSelection(
     windowIdx: number,
@@ -2717,6 +2750,8 @@ export default function Home() {
                   {visibleGroups.map((group) => {
                     const d = parseDateForDisplay(group.date);
                     const dayLabel = `${d.toLocaleDateString("en-US", { weekday: "long", timeZone: "America/New_York" })}, ${group.date}`;
+                    const groupMonthYear = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+                    const groupPackageRemaining = packageRemainingByMonth[groupMonthYear] || 0;
                     return (
                       <div key={group.key} className="rounded-xl border-2 border-brown-600 bg-brown-900/40 p-5 shadow-lg shadow-black/30">
                         <div className="mb-4">
@@ -2788,7 +2823,7 @@ export default function Home() {
                                       {formatTimeFromMins(sel.start)} - {endTime}
                                     </span>
                                     <span className="ml-2 text-mesa-accent font-semibold">
-                                      From {formatPrice(price)}
+                                      {groupPackageRemaining > 0 ? "Included in your package" : `From ${formatPrice(price)}`}
                                     </span>
                                   </div>
 
