@@ -4,6 +4,7 @@ import { getPackageById, packageHasAnyBookedSession, cancelPackage, revertPackag
 import { issueStripeRefund } from "@/lib/booking-finalize";
 import { sendSMS, sendAdminSMS, formatMonthYear } from "@/lib/sms";
 import { fmtMoney, packagePrice, calcServiceFee } from "@/lib/pricing";
+import { sendPackageCancellationNotification } from "@/lib/email";
 
 // The ownership check below must never trust a client-supplied email —
 // only the caller's OWN authenticated session can prove which package is
@@ -126,6 +127,17 @@ export async function POST(req: NextRequest) {
     // part of it actually was.
     const refundedToCard = refundResult?.refundedAmount ?? 0;
     const totalCredited = creditIssued + (refundResult?.creditedAmount ?? 0);
+    try {
+      await sendPackageCancellationNotification({
+        parentName: pkg.parent_name,
+        email: pkg.email,
+        packageType: pkg.package_type,
+        monthYear: pkg.month_year,
+        refundOutcome: { refundedAmount: refundedToCard, creditedAmount: totalCredited, failed: refundFailed },
+      });
+    } catch (err) {
+      console.error("Package cancellation email failed (cancellation still succeeded):", err);
+    }
     try {
       if (pkg.sms_consent && pkg.phone) {
         const message = refundFailed

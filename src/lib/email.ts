@@ -344,6 +344,49 @@ interface StripeRefundOutcome {
   failed: boolean;
 }
 
+// Renders whatever actually happened to the money — a plain credit, a full
+// refund, a split refund+credit, or (if the Stripe call failed outright) a
+// pending note that doesn't claim money moved before it actually did.
+// Shared by every cancellation email (sessions and packages alike) so the
+// wording of a given money outcome never drifts between them.
+function moneyOutcomeHtml(refundResult: StripeRefundOutcome | undefined, plainCredit: number | undefined, lateCreditNote: string): string {
+  if (refundResult) {
+    if (refundResult.failed) {
+      return `<div style="background: #1e3a5f; border-left: 4px solid #3b82f6; border-radius: 6px; padding: 14px 16px; margin: 16px 0;">
+        <p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #ffffff;">Refund In Progress</p>
+        <p style="margin: 0; color: #ffffff; font-size: 14px;">Your refund is being processed — you'll receive a separate confirmation once it's complete.</p>
+      </div>`;
+    }
+    const parts: string[] = [];
+    if (refundResult.refundedAmount > 0) parts.push(`<strong>$${fmtMoney(refundResult.refundedAmount)}</strong> has been refunded to your original payment method`);
+    if (refundResult.creditedAmount > 0) parts.push(`<strong>$${fmtMoney(refundResult.creditedAmount)}</strong> has been credited to your account`);
+    if (parts.length === 0) return "";
+    return `<div style="background: #1e3a5f; border-left: 4px solid #3b82f6; border-radius: 6px; padding: 14px 16px; margin: 16px 0;">
+      <p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #ffffff;">${refundResult.refundedAmount > 0 ? "Refund Issued" : "Account Credit"}</p>
+      <p style="margin: 0; color: #ffffff; font-size: 14px;">${parts.join(", ")}.</p>
+    </div>`;
+  }
+  if (plainCredit !== undefined && plainCredit > 0) {
+    return `<div style="background: #1e3a5f; border-left: 4px solid #3b82f6; border-radius: 6px; padding: 14px 16px; margin: 16px 0;">
+      <p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #ffffff;">Account Credit</p>
+      <p style="margin: 0; color: #ffffff; font-size: 14px;"><strong>$${fmtMoney(plainCredit)}</strong> has been credited to your account for a future booking${lateCreditNote}.</p>
+    </div>`;
+  }
+  return "";
+}
+
+// Plain-text summary of what happened to the money, for admin emails only.
+function adminMoneySummary(refundResult: StripeRefundOutcome | undefined, plainCredit: number | undefined): string {
+  if (refundResult) {
+    if (refundResult.failed) return "refund FAILED — needs manual action";
+    const parts: string[] = [];
+    if (refundResult.refundedAmount > 0) parts.push(`$${fmtMoney(refundResult.refundedAmount)} refunded to their card`);
+    if (refundResult.creditedAmount > 0) parts.push(`$${fmtMoney(refundResult.creditedAmount)} credited to their account`);
+    return parts.join(", ");
+  }
+  return plainCredit !== undefined && plainCredit > 0 ? `$${fmtMoney(plainCredit)} credited to their account` : "";
+}
+
 export async function sendCancellationNotification(data: {
   parentName: string;
   email: string;
@@ -376,35 +419,6 @@ export async function sendCancellationNotification(data: {
       </div>`
     : "";
 
-  // Renders whatever actually happened to the money — a plain credit, a full
-  // refund, a split refund+credit, or (if the Stripe call failed outright) a
-  // pending note that doesn't claim money moved before it actually did.
-  function moneyOutcomeHtml(refundResult: StripeRefundOutcome | undefined, plainCredit: number | undefined, lateCreditNote: string): string {
-    if (refundResult) {
-      if (refundResult.failed) {
-        return `<div style="background: #1e3a5f; border-left: 4px solid #3b82f6; border-radius: 6px; padding: 14px 16px; margin: 16px 0;">
-          <p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #ffffff;">Refund In Progress</p>
-          <p style="margin: 0; color: #ffffff; font-size: 14px;">Your refund is being processed — you'll receive a separate confirmation once it's complete.</p>
-        </div>`;
-      }
-      const parts: string[] = [];
-      if (refundResult.refundedAmount > 0) parts.push(`<strong>$${fmtMoney(refundResult.refundedAmount)}</strong> has been refunded to your original payment method`);
-      if (refundResult.creditedAmount > 0) parts.push(`<strong>$${fmtMoney(refundResult.creditedAmount)}</strong> has been credited to your account`);
-      if (parts.length === 0) return "";
-      return `<div style="background: #1e3a5f; border-left: 4px solid #3b82f6; border-radius: 6px; padding: 14px 16px; margin: 16px 0;">
-        <p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #ffffff;">${refundResult.refundedAmount > 0 ? "Refund Issued" : "Account Credit"}</p>
-        <p style="margin: 0; color: #ffffff; font-size: 14px;">${parts.join(", ")}.</p>
-      </div>`;
-    }
-    if (plainCredit !== undefined && plainCredit > 0) {
-      return `<div style="background: #1e3a5f; border-left: 4px solid #3b82f6; border-radius: 6px; padding: 14px 16px; margin: 16px 0;">
-        <p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #ffffff;">Account Credit</p>
-        <p style="margin: 0; color: #ffffff; font-size: 14px;"><strong>$${fmtMoney(plainCredit)}</strong> has been credited to your account for a future booking${lateCreditNote}.</p>
-      </div>`;
-    }
-    return "";
-  }
-
   const creditNote = !data.campAdjustment
     ? moneyOutcomeHtml(data.stripeRefundResult, data.cancelCredit, data.isLateCancel ? " (50% of what you paid — this was a late cancellation, so the other half isn't refunded per our policy)" : "")
     : "";
@@ -427,17 +441,6 @@ export async function sendCancellationNotification(data: {
       </div>${campMoneyHtml}`
     : "";
 
-  // Plain-text summary of what happened to the money, for the admin email only.
-  function adminMoneySummary(refundResult: StripeRefundOutcome | undefined, plainCredit: number | undefined): string {
-    if (refundResult) {
-      if (refundResult.failed) return "refund FAILED — needs manual action";
-      const parts: string[] = [];
-      if (refundResult.refundedAmount > 0) parts.push(`$${fmtMoney(refundResult.refundedAmount)} refunded to their card`);
-      if (refundResult.creditedAmount > 0) parts.push(`$${fmtMoney(refundResult.creditedAmount)} credited to their account`);
-      return parts.join(", ");
-    }
-    return plainCredit !== undefined && plainCredit > 0 ? `$${fmtMoney(plainCredit)} credited to their account` : "";
-  }
   const adminCancelSummary = adminMoneySummary(data.stripeRefundResult, data.cancelCredit);
   const adminCampSummary = data.campAdjustment?.isPaid
     ? adminMoneySummary(data.campAdjustment.stripeRefundResult, data.campAdjustment.creditGranted)
@@ -570,6 +573,56 @@ export async function sendPackageConfirmation(data: {
     `,
   });
   if (clientResult.error) console.error("Resend package-confirmation email error:", clientResult.error, "to:", data.email);
+}
+
+/** Sent when a client cancels a never-used package (see /api/packages/cancel)
+ *  — reuses the same money-outcome rendering as sendCancellationNotification
+ *  so a refund/credit/split/failure reads identically everywhere in the app. */
+export async function sendPackageCancellationNotification(data: {
+  parentName: string;
+  email: string;
+  packageType: number;
+  monthYear: string;
+  refundOutcome: StripeRefundOutcome;
+}) {
+  const resend = getResend();
+  const monthLabel = formatMonthYear(data.monthYear);
+  const moneyNote = moneyOutcomeHtml(data.refundOutcome, undefined, "");
+  const adminSummary = adminMoneySummary(data.refundOutcome, undefined);
+
+  // Notify Artemi
+  const adminResult = await resend.emails.send({
+    from: FROM_EMAIL,
+    to: ARTEMI_EMAIL,
+    subject: `Package Cancelled: ${data.parentName}`,
+    html: `
+      <h2>Monthly Package Cancelled</h2>
+      <p><strong>Parent:</strong> ${escapeHtml(data.parentName)}</p>
+      <p><strong>Package:</strong> ${data.packageType} sessions / month</p>
+      <p><strong>Month:</strong> ${monthLabel}</p>
+      ${adminSummary ? `<p><strong>${adminSummary}</strong></p>` : ""}
+    `,
+  });
+  if (adminResult.error) console.error("Resend admin package-cancellation email error:", adminResult.error);
+
+  // Confirmation to parent
+  const clientResult = await resend.emails.send({
+    from: FROM_EMAIL,
+    to: data.email,
+    replyTo: ARTEMI_EMAIL,
+    subject: `Package Cancelled — Mesa Basketball Training`,
+    html: `
+      <h2>Package Cancelled</h2>
+      <p>Hi ${escapeHtml(data.parentName)},</p>
+      <p>Your <strong>${data.packageType}-session private training package</strong> for <strong>${monthLabel}</strong> has been cancelled.</p>
+      ${moneyNote}
+      <p><a href="${BASE_URL}/my-bookings" style="color: #d4af37; font-weight: bold;">View My Bookings</a></p>
+      <br/>
+      <p>Questions? Contact Artemios at (631) 599-1280 or email <a href="mailto:artemios@mesabasketballtraining.com">artemios@mesabasketballtraining.com</a>.</p>
+      <p>— Mesa Basketball Training</p>
+    `,
+  });
+  if (clientResult.error) console.error("Resend package-cancellation email error:", clientResult.error, "to:", data.email);
 }
 
 export async function sendPackageReminder(data: {
