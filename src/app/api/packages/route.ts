@@ -1,16 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
-import { enrollInPackage, getActivePackage, hasPendingOrActivePackage, isNewClient, findReferrerInfoByCode, attachPackageCheckoutSession } from "@/lib/supabase";
-import { getStripe } from "@/lib/stripe";
+import { enrollInPackage, getActivePackage, hasPendingOrActivePackage, isNewClient, findReferrerInfoByCode, attachPackageCheckoutSession, getAccountCreditBalance, deductAccountCredit } from "@/lib/supabase";
+import { getStripe, buildCreditDiscount } from "@/lib/stripe";
 import { calcServiceFee, serviceFeeItemName, packagePrice } from "@/lib/pricing";
 import { resolveRequestEmail } from "@/lib/request-email";
+import { finalizePaidPackageEnrollment } from "@/lib/booking-finalize";
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { parentName, email: rawEmail, phone, packageType, monthYear, kids, referralCode, smsConsent } = body;
+    const { parentName, email: rawEmail, phone, packageType, monthYear, kids, referralCode, smsConsent, applyAccountCredit: rawApplyAccountCredit } = body;
     // Normalized once at the boundary — the self-referral comparison below
     // must match the lowercased/trimmed form already stored for the referrer.
     const email = typeof rawEmail === "string" ? rawEmail.toLowerCase().trim() : rawEmail;
+
+    // Account credit belongs to a real logged-in identity — never trust the
+    // client-supplied email alone to decide whose balance gets spent, or
+    // anyone who knows a client's email could drain their credit onto a
+    // package that isn't theirs. Only the caller's OWN authenticated session
+    // can authorize spending its balance; a guest with no session can never
+    // apply credit, since it can't prove ownership of any balance at all.
+    const sessionEmail = await resolveRequestEmail(req);
+    const applyAccountCredit = !!rawApplyAccountCredit && !!sessionEmail && sessionEmail === email;
 
     if (!parentName || !email || !phone || !packageType || !monthYear) {
       return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
@@ -48,9 +58,44 @@ export async function POST(req: NextRequest) {
 
     const totalPrice = packagePrice(packageType);
 
-    const { id } = await enrollInPackage({ email, parentName, phone, packageType, monthYear, totalPrice });
+    // Same account-credit pattern as every other paid booking type
+    // (/api/register): deduct up front, race-safe, capped at the price
+    // itself so a balance bigger than the package can't go negative.
+    let accountCreditApplied = 0;
+    if (applyAccountCredit && totalPrice > 0) {
+      const balance = await getAccountCreditBalance(email);
+      const wantCredit = Math.min(balance, totalPrice);
+      if (wantCredit > 0) {
+        const deducted = await deductAccountCredit(email, wantCredit);
+        if (deducted) accountCreditApplied = wantCredit;
+      }
+    }
+    const amountToCharge = Math.max(0, totalPrice - accountCreditApplied);
 
-    // Real money is due — send them to Stripe. The package stays
+    const { id } = await enrollInPackage({
+      email, parentName, phone, packageType, monthYear, totalPrice,
+      ...(accountCreditApplied > 0 ? { appliedAccountCredit: accountCreditApplied } : {}),
+    });
+
+    const packageMetadata = {
+      purpose: "package_enrollment",
+      package_id: id,
+      kids: kids || "",
+      sms_consent: String(!!smsConsent),
+      referrer_email: referrer?.email || "",
+      referrer_name: referrer?.name || "",
+      submitted_referral_code: referralCode || "",
+    };
+
+    if (amountToCharge === 0) {
+      // Fully covered by account credit — nothing to actually charge, so
+      // confirm immediately exactly like the equivalent register/route.ts
+      // path does for a $0 private-session booking.
+      await finalizePaidPackageEnrollment(id, "", null, packageMetadata);
+      return NextResponse.json({ success: true });
+    }
+
+    // Real money is still due — send them to Stripe. The package stays
     // pending_payment (unusable — getActivePackage won't return it) until
     // the webhook confirms payment, same as every other paid booking type.
     const stripe = getStripe();
@@ -64,23 +109,18 @@ export async function POST(req: NextRequest) {
       payment_intent_data: { setup_future_usage: "off_session" },
       customer_email: email,
       client_reference_id: id,
+      discounts: await buildCreditDiscount(stripe, accountCreditApplied),
       // The webhook runs in a separate request with no access to this
       // request's body, and monthly_packages has no columns for kids/SMS
       // consent — small facts the finalize step needs ride along here.
-      metadata: {
-        purpose: "package_enrollment",
-        package_id: id,
-        kids: kids || "",
-        sms_consent: String(!!smsConsent),
-        referrer_email: referrer?.email || "",
-        referrer_name: referrer?.name || "",
-        submitted_referral_code: referralCode || "",
-      },
+      metadata: packageMetadata,
       line_items: [
         {
           price_data: {
             currency: "usd",
             product_data: { name: `${packageType}-Session Monthly Package — ${monthYear}` },
+            // Full pre-credit price — the discount coupon above handles the
+            // credit deduction as its own line on Stripe's own page.
             unit_amount: Math.round(totalPrice * 100),
           },
           quantity: 1,
@@ -88,8 +128,8 @@ export async function POST(req: NextRequest) {
         {
           price_data: {
             currency: "usd",
-            product_data: { name: serviceFeeItemName(totalPrice) },
-            unit_amount: Math.round(calcServiceFee(totalPrice) * 100),
+            product_data: { name: serviceFeeItemName(amountToCharge) },
+            unit_amount: Math.round(calcServiceFee(amountToCharge) * 100),
           },
           quantity: 1,
         },

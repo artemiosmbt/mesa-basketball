@@ -25,6 +25,19 @@ async function authedJsonFetch(path: string): Promise<Record<string, unknown>> {
   return res.json();
 }
 
+// Same auth attachment as above, but for POST bodies (registration/package
+// submission) — the server now verifies this session's own email before
+// ever letting a request spend that email's account credit, so any submit
+// that sets applyAccountCredit must carry this header or credit silently
+// never applies, even for its rightful owner.
+async function authedPostHeaders(): Promise<HeadersInit> {
+  const { data: { session } } = await authClient.auth.getSession();
+  return {
+    "Content-Type": "application/json",
+    ...(session ? { Authorization: `Bearer ${session.access_token}` } : {}),
+  };
+}
+
 // The server always resolves the balance to the SESSION's own email,
 // ignoring the ?email= query param entirely (that's the point — it can't be
 // trusted to prove ownership). So if a logged-in user types a DIFFERENT
@@ -779,6 +792,35 @@ export default function Home() {
   const [pkgReferralCodeChecking, setPkgReferralCodeChecking] = useState(false);
   const [pkgSubmitting, setPkgSubmitting] = useState(false);
   const [pkgResult, setPkgResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [pkgAccountCreditBalance, setPkgAccountCreditBalance] = useState<number | null>(null);
+  const [pkgApplyAccountCredit, setPkgApplyAccountCredit] = useState(true);
+
+  // Fetch account credit balance for the package enrollment modal — same
+  // pattern as the private/group booking modal's own credit fetch above.
+  useEffect(() => {
+    if (!pkgModal.open) { setPkgAccountCreditBalance(null); return; }
+    const trimmed = pkgEmail.trim().toLowerCase();
+    if (!trimmed || !trimmed.includes("@")) { setPkgAccountCreditBalance(null); return; }
+    let cancelled = false;
+    sessionEmailMatches(trimmed).then((matches) => {
+      if (cancelled) return;
+      if (!matches) { setPkgAccountCreditBalance(null); return; }
+      authedJsonFetch(`/api/account-credits?email=${encodeURIComponent(trimmed)}`)
+        .then((d) => { if (!cancelled) setPkgAccountCreditBalance((d.balance as number) ?? 0); })
+        .catch(() => { if (!cancelled) setPkgAccountCreditBalance(0); });
+    });
+    return () => { cancelled = true; };
+  }, [pkgEmail, pkgModal.open]);
+
+  // How much credit actually applies to the package enrollment (capped at
+  // the package price) and what's left to charge via Stripe — mirrors what
+  // /api/packages computes server-side, same as creditAppliedToOrder above.
+  const pkgTotalPrice = packagePrice(pkgModal.packageType || 4);
+  const pkgCreditApplied = pkgAccountCreditBalance !== null && pkgAccountCreditBalance > 0 && pkgApplyAccountCredit
+    ? Math.min(pkgAccountCreditBalance, pkgTotalPrice)
+    : 0;
+  const pkgAmountToCharge = Math.max(0, pkgTotalPrice - pkgCreditApplied);
+
   const [calendarSessions, setCalendarSessions] = useState<CalSession[]>([]);
   const [showReferralInfo, setShowReferralInfo] = useState(false);
 
@@ -1181,7 +1223,7 @@ export default function Home() {
       if (bookingType === "weekly" && modal.selectedGroupSessions && modal.selectedGroupSessions.length > 0) {
         const res = await fetch("/api/register", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: await authedPostHeaders(),
           body: JSON.stringify({
             parentName,
             email,
@@ -1248,7 +1290,7 @@ export default function Home() {
           }));
           const res = await fetch("/api/register", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: await authedPostHeaders(),
             body: JSON.stringify({
               parentName,
               email,
@@ -1330,7 +1372,7 @@ export default function Home() {
       if (isRecurring) {
         const res = await fetch("/api/register", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: await authedPostHeaders(),
           body: JSON.stringify({
             parentName,
             email,
@@ -1382,7 +1424,7 @@ export default function Home() {
       const booking = datesToBook[0];
       const res = await fetch("/api/register", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: await authedPostHeaders(),
         body: JSON.stringify({
           parentName,
           email,
@@ -1509,7 +1551,7 @@ export default function Home() {
     try {
       const res = await fetch("/api/packages", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: await authedPostHeaders(),
         body: JSON.stringify({
           parentName: pkgName,
           email: pkgEmail,
@@ -1519,6 +1561,7 @@ export default function Home() {
           kids: kidsStr,
           referralCode: pkgReferralCode.trim() || undefined,
           smsConsent,
+          applyAccountCredit: pkgAccountCreditBalance !== null && pkgAccountCreditBalance > 0 && pkgApplyAccountCredit,
         }),
       });
       const data = await res.json();
@@ -2621,7 +2664,7 @@ export default function Home() {
                   <p className="text-xs text-brown-400">${(packagePrice(4) / 4).toFixed(2)} per session</p>
                 </div>
                 <button
-                  onClick={() => { if (!userEmail) { setAuthPrompt(true); return; } setPkgModal({ open: true, packageType: 4 }); setPkgFirstName(profileRef.current?.firstName ?? ""); setPkgLastName(profileRef.current?.lastName ?? ""); setPkgEmail(userEmail ?? ""); setPkgPhone(profileRef.current?.phone ?? ""); setPkgMonth(pkgMonthOptions[0]?.value || ""); setPkgResult(null); setKids(profileRef.current?.kids ?? [{ name: "", dob: "", grade: "", gender: "" }]); setPkgReferralCode(""); setPkgReferralCodeError(""); }}
+                  onClick={() => { if (!userEmail) { setAuthPrompt(true); return; } setPkgModal({ open: true, packageType: 4 }); setPkgFirstName(profileRef.current?.firstName ?? ""); setPkgLastName(profileRef.current?.lastName ?? ""); setPkgEmail(userEmail ?? ""); setPkgPhone(profileRef.current?.phone ?? ""); setPkgMonth(pkgMonthOptions[0]?.value || ""); setPkgResult(null); setKids(profileRef.current?.kids ?? [{ name: "", dob: "", grade: "", gender: "" }]); setPkgReferralCode(""); setPkgReferralCodeError(""); setPkgApplyAccountCredit(true); }}
                   className="mt-4 w-full rounded-lg bg-mesa-accent px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-yellow-600"
                 >
                   Enroll — 4 Sessions
@@ -2638,7 +2681,7 @@ export default function Home() {
                   <p className="text-xs text-brown-400">${(packagePrice(8) / 8).toFixed(2)} per session</p>
                 </div>
                 <button
-                  onClick={() => { if (!userEmail) { setAuthPrompt(true); return; } setPkgModal({ open: true, packageType: 8 }); setPkgFirstName(profileRef.current?.firstName ?? ""); setPkgLastName(profileRef.current?.lastName ?? ""); setPkgEmail(userEmail ?? ""); setPkgPhone(profileRef.current?.phone ?? ""); setPkgMonth(pkgMonthOptions[0]?.value || ""); setPkgResult(null); setKids(profileRef.current?.kids ?? [{ name: "", dob: "", grade: "", gender: "" }]); setPkgReferralCode(""); setPkgReferralCodeError(""); }}
+                  onClick={() => { if (!userEmail) { setAuthPrompt(true); return; } setPkgModal({ open: true, packageType: 8 }); setPkgFirstName(profileRef.current?.firstName ?? ""); setPkgLastName(profileRef.current?.lastName ?? ""); setPkgEmail(userEmail ?? ""); setPkgPhone(profileRef.current?.phone ?? ""); setPkgMonth(pkgMonthOptions[0]?.value || ""); setPkgResult(null); setKids(profileRef.current?.kids ?? [{ name: "", dob: "", grade: "", gender: "" }]); setPkgReferralCode(""); setPkgReferralCodeError(""); setPkgApplyAccountCredit(true); }}
                   className="mt-4 w-full rounded-lg bg-mesa-accent px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-yellow-600"
                 >
                   Enroll — 8 Sessions
@@ -3687,8 +3730,41 @@ export default function Home() {
               <button onClick={() => setPkgModal({ open: false, packageType: null })} className="text-2xl text-brown-400 hover:text-white">&times;</button>
             </div>
             <p className="mt-1 text-sm text-brown-400">
-              ${packagePrice(pkgModal.packageType || 4)} + {serviceFeeLabel(packagePrice(pkgModal.packageType || 4))} service fee{isPercentServiceFee(packagePrice(pkgModal.packageType || 4)) ? ` (${SERVICE_FEE_PERCENT_TEXT})` : ""} — paid securely by card via Stripe
+              {pkgAmountToCharge > 0
+                ? <>${pkgTotalPrice} + {serviceFeeLabel(pkgAmountToCharge)} service fee{isPercentServiceFee(pkgAmountToCharge) ? ` (${SERVICE_FEE_PERCENT_TEXT})` : ""} — paid securely by card via Stripe{pkgCreditApplied > 0 ? ` after $${pkgCreditApplied} account credit` : ""}</>
+                : <>${pkgTotalPrice} — fully covered by account credit, no card needed</>}
             </p>
+
+            {pkgAccountCreditBalance !== null && pkgAccountCreditBalance > 0 && (
+              <div className="mt-3 rounded-lg border border-blue-700 bg-blue-900/20 px-4 py-3 transition">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-blue-300">Account Credit</p>
+                    <p className="text-xs mt-0.5 text-blue-400">
+                      ${pkgAccountCreditBalance} available
+                      {pkgApplyAccountCredit ? " — will be applied to this package" : ""}
+                    </p>
+                  </div>
+                  {pkgApplyAccountCredit ? (
+                    <button
+                      type="button"
+                      onClick={() => setPkgApplyAccountCredit(false)}
+                      className="shrink-0 text-xs text-brown-400 hover:text-white transition"
+                    >
+                      Remove
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setPkgApplyAccountCredit(true)}
+                      className="shrink-0 rounded-lg bg-blue-800 hover:bg-blue-700 px-3 py-1.5 text-xs font-medium text-blue-200 transition"
+                    >
+                      Apply Credit
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
 
             {pkgResult?.success ? (
               <div className="mt-6 rounded-lg bg-green-900/50 p-4 text-center">
@@ -3807,7 +3883,7 @@ export default function Home() {
                   <p className="text-sm text-red-400">{pkgResult.message}</p>
                 )}
                 <button type="submit" disabled={pkgSubmitting} className="w-full rounded-lg bg-mesa-accent py-3 font-semibold text-white transition hover:bg-yellow-600 disabled:opacity-50">
-                  {pkgSubmitting ? "Submitting..." : "Continue to Payment"}
+                  {pkgSubmitting ? "Submitting..." : (pkgAmountToCharge === 0 ? "Confirm Enrollment" : "Continue to Payment")}
                 </button>
               </form>
             )}

@@ -1013,6 +1013,7 @@ export interface MonthlyPackage {
   stripe_payment_intent_id?: string | null;
   stripe_customer_id?: string | null;
   total_price?: number | null;
+  applied_account_credit?: number | null;
   sms_consent: boolean;
 }
 
@@ -1030,6 +1031,7 @@ export async function enrollInPackage(data: {
   packageType: number;
   monthYear: string;
   totalPrice: number;
+  appliedAccountCredit?: number;
 }): Promise<{ id: string }> {
   const supabase = getSupabase();
   const { data: row, error } = await supabase
@@ -1044,6 +1046,7 @@ export async function enrollInPackage(data: {
       reminder_sent: false,
       status: "pending_payment",
       total_price: data.totalPrice,
+      ...(data.appliedAccountCredit ? { applied_account_credit: data.appliedAccountCredit } : {}),
     })
     .select("id")
     .single();

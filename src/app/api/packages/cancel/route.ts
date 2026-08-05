@@ -79,23 +79,40 @@ export async function POST(req: NextRequest) {
     // packagePrice() fallback only covers packages enrolled before this
     // column existed (already backfilled by migration, but defensive here too).
     const totalPrice = pkg.total_price ?? packagePrice(pkg.package_type);
-    const serviceFeeText = fmtMoney(calcServiceFee(totalPrice));
+    // Any account credit applied at enrollment was never a card charge —
+    // only the remainder actually hit Stripe, so only that remainder is
+    // ever refundable there.
+    const appliedCredit = pkg.applied_account_credit || 0;
+    const cardChargedAmount = Math.max(0, totalPrice - appliedCredit);
+    // The fee itself was computed on the post-credit charge at enrollment
+    // (see /api/packages), not the full package price — match that here so
+    // this message names the fee actually paid. A fully credit-covered
+    // enrollment never went through Stripe at all, so no fee was ever
+    // charged — nothing to mention as non-refundable in that case.
+    const serviceFeeText = fmtMoney(calcServiceFee(cardChargedAmount));
+    const feeClause = cardChargedAmount > 0 ? ` (the $${serviceFeeText} service fee isn't refundable)` : "";
 
     let refundResult: { refundedAmount: number; creditedAmount: number; failed: boolean } | undefined;
     let creditIssued = 0;
-    if (pkg.stripe_payment_intent_id) {
+    if (pkg.stripe_payment_intent_id && cardChargedAmount > 0) {
       refundResult = await issueStripeRefund({
         email: pkg.email,
         paymentIntentId: pkg.stripe_payment_intent_id,
-        amountDollars: totalPrice,
+        amountDollars: cardChargedAmount,
         sessionLabel: `${pkg.package_type}-session package (${pkg.month_year})`,
       });
-    } else {
+    } else if (!pkg.stripe_payment_intent_id && cardChargedAmount > 0) {
       // Legacy package enrolled before Stripe existed for packages — no
       // card on file to refund, so it becomes account credit instead, same
       // fallback every other money-movement path in this app already uses.
-      await addAccountCredit(pkg.email, totalPrice).catch(() => {});
-      creditIssued = totalPrice;
+      await addAccountCredit(pkg.email, cardChargedAmount).catch(() => {});
+      creditIssued = cardChargedAmount;
+    }
+    // Whatever was paid with account credit at enrollment goes straight
+    // back to that balance — it was never a card charge to begin with.
+    if (appliedCredit > 0) {
+      await addAccountCredit(pkg.email, appliedCredit).catch(() => {});
+      creditIssued += appliedCredit;
     }
 
     const refundFailed = !!refundResult?.failed;
@@ -113,10 +130,10 @@ export async function POST(req: NextRequest) {
         const message = refundFailed
           ? `Mesa Basketball: Your ${pkg.package_type}-session package for ${pkg.month_year} has been cancelled. Your refund is being processed — you'll receive a separate confirmation once it's complete.`
           : refundedToCard > 0 && totalCredited > 0
-            ? `Mesa Basketball: Your ${pkg.package_type}-session package for ${pkg.month_year} has been cancelled. $${fmtMoney(refundedToCard)} has been refunded to your original payment method and $${fmtMoney(totalCredited)} credited to your account (the $${serviceFeeText} service fee isn't refundable).`
+            ? `Mesa Basketball: Your ${pkg.package_type}-session package for ${pkg.month_year} has been cancelled. $${fmtMoney(refundedToCard)} has been refunded to your original payment method and $${fmtMoney(totalCredited)} credited to your account.${feeClause}`
             : totalCredited > 0
-              ? `Mesa Basketball: Your ${pkg.package_type}-session package for ${pkg.month_year} has been cancelled. $${fmtMoney(totalCredited)} has been credited to your account (the $${serviceFeeText} service fee isn't refundable).`
-              : `Mesa Basketball: Your ${pkg.package_type}-session package for ${pkg.month_year} has been cancelled. $${fmtMoney(refundedToCard)} has been refunded to your original payment method (the $${serviceFeeText} service fee isn't refundable).`;
+              ? `Mesa Basketball: Your ${pkg.package_type}-session package for ${pkg.month_year} has been cancelled. $${fmtMoney(totalCredited)} has been credited to your account.${feeClause}`
+              : `Mesa Basketball: Your ${pkg.package_type}-session package for ${pkg.month_year} has been cancelled. $${fmtMoney(refundedToCard)} has been refunded to your original payment method.${feeClause}`;
         await sendSMS(pkg.phone, message);
       }
       const adminMoney = refundFailed

@@ -1122,7 +1122,7 @@ export async function finalizeRescheduleTopup(params: FinalizeRescheduleTopupPar
  * package_id (see allocatePackageCoverage in /api/register), never by
  * guessing from whatever else this email happened to book that month.
  */
-async function finalizePaidPackageEnrollment(
+export async function finalizePaidPackageEnrollment(
   packageId: string,
   paymentIntentId: string,
   customerId: string | null,

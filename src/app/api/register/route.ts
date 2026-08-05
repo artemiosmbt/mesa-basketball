@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getStripe } from "@/lib/stripe";
+import { getStripe, buildCreditDiscount } from "@/lib/stripe";
 import { calcServiceFee, serviceFeeItemName, fmtMoney, PRIVATE_RATE, GROUP_PRIVATE_RATE } from "@/lib/pricing";
 import { getWeeklySchedule, getCamps } from "@/lib/sheets";
+import { resolveRequestEmail } from "@/lib/request-email";
 import {
   finalizeConfirmedPrivateBooking,
   finalizeConfirmedPrivateSeriesBooking,
@@ -100,17 +101,6 @@ function findWithinRequestDuplicateDates(sessions: { date: string; startTime: st
 // baking it invisibly into a single reduced total. Line items keep their
 // full, undiscounted prices; Stripe applies this against the whole order
 // total, landing on the exact same final amount either way.
-async function buildCreditDiscount(stripe: ReturnType<typeof getStripe>, creditApplied: number): Promise<{ coupon: string }[] | undefined> {
-  if (creditApplied <= 0) return undefined;
-  const coupon = await stripe.coupons.create({
-    amount_off: Math.round(creditApplied * 100),
-    currency: "usd",
-    duration: "once",
-    name: "Account Credit",
-  });
-  return [{ coupon: coupon.id }];
-}
-
 async function allocatePackageCoverage(email: string, dates: string[], kidCount: number): Promise<Array<{ covered: boolean; packageId: string | null }>> {
   if (kidCount >= 4) {
     return dates.map(() => ({ covered: false, packageId: null }));
@@ -176,12 +166,21 @@ export async function POST(req: NextRequest) {
       // Referral credit opt-in
       useReferralCredit,
       // Account credit opt-in (dollar-value credit from e.g. a partial camp cancellation)
-      applyAccountCredit,
+      applyAccountCredit: rawApplyAccountCredit,
     } = body;
     // Normalized once at the boundary — every downstream check (self-referral
     // comparison, isNewClient, checkDuplicateRegistration) relies on this
     // matching the lowercased/trimmed form already stored for the referrer.
     const email = typeof rawEmail === "string" ? rawEmail.toLowerCase().trim() : rawEmail;
+
+    // Account credit belongs to a real logged-in identity — never trust the
+    // client-supplied email alone to decide whose balance gets spent, or
+    // anyone who knows a client's email could drain their credit onto a
+    // booking that isn't theirs. Only the caller's OWN authenticated session
+    // can authorize spending its balance; a guest with no session can never
+    // apply credit, since it can't prove ownership of any balance at all.
+    const sessionEmail = await resolveRequestEmail(req);
+    const applyAccountCredit = !!rawApplyAccountCredit && !!sessionEmail && sessionEmail === email;
 
     if (!parentName || !email || !phone || !kids || !type || !sessionDetails) {
       return NextResponse.json(
