@@ -4,7 +4,7 @@ import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import Image from "next/image";
 import { authClient, ADMIN_EMAIL } from "@/lib/auth";
 import LandingNav from "@/app/LandingNav";
-import { REFERRAL_PROGRAM_ENABLED } from "@/lib/feature-flags";
+import { REFERRAL_PROGRAM_ENABLED, NEW_CLIENT_DISCOUNT_ENABLED } from "@/lib/feature-flags";
 import { calcServiceFee, serviceFeeLabel, serviceFeeItemName, isPercentServiceFee, SERVICE_FEE_PERCENT_TEXT, packagePrice, PRIVATE_RATE, GROUP_PRIVATE_RATE, calcPrivatePrice as getPrivatePrice } from "@/lib/pricing";
 
 const LOCATION_LINKS: Record<string, { name: string; url: string }> = {
@@ -2641,11 +2641,13 @@ export default function Home() {
             </a>
           </div>
           <p className="mt-2 text-center text-sm text-brown-500">
-            Payment due upon registration — Cash, Venmo, or Zelle
+            Secure online payment due at checkout
           </p>
-          <p className="mt-2 text-center text-sm text-green-400/80">
-            New Clients: First Session 50% Off
-          </p>
+          {NEW_CLIENT_DISCOUNT_ENABLED && (
+            <p className="mt-2 text-center text-sm text-green-400/80">
+              New Clients: First Session 50% Off
+            </p>
+          )}
 
           {/* Monthly Packages */}
           <div className="mt-10 border-t border-brown-800 pt-8">
