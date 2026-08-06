@@ -12,6 +12,7 @@ import { getWeeklySchedule } from "@/lib/sheets";
 import { addAccountCredit, deductAccountCredit, addReferralCredit, logLateFeeEvent, getPackageById, countPackageSessionsUsed, setPackageSessions } from "@/lib/supabase";
 import { isLateAction, resolveOffSessionPaymentSource, chargeSavedCardOffSession, issueStripeRefund } from "@/lib/booking-finalize";
 import { calcServiceFee, serviceFeeLabel, fmtMoney, calcPrivatePrice, fullPriceForType, getTrainerTier, normalizeTrainerTier } from "@/lib/pricing";
+import { notifyTrainerOfCancellation, notifyTrainerOfReschedule, notifyTrainerOfNewBooking } from "@/lib/trainer-notify";
 
 
 function parseMinsFromTime(t: string): number {
@@ -606,6 +607,51 @@ export async function POST(req: NextRequest) {
     const adminCreditRefundNote = creditRefunded ? "\nReferral credit refunded (no longer applied)." : "";
     const priceLookupFailedNote = priceLookupFailed ? `\n⚠️ Couldn't verify the new price on the schedule sheet — price left at $${fmtMoney(reg.session_price ?? 0)}, double-check it manually.` : "";
     await sendAdminSMS(`ADMIN RESCHEDULED: ${reg.parent_name}\nFrom: ${oldSessionDetails}\nTo: ${newSessionDetails}\nPlayers: ${reg.kids}${adminPriceNote}${adminCreditRefundNote}${priceLookupFailedNote}`);
+
+    // Same trainer-swap-vs-plain-reschedule distinction as the client-facing
+    // reschedule endpoint — see the comment there.
+    if (bookedDate && bookedStartTime) {
+      const oldTrainer = reg.booked_trainer;
+      const newTrainer = resolvedTrainer;
+      if (oldTrainer && newTrainer && oldTrainer === newTrainer && oldBookedDate && oldBookedStartTime) {
+        await notifyTrainerOfReschedule({
+          trainer: newTrainer,
+          parentName: reg.parent_name,
+          sessionLabel: newSessionLabel || prefix,
+          oldDate: oldBookedDate,
+          oldStartTime: oldBookedStartTime,
+          oldEndTime: reg.booked_end_time || oldBookedStartTime,
+          newDate: bookedDate,
+          newStartTime: bookedStartTime,
+          newEndTime: bookedEndTime || bookedStartTime,
+          location: bookedLocation || "",
+        }).catch((notifyErr) => console.error("Trainer reschedule notify failed:", notifyErr));
+      } else {
+        if (oldTrainer && oldTrainer !== newTrainer && oldBookedDate && oldBookedStartTime) {
+          await notifyTrainerOfCancellation({
+            trainer: oldTrainer,
+            parentName: reg.parent_name,
+            sessionLabel: oldSessionLabel || derivedPrefix,
+            date: oldBookedDate,
+            startTime: oldBookedStartTime,
+            endTime: reg.booked_end_time || oldBookedStartTime,
+            location: reg.booked_location || "",
+          }).catch((notifyErr) => console.error("Trainer reschedule-cancel notify failed:", notifyErr));
+        }
+        if (newTrainer && newTrainer !== oldTrainer) {
+          await notifyTrainerOfNewBooking({
+            trainer: newTrainer,
+            parentName: reg.parent_name,
+            kids: reg.kids,
+            sessionLabel: newSessionLabel || prefix,
+            date: bookedDate,
+            startTime: bookedStartTime,
+            endTime: bookedEndTime || bookedStartTime,
+            location: bookedLocation || "",
+          }).catch((notifyErr) => console.error("Trainer reschedule-newbooking notify failed:", notifyErr));
+        }
+      }
+    }
   } catch (err) {
     console.error("Notification error (admin reschedule):", err);
   }

@@ -4,6 +4,7 @@ import { addPrivateSessionToCalendar, deletePrivateSessionFromCalendar, upsertGr
 import { sendSMS, sendAdminSMS, formatDateWithDay, formatMonthYear, resolveLocationName } from "@/lib/sms";
 import { getStripe } from "@/lib/stripe";
 import { calcServiceFee, fmtMoney, packagePrice, fullPriceForType, getTrainerTier, normalizeTrainerTier } from "@/lib/pricing";
+import { notifyTrainerOfNewBooking } from "@/lib/trainer-notify";
 import {
   addReferralCredit,
   awardReferralCreditOnce,
@@ -439,6 +440,19 @@ export async function finalizeConfirmedPrivateBooking(params: FinalizePrivateBoo
   const adminTypeLabel = params.type === "group-private" ? "group private" : "private";
   await sendAdminSMS(`NEW BOOKING (paid): ${params.parentName}\n1 ${adminTypeLabel} session:\n${adminDateLine}${adminTrainerLine}\nPlayers: ${params.kids}${pkgAdminNote}${params.submittedReferralCode ? `\nRef code: ${params.submittedReferralCode} ${params.privateReferrer ? "✓ applied" : "✗ NOT applied"}` : ""}`).catch(() => {});
 
+  if (isPrivateType && params.bookedDate && params.bookedStartTime) {
+    await notifyTrainerOfNewBooking({
+      trainer: params.bookedTrainer,
+      parentName: params.parentName,
+      kids: params.kids,
+      sessionLabel: adminTypeLabel === "group private" ? "Group Private Session" : "Private Session",
+      date: params.bookedDate,
+      startTime: params.bookedStartTime,
+      endTime: params.bookedEndTime || params.bookedStartTime,
+      location: params.bookedLocation || "",
+    }).catch((err) => console.error("Trainer new-booking notify failed:", err));
+  }
+
   if (isPrivateType && params.bookedDate && params.bookedStartTime && params.bookedEndTime) {
     try {
       await addPrivateSessionToCalendar({
@@ -575,6 +589,22 @@ export async function finalizeConfirmedWeeklyBooking(params: FinalizeWeeklyBooki
     `${formatDateWithDay(s.date)} | ${s.startTime}-${s.endTime}\nLocation: ${resolveLocationName(s.location)}${isMixedGroups ? `\nGroup: ${s.group}` : ""}`
   ).join("\n");
   await sendAdminSMS(`NEW BOOKING (paid): ${params.parentName}\n${confirmLabel}:\n${adminLines}${weeklyTrainerLine}\nPlayers: ${params.kids}${params.submittedReferralCode ? `\nRef code: ${params.submittedReferralCode} ${weeklyReferrer ? "✓ applied" : "✗ NOT applied"}` : ""}`).catch(() => {});
+
+  // Notified per-session (not just weeklySessions[0]) since a single batch
+  // can span more than one group with different trainers (e.g. a skills
+  // session cross-sold with its companion pickup slot).
+  for (const session of weeklySessions) {
+    await notifyTrainerOfNewBooking({
+      trainer: session.trainer,
+      parentName: params.parentName,
+      kids: params.kids,
+      sessionLabel: session.group || "Group Session",
+      date: session.date,
+      startTime: session.startTime,
+      endTime: session.endTime,
+      location: session.location,
+    }).catch((err) => console.error("Trainer new-booking notify failed:", err));
+  }
 
   const calendarSyncFailures: string[] = [];
   for (const session of weeklySessions) {
@@ -871,6 +901,24 @@ export async function finalizeConfirmedPrivateSeriesBooking(params: FinalizePriv
   const trainerLine = privateSessions[0]?.trainer ? `\nTrainer: ${privateSessions[0].trainer}` : "";
   const adminTypeLabel = params.type === "group-private" ? "group private" : "private";
   await sendAdminSMS(`NEW BOOKING (paid): ${params.parentName}\n${privateSessions.length} ${adminTypeLabel} sessions:\n${adminLines}${trainerLine}\nPlayers: ${params.kids}${params.submittedReferralCode ? `\nRef code: ${params.submittedReferralCode} ${params.privateReferrer ? "✓ applied" : "✗ NOT applied"}` : ""}`).catch(() => {});
+
+  if (isPrivateType) {
+    // Per-session, not just privateSessions[0] — a recurring series can
+    // legitimately use a different trainer on different dates (e.g. an "Any
+    // Available Trainer" package floating across substitutes week to week).
+    for (const s of privateSessions) {
+      await notifyTrainerOfNewBooking({
+        trainer: s.trainer,
+        parentName: params.parentName,
+        kids: params.kids,
+        sessionLabel: adminTypeLabel === "group private" ? "Group Private Session" : "Private Session",
+        date: s.date,
+        startTime: s.startTime,
+        endTime: s.endTime,
+        location: s.location,
+      }).catch((err) => console.error("Trainer new-booking notify failed:", err));
+    }
+  }
 
   if (isPrivateType) {
     const calendarSyncFailures: string[] = [];

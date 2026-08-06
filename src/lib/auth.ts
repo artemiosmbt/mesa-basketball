@@ -21,12 +21,27 @@ export interface TrainerAccount {
   email: string;
   role: "trainer" | "elevated_trainer";
   trainerName?: string;
+  // Notification phone (SMS) — separate from the login email above; only
+  // used to text this trainer about their own bookings (new/cancelled/
+  // rescheduled), never for dashboard auth. Omit if they don't want texts.
+  phone?: string;
 }
 
 export const TRAINER_ACCOUNTS: TrainerAccount[] = [
   { email: "ckaterinakis@hchc.edu", role: "elevated_trainer" },
-  // { email: "coach@example.com", role: "trainer", trainerName: "John Smith" },
+  // { email: "coach@example.com", role: "trainer", trainerName: "John Smith", phone: "631-555-0100" },
 ];
+
+// Looks up a trainer's contact info by their exact schedule-sheet name (the
+// same string stored in booked_trainer) — used to notify THEM (not just the
+// admin) about their own bookings. Returns null for Artemios (not in this
+// list — he already gets every admin notification) or any name with no
+// matching account, so a sheet typo just means that trainer's notification
+// silently doesn't fire, rather than erroring the booking.
+export function getTrainerContact(trainerName: string | null | undefined): TrainerAccount | null {
+  if (!trainerName) return null;
+  return TRAINER_ACCOUNTS.find((t) => t.trainerName === trainerName) ?? null;
+}
 
 export type AuthRole = "admin" | "elevated_trainer" | "trainer";
 

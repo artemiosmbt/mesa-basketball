@@ -8,6 +8,7 @@ import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@
 import { addAccountCredit, addReferralCredit, countPackageSessionsUsed, setPackageSessions } from "@/lib/supabase";
 import { issueStripeRefund, resolvedSessionPrice, type StripeRefundResult } from "@/lib/booking-finalize";
 import { fmtMoney } from "@/lib/pricing";
+import { notifyTrainerOfCancellation } from "@/lib/trainer-notify";
 
 // A session the trainer removed from the schedule is never the client's
 // fault — this is always treated as an on-time cancellation (full refund,
@@ -446,6 +447,18 @@ export async function GET(req: NextRequest) {
         console.error("Deletion cancel SMS failed for", r.phone, err);
       }
     }
+
+    if (r.booked_date && r.booked_start_time && r.booked_trainer) {
+      await notifyTrainerOfCancellation({
+        trainer: r.booked_trainer,
+        parentName: r.parent_name,
+        sessionLabel: r.booked_group || (r.session_details || "").split(" — ")[0].trim() || "Group Session",
+        date: r.booked_date,
+        startTime: r.booked_start_time,
+        endTime: r.booked_end_time || r.booked_start_time,
+        location: r.booked_location || "",
+      }).catch((err) => console.error("Trainer cancellation notify failed (weekly deletion):", err));
+    }
   }
 
   // === DELETION DETECTION — PRIVATE SESSIONS ===
@@ -535,6 +548,18 @@ export async function GET(req: NextRequest) {
       } catch (err) {
         console.error("Deletion cancel SMS failed for", r.phone, err);
       }
+    }
+
+    if (r.booked_trainer) {
+      await notifyTrainerOfCancellation({
+        trainer: r.booked_trainer,
+        parentName: r.parent_name,
+        sessionLabel: r.type === "group-private" ? "Group Private Session" : "Private Session",
+        date: r.booked_date,
+        startTime: r.booked_start_time,
+        endTime: r.booked_end_time || r.booked_start_time,
+        location: r.booked_location || "",
+      }).catch((err) => console.error("Trainer cancellation notify failed (private deletion):", err));
     }
   }
 

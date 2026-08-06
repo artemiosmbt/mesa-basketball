@@ -1027,3 +1027,104 @@ export async function sendAbandonedPackageEmail(data: {
   });
   if (result.error) console.error("Resend abandoned-package email error:", result.error);
 }
+
+// Notifies a part-time trainer (not Artemios — he already gets every admin
+// notification) that a session on THEIR schedule was just booked. Deliberately
+// light — just who/what/when/where, none of the financial detail the admin
+// email carries, since a trainer doesn't need Stripe/payment specifics to
+// show up and coach. Silent no-op territory (never called) for any trainer
+// with no email on file — see notifyTrainerOfNewBooking in trainer-notify.ts.
+export async function sendTrainerNewBookingEmail(data: {
+  to: string;
+  trainerName: string;
+  parentName: string;
+  kids?: string;
+  sessionLabel: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  location: string;
+}) {
+  const resend = getResend();
+  const result = await resend.emails.send({
+    from: FROM_EMAIL,
+    to: data.to,
+    subject: `New Booking: ${data.sessionLabel} — ${data.date}`,
+    html: `
+      <h2>New Booking on Your Schedule</h2>
+      <p>Hi ${escapeHtml(data.trainerName)},</p>
+      <p>A new session was just booked with you.</p>
+      <p><strong>Session:</strong> ${escapeHtml(data.sessionLabel)}</p>
+      <p><strong>When:</strong> ${escapeHtml(data.date)}, ${escapeHtml(data.startTime)}–${escapeHtml(data.endTime)}</p>
+      <p><strong>Where:</strong> ${escapeHtml(data.location)}</p>
+      <p><strong>Parent:</strong> ${escapeHtml(data.parentName)}</p>
+      ${data.kids ? `<p><strong>Player(s):</strong> ${escapeHtml(data.kids)}</p>` : ""}
+      <p style="color: #999; font-size: 13px;">— Mesa Basketball Training</p>
+    `,
+  });
+  if (result.error) console.error("Resend trainer-new-booking email error:", result.error);
+}
+
+// Same population/purpose as sendTrainerNewBookingEmail — this session is
+// gone from their schedule now.
+export async function sendTrainerCancellationEmail(data: {
+  to: string;
+  trainerName: string;
+  parentName: string;
+  sessionLabel: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  location: string;
+}) {
+  const resend = getResend();
+  const result = await resend.emails.send({
+    from: FROM_EMAIL,
+    to: data.to,
+    subject: `Cancelled: ${data.sessionLabel} — ${data.date}`,
+    html: `
+      <h2>Session Cancelled</h2>
+      <p>Hi ${escapeHtml(data.trainerName)},</p>
+      <p>This session was just cancelled — it's off your schedule.</p>
+      <p><strong>Session:</strong> ${escapeHtml(data.sessionLabel)}</p>
+      <p><strong>Was:</strong> ${escapeHtml(data.date)}, ${escapeHtml(data.startTime)}–${escapeHtml(data.endTime)} at ${escapeHtml(data.location)}</p>
+      <p><strong>Parent:</strong> ${escapeHtml(data.parentName)}</p>
+      <p style="color: #999; font-size: 13px;">— Mesa Basketball Training</p>
+    `,
+  });
+  if (result.error) console.error("Resend trainer-cancellation email error:", result.error);
+}
+
+// Same population/purpose again — the session moved to a new date/time/
+// location rather than disappearing outright.
+export async function sendTrainerRescheduleEmail(data: {
+  to: string;
+  trainerName: string;
+  parentName: string;
+  sessionLabel: string;
+  oldDate: string;
+  oldStartTime: string;
+  oldEndTime: string;
+  newDate: string;
+  newStartTime: string;
+  newEndTime: string;
+  location: string;
+}) {
+  const resend = getResend();
+  const result = await resend.emails.send({
+    from: FROM_EMAIL,
+    to: data.to,
+    subject: `Rescheduled: ${data.sessionLabel} — now ${data.newDate}`,
+    html: `
+      <h2>Session Rescheduled</h2>
+      <p>Hi ${escapeHtml(data.trainerName)},</p>
+      <p>This session moved to a new time.</p>
+      <p><strong>Session:</strong> ${escapeHtml(data.sessionLabel)}</p>
+      <p><strong>Was:</strong> ${escapeHtml(data.oldDate)}, ${escapeHtml(data.oldStartTime)}–${escapeHtml(data.oldEndTime)}</p>
+      <p><strong>Now:</strong> ${escapeHtml(data.newDate)}, ${escapeHtml(data.newStartTime)}–${escapeHtml(data.newEndTime)} at ${escapeHtml(data.location)}</p>
+      <p><strong>Parent:</strong> ${escapeHtml(data.parentName)}</p>
+      <p style="color: #999; font-size: 13px;">— Mesa Basketball Training</p>
+    `,
+  });
+  if (result.error) console.error("Resend trainer-reschedule email error:", result.error);
+}

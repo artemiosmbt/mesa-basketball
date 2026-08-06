@@ -29,6 +29,7 @@ import {
 } from "@/lib/email";
 import { getCurrentSheetLocation, getWeeklySchedule, isPrivateWindowOfferedByTrainer } from "@/lib/sheets";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
+import { notifyTrainerOfCancellation, notifyTrainerOfReschedule, notifyTrainerOfNewBooking } from "@/lib/trainer-notify";
 import {
   addPrivateSessionToCalendar,
   deletePrivateSessionFromCalendar,
@@ -643,6 +644,18 @@ export async function DELETE(
       : "\nPackage session — on-time, no fee, slot freed"
     : "";
   await sendAdminSMS(`CANCELLED: ${reg.parent_name}\n${cancelSessionDetails}${isLateCancel ? " (late)" : ""}${adminMoneyOutcome ? `\n${adminMoneyOutcome}` : ""}${adminPackageNote}\nPlayers: ${reg.kids}`);
+
+  if (reg.booked_date && reg.booked_start_time && reg.booked_trainer) {
+    await notifyTrainerOfCancellation({
+      trainer: reg.booked_trainer,
+      parentName: reg.parent_name,
+      sessionLabel: reg.type === "weekly" ? (reg.booked_group || "Group Session") : reg.type === "group-private" ? "Group Private Session" : "Private Session",
+      date: reg.booked_date,
+      startTime: reg.booked_start_time,
+      endTime: reg.booked_end_time || reg.booked_start_time,
+      location: cancelLocation,
+    }).catch((err) => console.error("Trainer cancellation notify failed:", err));
+  }
 
   // Sync calendar after cancellation
   if (reg.booked_date && reg.booked_start_time) {
@@ -1501,6 +1514,56 @@ export async function PUT(
       : "\nPackage session — slot moved, no fee"
     : "";
   await sendAdminSMS(`RESCHEDULED: ${newParentName}\nFrom: ${reg.session_details}\nTo: ${newSessionDetails}${rescheduleTrainerLine}\nPlayers: ${kidsToUse}${refundOutcomeAdminText ? `\n${refundOutcomeAdminText}` : ""}${adminCreditNote}${adminPackageNote}`);
+
+  // Trainer-facing: same trainer keeping the session just at a new time gets
+  // one "rescheduled" notice; a trainer swap tells the OLD trainer it's off
+  // their schedule and the NEW trainer it's a fresh booking, rather than
+  // both getting a confusing "rescheduled" message for a session one of them
+  // never actually had.
+  if (bookedDate && bookedStartTime) {
+    const oldTrainer = reg.booked_trainer;
+    const newTrainer = resolvedTrainer;
+    const newLabel = newType === "weekly" ? (sessionGroup || "Group Session") : newType === "group-private" ? "Group Private Session" : "Private Session";
+    const oldLabel = reg.type === "weekly" ? (reg.booked_group || "Group Session") : reg.type === "group-private" ? "Group Private Session" : "Private Session";
+    if (oldTrainer && newTrainer && oldTrainer === newTrainer && reg.booked_date && reg.booked_start_time) {
+      await notifyTrainerOfReschedule({
+        trainer: newTrainer,
+        parentName: newParentName,
+        sessionLabel: newLabel,
+        oldDate: reg.booked_date,
+        oldStartTime: reg.booked_start_time,
+        oldEndTime: reg.booked_end_time || reg.booked_start_time,
+        newDate: bookedDate,
+        newStartTime: bookedStartTime,
+        newEndTime: bookedEndTime || bookedStartTime,
+        location: bookedLocation || "",
+      }).catch((err) => console.error("Trainer reschedule notify failed:", err));
+    } else {
+      if (oldTrainer && oldTrainer !== newTrainer && reg.booked_date && reg.booked_start_time) {
+        await notifyTrainerOfCancellation({
+          trainer: oldTrainer,
+          parentName: newParentName,
+          sessionLabel: oldLabel,
+          date: reg.booked_date,
+          startTime: reg.booked_start_time,
+          endTime: reg.booked_end_time || reg.booked_start_time,
+          location: reg.booked_location || "",
+        }).catch((err) => console.error("Trainer reschedule-cancel notify failed:", err));
+      }
+      if (newTrainer && newTrainer !== oldTrainer) {
+        await notifyTrainerOfNewBooking({
+          trainer: newTrainer,
+          parentName: newParentName,
+          kids: kidsToUse,
+          sessionLabel: newLabel,
+          date: bookedDate,
+          startTime: bookedStartTime,
+          endTime: bookedEndTime || bookedStartTime,
+          location: bookedLocation || "",
+        }).catch((err) => console.error("Trainer reschedule-newbooking notify failed:", err));
+      }
+    }
+  }
 
   return NextResponse.json({ success: true, newToken, isLateReschedule: !!isLateReschedule, checkoutUrl: packageLateFeeCheckoutUrl });
 }

@@ -6,6 +6,7 @@ import { sendCancellationNotification } from "@/lib/email";
 import { getCurrentSheetLocation } from "@/lib/sheets";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import { issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome, isLateAction } from "@/lib/booking-finalize";
+import { notifyTrainerOfCancellation } from "@/lib/trainer-notify";
 import {
   addAccountCredit,
   addReferralCredit,
@@ -520,6 +521,18 @@ export async function POST(req: NextRequest) {
           : "\nPackage session — slot freed"
         : "";
       await sendAdminSMS(`CANCELLED: ${reg.parent_name}\n${sessionDetails}\nPlayers: ${reg.kids}${chargeLateFee ? "\n(Late fee charged)" : isLate ? "\n(Late fee waived)" : ""}${adminMoneyOutcome ? `\n${adminMoneyOutcome}` : ""}${adminPackageNote}`);
+
+      if (reg.booked_date && reg.booked_start_time && reg.booked_trainer) {
+        await notifyTrainerOfCancellation({
+          trainer: reg.booked_trainer,
+          parentName: reg.parent_name,
+          sessionLabel: reg.type === "weekly" ? (reg.booked_group || "Group Session") : reg.type === "group-private" ? "Group Private Session" : "Private Session",
+          date: reg.booked_date,
+          startTime: reg.booked_start_time,
+          endTime: reg.booked_end_time || reg.booked_start_time,
+          location: bookedLocation || "",
+        }).catch((notifyErr) => console.error("Trainer cancellation notify failed:", notifyErr));
+      }
     } catch (err) {
       console.error("Email/SMS notification error (admin cancel):", err);
     }
