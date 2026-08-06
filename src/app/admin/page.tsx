@@ -742,7 +742,9 @@ function CalendarView({ list, packageMembership, weeklyDiscountRates, weeklyCapa
                 <span className="rounded-full bg-teal-900/40 text-teal-400 px-2 py-0.5 text-xs font-medium">pkg</span>
               )}
             </div>
-            <div className="text-xs text-brown-300">{athleteNames(r.kids || "")}</div>
+            <div className="text-xs text-brown-300 whitespace-pre-line">
+              {r.kids ? r.kids.split(",").map((k) => k.trim()).join("\n") : "—"}
+            </div>
             <div className="text-xs text-brown-500 mt-0.5">{r.email} · {r.phone}</div>
             <div className="text-xs text-brown-400 mt-1 leading-relaxed whitespace-pre-line">
               {r.session_details ? r.session_details.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim() : "—"}
