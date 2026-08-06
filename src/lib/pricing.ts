@@ -52,9 +52,9 @@ export function fmtMoney(n: number): string {
   return n.toFixed(2);
 }
 
-import { getTrainerTier, type TrainerTier } from "./trainers";
+import { getTrainerTier, normalizeTrainerTier, type TrainerTier } from "./trainers";
 export type { TrainerTier };
-export { getTrainerTier };
+export { getTrainerTier, normalizeTrainerTier };
 
 // Monthly private-session package price, by trainer tier — Artemios runs a
 // higher rate than the part-time substitute trainers. Single source of

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getWeeklySchedule, getPrivateSlots, type WeeklySession } from "@/lib/sheets";
 import { deletePrivateSessionFromCalendar } from "@/lib/calendar";
-import { buildWeeklyPlan, claimWeeklyTimeChange, type WeeklyRegKeyFields } from "@/lib/weekly-schedule-matching";
+import { buildWeeklyPlan, claimWeeklyTimeChange, findWeeklyTrainerReassignments, claimWeeklyTrainerReassignment, regGroupKey, type WeeklyRegKeyFields } from "@/lib/weekly-schedule-matching";
 import { sendTimeChangeNotification, sendCancellationNotification } from "@/lib/email";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import { addAccountCredit, addReferralCredit, countPackageSessionsUsed, setPackageSessions } from "@/lib/supabase";
@@ -166,6 +166,7 @@ interface WeeklyRegLike extends WeeklyRegKeyFields {
   package_id: string | null;
   session_price: number | null;
   is_free: boolean | null;
+  booked_trainer: string | null;
 }
 
 function sessionIsUpcoming(dateStr: string, startTimeStr: string): boolean {
@@ -372,6 +373,23 @@ export async function GET(req: NextRequest) {
         `${totalRegistrantsNotified} registrant${totalRegistrantsNotified !== 1 ? "s" : ""} notified ` +
         `(${totalEmailsSent} email, ${totalSmsSent} SMS)`
     );
+  }
+
+  // === TRAINER REASSIGNMENT — WEEKLY SESSIONS (quiet, internal-only) ===
+  // A coach swap on an already-booked slot (same date/time/location/group,
+  // just a different trainer — "something came up, need someone to cover").
+  // No client notification needed; just keeps booked_trainer in sync so
+  // per-trainer group capacity pooling stays correct. See
+  // findWeeklyTrainerReassignments.
+  const trainerReassignments = findWeeklyTrainerReassignments(upcoming, weeklyRegsUpcoming);
+  const trainerSyncSummary: string[] = [];
+  for (const { reg, newTrainer } of trainerReassignments) {
+    const won = await claimWeeklyTrainerReassignment(supabase, reg, newTrainer);
+    if (!won) continue; // the admin-dashboard sync already caught and applied this one
+    trainerSyncSummary.push(`• ${reg.booked_date} — ${regGroupKey(reg)}: ${reg.booked_trainer || "Artemios Gavalas"} → ${newTrainer} (${reg.parent_name})`);
+  }
+  if (trainerSyncSummary.length > 0) {
+    await sendAdminSMS(`TRAINER REASSIGNED:\n${trainerSyncSummary.join("\n")}`);
   }
 
   const deletedFound: { session: string; date: string; count: number }[] = [];

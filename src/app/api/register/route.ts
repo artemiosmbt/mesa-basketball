@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getStripe, buildCreditDiscount } from "@/lib/stripe";
-import { calcServiceFee, serviceFeeItemName, fmtMoney, calcPrivatePrice, getTrainerTier, type TrainerTier } from "@/lib/pricing";
+import { calcServiceFee, serviceFeeItemName, fmtMoney, calcPrivatePrice, getTrainerTier, normalizeTrainerTier, type TrainerTier } from "@/lib/pricing";
 import { getWeeklySchedule, getCamps, isPrivateWindowOfferedByTrainer } from "@/lib/sheets";
 import { resolveRequestEmail } from "@/lib/request-email";
 import { NEW_CLIENT_DISCOUNT_ENABLED } from "@/lib/feature-flags";
@@ -137,7 +137,7 @@ async function allocatePackageCoverage(
           // enrollInPackage) — null only for packages enrolled before this
           // column existed, which were all Artemios-tier since that was the
           // only tier that existed then.
-          tier: (pkg.trainer_tier as TrainerTier) || "artemios",
+          tier: normalizeTrainerTier(pkg.trainer_tier),
           remaining: Math.max(0, pkg.package_type - used),
         });
       } else {

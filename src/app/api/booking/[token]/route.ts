@@ -21,7 +21,7 @@ import {
 } from "@/lib/supabase";
 import { issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome, isLateAction, parseSessionDateTimeET } from "@/lib/booking-finalize";
 import { getStripe } from "@/lib/stripe";
-import { calcServiceFee, serviceFeeItemName, fmtMoney, calcPrivatePrice, getTrainerTier, type TrainerTier } from "@/lib/pricing";
+import { calcServiceFee, serviceFeeItemName, fmtMoney, calcPrivatePrice, getTrainerTier, normalizeTrainerTier } from "@/lib/pricing";
 import {
   sendCancellationNotification,
   sendRescheduleNotification,
@@ -1249,7 +1249,7 @@ export async function PUT(
     // could be used to cover a session with the other tier's trainer for
     // free (e.g. an "Any Available Trainer" package silently covering an
     // Artemios session, or vice versa).
-    if (oldPkg && newType === "private" && kidCount <= 3 && getTrainerTier(resolvedTrainer) === ((oldPkg.trainer_tier as TrainerTier) || "artemios")) {
+    if (oldPkg && newType === "private" && kidCount <= 3 && getTrainerTier(resolvedTrainer) === normalizeTrainerTier(oldPkg.trainer_tier)) {
       const d = new Date(bookedDate);
       if (!isNaN(d.getTime())) {
         const newMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;

@@ -17,6 +17,13 @@ interface Package {
   reminder_sent: boolean;
   status: string;
   is_paid: boolean;
+  trainer_tier?: string | null;
+}
+
+// Null only for packages enrolled before trainer_tier existed — all
+// Artemios-tier at the time (see the backfill migration).
+function trainerTierLabel(tier: string | null | undefined): string {
+  return tier === "other" ? "Any Trainer" : "Artemios";
 }
 
 function monthLabel(monthYear: string): string {
@@ -175,6 +182,9 @@ export default function PackagesPage() {
           <div className="flex flex-col items-end gap-1 shrink-0">
             <span className="rounded-full bg-mesa-accent/20 text-mesa-accent px-2 py-0.5 text-xs font-bold">
               {pkg.package_type}-Session
+            </span>
+            <span className="rounded-full bg-brown-800 text-brown-300 px-2 py-0.5 text-xs font-medium">
+              {trainerTierLabel(pkg.trainer_tier)}
             </span>
             <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
               isExpired ? "bg-brown-800 text-brown-400" :
@@ -457,6 +467,11 @@ export default function PackagesPage() {
                         <span className="rounded-full bg-mesa-accent/20 text-mesa-accent px-2 py-0.5 text-xs font-bold">
                           {pkg.package_type}-Session
                         </span>
+                        <div className="mt-1">
+                          <span className="rounded-full bg-brown-800 text-brown-300 px-2 py-0.5 text-xs font-medium">
+                            {trainerTierLabel(pkg.trainer_tier)}
+                          </span>
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-brown-300 whitespace-nowrap text-xs">{monthLabel(pkg.month_year)}</td>
                       <td className="px-4 py-3 whitespace-nowrap text-xs">

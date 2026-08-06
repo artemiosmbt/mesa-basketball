@@ -24,3 +24,14 @@ const OWNER_TRAINER_NAME = "Artemios Gavalas";
 export function getTrainerTier(name: string | undefined | null): TrainerTier {
   return (name || "").trim() === OWNER_TRAINER_NAME ? "artemios" : "other";
 }
+
+// Validates a value read back from the database (monthly_packages.trainer_tier)
+// against the two real tiers, rather than trusting a bare `as TrainerTier`
+// cast — the app only ever writes "artemios"/"other" itself, but this is the
+// boundary where a stray manual DB edit or future bug could otherwise slip
+// an unrecognized string straight into a price-table lookup and silently
+// return undefined/NaN. Defaults to "artemios" (not "other") to match the
+// pre-trainer_tier backfill, which was always Artemios-tier.
+export function normalizeTrainerTier(value: string | undefined | null): TrainerTier {
+  return value === "other" ? "other" : "artemios";
+}

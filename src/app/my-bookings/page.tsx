@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { authClient } from "@/lib/auth";
-import { fmtMoney, packagePrice, calcServiceFee } from "@/lib/pricing";
+import { fmtMoney, packagePrice, calcServiceFee, normalizeTrainerTier } from "@/lib/pricing";
 import { REFERRAL_PROGRAM_ENABLED } from "@/lib/feature-flags";
 
 const LOCATION_NAMES: Record<string, string> = {
@@ -258,7 +258,7 @@ export default function MyBookings() {
 
                       {showPackageCancelConfirm ? (
                         <div className="mt-4 rounded-lg border border-red-800/50 bg-red-900/10 p-3">
-                          <p className="text-xs text-brown-300 mb-3">Cancel this package and refund the package price to your card? (The {`$${fmtMoney(calcServiceFee(activePackage.totalPrice ?? packagePrice(activePackage.packageType, activePackage.trainerTier === "other" ? "other" : "artemios")))}`} service fee isn&apos;t refundable.)</p>
+                          <p className="text-xs text-brown-300 mb-3">Cancel this package and refund the package price to your card? (The {`$${fmtMoney(calcServiceFee(activePackage.totalPrice ?? packagePrice(activePackage.packageType, normalizeTrainerTier(activePackage.trainerTier))))}`} service fee isn&apos;t refundable.)</p>
                           <div className="flex gap-2">
                             <button
                               type="button"

@@ -3,7 +3,7 @@ import { sendRegistrationNotification, sendReferralCreditNotification, sendResch
 import { addPrivateSessionToCalendar, deletePrivateSessionFromCalendar, upsertGroupSessionCalendarEvent } from "@/lib/calendar";
 import { sendSMS, sendAdminSMS, formatDateWithDay, formatMonthYear, resolveLocationName } from "@/lib/sms";
 import { getStripe } from "@/lib/stripe";
-import { calcServiceFee, fmtMoney, packagePrice, fullPriceForType, getTrainerTier, type TrainerTier } from "@/lib/pricing";
+import { calcServiceFee, fmtMoney, packagePrice, fullPriceForType, getTrainerTier, normalizeTrainerTier } from "@/lib/pricing";
 import {
   addReferralCredit,
   awardReferralCreditOnce,
@@ -1150,7 +1150,7 @@ export async function finalizePaidPackageEnrollment(
   // if the rate changed between purchase and this webhook firing. The
   // packagePrice() fallback only covers packages enrolled before total_price
   // existed.
-  const totalPrice = pkg.total_price ?? packagePrice(pkg.package_type, (pkg.trainer_tier as TrainerTier) || "artemios");
+  const totalPrice = pkg.total_price ?? packagePrice(pkg.package_type, normalizeTrainerTier(pkg.trainer_tier));
   // The fee was computed on whatever was left AFTER account credit at
   // enrollment (see /api/packages), not the full package price — using
   // totalPrice here would overstate it for any credit-covered enrollment,

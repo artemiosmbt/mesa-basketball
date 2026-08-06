@@ -4,7 +4,7 @@ import { verifyAdmin } from "@/lib/auth";
 import { getWeeklySchedule } from "@/lib/sheets";
 import { sendTimeChangeNotification } from "@/lib/email";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
-import { buildWeeklyPlan, claimWeeklyTimeChange, type WeeklyRegKeyFields } from "@/lib/weekly-schedule-matching";
+import { buildWeeklyPlan, claimWeeklyTimeChange, findWeeklyTrainerReassignments, claimWeeklyTrainerReassignment, regGroupKey, type WeeklyRegKeyFields } from "@/lib/weekly-schedule-matching";
 
 
 interface WeeklyRegistration extends WeeklyRegKeyFields {
@@ -13,6 +13,7 @@ interface WeeklyRegistration extends WeeklyRegKeyFields {
   phone: string;
   kids: string;
   sms_consent: boolean;
+  booked_trainer: string | null;
 }
 
 function sessionIsUpcoming(dateStr: string, startTimeStr: string): boolean {
@@ -207,10 +208,28 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // A coach swap on an already-booked slot (same date/time/location/group,
+  // just a different trainer) — quiet, internal-only: no client
+  // notification, just keeps booked_trainer in sync so per-trainer group
+  // capacity pooling stays correct. See findWeeklyTrainerReassignments.
+  const trainerReassignments = findWeeklyTrainerReassignments(upcoming, candidateRegs);
+  let trainerSyncCount = 0;
+  const trainerSyncSummary: string[] = [];
+  for (const { reg, newTrainer } of trainerReassignments) {
+    const won = await claimWeeklyTrainerReassignment(supabase, reg, newTrainer);
+    if (!won) continue; // the cron already caught and applied this one
+    trainerSyncCount++;
+    trainerSyncSummary.push(`• ${reg.booked_date} — ${regGroupKey(reg)}: ${reg.booked_trainer || "Artemios Gavalas"} → ${newTrainer} (${reg.parent_name})`);
+  }
+  if (trainerSyncSummary.length > 0) {
+    await sendAdminSMS(`TRAINER REASSIGNED:\n${trainerSyncSummary.join("\n")}`);
+  }
+
   return NextResponse.json({
     success: true,
     changesFound,
     totalEmailsSent,
     totalSmsSent,
+    trainerSyncCount,
   });
 }

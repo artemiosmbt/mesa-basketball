@@ -5,7 +5,7 @@ import Image from "next/image";
 import { authClient, ADMIN_EMAIL } from "@/lib/auth";
 import LandingNav from "@/app/LandingNav";
 import { REFERRAL_PROGRAM_ENABLED, NEW_CLIENT_DISCOUNT_ENABLED, ARTEMIOS_PACKAGES_AVAILABLE } from "@/lib/feature-flags";
-import { getTrainerBioSlug, getTrainerTier, type TrainerTier } from "@/lib/trainers";
+import { getTrainerBioSlug, getTrainerTier, normalizeTrainerTier, type TrainerTier } from "@/lib/trainers";
 import { calcServiceFee, serviceFeeLabel, serviceFeeItemName, isPercentServiceFee, SERVICE_FEE_PERCENT_TEXT, packagePrice, PRIVATE_RATE_BY_TIER, GROUP_PRIVATE_RATE_BY_TIER, calcPrivatePrice as getPrivatePrice } from "@/lib/pricing";
 
 const OWNER_TRAINER_NAME = "Artemios Gavalas";
@@ -862,7 +862,7 @@ export default function Home() {
           // Only counts as coverage if this package's tier matches the
           // trainer actually being booked — a package bought for one tier
           // never covers a session with the other tier's trainer.
-          const pkgTier: TrainerTier = pkg?.trainer_tier === "other" ? "other" : "artemios";
+          const pkgTier: TrainerTier = normalizeTrainerTier(pkg?.trainer_tier);
           const covers = !!pkg && pkgTier === getTrainerTier(modal.bookedTrainer);
           setPackageSessionsRemaining(covers && pkg ? Math.max(0, pkg.package_type - pkg.sessions_used) : 0);
         })
@@ -1070,7 +1070,7 @@ export default function Home() {
         authedJsonFetch(`/api/packages?email=${encodeURIComponent(userEmail)}&monthYear=${monthYear}`)
           .then((d) => {
             const pkg = d.package as { package_type: number; sessions_used: number; trainer_tier?: string } | null;
-            const trainerTier: TrainerTier = pkg?.trainer_tier === "other" ? "other" : "artemios";
+            const trainerTier: TrainerTier = normalizeTrainerTier(pkg?.trainer_tier);
             const remaining = pkg ? Math.max(0, pkg.package_type - pkg.sessions_used) : 0;
             return [monthYear, { remaining, trainerTier }] as const;
           })

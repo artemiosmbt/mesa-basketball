@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { getPackageById, packageHasAnyBookedSession, cancelPackage, revertPackageCancellation, addAccountCredit } from "@/lib/supabase";
 import { issueStripeRefund } from "@/lib/booking-finalize";
 import { sendSMS, sendAdminSMS, formatMonthYear } from "@/lib/sms";
-import { fmtMoney, packagePrice, calcServiceFee, type TrainerTier } from "@/lib/pricing";
+import { fmtMoney, packagePrice, calcServiceFee, normalizeTrainerTier } from "@/lib/pricing";
 import { sendPackageCancellationNotification } from "@/lib/email";
 
 // The ownership check below must never trust a client-supplied email —
@@ -79,7 +79,7 @@ export async function POST(req: NextRequest) {
     // cancellation, recomputing live would refund the wrong amount. The
     // packagePrice() fallback only covers packages enrolled before this
     // column existed (already backfilled by migration, but defensive here too).
-    const totalPrice = pkg.total_price ?? packagePrice(pkg.package_type, (pkg.trainer_tier as TrainerTier) || "artemios");
+    const totalPrice = pkg.total_price ?? packagePrice(pkg.package_type, normalizeTrainerTier(pkg.trainer_tier));
     // Any account credit applied at enrollment was never a card charge —
     // only the remainder actually hit Stripe, so only that remainder is
     // ever refundable there.

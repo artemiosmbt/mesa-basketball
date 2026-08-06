@@ -11,7 +11,7 @@ import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@
 import { getWeeklySchedule } from "@/lib/sheets";
 import { addAccountCredit, deductAccountCredit, addReferralCredit, logLateFeeEvent, getPackageById, countPackageSessionsUsed, setPackageSessions } from "@/lib/supabase";
 import { isLateAction, resolveOffSessionPaymentSource, chargeSavedCardOffSession, issueStripeRefund } from "@/lib/booking-finalize";
-import { calcServiceFee, serviceFeeLabel, fmtMoney, calcPrivatePrice, fullPriceForType, getTrainerTier, type TrainerTier } from "@/lib/pricing";
+import { calcServiceFee, serviceFeeLabel, fmtMoney, calcPrivatePrice, fullPriceForType, getTrainerTier, normalizeTrainerTier } from "@/lib/pricing";
 
 
 function parseMinsFromTime(t: string): number {
@@ -237,7 +237,7 @@ export async function POST(req: NextRequest) {
     // without this check a package bought for one tier could end up
     // covering the other tier's (possibly pricier) trainer for free.
     const oldPkg = await getPackageById(reg.package_id).catch(() => null);
-    if (oldPkg && effectiveType === "private" && (reg.total_participants || 1) <= 3 && getTrainerTier(resolvedTrainer) === ((oldPkg.trainer_tier as TrainerTier) || "artemios")) {
+    if (oldPkg && effectiveType === "private" && (reg.total_participants || 1) <= 3 && getTrainerTier(resolvedTrainer) === normalizeTrainerTier(oldPkg.trainer_tier)) {
       const d = new Date(bookedDate);
       if (!isNaN(d.getTime())) {
         const newMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
