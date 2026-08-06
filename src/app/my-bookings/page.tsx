@@ -62,7 +62,7 @@ export default function MyBookings() {
     referralCode: string | null;
   } | null>(null);
   const [accountCredit, setAccountCredit] = useState(0);
-  const [activePackage, setActivePackage] = useState<{ id: string; packageType: number; sessionsUsed: number; monthYear: string; cancellable: boolean } | null>(null);
+  const [activePackage, setActivePackage] = useState<{ id: string; packageType: number; sessionsUsed: number; monthYear: string; cancellable: boolean; totalPrice: number | null; trainerTier: string } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState<"upcoming" | "past">("upcoming");
@@ -258,7 +258,7 @@ export default function MyBookings() {
 
                       {showPackageCancelConfirm ? (
                         <div className="mt-4 rounded-lg border border-red-800/50 bg-red-900/10 p-3">
-                          <p className="text-xs text-brown-300 mb-3">Cancel this package and refund the package price to your card? (The {`$${fmtMoney(calcServiceFee(packagePrice(activePackage.packageType)))}`} service fee isn&apos;t refundable.)</p>
+                          <p className="text-xs text-brown-300 mb-3">Cancel this package and refund the package price to your card? (The {`$${fmtMoney(calcServiceFee(activePackage.totalPrice ?? packagePrice(activePackage.packageType, activePackage.trainerTier === "other" ? "other" : "artemios")))}`} service fee isn&apos;t refundable.)</p>
                           <div className="flex gap-2">
                             <button
                               type="button"

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, use, useRef } from "react";
-import { PRIVATE_RATE, GROUP_PRIVATE_RATE, calcPrivatePrice as getPrivatePrice } from "@/lib/pricing";
+import { PRIVATE_RATE_BY_TIER, GROUP_PRIVATE_RATE_BY_TIER, calcPrivatePrice as getPrivatePrice, getTrainerTier } from "@/lib/pricing";
 
 const LOCATION_LINKS: Record<string, { name: string; url: string }> = {
   "St. Pauls": { name: "St. Paul's Cathedral", url: "https://share.google/kVGkfSgr6SaShDWF7" },
@@ -1263,7 +1263,7 @@ export default function ManageBooking({
                         <p className="mt-1 text-xs text-brown-300">Add extra time at half price.</p>
                         <div className="mt-2 flex flex-wrap gap-2">
                           {upsellExtras.map(extra => {
-                            const cost = getPrivatePrice(extra, 1) * 0.5;
+                            const cost = getPrivatePrice(extra, 1, getTrainerTier(w?.trainer)) * 0.5;
                             return <button key={extra} type="button" onClick={() => setUpsellExtra(extra)} className="rounded bg-green-800/40 px-3 py-2 text-sm text-green-300 hover:bg-green-800/60">+{extra} min (+{formatPrice(cost)})</button>;
                           })}
                           <button type="button" onClick={() => { setHideUpsell(true); localStorage.setItem("mesa_hide_upsell", "true"); }} className="text-xs text-brown-500 hover:text-brown-400 self-center ml-2">Don&apos;t show this again</button>
@@ -1334,7 +1334,8 @@ export default function ManageBooking({
                   const kidCount = reschedulePlayers.length;
                   if (w) {
                     const totalMins = selectedDuration + upsellExtra;
-                    const price = getPrivatePrice(totalMins, kidCount);
+                    const wTrainerTier = getTrainerTier(w.trainer);
+                    const price = getPrivatePrice(totalMins, kidCount, wTrainerTier);
                     const isGroupRate = kidCount >= 4;
                     return (
                       <div className={`rounded-lg px-4 py-3 text-sm ${isGroupRate ? "border border-yellow-700/50 bg-yellow-900/20" : "bg-brown-800/50"}`}>
@@ -1348,11 +1349,11 @@ export default function ManageBooking({
                         </div>
                         {isGroupRate ? (
                           <p className="mt-1 text-xs text-yellow-400/80">
-                            Rate changed from ${PRIVATE_RATE}/hr to ${GROUP_PRIVATE_RATE}/hr — {kidCount} players · {totalMins} min
+                            Rate changed from ${PRIVATE_RATE_BY_TIER[wTrainerTier]}/hr to ${GROUP_PRIVATE_RATE_BY_TIER[wTrainerTier]}/hr — {kidCount} players · {totalMins} min
                           </p>
                         ) : (
                           <p className="mt-0.5 text-xs text-brown-500">
-                            ${PRIVATE_RATE}/hr · {kidCount} player{kidCount !== 1 ? "s" : ""} · {totalMins} min
+                            ${PRIVATE_RATE_BY_TIER[wTrainerTier]}/hr · {kidCount} player{kidCount !== 1 ? "s" : ""} · {totalMins} min
                           </p>
                         )}
                       </div>

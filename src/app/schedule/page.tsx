@@ -4,9 +4,27 @@ import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import Image from "next/image";
 import { authClient, ADMIN_EMAIL } from "@/lib/auth";
 import LandingNav from "@/app/LandingNav";
-import { REFERRAL_PROGRAM_ENABLED, NEW_CLIENT_DISCOUNT_ENABLED } from "@/lib/feature-flags";
-import { getTrainerBioSlug } from "@/lib/trainers";
-import { calcServiceFee, serviceFeeLabel, serviceFeeItemName, isPercentServiceFee, SERVICE_FEE_PERCENT_TEXT, packagePrice, PRIVATE_RATE, GROUP_PRIVATE_RATE, calcPrivatePrice as getPrivatePrice } from "@/lib/pricing";
+import { REFERRAL_PROGRAM_ENABLED, NEW_CLIENT_DISCOUNT_ENABLED, ARTEMIOS_PACKAGES_AVAILABLE } from "@/lib/feature-flags";
+import { getTrainerBioSlug, getTrainerTier, type TrainerTier } from "@/lib/trainers";
+import { calcServiceFee, serviceFeeLabel, serviceFeeItemName, isPercentServiceFee, SERVICE_FEE_PERCENT_TEXT, packagePrice, PRIVATE_RATE_BY_TIER, GROUP_PRIVATE_RATE_BY_TIER, calcPrivatePrice as getPrivatePrice } from "@/lib/pricing";
+
+const OWNER_TRAINER_NAME = "Artemios Gavalas";
+const SUBSTITUTE_TRAINER_LABEL = "Any Available Trainer";
+
+// Owner first (when present), then alphabetical — used everywhere a set of
+// trainers for the same date/time/location needs a stable, predictable order.
+function sortTrainerNames(names: string[]): string[] {
+  return [...names].sort((a, b) => {
+    const aOwner = a === OWNER_TRAINER_NAME;
+    const bOwner = b === OWNER_TRAINER_NAME;
+    if (aOwner !== bOwner) return aOwner ? -1 : 1;
+    return a.localeCompare(b);
+  });
+}
+
+function sameTrainerSet(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((t, i) => t === b[i]);
+}
 
 const LOCATION_LINKS: Record<string, { name: string; url: string }> = {
   "St. Pauls": { name: "St. Paul's Cathedral", url: "https://share.google/kgiqMxAj2iAFEAGI6" },
@@ -408,68 +426,130 @@ function groupByGroup(sessions: WeeklySession[]) {
   return groups;
 }
 
-// Merge consecutive slots on same day/location into available windows
+// Merge slots on the same day/location into available windows. Trainers are
+// NOT part of the grouping key — two trainers offering the same date/
+// location/time render as ONE card with a trainer choice on it, rather than
+// splitting into separate cards (less confusing for the client, since both
+// really are "the same slot"). Each window instead carries the full set of
+// trainers available for its exact time range; a client picks one via a
+// dropdown when booking.
 interface TimeWindow {
   date: string;
   location: string;
-  trainer: string;
+  trainers: string[]; // sorted: owner first (if present), then alphabetical
   startMins: number;
   endMins: number;
   startLabel: string;
   endLabel: string;
 }
 
+interface TrainerSegment {
+  start: number;
+  end: number;
+  trainers: string[];
+}
+
+function segmentsToWindows(date: string, location: string, segments: TrainerSegment[]): TimeWindow[] {
+  // Merge consecutive segments that share the exact same trainer set into
+  // one continuous window, same as the old "merge consecutive slots" rule —
+  // just keyed on trainer SET equality instead of a single trainer name.
+  const windows: TimeWindow[] = [];
+  let cur: TrainerSegment | null = null;
+  for (const seg of segments) {
+    if (cur !== null && cur.end === seg.start && sameTrainerSet(cur.trainers, seg.trainers)) {
+      cur = { start: cur.start, end: seg.end, trainers: cur.trainers };
+    } else {
+      if (cur !== null) {
+        const closed: TrainerSegment = cur;
+        windows.push({ date, location, trainers: closed.trainers, startMins: closed.start, endMins: closed.end, startLabel: formatTimeFromMins(closed.start), endLabel: formatTimeFromMins(closed.end) });
+      }
+      cur = { start: seg.start, end: seg.end, trainers: seg.trainers };
+    }
+  }
+  if (cur !== null) {
+    const closed: TrainerSegment = cur;
+    windows.push({ date, location, trainers: closed.trainers, startMins: closed.start, endMins: closed.end, startLabel: formatTimeFromMins(closed.start), endLabel: formatTimeFromMins(closed.end) });
+  }
+  return windows;
+}
+
 function buildTimeWindows(slots: PrivateSlot[]): TimeWindow[] {
-  // Group by date + location + trainer so two trainers at the same location
-  // and time never get merged into one shared window.
+  // Group by date + location only now.
   const groups: Record<string, PrivateSlot[]> = {};
   slots.forEach((s) => {
-    const key = `${s.date}|${s.location}|${s.trainer}`;
+    const key = `${s.date}|${s.location}`;
     if (!groups[key]) groups[key] = [];
     groups[key].push(s);
   });
 
   const windows: TimeWindow[] = [];
   Object.values(groups).forEach((group) => {
-    // Sort by start time
-    const sorted = [...group].sort((a, b) => parseTime(a.startTime) - parseTime(b.startTime));
-    let windowStart = parseTime(sorted[0].startTime);
-    let windowEnd = parseTime(sorted[0].endTime);
-
-    for (let i = 1; i < sorted.length; i++) {
-      const slotStart = parseTime(sorted[i].startTime);
-      const slotEnd = parseTime(sorted[i].endTime);
-      if (slotStart === windowEnd) {
-        // Consecutive — extend window
-        windowEnd = slotEnd;
-      } else {
-        // Gap — close current window and start new one
-        windows.push({
-          date: sorted[0].date,
-          location: sorted[0].location,
-          trainer: sorted[0].trainer,
-          startMins: windowStart,
-          endMins: windowEnd,
-          startLabel: formatTimeFromMins(windowStart),
-          endLabel: formatTimeFromMins(windowEnd),
-        });
-        windowStart = slotStart;
-        windowEnd = slotEnd;
-      }
-    }
-    // Close last window
-    windows.push({
-      date: sorted[0].date,
-      location: sorted[0].location,
-      trainer: sorted[0].trainer,
-      startMins: windowStart,
-      endMins: windowEnd,
-      startLabel: formatTimeFromMins(windowStart),
-      endLabel: formatTimeFromMins(windowEnd),
+    const [date, location] = [group[0].date, group[0].location];
+    // Every distinct start/end minute mark across every trainer's slots —
+    // the elementary intervals between consecutive marks are exactly the
+    // ranges where the set of available trainers can't change mid-range.
+    const bounds = new Set<number>();
+    group.forEach((s) => {
+      bounds.add(parseTime(s.startTime));
+      bounds.add(parseTime(s.endTime));
     });
+    const sortedBounds = Array.from(bounds).sort((a, b) => a - b);
+
+    const segments: TrainerSegment[] = [];
+    for (let i = 0; i < sortedBounds.length - 1; i++) {
+      const segStart = sortedBounds[i];
+      const segEnd = sortedBounds[i + 1];
+      const trainersHere = sortTrainerNames(Array.from(new Set(
+        group
+          .filter((s) => parseTime(s.startTime) <= segStart && parseTime(s.endTime) >= segEnd)
+          .map((s) => s.trainer)
+      )));
+      if (trainersHere.length > 0) segments.push({ start: segStart, end: segEnd, trainers: trainersHere });
+    }
+    windows.push(...segmentsToWindows(date, location, segments));
   });
 
   return windows;
+}
+
+// Removes already-booked trainers from a window's set for whatever
+// sub-range they're actually booked in — splitting the window into pieces
+// with different remaining trainer sets where needed, and dropping a piece
+// entirely once no trainer is left available for it.
+function subtractBookingsFromWindow(
+  w: TimeWindow,
+  bookedSlots: { date: string; startTime: string; endTime: string; location: string; trainer: string }[]
+): TimeWindow[] {
+  const relevant = bookedSlots.filter(
+    (b) =>
+      b.date === w.date &&
+      b.location === w.location &&
+      w.trainers.includes(b.trainer) &&
+      parseTime(b.startTime) < w.endMins &&
+      parseTime(b.endTime) > w.startMins
+  );
+  if (relevant.length === 0) return [w];
+
+  const bounds = new Set<number>([w.startMins, w.endMins]);
+  relevant.forEach((b) => {
+    bounds.add(Math.max(w.startMins, parseTime(b.startTime)));
+    bounds.add(Math.min(w.endMins, parseTime(b.endTime)));
+  });
+  const sortedBounds = Array.from(bounds).sort((a, b) => a - b);
+
+  const segments: TrainerSegment[] = [];
+  for (let i = 0; i < sortedBounds.length - 1; i++) {
+    const segStart = sortedBounds[i];
+    const segEnd = sortedBounds[i + 1];
+    const bookedTrainersHere = new Set(
+      relevant
+        .filter((b) => parseTime(b.startTime) <= segStart && parseTime(b.endTime) >= segEnd)
+        .map((b) => b.trainer)
+    );
+    const remaining = w.trainers.filter((t) => !bookedTrainersHere.has(t));
+    if (remaining.length > 0) segments.push({ start: segStart, end: segEnd, trainers: remaining });
+  }
+  return segmentsToWindows(w.date, w.location, segments);
 }
 
 // Generate 15-min increment start times within a window
@@ -504,14 +584,15 @@ function formatDuration(mins: number): string {
 function getUpsellOptions(
   selectedDuration: number,
   windowTotalMins: number,
-  remainingAfterSelection: number
+  remainingAfterSelection: number,
+  trainerTier: TrainerTier
 ): { extraMins: number; savings: number }[] {
   if (selectedDuration > 60) return []; // only upsell on base 60 min
   if (remainingAfterSelection < 15 || remainingAfterSelection > 30) return []; // only show when 15-30 min left in window
   const options: { extraMins: number; savings: number }[] = [];
   for (const extra of [15, 30]) {
     if (extra <= remainingAfterSelection) {
-      const fullPrice = getPrivatePrice(extra, 1);
+      const fullPrice = getPrivatePrice(extra, 1, trainerTier);
       options.push({ extraMins: extra, savings: fullPrice / 2 });
     }
   }
@@ -669,9 +750,9 @@ export default function Home() {
   const [activeGroup, setActiveGroup] = useState<string>("");
   const [groupDayFilter, setGroupDayFilter] = useState<Set<number>>(new Set());
 
-  // Per-window booking state: windowIndex → { start, duration }
+  // Per-window booking state: windowIndex → { start, duration, trainer }
   const [windowSelections, setWindowSelections] = useState<
-    Record<number, { start: number; duration: number }>
+    Record<number, { start: number; duration: number; trainer: string }>
   >({});
 
   const [modal, setModal] = useState<BookingModal>({
@@ -777,19 +858,24 @@ export default function Home() {
       authedJsonFetch(`/api/packages?email=${encodeURIComponent(trimmed)}&monthYear=${monthYear}`)
         .then((d) => {
           if (cancelled) return;
-          const pkg = d.package as { package_type: number; sessions_used: number } | null;
-          setPackageSessionsRemaining(pkg ? Math.max(0, pkg.package_type - pkg.sessions_used) : 0);
+          const pkg = d.package as { package_type: number; sessions_used: number; trainer_tier?: string } | null;
+          // Only counts as coverage if this package's tier matches the
+          // trainer actually being booked — a package bought for one tier
+          // never covers a session with the other tier's trainer.
+          const pkgTier: TrainerTier = pkg?.trainer_tier === "other" ? "other" : "artemios";
+          const covers = !!pkg && pkgTier === getTrainerTier(modal.bookedTrainer);
+          setPackageSessionsRemaining(covers && pkg ? Math.max(0, pkg.package_type - pkg.sessions_used) : 0);
         })
         .catch(() => { if (!cancelled) setPackageSessionsRemaining(0); });
     });
     return () => { cancelled = true; };
-  }, [email, modal.open, modal.type, modal.bookedDate, isGroupRate, kids.length]);
+  }, [email, modal.open, modal.type, modal.bookedDate, modal.bookedTrainer, isGroupRate, kids.length]);
 
   // Package coverage per month, keyed "YYYY-MM" — lets the private session
   // list itself say "Included in your package" instead of "From $150" for
   // logged-in clients with sessions left, before they ever open the modal.
   // (Populated further down, once timeWindows/userEmail are in scope.)
-  const [packageRemainingByMonth, setPackageRemainingByMonth] = useState<Record<string, number>>({});
+  const [packageRemainingByMonth, setPackageRemainingByMonth] = useState<Record<string, { remaining: number; trainerTier: TrainerTier }>>({});
 
   const [recurringWeeks, setRecurringWeeks] = useState<
     { date: string; startTime: string; endTime: string; location: string; trainer: string; selected: boolean }[]
@@ -801,7 +887,7 @@ export default function Home() {
   } | null>(null);
 
   // Package enrollment state
-  const [pkgModal, setPkgModal] = useState<{ open: boolean; packageType: 4 | 8 | null }>({ open: false, packageType: null });
+  const [pkgModal, setPkgModal] = useState<{ open: boolean; packageType: 4 | 8 | null; trainerTier: TrainerTier }>({ open: false, packageType: null, trainerTier: "other" });
   const [pkgFirstName, setPkgFirstName] = useState("");
   const [pkgLastName, setPkgLastName] = useState("");
   const pkgName = [pkgFirstName.trim(), pkgLastName.trim()].filter(Boolean).join(" ");
@@ -836,7 +922,7 @@ export default function Home() {
   // How much credit actually applies to the package enrollment (capped at
   // the package price) and what's left to charge via Stripe — mirrors what
   // /api/packages computes server-side, same as creditAppliedToOrder above.
-  const pkgTotalPrice = packagePrice(pkgModal.packageType || 4);
+  const pkgTotalPrice = packagePrice(pkgModal.packageType || 4, pkgModal.trainerTier);
   const pkgCreditApplied = pkgAccountCreditBalance !== null && pkgAccountCreditBalance > 0 && pkgApplyAccountCredit
     ? Math.min(pkgAccountCreditBalance, pkgTotalPrice)
     : 0;
@@ -881,7 +967,7 @@ export default function Home() {
   } | {
     kind: "private";
     windowDate: string; windowLocation: string; windowStartMins: number;
-    savedStart: number; savedDuration: number;
+    savedStart: number; savedDuration: number; savedTrainer: string;
   } | {
     kind: "group"; savedGroup: string; savedKeys: string[];
   } | null>(null);
@@ -962,57 +1048,8 @@ export default function Home() {
 
   const timeWindows = useMemo(() => {
     const windows = buildTimeWindows(privateSlots);
-    // Subtract booked time ranges from windows
     if (bookedSlots.length === 0) return windows;
-
-    const result: TimeWindow[] = [];
-    for (const w of windows) {
-      // Find bookings that overlap this window's time range
-      const overlaps = bookedSlots.filter(
-        (b) =>
-          b.date === w.date &&
-          b.location === w.location &&
-          b.trainer === w.trainer &&
-          parseTime(b.startTime) < w.endMins &&
-          parseTime(b.endTime) > w.startMins
-      );
-      if (overlaps.length === 0) {
-        result.push(w);
-        continue;
-      }
-
-      // Sort bookings by start time
-      const sorted = overlaps
-        .map((b) => ({ start: parseTime(b.startTime), end: parseTime(b.endTime) }))
-        .sort((a, b) => a.start - b.start);
-
-      // Split window around booked ranges
-      let cursor = w.startMins;
-      for (const booking of sorted) {
-        if (booking.start > cursor) {
-          // Gap before this booking
-          result.push({
-            ...w,
-            startMins: cursor,
-            endMins: booking.start,
-            startLabel: formatTimeFromMins(cursor),
-            endLabel: formatTimeFromMins(booking.start),
-          });
-        }
-        cursor = Math.max(cursor, booking.end);
-      }
-      // Remaining time after last booking
-      if (cursor < w.endMins) {
-        result.push({
-          ...w,
-          startMins: cursor,
-          endMins: w.endMins,
-          startLabel: formatTimeFromMins(cursor),
-          endLabel: formatTimeFromMins(w.endMins),
-        });
-      }
-    }
-    return result;
+    return windows.flatMap((w) => subtractBookingsFromWindow(w, bookedSlots));
   }, [privateSlots, bookedSlots]);
 
   const privateMonthYears = useMemo(() => {
@@ -1032,10 +1069,12 @@ export default function Home() {
       privateMonthYears.map((monthYear) =>
         authedJsonFetch(`/api/packages?email=${encodeURIComponent(userEmail)}&monthYear=${monthYear}`)
           .then((d) => {
-            const pkg = d.package as { package_type: number; sessions_used: number } | null;
-            return [monthYear, pkg ? Math.max(0, pkg.package_type - pkg.sessions_used) : 0] as const;
+            const pkg = d.package as { package_type: number; sessions_used: number; trainer_tier?: string } | null;
+            const trainerTier: TrainerTier = pkg?.trainer_tier === "other" ? "other" : "artemios";
+            const remaining = pkg ? Math.max(0, pkg.package_type - pkg.sessions_used) : 0;
+            return [monthYear, { remaining, trainerTier }] as const;
           })
-          .catch(() => [monthYear, 0] as const)
+          .catch(() => [monthYear, { remaining: 0, trainerTier: "artemios" as TrainerTier }] as const)
       )
     ).then((entries) => {
       if (!cancelled) setPackageRemainingByMonth(Object.fromEntries(entries));
@@ -1050,7 +1089,7 @@ export default function Home() {
     window: TimeWindow
   ) {
     setWindowSelections((prev) => {
-      const current = prev[windowIdx] || { start: window.startMins, duration: 60 };
+      const current = prev[windowIdx] || { start: window.startMins, duration: 60, trainer: window.trainers[0] };
       const updated = { ...current, [field]: value };
       // If changing start, clamp duration to max available
       if (field === "start") {
@@ -1067,9 +1106,16 @@ export default function Home() {
     });
   }
 
-  function openPrivateBooking(windowIdx: number, window: TimeWindow, overrideSel?: { start: number; duration: number }) {
+  function updateWindowTrainer(windowIdx: number, window: TimeWindow, trainer: string) {
+    setWindowSelections((prev) => {
+      const current = prev[windowIdx] || { start: window.startMins, duration: 60, trainer: window.trainers[0] };
+      return { ...prev, [windowIdx]: { ...current, trainer } };
+    });
+  }
+
+  function openPrivateBooking(windowIdx: number, window: TimeWindow, overrideSel?: { start: number; duration: number; trainer: string }) {
     if (!userEmail) {
-      const sel = windowSelections[windowIdx] || { start: window.startMins, duration: 60 };
+      const sel = windowSelections[windowIdx] || { start: window.startMins, duration: 60, trainer: window.trainers[0] };
       showAuthPrompt({
         kind: "private",
         windowDate: window.date,
@@ -1077,19 +1123,24 @@ export default function Home() {
         windowStartMins: window.startMins,
         savedStart: sel.start,
         savedDuration: sel.duration,
+        savedTrainer: sel.trainer,
       });
       return;
     }
     const sel = overrideSel || windowSelections[windowIdx] || {
       start: window.startMins,
       duration: Math.min(60, window.endMins - window.startMins),
+      trainer: window.trainers[0],
     };
+    const selectedTrainer = window.trainers.includes(sel.trainer) ? sel.trainer : window.trainers[0];
     const endMins = sel.start + sel.duration;
     const startLabel = formatTimeFromMins(sel.start);
     const endLabel = formatTimeFromMins(endMins);
     const details = `Private Session — ${window.date} ${startLabel}-${endLabel} (${sel.duration} min) at ${window.location}`;
 
-    // Find future weeks with matching day and time availability (any location)
+    // Find future weeks with matching day, time, AND the same selected
+    // trainer available — a recurring series stays with one trainer
+    // throughout rather than silently switching week to week.
     const selectedDate = new Date(window.date);
     const dayOfWeek = selectedDate.getUTCDay();
     const futureWeeks: typeof recurringWeeks = [];
@@ -1099,6 +1150,7 @@ export default function Home() {
       const wDate = new Date(w.date);
       if (wDate.getUTCDay() !== dayOfWeek) continue;
       if (wDate <= selectedDate) continue;
+      if (!w.trainers.includes(selectedTrainer)) continue;
       // Check if the selected time range fits in this window
       if (sel.start >= w.startMins && endMins <= w.endMins) {
         futureWeeks.push({
@@ -1106,7 +1158,7 @@ export default function Home() {
           startTime: startLabel,
           endTime: endLabel,
           location: w.location,
-          trainer: w.trainer,
+          trainer: selectedTrainer,
           selected: false,
         });
       }
@@ -1122,7 +1174,7 @@ export default function Home() {
       bookedStartTime: startLabel,
       bookedEndTime: endLabel,
       bookedLocation: window.location,
-      bookedTrainer: window.trainer,
+      bookedTrainer: selectedTrainer,
       selectedDuration: sel.duration,
       windowTotalMins: window.endMins - window.startMins,
       remainingAfterSelection: window.endMins - endMins,
@@ -1578,6 +1630,7 @@ export default function Home() {
           email: pkgEmail,
           phone: pkgPhone,
           packageType: pkgModal.packageType,
+          trainerTier: pkgModal.trainerTier,
           monthYear: pkgMonth,
           kids: kidsStr,
           referralCode: pkgReferralCode.trim() || undefined,
@@ -1610,7 +1663,8 @@ export default function Home() {
     return getUpsellOptions(
       modal.selectedDuration || 60,
       modal.windowTotalMins || 999,
-      modal.remainingAfterSelection || 0
+      modal.remainingAfterSelection || 0,
+      getTrainerTier(modal.bookedTrainer)
     );
   }, [modal, hideUpsell]);
 
@@ -1648,8 +1702,9 @@ export default function Home() {
       const baseDuration = parseInt(match[1]);
       const effectiveGroup = isGroupRate || kids.length >= 4;
       const kidCount = effectiveGroup ? 4 : kids.length;
-      const basePrice = getPrivatePrice(baseDuration, kidCount);
-      const extraPrice = upsellExtra > 0 ? getPrivatePrice(upsellExtra, kidCount) * 0.5 : 0;
+      const modalTrainerTier = getTrainerTier(modal.bookedTrainer);
+      const basePrice = getPrivatePrice(baseDuration, kidCount, modalTrainerTier);
+      const extraPrice = upsellExtra > 0 ? getPrivatePrice(upsellExtra, kidCount, modalTrainerTier) * 0.5 : 0;
       const totalPrice = basePrice + extraPrice;
       const numDates = 1 + recurringWeeks.filter((w) => w.selected).length;
       // Package-covered dates need no payment at all — subtract them before
@@ -1824,11 +1879,11 @@ export default function Home() {
   }
 
   function getGroupSessionKey(s: WeeklySession): string {
-    return `${s.group}|${s.date}|${s.startTime}`;
+    return `${s.group}|${s.date}|${s.startTime}|${s.trainer || "Artemios Gavalas"}`;
   }
 
   function getEnrollmentCount(s: WeeklySession): number {
-    const key = `${s.date}|${s.startTime}|${s.group || ""}`;
+    const key = `${s.date}|${s.startTime}|${s.group || ""}|${s.trainer || "Artemios Gavalas"}`;
     return groupEnrollment[key] || 0;
   }
 
@@ -1933,7 +1988,8 @@ export default function Home() {
       );
       if (winIdx !== -1) {
         const win = timeWindows[winIdx];
-        const savedSel = { start: pending.savedStart, duration: pending.savedDuration };
+        const savedTrainer = win.trainers.includes(pending.savedTrainer) ? pending.savedTrainer : win.trainers[0];
+        const savedSel = { start: pending.savedStart, duration: pending.savedDuration, trainer: savedTrainer };
         setWindowSelections((prev) => ({ ...prev, [winIdx]: savedSel }));
         openPrivateBooking(winIdx, win, savedSel);
       }
@@ -2654,11 +2710,11 @@ export default function Home() {
           <h2 className="font-[family-name:var(--font-oswald)] text-center text-3xl font-bold tracking-wide">Private Sessions</h2>
           <div className="mt-4 flex flex-wrap justify-center gap-6">
             <a href="#private-schedule" className="rounded-lg border border-mesa-accent bg-brown-800/60 px-4 py-2 text-center hover:bg-brown-700/60 hover:border-yellow-400 transition cursor-pointer">
-              <p className="text-lg font-bold text-mesa-accent">${PRIVATE_RATE} / 60 min</p>
+              <p className="text-lg font-bold text-mesa-accent">From ${PRIVATE_RATE_BY_TIER.other} / 60 min</p>
               <p className="text-xs text-brown-400">Up to 3 participants</p>
             </a>
             <a href="#private-schedule" className="rounded-lg border border-mesa-accent bg-brown-800/60 px-4 py-2 text-center hover:bg-brown-700/60 hover:border-yellow-400 transition cursor-pointer">
-              <p className="text-lg font-bold text-mesa-accent">${GROUP_PRIVATE_RATE} / 60 min</p>
+              <p className="text-lg font-bold text-mesa-accent">From ${GROUP_PRIVATE_RATE_BY_TIER.other} / 60 min</p>
               <p className="text-xs text-brown-400">Group Private (4+ players)</p>
             </a>
           </div>
@@ -2678,18 +2734,21 @@ export default function Home() {
               Commit to a full month of training and save — private sessions only.
             </p>
             <p className="mt-1 text-center text-xs text-brown-500">Up to 3 players per package.</p>
+            <p className="mt-1 text-center text-xs text-brown-500">
+              Prices shown are for Any Available Trainer — pick Artemios in the enrollment form if he&apos;s on the schedule that month.
+            </p>
             <div className="mt-6 grid gap-4 sm:grid-cols-2">
               {/* 4-session */}
               <div className="rounded-xl border border-brown-700 bg-brown-900/40 p-5 text-center">
-                <p className="text-3xl font-bold text-mesa-accent">${packagePrice(4)}</p>
+                <p className="text-3xl font-bold text-mesa-accent">${packagePrice(4, "other")}</p>
                 <p className="mt-0.5 text-sm text-brown-300">4 sessions / month</p>
                 <div className="mt-3 rounded-lg bg-brown-800/50 p-3 space-y-0.5">
-                  <p className="text-xs text-brown-500">Normally <span className="line-through">$600</span></p>
-                  <p className="text-sm font-semibold text-green-400">Save ${600 - packagePrice(4)} — {Math.round((1 - packagePrice(4) / 600) * 100)}% off</p>
-                  <p className="text-xs text-brown-400">${(packagePrice(4) / 4).toFixed(2)} per session</p>
+                  <p className="text-xs text-brown-500">Normally <span className="line-through">${PRIVATE_RATE_BY_TIER.other * 4}</span></p>
+                  <p className="text-sm font-semibold text-green-400">Save ${PRIVATE_RATE_BY_TIER.other * 4 - packagePrice(4, "other")} — {Math.round((1 - packagePrice(4, "other") / (PRIVATE_RATE_BY_TIER.other * 4)) * 100)}% off</p>
+                  <p className="text-xs text-brown-400">${(packagePrice(4, "other") / 4).toFixed(2)} per session</p>
                 </div>
                 <button
-                  onClick={() => { if (!userEmail) { setAuthPrompt(true); return; } setPkgModal({ open: true, packageType: 4 }); setPkgFirstName(profileRef.current?.firstName ?? ""); setPkgLastName(profileRef.current?.lastName ?? ""); setPkgEmail(userEmail ?? ""); setPkgPhone(profileRef.current?.phone ?? ""); setPkgMonth(pkgMonthOptions[0]?.value || ""); setPkgResult(null); setKids(profileRef.current?.kids ?? [{ name: "", dob: "", grade: "", gender: "" }]); setPkgReferralCode(""); setPkgReferralCodeError(""); setPkgApplyAccountCredit(true); }}
+                  onClick={() => { if (!userEmail) { setAuthPrompt(true); return; } setPkgModal({ open: true, packageType: 4, trainerTier: "other" }); setPkgFirstName(profileRef.current?.firstName ?? ""); setPkgLastName(profileRef.current?.lastName ?? ""); setPkgEmail(userEmail ?? ""); setPkgPhone(profileRef.current?.phone ?? ""); setPkgMonth(pkgMonthOptions[0]?.value || ""); setPkgResult(null); setKids(profileRef.current?.kids ?? [{ name: "", dob: "", grade: "", gender: "" }]); setPkgReferralCode(""); setPkgReferralCodeError(""); setPkgApplyAccountCredit(true); }}
                   className="mt-4 w-full rounded-lg bg-mesa-accent px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-yellow-600"
                 >
                   Enroll — 4 Sessions
@@ -2698,15 +2757,15 @@ export default function Home() {
               {/* 8-session */}
               <div className="relative rounded-xl border border-mesa-accent/50 bg-brown-900/40 p-5 text-center">
                 <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-mesa-accent px-3 py-0.5 text-xs font-bold text-white whitespace-nowrap">BEST VALUE</span>
-                <p className="text-3xl font-bold text-mesa-accent">${packagePrice(8)}</p>
+                <p className="text-3xl font-bold text-mesa-accent">${packagePrice(8, "other")}</p>
                 <p className="mt-0.5 text-sm text-brown-300">8 sessions / month</p>
                 <div className="mt-3 rounded-lg bg-brown-800/50 p-3 space-y-0.5">
-                  <p className="text-xs text-brown-500">Normally <span className="line-through">$1,200</span></p>
-                  <p className="text-sm font-semibold text-green-400">Save ${1200 - packagePrice(8)} — {Math.round((1 - packagePrice(8) / 1200) * 100)}% off</p>
-                  <p className="text-xs text-brown-400">${(packagePrice(8) / 8).toFixed(2)} per session</p>
+                  <p className="text-xs text-brown-500">Normally <span className="line-through">${PRIVATE_RATE_BY_TIER.other * 8}</span></p>
+                  <p className="text-sm font-semibold text-green-400">Save ${PRIVATE_RATE_BY_TIER.other * 8 - packagePrice(8, "other")} — {Math.round((1 - packagePrice(8, "other") / (PRIVATE_RATE_BY_TIER.other * 8)) * 100)}% off</p>
+                  <p className="text-xs text-brown-400">${(packagePrice(8, "other") / 8).toFixed(2)} per session</p>
                 </div>
                 <button
-                  onClick={() => { if (!userEmail) { setAuthPrompt(true); return; } setPkgModal({ open: true, packageType: 8 }); setPkgFirstName(profileRef.current?.firstName ?? ""); setPkgLastName(profileRef.current?.lastName ?? ""); setPkgEmail(userEmail ?? ""); setPkgPhone(profileRef.current?.phone ?? ""); setPkgMonth(pkgMonthOptions[0]?.value || ""); setPkgResult(null); setKids(profileRef.current?.kids ?? [{ name: "", dob: "", grade: "", gender: "" }]); setPkgReferralCode(""); setPkgReferralCodeError(""); setPkgApplyAccountCredit(true); }}
+                  onClick={() => { if (!userEmail) { setAuthPrompt(true); return; } setPkgModal({ open: true, packageType: 8, trainerTier: "other" }); setPkgFirstName(profileRef.current?.firstName ?? ""); setPkgLastName(profileRef.current?.lastName ?? ""); setPkgEmail(userEmail ?? ""); setPkgPhone(profileRef.current?.phone ?? ""); setPkgMonth(pkgMonthOptions[0]?.value || ""); setPkgResult(null); setKids(profileRef.current?.kids ?? [{ name: "", dob: "", grade: "", gender: "" }]); setPkgReferralCode(""); setPkgReferralCodeError(""); setPkgApplyAccountCredit(true); }}
                   className="mt-4 w-full rounded-lg bg-mesa-accent px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-yellow-600"
                 >
                   Enroll — 8 Sessions
@@ -2819,7 +2878,7 @@ export default function Home() {
                     const d = parseDateForDisplay(group.date);
                     const dayLabel = `${d.toLocaleDateString("en-US", { weekday: "long", timeZone: "America/New_York" })}, ${group.date}`;
                     const groupMonthYear = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-                    const groupPackageRemaining = packageRemainingByMonth[groupMonthYear] || 0;
+                    const groupPackageInfo = packageRemainingByMonth[groupMonthYear];
                     return (
                       <div key={group.key} className="rounded-xl border-2 border-brown-600 bg-brown-900/40 p-5 shadow-lg shadow-black/30">
                         <div className="mb-4">
@@ -2838,10 +2897,19 @@ export default function Home() {
                             const sel = windowSelections[wi] || {
                               start: defaultStart,
                               duration: Math.min(60, window.endMins - defaultStart),
+                              trainer: window.trainers[0],
                             };
+                            const selectedTrainer = window.trainers.includes(sel.trainer) ? sel.trainer : window.trainers[0];
+                            // Only "included in your package" if the active
+                            // package's tier matches whichever trainer is
+                            // currently selected on THIS card — a package
+                            // never covers the other tier's trainer.
+                            const groupPackageRemaining = groupPackageInfo && groupPackageInfo.trainerTier === getTrainerTier(selectedTrainer)
+                              ? groupPackageInfo.remaining
+                              : 0;
                             const durationOptions = getDurationOptions(sel.start, window.endMins);
                             const endTime = formatTimeFromMins(sel.start + sel.duration);
-                            const price = getPrivatePrice(sel.duration, 1);
+                            const price = getPrivatePrice(sel.duration, 1, getTrainerTier(selectedTrainer));
 
                             return (
                               <div
@@ -2849,10 +2917,27 @@ export default function Home() {
                                 className="rounded-lg bg-brown-800/50 border border-brown-700/60 p-4"
                               >
                                 <p className="text-sm text-brown-400 mb-3">
-                                  <LocationLink location={window.location} className="text-brown-400" /> &bull; Available {window.startLabel} - {window.endLabel} &bull; {window.trainer}
-                                  <TrainerBioLink trainer={window.trainer} />
+                                  <LocationLink location={window.location} className="text-brown-400" /> &bull; Available {window.startLabel} - {window.endLabel} &bull; {selectedTrainer}
+                                  <TrainerBioLink trainer={selectedTrainer} />
                                 </p>
                                 <div className="flex flex-wrap items-end gap-4">
+                                  {window.trainers.length > 1 && (
+                                    <div>
+                                      <label className="mb-1 block text-xs text-brown-400">Trainer</label>
+                                      <select
+                                        value={selectedTrainer}
+                                        onChange={(e) => updateWindowTrainer(wi, window, e.target.value)}
+                                        className="rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-sm text-white focus:border-mesa-accent focus:outline-none"
+                                      >
+                                        {window.trainers.map((t) => (
+                                          <option key={t} value={t}>
+                                            {t}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </div>
+                                  )}
+
                                   <div>
                                     <label className="mb-1 block text-xs text-brown-400">Start Time</label>
                                     <select
@@ -2897,7 +2982,7 @@ export default function Home() {
                                   </div>
 
                                   <button
-                                    onClick={() => openPrivateBooking(wi, window)}
+                                    onClick={() => openPrivateBooking(wi, window, { ...sel, trainer: selectedTrainer })}
                                     className="rounded bg-mesa-accent px-4 py-2 text-sm font-semibold text-white transition hover:bg-yellow-600"
                                   >
                                     Book
@@ -3558,7 +3643,7 @@ export default function Home() {
                     </p>
                     <div className="mt-3 flex flex-wrap gap-2">
                       {upsellOptions.map((opt) => {
-                        const extraCost = getPrivatePrice(opt.extraMins, isGroupRate || kids.length >= 4 ? 4 : 1) * 0.5;
+                        const extraCost = getPrivatePrice(opt.extraMins, isGroupRate || kids.length >= 4 ? 4 : 1, getTrainerTier(modal.bookedTrainer)) * 0.5;
                         return (
                           <button
                             key={opt.extraMins}
@@ -3663,7 +3748,7 @@ export default function Home() {
                           : "border-brown-700 text-brown-400 hover:border-brown-500"
                       }`}
                     >
-                      Private (${PRIVATE_RATE}/hr)
+                      Private (${PRIVATE_RATE_BY_TIER[getTrainerTier(modal.bookedTrainer)]}/hr)
                       <span className="block text-xs font-normal">Up to 3 players</span>
                     </button>
                     <button
@@ -3675,7 +3760,7 @@ export default function Home() {
                           : "border-brown-700 text-brown-400 hover:border-brown-500"
                       }`}
                     >
-                      Group (${GROUP_PRIVATE_RATE}/hr)
+                      Group (${GROUP_PRIVATE_RATE_BY_TIER[getTrainerTier(modal.bookedTrainer)]}/hr)
                       <span className="block text-xs font-normal">4+ players</span>
                     </button>
                   </div>
@@ -3753,13 +3838,52 @@ export default function Home() {
               <h3 className="text-xl font-bold">
                 {pkgModal.packageType}-Session Package
               </h3>
-              <button onClick={() => setPkgModal({ open: false, packageType: null })} className="text-2xl text-brown-400 hover:text-white">&times;</button>
+              <button onClick={() => setPkgModal((m) => ({ ...m, open: false }))} className="text-2xl text-brown-400 hover:text-white">&times;</button>
             </div>
             <p className="mt-1 text-sm text-brown-400">
               {pkgAmountToCharge > 0
                 ? <>${pkgTotalPrice} + {serviceFeeLabel(pkgAmountToCharge)} service fee{isPercentServiceFee(pkgAmountToCharge) ? ` (${SERVICE_FEE_PERCENT_TEXT})` : ""} — paid securely by card via Stripe{pkgCreditApplied > 0 ? ` after $${pkgCreditApplied} account credit` : ""}</>
                 : <>${pkgTotalPrice} — fully covered by account credit, no card needed</>}
             </p>
+
+            <div className="mt-3">
+              <label className="mb-1 block text-sm font-medium text-brown-300">Trainer</label>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  disabled={!ARTEMIOS_PACKAGES_AVAILABLE}
+                  onClick={() => ARTEMIOS_PACKAGES_AVAILABLE && setPkgModal((m) => ({ ...m, trainerTier: "artemios" }))}
+                  title={ARTEMIOS_PACKAGES_AVAILABLE ? "" : "Artemios isn't currently taking new package enrollments — check back soon"}
+                  className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition ${
+                    !ARTEMIOS_PACKAGES_AVAILABLE
+                      ? "cursor-not-allowed border-brown-800 bg-brown-900/50 text-brown-600 opacity-60"
+                      : pkgModal.trainerTier === "artemios"
+                        ? "border-mesa-accent bg-mesa-accent/20 text-mesa-accent"
+                        : "border-brown-700 text-brown-400 hover:border-brown-500"
+                  }`}
+                >
+                  {OWNER_TRAINER_NAME}
+                  <span className="block text-xs font-normal">${packagePrice(pkgModal.packageType || 4, "artemios")}{ARTEMIOS_PACKAGES_AVAILABLE ? "" : " — unavailable"}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPkgModal((m) => ({ ...m, trainerTier: "other" }))}
+                  className={`flex-1 rounded-lg border px-3 py-2 text-sm font-medium transition ${
+                    pkgModal.trainerTier === "other"
+                      ? "border-mesa-accent bg-mesa-accent/20 text-mesa-accent"
+                      : "border-brown-700 text-brown-400 hover:border-brown-500"
+                  }`}
+                >
+                  {SUBSTITUTE_TRAINER_LABEL}
+                  <span className="block text-xs font-normal">${packagePrice(pkgModal.packageType || 4, "other")}</span>
+                </button>
+              </div>
+              <p className="mt-1.5 text-xs text-brown-500">
+                {pkgModal.trainerTier === "artemios"
+                  ? "Every session in this package will be with Artemios."
+                  : "Sessions can be booked with any part-time trainer who has an open slot — not locked to one person."}
+              </p>
+            </div>
 
             {pkgAccountCreditBalance !== null && pkgAccountCreditBalance > 0 && (
               <div className="mt-3 rounded-lg border border-blue-700 bg-blue-900/20 px-4 py-3 transition">
@@ -3795,7 +3919,7 @@ export default function Home() {
             {pkgResult?.success ? (
               <div className="mt-6 rounded-lg bg-green-900/50 p-4 text-center">
                 <p className="text-base font-semibold text-green-400">{pkgResult.message}</p>
-                <button onClick={() => setPkgModal({ open: false, packageType: null })} className="mt-4 rounded bg-brown-700 px-4 py-2 text-sm hover:bg-brown-600">Close</button>
+                <button onClick={() => setPkgModal((m) => ({ ...m, open: false }))} className="mt-4 rounded bg-brown-700 px-4 py-2 text-sm hover:bg-brown-600">Close</button>
               </div>
             ) : (
               <form onSubmit={handlePackageSubmit} className="mt-4 space-y-4">

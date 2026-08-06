@@ -111,6 +111,11 @@ export async function POST(req: NextRequest) {
             sessionsUsed: activePackage.sessions_used,
             monthYear: activePackage.month_year,
             cancellable: packageCancellable,
+            // Actual price charged at enrollment — never recompute this
+            // client-side from the live rate, which may have changed since
+            // (and now also depends on which trainer tier was purchased).
+            totalPrice: activePackage.total_price ?? null,
+            trainerTier: activePackage.trainer_tier || "artemios",
           }
         : null,
     });

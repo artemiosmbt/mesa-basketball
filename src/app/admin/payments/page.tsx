@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useCallback, type FormEvent } from "react
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { authClient, ADMIN_EMAIL } from "@/lib/auth";
-import { fullPriceForType } from "@/lib/pricing";
+import { fullPriceForType, getTrainerTier } from "@/lib/pricing";
 
 interface Registration {
   id: string;
@@ -33,6 +33,7 @@ interface Registration {
   camp_drop_in_rate: number | null;
   applied_account_credit: number | null;
   booking_batch_id: string | null;
+  booked_trainer: string | null;
 }
 
 interface PackageData {
@@ -343,7 +344,7 @@ export default function PaymentsPage() {
       const discount = weeklyDiscountRates.get(r.referral_code)!;
       basePrice = Math.round(50 * (r.total_participants || 1) * (1 - discount));
     } else {
-      basePrice = fullPriceForType(r.type);
+      basePrice = fullPriceForType(r.type, getTrainerTier(r.booked_trainer));
     }
     const discounted = r.is_free && isPrivateType ? Math.round(basePrice * 0.5 * 100) / 100 : basePrice;
     // session_price/basePrice is always the full pre-credit rate — account

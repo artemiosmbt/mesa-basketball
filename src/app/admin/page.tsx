@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { authClient, resolveAuthRole, type AuthContext } from "@/lib/auth";
 import type { WeeklySession, Camp, PrivateSlot } from "@/lib/sheets";
-import { fullPriceForType, calcPrivatePrice as calcPrivatePricePreview } from "@/lib/pricing";
+import { fullPriceForType, calcPrivatePrice as calcPrivatePricePreview, getTrainerTier } from "@/lib/pricing";
 
 interface Registration {
   id: string;
@@ -168,7 +168,7 @@ function preCreditPrice(r: Registration, weeklyDiscountRates?: Map<string, numbe
     const discount = weeklyDiscountRates.get(r.referral_code)!;
     basePrice = Math.round(50 * (r.total_participants || 1) * (1 - discount));
   } else {
-    basePrice = fullPriceForType(r.type);
+    basePrice = fullPriceForType(r.type, getTrainerTier(r.booked_trainer));
   }
   return r.is_free && isPrivateType ? Math.round(basePrice * 0.5 * 100) / 100 : basePrice;
 }
@@ -2046,7 +2046,7 @@ export default function AdminPage() {
                   let newFull: number | undefined;
                   if (targetIsPrivate) {
                     const durationMins = Math.max(60, parseTimeToMinsClient(rescheduleForm.end) - parseTimeToMinsClient(rescheduleForm.start));
-                    newFull = calcPrivatePricePreview(durationMins, r.total_participants || 1);
+                    newFull = calcPrivatePricePreview(durationMins, r.total_participants || 1, getTrainerTier(rescheduleForm.trainer || r.booked_trainer));
                   } else if (targetIsWeekly && typeof rescheduleForm.price === "number") {
                     newFull = Math.round(rescheduleForm.price * (r.total_participants || 1));
                   }

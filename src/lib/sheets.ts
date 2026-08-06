@@ -130,6 +130,50 @@ export async function getPrivateSlots(options?: { noCache?: boolean }): Promise<
   }));
 }
 
+function parseTimeToMins(t: string): number {
+  const m = t.match(/(\d+):(\d+)\s*(AM|PM)/i);
+  if (!m) return 0;
+  let h = parseInt(m[1]);
+  const min = parseInt(m[2]);
+  if (m[3].toUpperCase() === "PM" && h !== 12) h += 12;
+  if (m[3].toUpperCase() === "AM" && h === 12) h = 0;
+  return h * 60 + min;
+}
+
+// Verifies that [startTime, endTime) on `date` at `location` is actually
+// covered by consecutive, available Sheet rows for `trainer` — the same
+// "merge consecutive slots into a window" rule the schedule page uses for
+// display, applied server-side as a real gate instead of just a UI hint.
+// Without this, nothing stopped a request from claiming a trainer/price/slot
+// combination that was never actually offered (a stale tab, a slot the
+// business pulled while the form was open, or a request built by hand) —
+// which, once price depends on which trainer is picked, is a pricing
+// integrity gap, not just a display one.
+export async function isPrivateWindowOfferedByTrainer(
+  date: string,
+  startTime: string,
+  endTime: string,
+  location: string,
+  trainer: string
+): Promise<boolean> {
+  const slots = await getPrivateSlots();
+  const wantStart = parseTimeToMins(startTime);
+  const wantEnd = parseTimeToMins(endTime);
+  if (wantEnd <= wantStart) return false;
+  const relevant = slots
+    .filter((s) => s.date === date && s.location === location && s.trainer === trainer && s.available)
+    .map((s) => ({ start: parseTimeToMins(s.startTime), end: parseTimeToMins(s.endTime) }))
+    .sort((a, b) => a.start - b.start);
+
+  let cursor = wantStart;
+  for (const s of relevant) {
+    if (s.start > cursor) break; // gap before this block — coverage broken
+    if (s.end > cursor) cursor = s.end;
+    if (cursor >= wantEnd) return true;
+  }
+  return cursor >= wantEnd;
+}
+
 // Returns the current location for a session from Google Sheets, or null if not found / unchanged.
 export async function getCurrentSheetLocation(date: string, startTime: string): Promise<string | null> {
   const [weeklySessions, privateSlots] = await Promise.all([

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getStripe, buildCreditDiscount } from "@/lib/stripe";
-import { calcServiceFee, serviceFeeItemName, fmtMoney, PRIVATE_RATE, GROUP_PRIVATE_RATE } from "@/lib/pricing";
-import { getWeeklySchedule, getCamps } from "@/lib/sheets";
+import { calcServiceFee, serviceFeeItemName, fmtMoney, calcPrivatePrice, getTrainerTier, type TrainerTier } from "@/lib/pricing";
+import { getWeeklySchedule, getCamps, isPrivateWindowOfferedByTrainer } from "@/lib/sheets";
 import { resolveRequestEmail } from "@/lib/request-email";
 import { NEW_CLIENT_DISCOUNT_ENABLED } from "@/lib/feature-flags";
 import {
@@ -27,6 +27,7 @@ import {
   countPackageSessionsUsed,
   syncPackageSessionsUsed,
   isRateLimited,
+  hasConflictingPrivateBooking,
 } from "@/lib/supabase";
 
 // For each booked date (in order), the active package (if any) whose
@@ -37,9 +38,11 @@ import {
 // counted against package_id specifically (not "any private session this
 // email had this month"), so an individually-paid overflow session never
 // eats into a package's count. Packages only ever cover standard private
-// sessions (up to 3 kids, $150/hr) — never group-private (4+, $250/hr):
-// a package slot is priced around the private rate, so a 4+ kid session
-// always charges normally regardless of remaining capacity.
+// sessions (up to 3 kids) — never group-private (4+): a package slot is
+// priced around the standard private rate, so a 4+ kid session always
+// charges normally regardless of remaining capacity. A package also only
+// ever covers a session whose trainer matches the tier it was bought for
+// (see allocatePackageCoverage below).
 // Splits `total` across items weighted by `weights` so every item's share
 // sums EXACTLY back to `total` (e.g. $11 credit split 3 ways by equal
 // weight -> $4/$4/$3, never $4/$4/$4 = $12). Used to record account credit
@@ -102,32 +105,50 @@ function findWithinRequestDuplicateDates(sessions: { date: string; startTime: st
 // baking it invisibly into a single reduced total. Line items keep their
 // full, undiscounted prices; Stripe applies this against the whole order
 // total, landing on the exact same final amount either way.
-async function allocatePackageCoverage(email: string, dates: string[], kidCount: number): Promise<Array<{ covered: boolean; packageId: string | null }>> {
+async function allocatePackageCoverage(
+  email: string,
+  entries: { date: string; trainer: string }[],
+  kidCount: number
+): Promise<Array<{ covered: boolean; packageId: string | null }>> {
   if (kidCount >= 4) {
-    return dates.map(() => ({ covered: false, packageId: null }));
+    return entries.map(() => ({ covered: false, packageId: null }));
   }
-  const remainingByMonth = new Map<string, { packageId: string; remaining: number }>();
+  // null = no active package that month; otherwise the one active package's
+  // tier + remaining count. A package only ever covers a session whose
+  // trainer matches the tier it was purchased for — an "Any Available
+  // Trainer" package never covers an Artemios session and vice versa (see
+  // the trainer-tier selector on the package modal).
+  const packageByMonth = new Map<string, { packageId: string; tier: TrainerTier; remaining: number } | null>();
   const result: Array<{ covered: boolean; packageId: string | null }> = [];
-  for (const dateStr of dates) {
-    const d = new Date(dateStr);
+  for (const entry of entries) {
+    const d = new Date(entry.date);
     if (isNaN(d.getTime())) {
       result.push({ covered: false, packageId: null });
       continue;
     }
     const month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-    if (!remainingByMonth.has(month)) {
+    if (!packageByMonth.has(month)) {
       const pkg = await getActivePackage(email, month);
       if (pkg) {
         const used = await countPackageSessionsUsed(pkg.id);
-        remainingByMonth.set(month, { packageId: pkg.id, remaining: Math.max(0, pkg.package_type - used) });
+        packageByMonth.set(month, {
+          packageId: pkg.id,
+          // trainer_tier is stored as 'artemios' | 'other' directly (see
+          // enrollInPackage) — null only for packages enrolled before this
+          // column existed, which were all Artemios-tier since that was the
+          // only tier that existed then.
+          tier: (pkg.trainer_tier as TrainerTier) || "artemios",
+          remaining: Math.max(0, pkg.package_type - used),
+        });
       } else {
-        remainingByMonth.set(month, { packageId: "", remaining: 0 });
+        packageByMonth.set(month, null);
       }
     }
-    const entry = remainingByMonth.get(month)!;
-    if (entry.remaining > 0) {
-      result.push({ covered: true, packageId: entry.packageId });
-      remainingByMonth.set(month, { ...entry, remaining: entry.remaining - 1 });
+    const pkgEntry = packageByMonth.get(month) ?? null;
+    const sessionTier = getTrainerTier(entry.trainer);
+    if (pkgEntry && pkgEntry.remaining > 0 && pkgEntry.tier === sessionTier) {
+      result.push({ covered: true, packageId: pkgEntry.packageId });
+      packageByMonth.set(month, { ...pkgEntry, remaining: pkgEntry.remaining - 1 });
     } else {
       result.push({ covered: false, packageId: null });
     }
@@ -250,10 +271,32 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // Check capacity for all selected sessions
+      // Re-verify against the live sheet FIRST — never trust the client's
+      // own trainer field (or weeklyTotalPrice) for capacity/pricing/storage
+      // decisions. Trainer especially: capacity is now pooled per trainer
+      // (two simultaneous same-named groups with different trainers are
+      // independent pools — see checkGroupSessionCapacity), so a client
+      // naming a fabricated trainer for a real slot could otherwise dodge
+      // the real trainer's capacity limit entirely by landing in a pool
+      // nothing else ever counts against.
+      const liveWeeklySchedule = await getWeeklySchedule({ noCache: true });
+      const liveWeeklyMatches = weeklySessions.map((s: { date: string; startTime: string; group: string }) =>
+        liveWeeklySchedule.find((ls) => ls.group === s.group && ls.date === s.date && ls.startTime === s.startTime)
+      );
+      const unmatchedSessions = weeklySessions.filter((_: unknown, i: number) => !liveWeeklyMatches[i]);
+      if (unmatchedSessions.length > 0) {
+        const dates = unmatchedSessions.map((s: { date: string }) => s.date).join(", ");
+        return NextResponse.json(
+          { error: `Couldn't verify current pricing for: ${dates}. The schedule may have changed — please refresh and try again.` },
+          { status: 400 }
+        );
+      }
+
+      // Check capacity for all selected sessions — keyed on the VERIFIED
+      // live trainer, not whatever the client submitted.
       const capacityChecks = await Promise.all(
-        weeklySessions.map((s: { date: string; startTime: string; endTime: string; location: string; group: string; maxSpots: number }) =>
-          checkGroupSessionCapacity(s.date, s.startTime, s.group, s.maxSpots)
+        weeklySessions.map((s: { date: string; startTime: string; endTime: string; location: string; group: string; maxSpots: number }, i: number) =>
+          checkGroupSessionCapacity(s.date, s.startTime, s.group, s.maxSpots, liveWeeklyMatches[i]!.trainer || "Artemios Gavalas")
         )
       );
 
@@ -283,23 +326,6 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      // Re-verify pricing against the live sheet — never trust
-      // weeklyTotalPrice sent from the client. It reflects whatever price
-      // the browser happened to have loaded, which could be stale (the
-      // sheet changed since) or simply wrong if the request was tampered
-      // with, and this is the only place real money gets decided.
-      const liveWeeklySchedule = await getWeeklySchedule({ noCache: true });
-      const liveWeeklyMatches = weeklySessions.map((s: { date: string; startTime: string; group: string }) =>
-        liveWeeklySchedule.find((ls) => ls.group === s.group && ls.date === s.date && ls.startTime === s.startTime)
-      );
-      const unmatchedSessions = weeklySessions.filter((_: unknown, i: number) => !liveWeeklyMatches[i]);
-      if (unmatchedSessions.length > 0) {
-        const dates = unmatchedSessions.map((s: { date: string }) => s.date).join(", ");
-        return NextResponse.json(
-          { error: `Couldn't verify current pricing for: ${dates}. The schedule may have changed — please refresh and try again.` },
-          { status: 400 }
-        );
-      }
       // Same multi-session volume-discount tiers shown on the booking form
       // (4+ sessions = 10% off, 8+ = 15% off) — but applied PER GROUP, not
       // across the whole request. A submission can now span more than one
@@ -362,7 +388,7 @@ export async function POST(req: NextRequest) {
           bookedEndTime: session.endTime,
           bookedLocation: session.location,
           bookedGroup: session.group,
-          bookedTrainer: session.trainer,
+          bookedTrainer: liveWeeklyMatches[i]!.trainer,
           referralCode,
           isFree: false,
           smsConsent: !!smsConsent,
@@ -373,12 +399,19 @@ export async function POST(req: NextRequest) {
         });
       }
 
+      // Calendar/email confirmations must reflect the VERIFIED trainer that
+      // was actually stored above, never the client's raw submission.
+      const weeklySessionsVerified = weeklySessions.map((s: { date: string; startTime: string; endTime: string; location: string; group: string; maxSpots?: number }, i: number) => ({
+        ...s,
+        trainer: liveWeeklyMatches[i]!.trainer,
+      }));
+
       const weeklyFinalizeParams = {
         parentName,
         email,
         phone,
         kids,
-        weeklySessions: weeklySessions as Array<{ date: string; startTime: string; endTime: string; location: string; group: string; trainer?: string; maxSpots?: number }>,
+        weeklySessions: weeklySessionsVerified as Array<{ date: string; startTime: string; endTime: string; location: string; group: string; trainer?: string; maxSpots?: number }>,
         totalParticipants: totalParticipants || 1,
         referralCode,
         weeklyReferrer,
@@ -721,11 +754,10 @@ export async function POST(req: NextRequest) {
       if (m[3].toUpperCase() === "AM" && h === 12) h = 0;
       return h * 60 + min;
     }
-    function calcPrivateSessionPrice(startTime?: string, endTime?: string, kidCount = 1): number | undefined {
+    function calcPrivateSessionPrice(startTime?: string, endTime?: string, kidCount = 1, trainer?: string): number | undefined {
       if (!startTime || !endTime) return undefined;
       const duration = Math.max(60, parseMinsFromTime(endTime) - parseMinsFromTime(startTime));
-      const rate = kidCount >= 4 ? GROUP_PRIVATE_RATE : PRIVATE_RATE;
-      return Math.round(rate * (duration / 60) * 100) / 100;
+      return calcPrivatePrice(duration, kidCount, getTrainerTier(trainer));
     }
 
     // Multi-date recurring private/group-private booking — one row per
@@ -733,8 +765,34 @@ export async function POST(req: NextRequest) {
     // old pattern of N separate /api/register calls plus a trailing
     // emailOnly call just to send one combined email.
     if (isPrivateType && privateSessions && privateSessions.length > 0) {
-      if (privateSessions.some((s: { date?: string; startTime?: string; endTime?: string; location?: string }) => !s.date || !s.startTime || !s.endTime || !s.location)) {
+      if (privateSessions.some((s: { date?: string; startTime?: string; endTime?: string; location?: string; trainer?: string }) => !s.date || !s.startTime || !s.endTime || !s.location || !s.trainer)) {
         return NextResponse.json({ error: "Missing session details" }, { status: 400 });
+      }
+
+      // Each date/time/location/trainer combination must be a real,
+      // currently-offered slot from the live schedule sheet, with no
+      // conflicting booking already against that trainer — never trust the
+      // client's claim alone, since which trainer is picked now also
+      // determines price (a request could otherwise name a cheaper
+      // substitute for a window only the higher-rate trainer actually
+      // offers). The schedule page only ever HID an already-booked window
+      // client-side; this is the real, authoritative guard.
+      const slotChecks = await Promise.all(
+        privateSessions.map(async (s: { date: string; startTime: string; endTime: string; location: string; trainer: string }) => {
+          const [offered, conflicting] = await Promise.all([
+            isPrivateWindowOfferedByTrainer(s.date, s.startTime, s.endTime, s.location, s.trainer),
+            hasConflictingPrivateBooking(s.date, s.startTime, s.endTime, s.location, s.trainer),
+          ]);
+          return offered && !conflicting;
+        })
+      );
+      const invalidSessions = privateSessions.filter((_: unknown, i: number) => !slotChecks[i]);
+      if (invalidSessions.length > 0) {
+        const invalidDates = invalidSessions.map((s: { date: string }) => s.date).join(", ");
+        return NextResponse.json(
+          { error: `The following date${invalidSessions.length > 1 ? "s are" : " is"} no longer available: ${invalidDates}. Please refresh and try again.` },
+          { status: 400 }
+        );
       }
 
       const newClient = await isNewClient(email, phone);
@@ -771,7 +829,7 @@ export async function POST(req: NextRequest) {
       // date, if the package has enough remaining capacity) is already
       // fully prepaid, so it shouldn't also consume the one-time discount
       // or a referral credit that could instead apply to a future booking.
-      const packageCoverage = await allocatePackageCoverage(email, privateSessions.map((s: { date: string }) => s.date), totalParticipants || 1);
+      const packageCoverage = await allocatePackageCoverage(email, privateSessions.map((s: { date: string; trainer: string }) => ({ date: s.date, trainer: s.trainer })), totalParticipants || 1);
 
       // Only the FIRST (non-package-covered) date in the series can carry
       // the first-time discount or a redeemed referral credit — by the
@@ -798,7 +856,7 @@ export async function POST(req: NextRequest) {
       }
 
       const pricedSessions = privateSessions.map((s: { date: string; startTime: string; endTime: string; location: string; trainer?: string }, i: number) => {
-        const fullPrice = calcPrivateSessionPrice(s.startTime, s.endTime, totalParticipants || 1) ?? 0;
+        const fullPrice = calcPrivateSessionPrice(s.startTime, s.endTime, totalParticipants || 1, s.trainer) ?? 0;
         const packageCovered = packageCoverage[i]?.covered ?? false;
         const packageId = packageCoverage[i]?.packageId ?? null;
         const isFree = !packageCovered && i === 0 && firstIsFree;
@@ -1004,8 +1062,18 @@ export async function POST(req: NextRequest) {
 
     // Single-date private/group-private booking, paid via Stripe.
     if (isPrivateType && !privateSessions) {
-      if (!bookedDate || !bookedStartTime || !bookedEndTime || !bookedLocation) {
+      if (!bookedDate || !bookedStartTime || !bookedEndTime || !bookedLocation || !bookedTrainer) {
         return NextResponse.json({ error: "Missing session details" }, { status: 400 });
+      }
+
+      // Same authoritative slot+trainer+conflict check as the multi-date
+      // path above — see the comment there.
+      const [slotOffered, slotConflicting] = await Promise.all([
+        isPrivateWindowOfferedByTrainer(bookedDate, bookedStartTime, bookedEndTime, bookedLocation, bookedTrainer),
+        hasConflictingPrivateBooking(bookedDate, bookedStartTime, bookedEndTime, bookedLocation, bookedTrainer),
+      ]);
+      if (!slotOffered || slotConflicting) {
+        return NextResponse.json({ error: "That session is no longer available. Please refresh and try again." }, { status: 400 });
       }
 
       const newClient = await isNewClient(email, phone);
@@ -1021,7 +1089,7 @@ export async function POST(req: NextRequest) {
       // discount/credit logic — a package-covered session is already fully
       // prepaid, so it shouldn't also spend a referral credit or "waste" the
       // first-time discount that could instead apply to a future session.
-      const { covered: packageCovered, packageId } = (await allocatePackageCoverage(email, [bookedDate], totalParticipants || 1))[0];
+      const { covered: packageCovered, packageId } = (await allocatePackageCoverage(email, [{ date: bookedDate, trainer: bookedTrainer }], totalParticipants || 1))[0];
       // A package-covered session is $0 due to Stripe — no incremental
       // revenue to justify awarding the referrer a real credit. isNewClient
       // only checks past registrations (never monthly_packages), so a
@@ -1050,7 +1118,7 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      const privateSessionPrice = calcPrivateSessionPrice(bookedStartTime, bookedEndTime, totalParticipants || 1);
+      const privateSessionPrice = calcPrivateSessionPrice(bookedStartTime, bookedEndTime, totalParticipants || 1, bookedTrainer);
 
       const effectivePrice = packageCovered
         ? 0

@@ -18,7 +18,7 @@ import {
   recordCampDayRefund,
 } from "@/lib/supabase";
 import { getStripe } from "@/lib/stripe";
-import { calcServiceFee, serviceFeeItemName, fmtMoney, calcPrivatePrice } from "@/lib/pricing";
+import { calcServiceFee, serviceFeeItemName, fmtMoney, calcPrivatePrice, getTrainerTier } from "@/lib/pricing";
 
 
 function parseMinsFromTime(t: string): number {
@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
   // a late cancellation the same way a client-initiated one would.
   const { data: reg } = await supabase
     .from("registrations")
-    .select("manage_token, type, email, parent_name, booked_date, booked_start_time, booked_end_time, booked_location, booked_group, kids, session_details, total_participants, phone, sms_consent, is_paid, stripe_payment_intent_id, applied_account_credit, session_price, is_free, used_referral_credit, created_at, admin_change_at, package_id, is_full_camp, referral_code, camp_drop_in_rate")
+    .select("manage_token, type, email, parent_name, booked_date, booked_start_time, booked_end_time, booked_location, booked_group, booked_trainer, kids, session_details, total_participants, phone, sms_consent, is_paid, stripe_payment_intent_id, applied_account_credit, session_price, is_free, used_referral_credit, created_at, admin_change_at, package_id, is_full_camp, referral_code, camp_drop_in_rate")
     .eq("id", id)
     .single();
 
@@ -343,7 +343,7 @@ export async function POST(req: NextRequest) {
     const durationMins = reg.booked_start_time && reg.booked_end_time
       ? Math.max(60, parseMinsFromTime(reg.booked_end_time) - parseMinsFromTime(reg.booked_start_time))
       : 60;
-    const liveFullPrice = calcPrivatePrice(durationMins, reg.total_participants || 1);
+    const liveFullPrice = calcPrivatePrice(durationMins, reg.total_participants || 1, getTrainerTier(reg.booked_trainer));
     packageLateFeeAmount = Math.round(liveFullPrice * 0.5 * 100) / 100;
     if (packageLateFeeAmount > 0) {
       try {

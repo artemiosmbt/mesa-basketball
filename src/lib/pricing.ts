@@ -52,41 +52,63 @@ export function fmtMoney(n: number): string {
   return n.toFixed(2);
 }
 
-// Monthly private-session package price. Single source of truth — this used
-// to be the same `packageType === 4 ? 475 : 900` ternary hardcoded
-// separately in three different files (purchase, cancellation, and
-// confirmation-email logic); any future price change only needed to touch
-// one of them and the others would silently keep charging/refunding the old
-// amount.
-export function packagePrice(packageType: number): number {
-  return packageType === 4 ? 475 : 900;
+import { getTrainerTier, type TrainerTier } from "./trainers";
+export type { TrainerTier };
+export { getTrainerTier };
+
+// Monthly private-session package price, by trainer tier — Artemios runs a
+// higher rate than the part-time substitute trainers. Single source of
+// truth — this used to be the same `packageType === 4 ? 475 : 900` ternary
+// hardcoded separately in three different files (purchase, cancellation,
+// and confirmation-email logic); any future price change only needs to
+// touch this one table instead of relying on every one of those spots being
+// updated too. `trainerTier` is a required argument (not defaulted) so a
+// missing call site fails to compile instead of silently charging/refunding
+// the wrong trainer's rate.
+const PACKAGE_PRICE_BY_TIER: Record<TrainerTier, Record<4 | 8, number>> = {
+  artemios: { 4: 475, 8: 900 },
+  other: { 4: 440, 8: 850 },
+};
+
+export function packagePrice(packageType: number, trainerTier: TrainerTier): number {
+  return PACKAGE_PRICE_BY_TIER[trainerTier][packageType === 4 ? 4 : 8];
 }
 
-// Standard private-session hourly rate (1-3 kids). Single source of truth —
-// this bare number used to be hardcoded independently in 12+ files (booking
-// forms, admin dashboards, cancel/reschedule/no-show/add-player routes,
-// confirmation emails); any future rate change only needs to touch this one
-// constant instead of relying on every one of those spots being updated too.
-export const PRIVATE_RATE = 150;
-// Group-private (4+ kids) hourly rate.
-export const GROUP_PRIVATE_RATE = 250;
+// Standard private-session hourly rate (1-3 kids), by trainer tier. Single
+// source of truth — these bare numbers used to be one hardcoded constant
+// shared independently across 12+ files (booking forms, admin dashboards,
+// cancel/reschedule/no-show/add-player routes, confirmation emails); any
+// future rate change only needs to touch this one table.
+export const PRIVATE_RATE_BY_TIER: Record<TrainerTier, number> = { artemios: 150, other: 125 };
+// Group-private (4+ kids) hourly rate, by trainer tier.
+export const GROUP_PRIVATE_RATE_BY_TIER: Record<TrainerTier, number> = { artemios: 250, other: 210 };
+
+// Legacy flat aliases equal to Artemios's rate — kept only for contexts with
+// literally no trainer to look up (marketing copy that predates per-trainer
+// pricing). Anywhere an actual session/booking/package is priced must use
+// the tier-aware functions below instead.
+export const PRIVATE_RATE = PRIVATE_RATE_BY_TIER.artemios;
+export const GROUP_PRIVATE_RATE = GROUP_PRIVATE_RATE_BY_TIER.artemios;
 // Rough flat fallback used ONLY when a legacy weekly/camp row has no stored
 // session_price to fall back on — not a real distinct price, just a guess
 // that avoids treating a missing/unset price as $0 (which would understate
 // what's actually owed).
 export const LEGACY_GROUP_SESSION_FALLBACK = 50;
 
-// Prorated private-session price for a given duration and kid count.
-export function calcPrivatePrice(durationMins: number, kidCount: number): number {
-  const rate = kidCount >= 4 ? GROUP_PRIVATE_RATE : PRIVATE_RATE;
+// Prorated private-session price for a given duration, kid count, and the
+// trainer actually running the session — the same session is $125/hr with a
+// substitute trainer and $150/hr with Artemios, so trainerTier is required,
+// never defaulted or inferred.
+export function calcPrivatePrice(durationMins: number, kidCount: number, trainerTier: TrainerTier): number {
+  const rate = kidCount >= 4 ? GROUP_PRIVATE_RATE_BY_TIER[trainerTier] : PRIVATE_RATE_BY_TIER[trainerTier];
   return Math.round(rate * (durationMins / 60) * 100) / 100;
 }
 
 // Full session price fallback by type — used only when session_price is
 // null (a real, common case for legacy rows) rather than treating an unset
 // price as $0, which would understate what's actually owed.
-export function fullPriceForType(type: string): number {
-  if (type === "group-private") return GROUP_PRIVATE_RATE;
-  if (type === "private") return PRIVATE_RATE;
+export function fullPriceForType(type: string, trainerTier: TrainerTier): number {
+  if (type === "group-private") return GROUP_PRIVATE_RATE_BY_TIER[trainerTier];
+  if (type === "private") return PRIVATE_RATE_BY_TIER[trainerTier];
   return LEGACY_GROUP_SESSION_FALLBACK;
 }

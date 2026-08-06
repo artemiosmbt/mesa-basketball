@@ -3,7 +3,7 @@ import { sendRegistrationNotification, sendReferralCreditNotification, sendResch
 import { addPrivateSessionToCalendar, deletePrivateSessionFromCalendar, upsertGroupSessionCalendarEvent } from "@/lib/calendar";
 import { sendSMS, sendAdminSMS, formatDateWithDay, formatMonthYear, resolveLocationName } from "@/lib/sms";
 import { getStripe } from "@/lib/stripe";
-import { calcServiceFee, fmtMoney, packagePrice, fullPriceForType } from "@/lib/pricing";
+import { calcServiceFee, fmtMoney, packagePrice, fullPriceForType, getTrainerTier, type TrainerTier } from "@/lib/pricing";
 import {
   addReferralCredit,
   awardReferralCreditOnce,
@@ -79,9 +79,9 @@ function joinWithAnd(parts: string[]): string {
  * every cancellation/reschedule/no-show path that needs to know what a
  * client actually paid or owes.
  */
-export function resolvedSessionPrice(reg: { session_price: number | null; is_free: boolean; type: string }): number {
+export function resolvedSessionPrice(reg: { session_price: number | null; is_free: boolean; type: string; booked_trainer?: string | null }): number {
   const isPrivateType = reg.type === "private" || reg.type === "group-private";
-  const basePrice = reg.session_price ?? fullPriceForType(reg.type);
+  const basePrice = reg.session_price ?? fullPriceForType(reg.type, getTrainerTier(reg.booked_trainer));
   return reg.is_free && isPrivateType ? Math.round(basePrice * 0.5 * 100) / 100 : basePrice;
 }
 
@@ -1145,7 +1145,12 @@ export async function finalizePaidPackageEnrollment(
 
   const kids = metadata.kids || "";
   const submittedReferralCode = metadata.submitted_referral_code || undefined;
-  const totalPrice = packagePrice(pkg.package_type);
+  // Prefer the price actually stamped at enrollment (see enrollInPackage) —
+  // recomputing live here would show the wrong amount in this confirmation
+  // if the rate changed between purchase and this webhook firing. The
+  // packagePrice() fallback only covers packages enrolled before total_price
+  // existed.
+  const totalPrice = pkg.total_price ?? packagePrice(pkg.package_type, (pkg.trainer_tier as TrainerTier) || "artemios");
   // The fee was computed on whatever was left AFTER account credit at
   // enrollment (see /api/packages), not the full package price — using
   // totalPrice here would overstate it for any credit-covered enrollment,
@@ -1165,6 +1170,7 @@ export async function finalizePaidPackageEnrollment(
       packageType: pkg.package_type,
       monthYear: pkg.month_year,
       totalPrice,
+      trainerTier: pkg.trainer_tier || "artemios",
       appliedAccountCredit: appliedCredit,
       kids: kids || undefined,
       referralCode: submittedReferralCode,

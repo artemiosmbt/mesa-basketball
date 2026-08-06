@@ -10,7 +10,7 @@ import {
 import { sendAdminSMS, sendSMS } from "@/lib/sms";
 import { getWeeklySchedule } from "@/lib/sheets";
 import { resolveOffSessionPaymentSource, chargeSavedCardOffSession, issueStripeRefund } from "@/lib/booking-finalize";
-import { calcServiceFee, serviceFeeLabel, fmtMoney, calcPrivatePrice, fullPriceForType } from "@/lib/pricing";
+import { calcServiceFee, serviceFeeLabel, fmtMoney, calcPrivatePrice, fullPriceForType, getTrainerTier } from "@/lib/pricing";
 
 
 function parseMinsFromTime(t: string): number {
@@ -96,10 +96,12 @@ export async function POST(req: NextRequest) {
   const newCount = oldCount + 1;
   const isPriv = isPrivateType(reg.type);
 
+  const trainerTier = getTrainerTier(reg.booked_trainer);
+
   let newFullPrice: number | null = null;
   if (isPriv && reg.booked_start_time && reg.booked_end_time) {
     const durationMins = Math.max(60, parseMinsFromTime(reg.booked_end_time) - parseMinsFromTime(reg.booked_start_time));
-    newFullPrice = calcPrivatePrice(durationMins, newCount);
+    newFullPrice = calcPrivatePrice(durationMins, newCount, trainerTier);
   } else if (reg.type === "weekly" && reg.booked_date && reg.booked_start_time) {
     // Look up the group's actual live rate rather than scaling the stored
     // price — different groups have different per-session rates (e.g. "HS
@@ -129,7 +131,7 @@ export async function POST(req: NextRequest) {
   // from both sides so the displayed/texted amounts reflect what's actually
   // still owed, not the pre-credit rate.
   const appliedCredit = reg.applied_account_credit || 0;
-  const oldFullPrice = reg.session_price ?? fullPriceForType(reg.type);
+  const oldFullPrice = reg.session_price ?? fullPriceForType(reg.type, trainerTier);
   const oldAmount = Math.max(0, effectiveAmount(oldFullPrice, !!reg.is_free, isPriv) - appliedCredit);
   const newAmount = newFullPrice !== null ? Math.max(0, effectiveAmount(newFullPrice, !!reg.is_free, isPriv) - appliedCredit) : oldAmount;
   const priceDelta = newFullPrice !== null ? newAmount - oldAmount : 0;

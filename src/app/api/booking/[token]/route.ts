@@ -17,16 +17,17 @@ import {
   attachStripeCheckoutSession,
   logLateFeeEvent,
   recordCampDayRefund,
+  hasConflictingPrivateBooking,
 } from "@/lib/supabase";
 import { issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome, isLateAction, parseSessionDateTimeET } from "@/lib/booking-finalize";
 import { getStripe } from "@/lib/stripe";
-import { calcServiceFee, serviceFeeItemName, fmtMoney, calcPrivatePrice } from "@/lib/pricing";
+import { calcServiceFee, serviceFeeItemName, fmtMoney, calcPrivatePrice, getTrainerTier, type TrainerTier } from "@/lib/pricing";
 import {
   sendCancellationNotification,
   sendRescheduleNotification,
   sendPlayerUpdateNotification,
 } from "@/lib/email";
-import { getCurrentSheetLocation, getWeeklySchedule } from "@/lib/sheets";
+import { getCurrentSheetLocation, getWeeklySchedule, isPrivateWindowOfferedByTrainer } from "@/lib/sheets";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import {
   addPrivateSessionToCalendar,
@@ -515,7 +516,7 @@ export async function DELETE(
     const durationMins = reg.booked_start_time && reg.booked_end_time
       ? Math.max(60, parseMins(reg.booked_end_time) - parseMins(reg.booked_start_time))
       : 60;
-    const liveFullPrice = calcPrivatePrice(durationMins, reg.total_participants || 1);
+    const liveFullPrice = calcPrivatePrice(durationMins, reg.total_participants || 1, getTrainerTier(reg.booked_trainer));
     packageLateFeeAmount = Math.round(liveFullPrice * 0.5 * 100) / 100;
     if (packageLateFeeAmount > 0) {
       try {
@@ -751,8 +752,9 @@ export async function PATCH(
     const oldTierHigh = oldCount >= 4;
     const newTierHigh = newCount >= 4;
     if (oldTierHigh !== newTierHigh) {
-      const lowPrice = calcPrivatePrice(duration, 1);
-      const highPrice = calcPrivatePrice(duration, 4);
+      const trainerTier = getTrainerTier(reg.booked_trainer);
+      const lowPrice = calcPrivatePrice(duration, 1, trainerTier);
+      const highPrice = calcPrivatePrice(duration, 4, trainerTier);
       if (!newTierHigh) {
         // 4+ → 1-3: dropping tier
         newPrice = isLate ? Math.round((lowPrice + highPrice) * 100 / 2) / 100 : lowPrice;
@@ -955,6 +957,30 @@ export async function PUT(
     : `Private Session — ${bookedDate} ${bookedStartTime}-${bookedEndTime} at ${bookedLocation}`;
   const resolvedTrainer: string | undefined = newType === "weekly" ? sessionTrainer : bookedTrainer;
 
+  // Same authoritative slot+trainer+conflict check as a fresh booking (see
+  // register/route.ts) — required here too now that trainer determines
+  // price: a client-side reschedule form could otherwise name a cheaper
+  // substitute trainer for a window only the higher-rate trainer actually
+  // offers, or reschedule into a slot that trainer no longer has. Skipped
+  // when the request isn't actually moving the session (e.g. only the kid
+  // count changed) — the old booking's own row would otherwise show up as
+  // a "conflict" against itself, since it's still confirmed at this point.
+  const isSameSlotAsBefore = reg.booked_date === bookedDate && reg.booked_start_time === bookedStartTime
+    && reg.booked_end_time === bookedEndTime && reg.booked_location === bookedLocation
+    && (reg.booked_trainer || undefined) === resolvedTrainer;
+  if (newType !== "weekly" && !isSameSlotAsBefore) {
+    if (!resolvedTrainer) {
+      return NextResponse.json({ error: "Missing trainer for the new session" }, { status: 400 });
+    }
+    const [slotOffered, slotConflicting] = await Promise.all([
+      isPrivateWindowOfferedByTrainer(bookedDate, bookedStartTime, bookedEndTime, bookedLocation, resolvedTrainer),
+      hasConflictingPrivateBooking(bookedDate, bookedStartTime, bookedEndTime, bookedLocation, resolvedTrainer),
+    ]);
+    if (!slotOffered || slotConflicting) {
+      return NextResponse.json({ error: "That session is no longer available. Please refresh and try again." }, { status: 400 });
+    }
+  }
+
   // Check if original session is within 24h (with grace period) → late reschedule fee applies
   const isLateReschedule = !!(reg.booked_date && reg.booked_start_time && isLateAction(reg.booked_date, reg.booked_start_time, reg.created_at, reg.admin_change_at));
 
@@ -1061,11 +1087,11 @@ export async function PUT(
     }
   } else if ((newType === "private" || newType === "group-private") && bookedStartTime && bookedEndTime) {
     const duration = Math.max(60, parseMins(bookedEndTime) - parseMins(bookedStartTime));
-    newSessionPrice = calcPrivatePrice(duration, kidCount);
+    newSessionPrice = calcPrivatePrice(duration, kidCount, getTrainerTier(resolvedTrainer));
   }
   const newPriceKnown = newSessionPrice != null;
   const newEffectivePrice = newPriceKnown
-    ? resolvedSessionPrice({ session_price: newSessionPrice ?? null, is_free: newIsFree, type: newType })
+    ? resolvedSessionPrice({ session_price: newSessionPrice ?? null, is_free: newIsFree, type: newType, booked_trainer: resolvedTrainer })
     : undefined;
 
   // Figure out whether real money needs to move. Only bookings actually paid
@@ -1149,7 +1175,7 @@ export async function PUT(
       const oldDuration = reg.booked_start_time && reg.booked_end_time
         ? Math.max(60, parseMins(reg.booked_end_time) - parseMins(reg.booked_start_time))
         : 60;
-      const liveFullPrice = calcPrivatePrice(oldDuration, reg.total_participants || 1);
+      const liveFullPrice = calcPrivatePrice(oldDuration, reg.total_participants || 1, getTrainerTier(reg.booked_trainer));
       packageLateFeeAmount = Math.round(liveFullPrice * 0.5 * 100) / 100;
       if (packageLateFeeAmount > 0) {
         try {
@@ -1217,7 +1243,13 @@ export async function PUT(
     // never a 4+ kid group-private rate, regardless of remaining capacity.
     const oldPkg = await getPackageById(reg.package_id).catch(() => null);
     let sameMonthCovered = false;
-    if (oldPkg && newType === "private" && kidCount <= 3) {
+    // Also requires the NEW trainer to match the package's own tier — a
+    // reschedule can change trainer (resolvedTrainer comes straight from
+    // the client), and without this check a package bought for one tier
+    // could be used to cover a session with the other tier's trainer for
+    // free (e.g. an "Any Available Trainer" package silently covering an
+    // Artemios session, or vice versa).
+    if (oldPkg && newType === "private" && kidCount <= 3 && getTrainerTier(resolvedTrainer) === ((oldPkg.trainer_tier as TrainerTier) || "artemios")) {
       const d = new Date(bookedDate);
       if (!isNaN(d.getTime())) {
         const newMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;

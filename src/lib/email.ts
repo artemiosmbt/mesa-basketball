@@ -1,5 +1,5 @@
 import { Resend } from "resend";
-import { calcServiceFee, fmtMoney, PRIVATE_RATE, GROUP_PRIVATE_RATE } from "./pricing";
+import { calcServiceFee, fmtMoney, PRIVATE_RATE_BY_TIER, GROUP_PRIVATE_RATE_BY_TIER, getTrainerTier } from "./pricing";
 import { formatMonthYear } from "./sms";
 
 const ARTEMI_EMAIL = "artemios@mesabasketballtraining.com";
@@ -216,12 +216,13 @@ export async function sendRegistrationNotification(data: {
        </p>`
     : "";
 
+  const emailTrainerTier = getTrainerTier(data.trainer);
   const priceNote = isPackageBooking || data.isFree
     ? ""
     : data.type === "private"
-      ? `<p><strong>Rate:</strong> $${PRIVATE_RATE} (up to 3 participants)</p>`
+      ? `<p><strong>Rate:</strong> $${PRIVATE_RATE_BY_TIER[emailTrainerTier]} (up to 3 participants)</p>`
       : data.type === "group-private"
-        ? `<p><strong>Rate:</strong> $${GROUP_PRIVATE_RATE} (4+ participants)</p>`
+        ? `<p><strong>Rate:</strong> $${GROUP_PRIVATE_RATE_BY_TIER[emailTrainerTier]} (4+ participants)</p>`
         : "";
 
   // This function only ever runs once a booking is actually confirmed —
@@ -498,6 +499,7 @@ export async function sendPackageConfirmation(data: {
   packageType: number;
   monthYear: string;
   totalPrice: number;
+  trainerTier?: string;
   appliedAccountCredit?: number;
   kids?: string;
   referralCode?: string;
@@ -564,7 +566,7 @@ export async function sendPackageConfirmation(data: {
       <p style="background: #162d5a; color: #d4af37; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">${chargedToCard > 0 ? `Charged to your card: $${fmtMoney(chargedToCard)}` : "Fully covered by your account credit — no card was charged"}</p>
       <p>Your next ${data.packageType} private session bookings this month are already covered — nothing further will be charged when you book them at <a href="${BASE_URL}/schedule" style="color: #d4af37; font-weight: bold;">mesabasketballtraining.com/schedule</a>, up to your package total.</p>
       <h3>Cancellation &amp; Rescheduling Policy</h3>
-      <p>Cancellations and reschedules within 24 hours of a scheduled session incur a <strong>$${fmtMoney(PRIVATE_RATE * 0.5)} fee</strong> (50% of the standard $${PRIVATE_RATE} private rate). <strong>No-shows without prior notice will be charged the full session fee.</strong></p>
+      <p>Cancellations and reschedules within 24 hours of a scheduled session incur a <strong>$${fmtMoney(PRIVATE_RATE_BY_TIER[data.trainerTier === "other" ? "other" : "artemios"] * 0.5)} fee</strong> (50% of the standard $${PRIVATE_RATE_BY_TIER[data.trainerTier === "other" ? "other" : "artemios"]} private rate). <strong>No-shows without prior notice will be charged the full session fee.</strong></p>
       <h3>Track Your Sessions</h3>
       <p><a href="${BASE_URL}/my-bookings" style="color: #d4af37; font-weight: bold;">View My Bookings</a> — check how many sessions you've used this month.</p>
       <br/>

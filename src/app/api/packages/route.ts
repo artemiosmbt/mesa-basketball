@@ -1,14 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { enrollInPackage, getActivePackage, hasPendingOrActivePackage, isNewClient, findReferrerInfoByCode, attachPackageCheckoutSession, getAccountCreditBalance, deductAccountCredit } from "@/lib/supabase";
 import { getStripe, buildCreditDiscount } from "@/lib/stripe";
-import { calcServiceFee, serviceFeeItemName, packagePrice } from "@/lib/pricing";
+import { calcServiceFee, serviceFeeItemName, packagePrice, type TrainerTier } from "@/lib/pricing";
 import { resolveRequestEmail } from "@/lib/request-email";
 import { finalizePaidPackageEnrollment } from "@/lib/booking-finalize";
+import { ARTEMIOS_PACKAGES_AVAILABLE } from "@/lib/feature-flags";
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { parentName, email: rawEmail, phone, packageType, monthYear, kids, referralCode, smsConsent, applyAccountCredit: rawApplyAccountCredit } = body;
+    const { parentName, email: rawEmail, phone, packageType, monthYear, kids, referralCode, smsConsent, applyAccountCredit: rawApplyAccountCredit, trainerTier: rawTrainerTier } = body;
+    // Never trust a client-sent price for this — only the tier selection
+    // itself, validated against a fixed set, with price always computed
+    // server-side from it (see packagePrice below).
+    const trainerTier: TrainerTier = rawTrainerTier === "other" ? "other" : "artemios";
     // Normalized once at the boundary — the self-referral comparison below
     // must match the lowercased/trimmed form already stored for the referrer.
     const email = typeof rawEmail === "string" ? rawEmail.toLowerCase().trim() : rawEmail;
@@ -28,6 +33,14 @@ export async function POST(req: NextRequest) {
 
     if (packageType !== 4 && packageType !== 8) {
       return NextResponse.json({ error: "Invalid package type. Must be 4 or 8." }, { status: 400 });
+    }
+
+    // The client-side selector disables the Artemios option while he's not
+    // taking new package enrollments — enforce that here too, not just
+    // visually, since a request can always be sent directly regardless of
+    // what the UI shows.
+    if (trainerTier === "artemios" && !ARTEMIOS_PACKAGES_AVAILABLE) {
+      return NextResponse.json({ error: "Artemios isn't currently taking new package enrollments. Please choose Any Available Trainer instead." }, { status: 400 });
     }
 
     // Block a second attempt for the same month whether the existing one is
@@ -56,7 +69,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const totalPrice = packagePrice(packageType);
+    const totalPrice = packagePrice(packageType, trainerTier);
 
     // Same account-credit pattern as every other paid booking type
     // (/api/register): deduct up front, race-safe, capped at the price
@@ -73,7 +86,7 @@ export async function POST(req: NextRequest) {
     const amountToCharge = Math.max(0, totalPrice - accountCreditApplied);
 
     const { id } = await enrollInPackage({
-      email, parentName, phone, packageType, monthYear, totalPrice,
+      email, parentName, phone, packageType, monthYear, totalPrice, trainerTier,
       ...(accountCreditApplied > 0 ? { appliedAccountCredit: accountCreditApplied } : {}),
     });
 
@@ -118,7 +131,7 @@ export async function POST(req: NextRequest) {
         {
           price_data: {
             currency: "usd",
-            product_data: { name: `${packageType}-Session Monthly Package — ${monthYear}` },
+            product_data: { name: `${packageType}-Session Monthly Package (${trainerTier === "other" ? "Any Available Trainer" : "Artemios"}) — ${monthYear}` },
             // Full pre-credit price — the discount coupon above handles the
             // credit deduction as its own line on Stripe's own page.
             unit_amount: Math.round(totalPrice * 100),

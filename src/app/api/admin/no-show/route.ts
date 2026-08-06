@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { verifyDashboardAccess } from "@/lib/auth";
 import { sendAdminSMS } from "@/lib/sms";
 import { countPackageSessionsUsed, setPackageSessions } from "@/lib/supabase";
-import { fmtMoney, fullPriceForType } from "@/lib/pricing";
+import { fmtMoney, fullPriceForType, getTrainerTier } from "@/lib/pricing";
 
 // The one write action every trainer tier (not just full admin) can take —
 // they're the one who'd actually know a client didn't show up.
@@ -75,7 +75,7 @@ export async function POST(req: NextRequest) {
   }
 
   const isPrivateType = reg.type === "private" || reg.type === "group-private";
-  const basePrice = reg.session_price != null ? reg.session_price : fullPriceForType(reg.type);
+  const basePrice = reg.session_price != null ? reg.session_price : fullPriceForType(reg.type, getTrainerTier(reg.booked_trainer));
   const fullFeeAmount = reg.is_free && isPrivateType ? Math.round(basePrice * 0.5 * 100) / 100 : basePrice;
 
   // A no-show keeps the FULL charge per policy — if they already paid

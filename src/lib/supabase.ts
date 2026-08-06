@@ -1024,6 +1024,12 @@ export interface MonthlyPackage {
   total_price?: number | null;
   applied_account_credit?: number | null;
   sms_consent: boolean;
+  // 'artemios' | 'other' — which trainer tier this package was purchased
+  // for and can be redeemed against. Nullable only for rows enrolled before
+  // this column existed; the backfill migration sets those to 'artemios'
+  // (the only tier that existed at the time), so treat a null here the
+  // same way in any code that reads it.
+  trainer_tier?: string | null;
 }
 
 // Inserted as 'pending_payment' — the client is redirected to Stripe
@@ -1040,6 +1046,7 @@ export async function enrollInPackage(data: {
   packageType: number;
   monthYear: string;
   totalPrice: number;
+  trainerTier: string;
   appliedAccountCredit?: number;
 }): Promise<{ id: string }> {
   const supabase = getSupabase();
@@ -1055,6 +1062,7 @@ export async function enrollInPackage(data: {
       reminder_sent: false,
       status: "pending_payment",
       total_price: data.totalPrice,
+      trainer_tier: data.trainerTier,
       ...(data.appliedAccountCredit ? { applied_account_credit: data.appliedAccountCredit } : {}),
     })
     .select("id")
@@ -1387,7 +1395,7 @@ export async function getGroupSessionEnrollment(): Promise<
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from("registrations")
-    .select("booked_date, booked_start_time, booked_group, total_participants")
+    .select("type, booked_date, booked_start_time, booked_group, booked_trainer, total_participants")
     .in("type", ["weekly", "camp"])
     .eq("status", "confirmed")
     .not("booked_date", "is", null);
@@ -1396,9 +1404,17 @@ export async function getGroupSessionEnrollment(): Promise<
 
   const counts: Record<string, number> = {};
   for (const row of data) {
-    // Include the group label so two different groups/sessions at the same
-    // date+time never share a capacity pool — each gets its own count.
-    const key = `${row.booked_date}|${row.booked_start_time}|${row.booked_group || ""}`;
+    // Weekly rows include the trainer in the key so two different
+    // same-named groups at the same date+time — run by different trainers —
+    // never share a capacity pool (one trainer can never run two groups at
+    // once, so trainer is what actually distinguishes them; see
+    // checkGroupSessionCapacity). Camps have no multi-trainer concept and
+    // the client keys camp lookups without a trainer segment (see
+    // schedule/page.tsx) — including one here would silently break camp
+    // enrollment counts by mismatching that key.
+    const key = row.type === "weekly"
+      ? `${row.booked_date}|${row.booked_start_time}|${row.booked_group || ""}|${row.booked_trainer || "Artemios Gavalas"}`
+      : `${row.booked_date}|${row.booked_start_time}|${row.booked_group || ""}`;
     counts[key] = (counts[key] || 0) + (row.total_participants || 1);
   }
   return counts;
@@ -1460,13 +1476,20 @@ export async function checkGroupSessionCapacity(
   date: string,
   startTime: string,
   group: string,
-  maxSpots: number
+  maxSpots: number,
+  trainer: string
 ): Promise<{ available: boolean; enrolled: number }> {
   const supabase = getSupabase();
   // Confirmed rows always count; a pending_payment row only counts while
   // it's recent enough that someone could plausibly still be mid-checkout
   // (see PENDING_PAYMENT_GRACE_MS) — otherwise an abandoned checkout would
   // hold a "spot" for up to 30 minutes with nobody actually paying for it.
+  //
+  // Filtering on trainer too (not just date+time+group) matters once two
+  // simultaneous instances of the same-named group run side by side with
+  // different coaches — one trainer can never run two groups at once, so
+  // trainer is what actually distinguishes them. Without this, two
+  // independent 8-spot sessions would share one pooled capacity count.
   const { count, error } = await supabase
     .from("registrations")
     .select("*", { count: "exact", head: true })
@@ -1474,10 +1497,57 @@ export async function checkGroupSessionCapacity(
     .or(pendingPaymentGraceFilter())
     .eq("booked_date", date)
     .eq("booked_start_time", startTime)
-    .eq("booked_group", group || "");
+    .eq("booked_group", group || "")
+    .eq("booked_trainer", trainer || "Artemios Gavalas");
 
   const enrolled = error ? 0 : count || 0;
   return { available: enrolled < maxSpots, enrolled };
+}
+
+function parseTimeToMins(t: string): number {
+  const m = t.match(/(\d+):(\d+)\s*(AM|PM)/i);
+  if (!m) return 0;
+  let h = parseInt(m[1]);
+  const min = parseInt(m[2]);
+  if (m[3].toUpperCase() === "PM" && h !== 12) h += 12;
+  if (m[3].toUpperCase() === "AM" && h === 12) h = 0;
+  return h * 60 + min;
+}
+
+/**
+ * True if this trainer already has a confirmed/recent-pending private
+ * booking that overlaps the requested time range at this date+location.
+ * Private sessions have no "capacity" like a group session does — a
+ * trainer can only run one at a time — so any overlap at all (not just an
+ * exact date/time match) means the slot is taken. This is the server-side
+ * guard that was missing entirely before: the schedule page only ever
+ * HID an already-booked window client-side, so a stale tab or a request
+ * built by hand could still book a trainer who was already taken.
+ */
+export async function hasConflictingPrivateBooking(
+  date: string,
+  startTime: string,
+  endTime: string,
+  location: string,
+  trainer: string
+): Promise<boolean> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("registrations")
+    .select("booked_start_time, booked_end_time")
+    .in("type", ["private", "group-private"])
+    .or(pendingPaymentGraceFilter())
+    .eq("booked_date", date)
+    .eq("booked_location", location)
+    .eq("booked_trainer", trainer);
+  if (error || !data) return false;
+  const wantStart = parseTimeToMins(startTime);
+  const wantEnd = parseTimeToMins(endTime);
+  return data.some((r) => {
+    const rowStart = parseTimeToMins(r.booked_start_time as string);
+    const rowEnd = parseTimeToMins(r.booked_end_time as string);
+    return rowStart < wantEnd && rowEnd > wantStart;
+  });
 }
 
 /**

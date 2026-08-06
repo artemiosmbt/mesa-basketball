@@ -11,7 +11,7 @@ import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@
 import { getWeeklySchedule } from "@/lib/sheets";
 import { addAccountCredit, deductAccountCredit, addReferralCredit, logLateFeeEvent, getPackageById, countPackageSessionsUsed, setPackageSessions } from "@/lib/supabase";
 import { isLateAction, resolveOffSessionPaymentSource, chargeSavedCardOffSession, issueStripeRefund } from "@/lib/booking-finalize";
-import { calcServiceFee, serviceFeeLabel, fmtMoney, calcPrivatePrice, fullPriceForType } from "@/lib/pricing";
+import { calcServiceFee, serviceFeeLabel, fmtMoney, calcPrivatePrice, fullPriceForType, getTrainerTier, type TrainerTier } from "@/lib/pricing";
 
 
 function parseMinsFromTime(t: string): number {
@@ -172,7 +172,7 @@ export async function POST(req: NextRequest) {
   let priceLookupFailed = false;
   if (isNewPrivate) {
     const durationMins = Math.max(60, parseMinsFromTime(bookedEndTime) - parseMinsFromTime(bookedStartTime));
-    newFullPrice = calcPrivatePrice(durationMins, reg.total_participants || 1);
+    newFullPrice = calcPrivatePrice(durationMins, reg.total_participants || 1, getTrainerTier(resolvedTrainer));
   } else if (effectiveType === "weekly") {
     try {
       const sessions = await getWeeklySchedule({ noCache: true });
@@ -198,7 +198,7 @@ export async function POST(req: NextRequest) {
   // change the credit-granted/amount-due delta, but the displayed $ amounts
   // need to reflect what the client actually still owes, not the pre-credit rate.
   const appliedCredit = reg.applied_account_credit || 0;
-  const oldFullPrice = reg.session_price ?? fullPriceForType(reg.type);
+  const oldFullPrice = reg.session_price ?? fullPriceForType(reg.type, getTrainerTier(reg.booked_trainer));
   const oldAmount = Math.max(0, effectiveAmount(oldFullPrice, !!reg.is_free, wasPrivate) - appliedCredit);
   const newAmount = newFullPrice !== undefined ? Math.max(0, effectiveAmount(newFullPrice, newIsFree, isNewPrivate) - appliedCredit) : oldAmount;
   const priceDelta = newFullPrice !== undefined ? newAmount - oldAmount : 0;
@@ -227,13 +227,17 @@ export async function POST(req: NextRequest) {
       const oldDuration = reg.booked_start_time && reg.booked_end_time
         ? Math.max(60, parseMinsFromTime(reg.booked_end_time) - parseMinsFromTime(reg.booked_start_time))
         : 60;
-      const liveFullPrice = calcPrivatePrice(oldDuration, reg.total_participants || 1);
+      const liveFullPrice = calcPrivatePrice(oldDuration, reg.total_participants || 1, getTrainerTier(reg.booked_trainer));
       packageLateFeeAmount = Math.round(liveFullPrice * 0.5 * 100) / 100;
     }
     // Packages only ever cover a standard private session (up to 3 kids) —
     // never a 4+ kid group-private rate, regardless of remaining capacity.
+    // Also requires the NEW trainer to match the package's own tier — an
+    // admin reschedule can move the session to a different trainer, and
+    // without this check a package bought for one tier could end up
+    // covering the other tier's (possibly pricier) trainer for free.
     const oldPkg = await getPackageById(reg.package_id).catch(() => null);
-    if (oldPkg && effectiveType === "private" && (reg.total_participants || 1) <= 3) {
+    if (oldPkg && effectiveType === "private" && (reg.total_participants || 1) <= 3 && getTrainerTier(resolvedTrainer) === ((oldPkg.trainer_tier as TrainerTier) || "artemios")) {
       const d = new Date(bookedDate);
       if (!isNaN(d.getTime())) {
         const newMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
