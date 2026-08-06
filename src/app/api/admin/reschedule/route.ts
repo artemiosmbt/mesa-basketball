@@ -318,9 +318,10 @@ export async function POST(req: NextRequest) {
   let lateFeeCreditApplied = 0;
   let amountToCharge = 0;
   if (wasPaid && chargeLateFee) {
-    // Weekly group sessions: late reschedule is full forfeiture — nothing
-    // credited toward the new session, which is charged in full below.
-    // Every other paid session type keeps the original 50%-credited policy.
+    // Bulk-discounted weekly group sessions: late reschedule is full
+    // forfeiture — nothing credited toward the new session, which is
+    // charged in full below. A plain (non-bulk) weekly booking, and every
+    // other paid session type, keeps the original 50%-credited policy.
     lateFeeCredited = fullForfeitNoRefund ? 0 : Math.round(oldAmount * 0.5 * 100) / 100;
     lateFeeCreditApplied = Math.min(lateFeeCredited, newAmount);
     amountToCharge = Math.max(0, Math.round((newAmount - lateFeeCreditApplied) * 100) / 100);
