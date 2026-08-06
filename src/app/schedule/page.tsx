@@ -2921,7 +2921,20 @@ export default function Home() {
                               : 0;
                             const durationOptions = getDurationOptions(sel.start, window.endMins);
                             const endTime = formatTimeFromMins(sel.start + sel.duration);
-                            const price = getPrivatePrice(sel.duration, 1, getTrainerTier(selectedTrainer));
+                            // Before a trainer is picked, "From $X" reflects
+                            // the cheapest trainer ACTUALLY available on this
+                            // specific card — e.g. if Artemios is the only
+                            // one training that day, this correctly shows
+                            // $150, not a blind $125 guess that isn't really
+                            // bookable. Once a trainer is picked, it's their
+                            // exact rate, no longer a "from" estimate.
+                            const cheapestAvailablePrice = window.trainers.reduce<number | null>((min, t) => {
+                              const p = getPrivatePrice(sel.duration, 1, getTrainerTier(t));
+                              return min === null || p < min ? p : min;
+                            }, null);
+                            const price = selectedTrainer
+                              ? getPrivatePrice(sel.duration, 1, getTrainerTier(selectedTrainer))
+                              : (cheapestAvailablePrice ?? getPrivatePrice(sel.duration, 1, "other"));
 
                             return (
                               <div
@@ -2935,7 +2948,7 @@ export default function Home() {
                                     onChange={(e) => updateWindowTrainer(wi, window, e.target.value)}
                                     className="rounded border border-brown-700 bg-brown-800 px-1.5 py-0.5 text-xs text-white focus:border-mesa-accent focus:outline-none"
                                   >
-                                    <option value="">Select a trainer</option>
+                                    <option value="">Select a Trainer</option>
                                     {window.trainers.map((t) => (
                                       <option key={t} value={t}>
                                         {t}
@@ -3896,6 +3909,20 @@ export default function Home() {
                   ? "Every session in this package will be with Artemios."
                   : "Sessions can be booked with any part-time trainer who has an open slot — not locked to one person."}
               </p>
+              {(() => {
+                const packageType = pkgModal.packageType || 4;
+                const normally = PRIVATE_RATE_BY_TIER[pkgModal.trainerTier] * packageType;
+                const price = packagePrice(packageType, pkgModal.trainerTier);
+                const savings = normally - price;
+                const pct = Math.round((1 - price / normally) * 100);
+                return (
+                  <div className="mt-3 rounded-lg bg-brown-800/50 p-3 space-y-0.5">
+                    <p className="text-xs text-brown-500">Normally <span className="line-through">${normally}</span></p>
+                    <p className="text-sm font-semibold text-green-400">Save ${savings} — {pct}% off</p>
+                    <p className="text-xs text-brown-400">${(price / packageType).toFixed(2)} per session</p>
+                  </div>
+                );
+              })()}
             </div>
 
             {pkgAccountCreditBalance !== null && pkgAccountCreditBalance > 0 && (
