@@ -1,3 +1,7 @@
+import { getTrainerTier, normalizeTrainerTier, type TrainerTier } from "./trainers";
+export type { TrainerTier };
+export { getTrainerTier, normalizeTrainerTier };
+
 // Fee added on top of every real Stripe charge (new bookings and reschedule
 // topups) — covers Stripe's own processing cost. Applies uniformly
 // regardless of card type/payment method, which keeps it outside NY's
@@ -51,10 +55,6 @@ export function serviceFeeItemName(chargeAmount: number): string {
 export function fmtMoney(n: number): string {
   return n.toFixed(2);
 }
-
-import { getTrainerTier, normalizeTrainerTier, type TrainerTier } from "./trainers";
-export type { TrainerTier };
-export { getTrainerTier, normalizeTrainerTier };
 
 // Monthly private-session package price, by trainer tier — Artemios runs a
 // higher rate than the part-time substitute trainers. Single source of

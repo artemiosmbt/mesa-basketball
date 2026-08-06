@@ -32,6 +32,14 @@ export function getTrainerTier(name: string | undefined | null): TrainerTier {
 // an unrecognized string straight into a price-table lookup and silently
 // return undefined/NaN. Defaults to "artemios" (not "other") to match the
 // pre-trainer_tier backfill, which was always Artemios-tier.
+//
+// This defaults the OPPOSITE direction from getTrainerTier above, and
+// deliberately so — the two answer different questions. getTrainerTier maps
+// a trainer NAME to a tier, where an unrecognized name is presumably a new/
+// unlisted substitute, so "other" (the cheaper tier) is the safe guess.
+// normalizeTrainerTier maps an already-stored TIER VALUE back to a real
+// tier, where a missing/legacy value always meant Artemios historically —
+// "artemios" is the correct guess there, not merely the safe one.
 export function normalizeTrainerTier(value: string | undefined | null): TrainerTier {
   return value === "other" ? "other" : "artemios";
 }

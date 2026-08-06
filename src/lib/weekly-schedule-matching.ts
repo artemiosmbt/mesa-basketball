@@ -123,17 +123,6 @@ export function buildWeeklyPlan<T extends WeeklyRegKeyFields>(sheetRows: WeeklyS
   return { changes, deletions, ambiguous };
 }
 
-// The automatic cron (fires on every sheet edit, via Apps Script) and the
-// admin-dashboard-triggered sync (fires on every dashboard load) both watch
-// for the exact same weekly time/location changes with no coordination
-// between them — if an admin edits the sheet and then happens to reload the
-// dashboard shortly after, both can independently see the same registration
-// as "stale" before either one's write has landed, and both would notify
-// the client. This makes the update conditional on the OLD start/end/
-// location still matching what was actually read (optimistic concurrency,
-// no new schema needed) — whichever request's UPDATE actually lands first
-// "wins" and is the only one that proceeds to send the notification; the
-// loser's WHERE clause matches zero rows and it skips sending anything.
 // Detects registrations whose stored booked_trainer no longer matches the
 // sheet's current trainer for that EXACT date+group+time+location — e.g.
 // staff swapped in a substitute coach for an already-booked session
@@ -192,6 +181,17 @@ export async function claimWeeklyTrainerReassignment(
   return !!data && data.length > 0;
 }
 
+// The automatic cron (fires on every sheet edit, via Apps Script) and the
+// admin-dashboard-triggered sync (fires on every dashboard load) both watch
+// for the exact same weekly time/location changes with no coordination
+// between them — if an admin edits the sheet and then happens to reload the
+// dashboard shortly after, both can independently see the same registration
+// as "stale" before either one's write has landed, and both would notify
+// the client. This makes the update conditional on the OLD start/end/
+// location still matching what was actually read (optimistic concurrency,
+// no new schema needed) — whichever request's UPDATE actually lands first
+// "wins" and is the only one that proceeds to send the notification; the
+// loser's WHERE clause matches zero rows and it skips sending anything.
 export async function claimWeeklyTimeChange(
   supabase: SupabaseClient,
   reg: WeeklyRegKeyFields,

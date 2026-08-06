@@ -8,7 +8,7 @@ import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@
 import { addAccountCredit, addReferralCredit, countPackageSessionsUsed, setPackageSessions } from "@/lib/supabase";
 import { issueStripeRefund, resolvedSessionPrice, type StripeRefundResult } from "@/lib/booking-finalize";
 import { fmtMoney } from "@/lib/pricing";
-import { notifyTrainerOfCancellation } from "@/lib/trainer-notify";
+import { notifyTrainerOfCancellation, notifyTrainerOfNewBooking } from "@/lib/trainer-notify";
 
 // A session the trainer removed from the schedule is never the client's
 // fault — this is always treated as an on-time cancellation (full refund,
@@ -98,6 +98,28 @@ function parseTimeMins(t: string): number | null {
   return h * 60 + min;
 }
 
+// Merges consecutive (touching) intervals and reports whether the resulting
+// union fully covers [rangeStart, rangeEnd) — shared by
+// privateBookingStillOnSheet (does this exact range exist at all, across
+// any trainer) and findPrivateTrainerReassignments (does THIS SPECIFIC
+// trainer's own slots cover it) below.
+function intervalsCoverRange(intervals: { start: number; end: number }[], rangeStart: number, rangeEnd: number): boolean {
+  if (intervals.length === 0) return false;
+  const sorted = [...intervals].sort((a, b) => a.start - b.start);
+  let windowStart = sorted[0].start;
+  let windowEnd = sorted[0].end;
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i].start === windowEnd) {
+      windowEnd = sorted[i].end;
+    } else {
+      if (rangeStart >= windowStart && rangeEnd <= windowEnd) return true;
+      windowStart = sorted[i].start;
+      windowEnd = sorted[i].end;
+    }
+  }
+  return rangeStart >= windowStart && rangeEnd <= windowEnd;
+}
+
 // A private booking's start/end time is NOT guaranteed to match any single
 // raw sheet row — the booking page merges consecutive same-day/location/
 // trainer rows into one bigger window (see buildTimeWindows in
@@ -115,18 +137,28 @@ function parseTimeMins(t: string): number | null {
 // location (without the registration's booked_location being resynced;
 // that drift is only patched display-side, by getCurrentSheetLocation)
 // must not look like a deletion.
+// Deliberately trainer-agnostic — this only asks "does this exact date/time
+// (at some location) still exist on the sheet at all," never "does MY
+// trainer still cover it." It used to filter candidate slots down to the
+// registration's OWN stored trainer first, which made a coach reassignment
+// on an already-booked private slot (same date/time/location, just a
+// different trainer covering — see findPrivateTrainerReassignments, which
+// detects exactly that and reconciles booked_trainer separately) look
+// identical to the whole session being deleted from the sheet: the old
+// trainer's name no longer matched any row, this returned false, and the
+// deletion-detection loop below auto-cancelled a real booking and issued a
+// real Stripe refund for a session the client still actually had.
 function privateBookingStillOnSheet(
-  reg: { booked_date: string | null; booked_start_time: string | null; booked_end_time: string | null; booked_trainer?: string | null },
+  reg: { booked_date: string | null; booked_start_time: string | null; booked_end_time: string | null },
   slots: { date: string; startTime: string; endTime: string; location: string; trainer: string }[]
 ): boolean {
   const regStart = parseTimeMins(reg.booked_start_time || "");
   const regEnd = parseTimeMins(reg.booked_end_time || "");
   if (regStart === null || regEnd === null) return true; // can't evaluate — don't risk a false cancel
 
-  const trainer = reg.booked_trainer || "Artemios Gavalas";
   const byLocation: Record<string, { start: number; end: number }[]> = {};
   slots
-    .filter((s) => s.date === reg.booked_date && s.trainer === trainer)
+    .filter((s) => s.date === reg.booked_date)
     .forEach((s) => {
       const start = parseTimeMins(s.startTime);
       const end = parseTimeMins(s.endTime);
@@ -135,21 +167,50 @@ function privateBookingStillOnSheet(
       byLocation[s.location].push({ start, end });
     });
 
-  return Object.values(byLocation).some((rows) => {
-    const sorted = [...rows].sort((a, b) => a.start - b.start);
-    let windowStart = sorted[0].start;
-    let windowEnd = sorted[0].end;
-    for (let i = 1; i < sorted.length; i++) {
-      if (sorted[i].start === windowEnd) {
-        windowEnd = sorted[i].end;
-      } else {
-        if (regStart >= windowStart && regEnd <= windowEnd) return true;
-        windowStart = sorted[i].start;
-        windowEnd = sorted[i].end;
-      }
+  return Object.values(byLocation).some((rows) => intervalsCoverRange(rows, regStart, regEnd));
+}
+
+// Private-session counterpart to findWeeklyTrainerReassignments — detects
+// confirmed private/group-private registrations whose stored booked_trainer
+// no longer matches whichever trainer's sheet slots actually cover that
+// EXACT date/time/location. Quiet, internal-only reconciliation (like the
+// weekly version): no client notification, but the assigned trainer(s) do
+// still get notified — see the call site below.
+function findPrivateTrainerReassignments<
+  T extends { id: string; booked_date: string | null; booked_start_time: string | null; booked_end_time: string | null; booked_location: string | null; booked_trainer: string | null }
+>(
+  regs: T[],
+  slots: { date: string; startTime: string; endTime: string; location: string; trainer: string }[]
+): { reg: T; newTrainer: string }[] {
+  const result: { reg: T; newTrainer: string }[] = [];
+  for (const r of regs) {
+    const regStart = parseTimeMins(r.booked_start_time || "");
+    const regEnd = parseTimeMins(r.booked_end_time || "");
+    if (regStart === null || regEnd === null) continue;
+
+    const sameDayLocation = slots.filter((s) => s.date === r.booked_date && s.location === (r.booked_location || ""));
+    const trainersHere = [...new Set(sameDayLocation.map((s) => s.trainer))];
+    const covered: { start: number; end: number }[] = sameDayLocation
+      .map((s) => ({ start: parseTimeMins(s.startTime), end: parseTimeMins(s.endTime) }))
+      .filter((s): s is { start: number; end: number } => s.start !== null && s.end !== null);
+    // Only act when the registration's exact range still genuinely exists
+    // somewhere on the sheet — if it doesn't, that's a real deletion,
+    // handled entirely separately below, not a trainer swap.
+    if (!intervalsCoverRange(covered, regStart, regEnd)) continue;
+
+    const currentTrainer = r.booked_trainer || "Artemios Gavalas";
+    const coveringTrainer = trainersHere.find((t) => {
+      const trainerIntervals = sameDayLocation
+        .filter((s) => s.trainer === t)
+        .map((s) => ({ start: parseTimeMins(s.startTime), end: parseTimeMins(s.endTime) }))
+        .filter((s): s is { start: number; end: number } => s.start !== null && s.end !== null);
+      return intervalsCoverRange(trainerIntervals, regStart, regEnd);
+    });
+    if (coveringTrainer && coveringTrainer !== currentTrainer) {
+      result.push({ reg: r, newTrainer: coveringTrainer });
     }
-    return regStart >= windowStart && regEnd <= windowEnd;
-  });
+  }
+  return result;
 }
 
 interface WeeklyRegLike extends WeeklyRegKeyFields {
@@ -379,15 +440,40 @@ export async function GET(req: NextRequest) {
   // === TRAINER REASSIGNMENT — WEEKLY SESSIONS (quiet, internal-only) ===
   // A coach swap on an already-booked slot (same date/time/location/group,
   // just a different trainer — "something came up, need someone to cover").
-  // No client notification needed; just keeps booked_trainer in sync so
-  // per-trainer group capacity pooling stays correct. See
-  // findWeeklyTrainerReassignments.
+  // No CLIENT notification needed; just keeps booked_trainer in sync so
+  // per-trainer group capacity pooling stays correct (see
+  // findWeeklyTrainerReassignments) — but the trainers involved do get
+  // notified: outgoing one told it's off their schedule, incoming one told
+  // it's a new booking.
   const trainerReassignments = findWeeklyTrainerReassignments(upcoming, weeklyRegsUpcoming);
   const trainerSyncSummary: string[] = [];
   for (const { reg, newTrainer } of trainerReassignments) {
     const won = await claimWeeklyTrainerReassignment(supabase, reg, newTrainer);
     if (!won) continue; // the admin-dashboard sync already caught and applied this one
-    trainerSyncSummary.push(`• ${reg.booked_date} — ${regGroupKey(reg)}: ${reg.booked_trainer || "Artemios Gavalas"} → ${newTrainer} (${reg.parent_name})`);
+    const oldTrainer = reg.booked_trainer || "Artemios Gavalas";
+    trainerSyncSummary.push(`• ${reg.booked_date} — ${regGroupKey(reg)}: ${oldTrainer} → ${newTrainer} (${reg.parent_name})`);
+    if (reg.booked_date && reg.booked_start_time) {
+      const sessionLabel = regGroupKey(reg);
+      await notifyTrainerOfCancellation({
+        trainer: oldTrainer,
+        parentName: reg.parent_name,
+        sessionLabel,
+        date: reg.booked_date,
+        startTime: reg.booked_start_time,
+        endTime: reg.booked_end_time || reg.booked_start_time,
+        location: reg.booked_location || "",
+      }).catch((err) => console.error("Trainer reassignment-cancel notify failed (weekly):", err));
+      await notifyTrainerOfNewBooking({
+        trainer: newTrainer,
+        parentName: reg.parent_name,
+        kids: reg.kids,
+        sessionLabel,
+        date: reg.booked_date,
+        startTime: reg.booked_start_time,
+        endTime: reg.booked_end_time || reg.booked_start_time,
+        location: reg.booked_location || "",
+      }).catch((err) => console.error("Trainer reassignment-newbooking notify failed (weekly):", err));
+    }
   }
   if (trainerSyncSummary.length > 0) {
     await sendAdminSMS(`TRAINER REASSIGNED:\n${trainerSyncSummary.join("\n")}`);
@@ -484,11 +570,13 @@ export async function GET(req: NextRequest) {
     .in("type", ["private", "group-private"])
     .eq("status", "confirmed");
 
+  const cancelledPrivateIds = new Set<string>();
   for (const r of (allPrivateRegs || [])) {
     if (!r.booked_date || !sessionIsUpcoming(r.booked_date, r.booked_start_time || "")) continue;
     const existsInFirstRead = privateBookingStillOnSheet(r, privateSlots);
     const existsInConfirmRead = privateSlotsConfirm === null ? true : privateBookingStillOnSheet(r, privateSlotsConfirm);
     if (existsInFirstRead || existsInConfirmRead) continue;
+    cancelledPrivateIds.add(r.id);
 
     const summaryKey = `${r.booked_date}|${r.booked_start_time}`;
     if (!cancelledKeys.has(summaryKey)) {
@@ -574,6 +662,58 @@ export async function GET(req: NextRequest) {
     } catch (err) {
       console.error("Admin deletion SMS failed:", err);
     }
+  }
+
+  // === TRAINER REASSIGNMENT — PRIVATE SESSIONS (quiet, internal-only) ===
+  // Same "something came up, need someone to cover" scenario as the weekly
+  // version above, for an already-booked private/group-private session.
+  // Excludes rows just cancelled by the deletion loop directly above (a
+  // genuinely deleted session, not a trainer swap).
+  const privateReassignments = findPrivateTrainerReassignments(
+    (allPrivateRegs || []).filter((r) => !cancelledPrivateIds.has(r.id)),
+    privateSlots
+  );
+  const privateTrainerSyncSummary: string[] = [];
+  for (const { reg: r, newTrainer } of privateReassignments) {
+    const oldTrainer = r.booked_trainer || "Artemios Gavalas";
+    // .eq("booked_trainer", null) would never match in Postgres (NULL = NULL
+    // is never true) — a legacy row with no stored trainer would silently
+    // never win this compare-and-swap without the .is() branch, same
+    // pattern as claimWeeklyTrainerReassignment/claimWeeklyTimeChange.
+    let updateQuery = supabase
+      .from("registrations")
+      .update({ booked_trainer: newTrainer })
+      .eq("id", r.id);
+    updateQuery = r.booked_trainer === null ? updateQuery.is("booked_trainer", null) : updateQuery.eq("booked_trainer", r.booked_trainer);
+    const { data: won } = await updateQuery.select("id");
+    if (!won || won.length === 0) continue; // a concurrent run already applied this
+    privateTrainerSyncSummary.push(`• ${r.booked_date} ${r.booked_start_time} — ${oldTrainer} → ${newTrainer} (${r.parent_name})`);
+
+    const sessionLabel = r.type === "group-private" ? "Group Private Session" : "Private Session";
+    if (r.booked_date && r.booked_start_time) {
+      await notifyTrainerOfCancellation({
+        trainer: oldTrainer,
+        parentName: r.parent_name,
+        sessionLabel,
+        date: r.booked_date,
+        startTime: r.booked_start_time,
+        endTime: r.booked_end_time || r.booked_start_time,
+        location: r.booked_location || "",
+      }).catch((err) => console.error("Trainer reassignment-cancel notify failed (private):", err));
+      await notifyTrainerOfNewBooking({
+        trainer: newTrainer,
+        parentName: r.parent_name,
+        kids: r.kids,
+        sessionLabel,
+        date: r.booked_date,
+        startTime: r.booked_start_time,
+        endTime: r.booked_end_time || r.booked_start_time,
+        location: r.booked_location || "",
+      }).catch((err) => console.error("Trainer reassignment-newbooking notify failed (private):", err));
+    }
+  }
+  if (privateTrainerSyncSummary.length > 0) {
+    await sendAdminSMS(`TRAINER REASSIGNED (private):\n${privateTrainerSyncSummary.join("\n")}`).catch(() => {});
   }
 
   return NextResponse.json({

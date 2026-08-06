@@ -5,6 +5,7 @@ import { getWeeklySchedule } from "@/lib/sheets";
 import { sendTimeChangeNotification } from "@/lib/email";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import { buildWeeklyPlan, claimWeeklyTimeChange, findWeeklyTrainerReassignments, claimWeeklyTrainerReassignment, regGroupKey, type WeeklyRegKeyFields } from "@/lib/weekly-schedule-matching";
+import { notifyTrainerOfCancellation, notifyTrainerOfNewBooking } from "@/lib/trainer-notify";
 
 
 interface WeeklyRegistration extends WeeklyRegKeyFields {
@@ -209,9 +210,11 @@ export async function POST(req: NextRequest) {
   }
 
   // A coach swap on an already-booked slot (same date/time/location/group,
-  // just a different trainer) — quiet, internal-only: no client
-  // notification, just keeps booked_trainer in sync so per-trainer group
-  // capacity pooling stays correct. See findWeeklyTrainerReassignments.
+  // just a different trainer) — quiet on the CLIENT side (no notification,
+  // just keeps booked_trainer in sync so per-trainer group capacity pooling
+  // stays correct — see findWeeklyTrainerReassignments), but the trainers
+  // themselves do get notified: the outgoing one that the slot is off their
+  // schedule, the incoming one that it's a new booking.
   const trainerReassignments = findWeeklyTrainerReassignments(upcoming, candidateRegs);
   let trainerSyncCount = 0;
   const trainerSyncSummary: string[] = [];
@@ -219,7 +222,30 @@ export async function POST(req: NextRequest) {
     const won = await claimWeeklyTrainerReassignment(supabase, reg, newTrainer);
     if (!won) continue; // the cron already caught and applied this one
     trainerSyncCount++;
-    trainerSyncSummary.push(`• ${reg.booked_date} — ${regGroupKey(reg)}: ${reg.booked_trainer || "Artemios Gavalas"} → ${newTrainer} (${reg.parent_name})`);
+    const oldTrainer = reg.booked_trainer || "Artemios Gavalas";
+    trainerSyncSummary.push(`• ${reg.booked_date} — ${regGroupKey(reg)}: ${oldTrainer} → ${newTrainer} (${reg.parent_name})`);
+    if (reg.booked_date && reg.booked_start_time) {
+      const sessionLabel = regGroupKey(reg);
+      await notifyTrainerOfCancellation({
+        trainer: oldTrainer,
+        parentName: reg.parent_name,
+        sessionLabel,
+        date: reg.booked_date,
+        startTime: reg.booked_start_time,
+        endTime: reg.booked_end_time || reg.booked_start_time,
+        location: reg.booked_location || "",
+      }).catch((err) => console.error("Trainer reassignment-cancel notify failed (weekly):", err));
+      await notifyTrainerOfNewBooking({
+        trainer: newTrainer,
+        parentName: reg.parent_name,
+        kids: reg.kids,
+        sessionLabel,
+        date: reg.booked_date,
+        startTime: reg.booked_start_time,
+        endTime: reg.booked_end_time || reg.booked_start_time,
+        location: reg.booked_location || "",
+      }).catch((err) => console.error("Trainer reassignment-newbooking notify failed (weekly):", err));
+    }
   }
   if (trainerSyncSummary.length > 0) {
     await sendAdminSMS(`TRAINER REASSIGNED:\n${trainerSyncSummary.join("\n")}`);

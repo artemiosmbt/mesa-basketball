@@ -2894,11 +2894,23 @@ export default function Home() {
                             const startOptions = getStartOptions(window, 60, isToday ? nowMins : undefined);
                             const defaultStart = startOptions.length > 0 ? startOptions[0] : window.startMins;
                             const totalAvailable = window.endMins - window.startMins;
-                            const sel = windowSelections[wi] || {
+                            // windowSelections is keyed by array index, not by a
+                            // stable window identity — a refetch (any other
+                            // booking completing) can reshuffle which window
+                            // lands at this index, leaving a stale start/duration
+                            // that's out of range for the window actually here
+                            // now (getDurationOptions could even go negative).
+                            // Re-validate against the CURRENT window's bounds,
+                            // same defensive spirit as selectedTrainer just below.
+                            const rawSel = windowSelections[wi] || {
                               start: defaultStart,
                               duration: Math.min(60, window.endMins - defaultStart),
                               trainer: window.trainers[0],
                             };
+                            const startInRange = rawSel.start >= window.startMins && rawSel.start < window.endMins;
+                            const sel = startInRange
+                              ? { ...rawSel, duration: Math.min(rawSel.duration, window.endMins - rawSel.start) || Math.min(60, window.endMins - rawSel.start) }
+                              : { start: defaultStart, duration: Math.min(60, window.endMins - defaultStart), trainer: rawSel.trainer };
                             const selectedTrainer = window.trainers.includes(sel.trainer) ? sel.trainer : window.trainers[0];
                             // Only "included in your package" if the active
                             // package's tier matches whichever trainer is

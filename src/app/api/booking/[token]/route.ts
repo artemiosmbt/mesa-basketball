@@ -1546,7 +1546,8 @@ export async function PUT(
     const oldTrainer = reg.booked_trainer;
     const newTrainer = resolvedTrainer;
     const newLabel = newType === "weekly" ? (sessionGroup || "Group Session") : newType === "group-private" ? "Group Private Session" : "Private Session";
-    if (oldTrainer && newTrainer && oldTrainer === newTrainer && reg.booked_date && reg.booked_start_time) {
+    const slotActuallyMoved = reg.booked_date !== bookedDate || reg.booked_start_time !== bookedStartTime || (reg.booked_end_time || reg.booked_start_time) !== (bookedEndTime || bookedStartTime) || (reg.booked_location || "") !== (bookedLocation || "");
+    if (oldTrainer && newTrainer && oldTrainer === newTrainer && reg.booked_date && reg.booked_start_time && slotActuallyMoved) {
       await notifyTrainerOfReschedule({
         trainer: newTrainer,
         parentName: newParentName,
