@@ -34,6 +34,7 @@ interface Registration {
   applied_account_credit?: number | null;
   is_late_cancel?: boolean;
   camp_day_late_fee?: number | null;
+  package_id?: string | null;
 }
 
 interface ProfileKid {
@@ -79,6 +80,21 @@ const TYPE_LABELS: Record<string, string> = {
 
 function isPickup(r: { type: string; session_details: string }): boolean {
   return r.type === "weekly" && r.session_details?.toLowerCase().includes("pickup");
+}
+
+// Whether a weekly booking was part of a bulk/volume-discounted purchase
+// (the 10%/15% off for booking several sessions at once) — the full-
+// forfeiture late-cancel/reschedule policy only applies to those, not a
+// plain 1-3 session weekly booking at the regular rate. Mirrors the same
+// live-rate comparison the server uses (session_price vs. the group's
+// actual current sheet rate).
+function isBulkDiscountedWeekly(r: Registration, weeklySchedule: WeeklySession[]): boolean {
+  if (r.type !== "weekly" || r.session_price == null || !r.booked_date || !r.booked_start_time) return false;
+  const groupLabel = r.booked_group || r.session_details?.split(" — ")[0] || "";
+  const match = weeklySchedule.find((s) => s.group === groupLabel && s.date === r.booked_date && s.startTime === r.booked_start_time);
+  if (!match) return false;
+  const standardRate = match.price * (r.total_participants || 1);
+  return r.session_price < standardRate;
 }
 
 function typePill(type: string, sessionDetails?: string) {
@@ -1078,11 +1094,23 @@ export default function AdminPage() {
           data.creditedAmount > 0 ? `$${data.creditedAmount} credited to their account` : "",
         ].filter(Boolean).join(", ");
         alert(`Cancelled${data.isLateCancel ? " (late fee charged)" : ""}. ${parts}.`);
+      } else if (data?.packageSessionForfeited) {
+        alert("Cancelled (late). The session was forfeited from their package — no fee, no refund.");
+      } else if (data?.fullForfeitNoRefund) {
+        alert("Cancelled (late). Full forfeiture — nothing refunded or credited.");
+      } else if (data?.isLateCancel) {
+        alert("Cancelled (late fee applies) — nothing to auto-refund/credit for this booking.");
       }
     } else if (data?.needsFeeChoice) {
       setCancelling(null);
+      const reg = registrations.find((x) => x.id === id);
+      const feeExplainer = reg?.package_id
+        ? "OK = CHARGE — the session is forfeited from their package (no fee, but no refund/carryover either).\n\nCancel = WAIVE the fee — the slot is freed back to their package, same as an on-time cancellation."
+        : reg && isBulkDiscountedWeekly(reg, scheduleData?.weeklySchedule || [])
+          ? "OK = CHARGE — full forfeiture, nothing refunded/credited (bulk-discounted booking).\n\nCancel = WAIVE the fee — full refund back to their card, same as an on-time cancellation."
+          : "OK = CHARGE the standard late fee — half of what they paid is credited to their account, the other half is kept as the fee.\n\nCancel = WAIVE the fee — full refund back to their card, same as an on-time cancellation.";
       const charge = confirm(
-        "This booking is within the 24-hour late-cancellation window.\n\nOK = CHARGE the standard late fee — half of what they paid is credited to their account, the other half is kept as the fee.\n\nCancel = WAIVE the fee — full refund back to their card, same as an on-time cancellation."
+        `This booking is within the 24-hour late-cancellation window.\n\n${feeExplainer}`
       );
       return cancelRegistration(id, charge ? "charge" : "waive");
     } else {
@@ -1233,8 +1261,13 @@ export default function AdminPage() {
     setRescheduleSaving(false);
     if (!res.ok) {
       if (data?.needsFeeChoice) {
+        const feeExplainer = r.package_id
+          ? "OK = CHARGE — the original session is forfeited from their package (no fee). If the package still has capacity, the new session is still covered; otherwise it's charged at full price.\n\nCancel = WAIVE the fee — reschedule at no cost, same as an on-time reschedule."
+          : isBulkDiscountedWeekly(r, scheduleData?.weeklySchedule || [])
+            ? "OK = CHARGE — the original session is fully forfeited (no refund/credit, bulk-discounted booking), and the new session is charged at full price.\n\nCancel = WAIVE the fee — reschedule at no cost, same as an on-time reschedule."
+            : "OK = CHARGE the standard late fee — half of what they paid is credited to their account and applied toward the new session, the other half is kept as the fee.\n\nCancel = WAIVE the fee — reschedule at no cost, same as an on-time reschedule.";
         const charge = confirm(
-          "The current session is within the 24-hour late-reschedule window.\n\nOK = CHARGE the standard late fee — half of what they paid is credited to their account and applied toward the new session, the other half is kept as the fee.\n\nCancel = WAIVE the fee — reschedule at no cost, same as an on-time reschedule."
+          `The current session is within the 24-hour late-reschedule window.\n\n${feeExplainer}`
         );
         return submitReschedule(charge ? "charge" : "waive");
       }
@@ -1258,7 +1291,17 @@ export default function AdminPage() {
     } : reg)));
     setReschedulingId(null);
     const notes: string[] = [];
-    if (data.lateFeeCharged) {
+    if (data.packageSessionForfeited) {
+      notes.push(`Original session forfeited from their package (late reschedule).${data.newSessionPackageCovered ? " New session still covered — nothing charged." : " Package had no capacity left for the new date."}`);
+      if (data.autoChargedAmount > 0) {
+        notes.push(`$${data.autoChargedAmount} (+ service fee) was automatically charged to their card on file for the new session.`);
+      }
+    } else if (data.fullForfeitNoRefund) {
+      notes.push(`Original session fully forfeited (no refund/credit) — weekly late reschedule.`);
+      if (data.autoChargedAmount > 0) {
+        notes.push(`$${data.autoChargedAmount} (+ service fee) was automatically charged to their card on file for the new session at full price.`);
+      }
+    } else if (data.lateFeeCharged) {
       notes.push(`Late fee charged: $${data.lateFeeCredited} credited to ${r.parent_name}'s account (50% of what they paid)${data.lateFeeCreditApplied > 0 ? `, $${data.lateFeeCreditApplied} of it applied to the new session` : ""}.`);
       if (data.autoChargedAmount > 0) {
         notes.push(`$${data.autoChargedAmount} (+ service fee) was automatically charged to their card on file to cover the rest.`);

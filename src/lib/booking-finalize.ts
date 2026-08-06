@@ -1088,6 +1088,21 @@ export interface FinalizeRescheduleTopupParams {
   amountCharged: number;
   lateFeeCredited?: number;
   lateFeeCreditApplied?: number;
+  // True when this topup exists because a late-rescheduled package session
+  // was forfeited and the package no longer had capacity to cover the new
+  // date — the old session is simply lost (no fee), and the new one is paid
+  // for outright like a normal booking. Mutually exclusive with
+  // lateFeeCredited/lateFeeCreditApplied (those only apply to the general,
+  // non-package 50%-credited policy).
+  packageSessionForfeited?: boolean;
+  // True when this topup is for a weekly group session that was part of a
+  // bulk/volume-discounted booking (10%/15% off) rescheduled late — the old
+  // session is fully forfeited (no credit at all), and this topup is the new
+  // session's full, undiscounted price. A plain (non-bulk) weekly late
+  // reschedule still uses the general 50%-credited policy above, so this
+  // must be computed by the caller (which knows whether the OLD booking was
+  // bulk-discounted) rather than derived from `type` alone.
+  fullForfeitNoRefund?: boolean;
 }
 
 /**
@@ -1101,6 +1116,7 @@ export interface FinalizeRescheduleTopupParams {
  */
 export async function finalizeRescheduleTopup(params: FinalizeRescheduleTopupParams): Promise<void> {
   const isPrivateType = params.type === "private" || params.type === "group-private";
+  const fullForfeitNoRefund = !!params.fullForfeitNoRefund;
 
   try {
     await sendRescheduleNotification({
@@ -1114,6 +1130,9 @@ export async function finalizeRescheduleTopup(params: FinalizeRescheduleTopupPar
       priceAdjustment: { kind: "charge", amount: params.amountCharged },
       lateFeeCredited: params.lateFeeCredited,
       lateFeeCreditApplied: params.lateFeeCreditApplied,
+      packageSessionForfeited: params.packageSessionForfeited,
+      newSessionPackageCovered: false,
+      fullForfeitNoRefund,
     });
   } catch (err) {
     console.error("Reschedule email failed (topup booking was paid):", err);
@@ -1123,12 +1142,17 @@ export async function finalizeRescheduleTopup(params: FinalizeRescheduleTopupPar
   const creditAppliedNote = params.lateFeeCreditApplied
     ? ` ($${fmtMoney(params.lateFeeCreditApplied)} late-fee credit applied, remainder charged)`
     : "";
+  const forfeitSmsNote = params.packageSessionForfeited
+    ? " (your original package session was forfeited — this is your new session, paid separately)"
+    : fullForfeitNoRefund
+      ? " (your original session was fully forfeited, non-refundable — this is your new session at full price)"
+      : "";
   if (params.smsConsent && params.phone) {
     const trainerLine = params.bookedTrainer ? `\nTrainer: ${params.bookedTrainer}` : "";
-    await sendSMS(params.phone, `Mesa Basketball: Reschedule confirmed — $${fmtMoney(topupTotalWithFee)} charged${creditAppliedNote}!\n${formatDateWithDay(params.bookedDate)} | ${params.bookedStartTime}-${params.bookedEndTime}\nLocation: ${resolveLocationName(params.bookedLocation)}${trainerLine}\nAthlete: ${params.kids}\nManage: mesabasketballtraining.com/booking/${params.manageToken}\nReply STOP to opt out.`);
+    await sendSMS(params.phone, `Mesa Basketball: Reschedule confirmed — $${fmtMoney(topupTotalWithFee)} charged${creditAppliedNote}${forfeitSmsNote}!\n${formatDateWithDay(params.bookedDate)} | ${params.bookedStartTime}-${params.bookedEndTime}\nLocation: ${resolveLocationName(params.bookedLocation)}${trainerLine}\nAthlete: ${params.kids}\nManage: mesabasketballtraining.com/booking/${params.manageToken}\nReply STOP to opt out.`);
   }
 
-  await sendAdminSMS(`RESCHEDULED (paid $${fmtMoney(topupTotalWithFee)}${creditAppliedNote}): ${params.parentName}\nFrom: ${params.oldSessionDetails}\nTo: ${params.newSessionDetails}\nPlayers: ${params.kids}`).catch(() => {});
+  await sendAdminSMS(`RESCHEDULED (paid $${fmtMoney(topupTotalWithFee)}${creditAppliedNote}${params.packageSessionForfeited ? " — package session forfeited" : fullForfeitNoRefund ? " — weekly full forfeiture" : ""}): ${params.parentName}\nFrom: ${params.oldSessionDetails}\nTo: ${params.newSessionDetails}\nPlayers: ${params.kids}`).catch(() => {});
 
   // The OLD trainer (if this swapped trainers) was already notified their
   // slot was gone synchronously when the reschedule was first requested —
@@ -1406,25 +1430,6 @@ async function finalizePlayerEditTopup(session: Stripe.Checkout.Session): Promis
 export async function finalizePaidCheckoutSession(session: Stripe.Checkout.Session): Promise<void> {
   const metadata = session.metadata || {};
 
-  // A package late-cancellation/reschedule fee — this is a standalone
-  // charge with no registration row or package state to flip (the
-  // cancellation/reschedule already happened synchronously when it was
-  // requested; this only confirms the fee itself actually got paid), so it
-  // has no client_reference_id and is checked before that's required below.
-  if (metadata.purpose === "package_late_fee") {
-    const amount = session.amount_total != null ? session.amount_total / 100 : undefined;
-    let firstConfirmation = true;
-    if (metadata.late_fee_event_id && amount != null) {
-      firstConfirmation = await markLateFeeEventCharged(metadata.late_fee_event_id, amount);
-    }
-    // A Stripe webhook redelivery for the same session would otherwise
-    // re-send this "fee PAID" text every time it redelivers.
-    if (firstConfirmation) {
-      await sendAdminSMS(`Package late fee PAID ($${amount != null ? fmtMoney(amount) : "?"}): ${metadata.parent_name || "unknown"}\n${metadata.session_details || ""} (${metadata.action || "cancel/reschedule"})`).catch(() => {});
-    }
-    return;
-  }
-
   // A client editing their own player roster on an already-confirmed
   // booking, where the change increases the price (or a late removal owes a
   // separate fee) — same "no client_reference_id" shape as the package fee
@@ -1498,6 +1503,15 @@ export async function finalizePaidCheckoutSession(session: Stripe.Checkout.Sessi
       amountCharged: metadata.topup_amount ? Number(metadata.topup_amount) : 0,
       lateFeeCredited: metadata.late_fee_credited ? Number(metadata.late_fee_credited) : undefined,
       lateFeeCreditApplied: metadata.late_fee_credit_applied ? Number(metadata.late_fee_credit_applied) : undefined,
+      // A package-covered old session never has its own Stripe payment
+      // intent (see the identical old_payment_intent_id comment in
+      // booking/[token]/route.ts) — the only other path that reaches this
+      // topup with that field empty is a package late reschedule whose
+      // package ran out of capacity. An on-time package reschedule to a
+      // different month also charges full price with this field empty, so
+      // this is deliberately gated on is_late_reschedule too.
+      packageSessionForfeited: !metadata.old_payment_intent_id && metadata.is_late_reschedule === "true",
+      fullForfeitNoRefund: metadata.is_bulk_discounted_weekly === "true" && metadata.is_late_reschedule === "true",
     });
     return;
   }

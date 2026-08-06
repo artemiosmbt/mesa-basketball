@@ -1,5 +1,5 @@
 import { Resend } from "resend";
-import { calcServiceFee, fmtMoney, PRIVATE_RATE_BY_TIER, GROUP_PRIVATE_RATE_BY_TIER, getTrainerTier, normalizeTrainerTier } from "./pricing";
+import { calcServiceFee, fmtMoney, PRIVATE_RATE_BY_TIER, GROUP_PRIVATE_RATE_BY_TIER, getTrainerTier } from "./pricing";
 import { formatMonthYear } from "./sms";
 
 const ARTEMI_EMAIL = "artemios@mesabasketballtraining.com";
@@ -232,7 +232,9 @@ export async function sendRegistrationNotification(data: {
   // states the cancellation/reschedule policy, not a payment method.
   const paymentNote = isPackageBooking || data.isFree
     ? ""
-    : `<p>Please provide at least 24 hours' notice if you need to cancel or reschedule a session. Rescheduling or canceling within 24 hours of the scheduled session will result in a 50% charge of the session fee. <strong>No-shows without prior notice will be charged the full session fee.</strong></p>`;
+    : data.type === "weekly"
+      ? `<p>Please provide at least 24 hours' notice if you need to cancel or reschedule a session. Rescheduling or canceling within 24 hours of the scheduled session will result in a 50% charge of the session fee. <strong>No-shows without prior notice will be charged the full session fee.</strong> (Sessions booked in bulk — 4+ or 8+ at once — are non-refundable if cancelled within 24 hours, and a reschedule within 24 hours is charged at full price for the new session.)</p>`
+      : `<p>Please provide at least 24 hours' notice if you need to cancel or reschedule a session. Rescheduling or canceling within 24 hours of the scheduled session will result in a 50% charge of the session fee. <strong>No-shows without prior notice will be charged the full session fee.</strong></p>`;
 
   const freeNote = !isPackageBooking && data.isFree && data.isFirstTime
     ? `<p style="background: #162d5a; color: #d4af37; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">First Session Discount Applied — 50% Off!</p>`
@@ -396,14 +398,24 @@ export async function sendCancellationNotification(data: {
   isLateCancel: boolean;
   lateFeeAmount?: number;
   campAdjustment?: { finalAmount: number; originalAmount: number; isPaid: boolean; creditGranted: number; stripeRefundResult?: StripeRefundOutcome };
-  // Late cancellation: 50% credited to account. No Stripe call is ever
-  // attempted for this case, so there's nothing to "fail" — it's a plain credit.
+  // Late cancellation (old, non-package/non-weekly policy only): 50%
+  // credited to account. No Stripe call is ever attempted for this case, so
+  // there's nothing to "fail" — it's a plain credit.
   cancelCredit?: number;
   // On-time cancellation of a Stripe-paid booking: the actual outcome of
   // trying to refund it — may be split across a real card refund and account
   // credit (see issueStripeRefund's amount_too_large fallback), or failed
   // entirely (nothing moved yet; admin alerted to complete it manually).
   stripeRefundResult?: StripeRefundOutcome;
+  // Late cancellation of a package-covered session: the session itself is
+  // forfeited (stays counted as "used" against the package, same as a
+  // no-show) — no separate fee is ever charged. Mutually exclusive with
+  // lateFeeAmount/cancelCredit/stripeRefundResult for the same booking.
+  packageSessionForfeited?: boolean;
+  // Late cancellation of a plain (non-package) weekly group session: full
+  // forfeiture, 0% refunded — replaces the old 50%-credited path for weekly
+  // specifically. Also mutually exclusive with cancelCredit/stripeRefundResult.
+  fullForfeitNoRefund?: boolean;
 }) {
   const resend = getResend();
   const isPickupCancel = data.sessionDetails.toLowerCase().includes("pickup");
@@ -412,15 +424,25 @@ export async function sendCancellationNotification(data: {
   const lateFee = data.lateFeeAmount !== undefined
     ? data.lateFeeAmount
     : data.sessionType === "group-private" ? 125 : data.sessionType === "weekly" ? 25 : 75;
-  const lateNote = data.isLateCancel && !data.campAdjustment && !somethingWasAttempted
+  const lateNote = data.packageSessionForfeited
     ? `<div style="background: #7c1d1d; border-left: 4px solid #ef4444; border-radius: 6px; padding: 14px 16px; margin: 16px 0;">
-        <p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #ffffff;">⚠️ Late Fee</p>
-        <p style="margin: 0; color: #ffffff; font-size: 14px;">This cancellation was made within 24 hours of the session. Per our policy, a <strong>50% fee of $${fmtMoney(lateFee)}</strong> is still due.</p>
-        ${PAYMENT_LINES}
+        <p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #ffffff;">⚠️ Late Cancellation</p>
+        <p style="margin: 0; color: #ffffff; font-size: 14px;">This cancellation was made within 24 hours of the session. Per our policy, <strong>this session is forfeited from your package</strong> — no additional charge, but it doesn't carry over or refund.</p>
       </div>`
-    : "";
+    : data.fullForfeitNoRefund
+      ? `<div style="background: #7c1d1d; border-left: 4px solid #ef4444; border-radius: 6px; padding: 14px 16px; margin: 16px 0;">
+          <p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #ffffff;">⚠️ Late Cancellation</p>
+          <p style="margin: 0; color: #ffffff; font-size: 14px;">This cancellation was made within 24 hours of the session. Per our policy, <strong>this session is non-refundable</strong>.</p>
+        </div>`
+      : data.isLateCancel && !data.campAdjustment && !somethingWasAttempted
+        ? `<div style="background: #7c1d1d; border-left: 4px solid #ef4444; border-radius: 6px; padding: 14px 16px; margin: 16px 0;">
+            <p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #ffffff;">⚠️ Late Fee</p>
+            <p style="margin: 0; color: #ffffff; font-size: 14px;">This cancellation was made within 24 hours of the session. Per our policy, a <strong>50% fee of $${fmtMoney(lateFee)}</strong> is still due.</p>
+            ${PAYMENT_LINES}
+          </div>`
+        : "";
 
-  const creditNote = !data.campAdjustment
+  const creditNote = !data.campAdjustment && !data.packageSessionForfeited && !data.fullForfeitNoRefund
     ? moneyOutcomeHtml(data.stripeRefundResult, data.cancelCredit, data.isLateCancel ? " (50% of what you paid — this was a late cancellation, so the other half isn't refunded per our policy)" : "")
     : "";
 
@@ -456,8 +478,10 @@ export async function sendCancellationNotification(data: {
       <h2>${isPickupCancel ? "Pickup " : ""}Session Cancelled</h2>
       <p><strong>Parent:</strong> ${escapeHtml(data.parentName)}</p>
       <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails)}</p>
-      ${data.isLateCancel && !data.campAdjustment && !somethingWasAttempted ? `<p><strong>⚠️ Late cancellation (within 24h) — 50% fee ($${fmtMoney(lateFee)}) applies</strong></p>` : ""}
-      ${!data.campAdjustment && adminCancelSummary ? `<p><strong>${adminCancelSummary}</strong>${data.isLateCancel ? " (late cancellation — 50% of what they paid)" : ""}</p>` : ""}
+      ${data.isLateCancel && data.packageSessionForfeited ? `<p><strong>⚠️ Late cancellation (within 24h) — package session forfeited, no fee charged</strong></p>` : ""}
+      ${data.isLateCancel && data.fullForfeitNoRefund ? `<p><strong>⚠️ Late cancellation (within 24h) — full forfeiture, no refund</strong></p>` : ""}
+      ${data.isLateCancel && !data.campAdjustment && !data.packageSessionForfeited && !data.fullForfeitNoRefund && !somethingWasAttempted ? `<p><strong>⚠️ Late cancellation (within 24h) — 50% fee ($${fmtMoney(lateFee)}) applies</strong></p>` : ""}
+      ${!data.campAdjustment && !data.packageSessionForfeited && !data.fullForfeitNoRefund && adminCancelSummary ? `<p><strong>${adminCancelSummary}</strong>${data.isLateCancel ? " (late cancellation — 50% of what they paid)" : ""}</p>` : ""}
       ${data.campAdjustment ? `<p><strong>New total: $${fmtMoney(data.campAdjustment.finalAmount)} (was $${fmtMoney(data.campAdjustment.originalAmount)}).</strong> ${data.campAdjustment.isPaid ? adminCampSummary : `Due: $${fmtMoney(data.campAdjustment.finalAmount)}`}</p>` : ""}
     `,
   });
@@ -566,7 +590,7 @@ export async function sendPackageConfirmation(data: {
       <p style="background: #162d5a; color: #d4af37; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">${chargedToCard > 0 ? `Charged to your card: $${fmtMoney(chargedToCard)}` : "Fully covered by your account credit — no card was charged"}</p>
       <p>Your next ${data.packageType} private session bookings this month are already covered — nothing further will be charged when you book them at <a href="${BASE_URL}/schedule" style="color: #d4af37; font-weight: bold;">mesabasketballtraining.com/schedule</a>, up to your package total.</p>
       <h3>Cancellation &amp; Rescheduling Policy</h3>
-      <p>Cancellations and reschedules within 24 hours of a scheduled session incur a <strong>$${fmtMoney(PRIVATE_RATE_BY_TIER[normalizeTrainerTier(data.trainerTier)] * 0.5)} fee</strong> (50% of the standard $${PRIVATE_RATE_BY_TIER[normalizeTrainerTier(data.trainerTier)]} private rate). <strong>No-shows without prior notice will be charged the full session fee.</strong></p>
+      <p>Cancelling or rescheduling a session within 24 hours forfeits that session from your package — no fee, but no refund or carryover either. If it was your last session in the package, rescheduling it requires paying full price for the new session (or you can simply cancel instead). <strong>No-shows without prior notice will be charged the full session fee.</strong></p>
       <h3>Track Your Sessions</h3>
       <p><a href="${BASE_URL}/my-bookings" style="color: #d4af37; font-weight: bold;">View My Bookings</a> — check how many sessions you've used this month.</p>
       <br/>
@@ -869,16 +893,46 @@ export async function sendRescheduleNotification(data: {
   // session (priceAdjustment absent) or only partially, with the remainder
   // charged via Stripe (priceAdjustment present).
   lateFeeCreditApplied?: number;
+  // Late reschedule of a package-covered session: the OLD session is
+  // forfeited from the package (stays counted as "used", same as a
+  // no-show) — no separate fee is charged. newSessionPackageCovered says
+  // whether the package still had capacity left to cover the NEW date
+  // after that forfeiture; if not, priceAdjustment carries the full-price
+  // charge for the new session instead.
+  packageSessionForfeited?: boolean;
+  newSessionPackageCovered?: boolean;
+  // Late reschedule of a plain (non-package) weekly group session: the OLD
+  // session is fully forfeited (no credit carried forward at all), and the
+  // new session is always charged at full undiscounted price — carried in
+  // priceAdjustment as a "charge", same as above.
+  fullForfeitNoRefund?: boolean;
 }) {
   const resend = getResend();
 
-  // The late-fee "still due" note only makes sense when nothing was
-  // collected/credited automatically for this reschedule at all.
-  const lateFeeNote = data.isLateReschedule && !data.priceAdjustment && !data.lateFeeCredited
+  // The old flat "50% fee still due" note only applies to the original
+  // (non-package, non-weekly) late-reschedule policy — package and weekly
+  // now have their own dedicated notes below instead.
+  const lateFeeNote = !data.packageSessionForfeited && !data.fullForfeitNoRefund && data.isLateReschedule && !data.priceAdjustment && !data.lateFeeCredited
     ? `<div style="background: #7c1d1d; border-left: 4px solid #ef4444; border-radius: 6px; padding: 14px 16px; margin: 16px 0;">
         <p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #ffffff;">⚠️ Late Fee</p>
         <p style="margin: 0; color: #ffffff; font-size: 14px;">This reschedule was made within 24 hours of the session. Per our policy, a <strong>50% fee${data.lateFeeAmount ? ` of $${fmtMoney(data.lateFeeAmount)}` : ""}</strong> is still due.</p>
         ${PAYMENT_LINES}
+      </div>`
+    : "";
+  const packageForfeitNote = data.packageSessionForfeited
+    ? `<div style="background: #7c1d1d; border-left: 4px solid #ef4444; border-radius: 6px; padding: 14px 16px; margin: 16px 0;">
+        <p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #ffffff;">⚠️ Late Reschedule</p>
+        <p style="margin: 0; color: #ffffff; font-size: 14px;">This reschedule was made within 24 hours of the session. Per our policy, <strong>your original session is forfeited from your package</strong>.${
+          data.newSessionPackageCovered
+            ? " Your new session is still covered by your package — nothing further charged."
+            : " Your package no longer has a session available to cover the new date, so it was charged separately below."
+        }</p>
+      </div>`
+    : "";
+  const fullForfeitNote = data.fullForfeitNoRefund
+    ? `<div style="background: #7c1d1d; border-left: 4px solid #ef4444; border-radius: 6px; padding: 14px 16px; margin: 16px 0;">
+        <p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #ffffff;">⚠️ Late Reschedule</p>
+        <p style="margin: 0; color: #ffffff; font-size: 14px;">This reschedule was made within 24 hours of the session. Per our policy, <strong>your original session is fully forfeited (non-refundable)</strong>, and the new session is charged at full price.</p>
       </div>`
     : "";
   function refundAdjustmentBody(adj: { refundedAmount: number; creditedAmount: number; failed: boolean }): string {
@@ -894,9 +948,11 @@ export async function sendRescheduleNotification(data: {
         <p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #ffffff;">${data.priceAdjustment.kind === "refund" ? (data.priceAdjustment.failed ? "Refund In Progress" : "Refund Issued") : "Payment Received"}</p>
         <p style="margin: 0; color: #ffffff; font-size: 14px;">${data.priceAdjustment.kind === "refund"
           ? refundAdjustmentBody(data.priceAdjustment)
-          : data.isLateReschedule
-            ? `50% of your original payment${data.lateFeeCredited ? ` ($${fmtMoney(data.lateFeeCredited)})` : ""} was kept as a late reschedule fee${data.lateFeeCreditApplied ? `, <strong>$${fmtMoney(data.lateFeeCreditApplied)}</strong> of which was applied directly to your new session` : ""}, and <strong>$${fmtMoney(data.priceAdjustment.amount + calcServiceFee(data.priceAdjustment.amount))}</strong> was charged to cover the rest.`
-            : `<strong>$${fmtMoney(data.priceAdjustment.amount + calcServiceFee(data.priceAdjustment.amount))}</strong> was charged to complete your reschedule (new session is higher-priced).`}</p>
+          : (data.packageSessionForfeited || data.fullForfeitNoRefund)
+            ? `<strong>$${fmtMoney(data.priceAdjustment.amount + calcServiceFee(data.priceAdjustment.amount))}</strong> was charged for your new session${data.fullForfeitNoRefund ? " at full price" : ""}.`
+            : data.isLateReschedule
+              ? `50% of your original payment${data.lateFeeCredited ? ` ($${fmtMoney(data.lateFeeCredited)})` : ""} was kept as a late reschedule fee${data.lateFeeCreditApplied ? `, <strong>$${fmtMoney(data.lateFeeCreditApplied)}</strong> of which was applied directly to your new session` : ""}, and <strong>$${fmtMoney(data.priceAdjustment.amount + calcServiceFee(data.priceAdjustment.amount))}</strong> was charged to cover the rest.`
+              : `<strong>$${fmtMoney(data.priceAdjustment.amount + calcServiceFee(data.priceAdjustment.amount))}</strong> was charged to complete your reschedule (new session is higher-priced).`}</p>
       </div>`
     : !data.priceAdjustment && data.lateFeeCredited
       ? `<div style="background: #1e3a5f; border-left: 4px solid #3b82f6; border-radius: 6px; padding: 14px 16px; margin: 16px 0;">
@@ -927,6 +983,8 @@ export async function sendRescheduleNotification(data: {
             ? `<p><strong>$${fmtMoney(data.lateFeeCreditApplied)} late-fee credit applied to new session</strong>${leftoverLateFeeCredit > 0 ? ` ($${fmtMoney(leftoverLateFeeCredit)} left in account)` : ""}</p>`
             : `<p><strong>$${fmtMoney(data.lateFeeCredited)} credited to their account</strong> (late reschedule — 50% of what they paid)</p>`
           : ""}
+      ${data.packageSessionForfeited ? `<p><strong>⚠️ Late reschedule — package session forfeited</strong>${data.newSessionPackageCovered ? " (new session still covered)" : " (package exhausted)"}</p>` : ""}
+      ${data.fullForfeitNoRefund ? `<p><strong>⚠️ Late reschedule — full forfeiture, no refund</strong></p>` : ""}
       ${lateFeeNote}
     `,
   });
@@ -945,6 +1003,8 @@ export async function sendRescheduleNotification(data: {
       <p><strong>Old Session:</strong> ${formatSessionDetailsForEmail(data.oldSessionDetails)}</p>
       <p><strong>New Session:</strong> ${formatSessionDetailsForEmail(data.newSessionDetails)}</p>
       ${data.newTrainer ? `<p><strong>Trainer:</strong> ${escapeHtml(data.newTrainer)}</p>` : ""}
+      ${packageForfeitNote}
+      ${fullForfeitNote}
       ${priceAdjustmentNote}
       ${lateFeeNote}
       <p><a href="${BASE_URL}/my-bookings" style="color: #d4af37; font-weight: bold;">View My Bookings</a> — Manage all your sessions</p>

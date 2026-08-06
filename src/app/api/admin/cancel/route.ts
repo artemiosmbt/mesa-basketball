@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { verifyAdmin } from "@/lib/auth";
 import { deletePrivateSessionFromCalendar, upsertGroupSessionCalendarEvent } from "@/lib/calendar";
 import { sendCancellationNotification } from "@/lib/email";
-import { getCurrentSheetLocation } from "@/lib/sheets";
+import { getCurrentSheetLocation, getWeeklySchedule } from "@/lib/sheets";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import { issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome, isLateAction } from "@/lib/booking-finalize";
 import { notifyTrainerOfCancellation } from "@/lib/trainer-notify";
@@ -18,20 +18,7 @@ import {
   cancelRegistration,
   recordCampDayRefund,
 } from "@/lib/supabase";
-import { getStripe } from "@/lib/stripe";
-import { calcServiceFee, serviceFeeItemName, fmtMoney, calcPrivatePrice, getTrainerTier } from "@/lib/pricing";
-
-
-function parseMinsFromTime(t: string): number {
-  const m = t.match(/(\d+):(\d+)\s*(AM|PM)/i);
-  if (!m) return 0;
-  let h = parseInt(m[1]);
-  const min = parseInt(m[2]);
-  const period = m[3].toUpperCase();
-  if (period === "PM" && h !== 12) h += 12;
-  if (period === "AM" && h === 12) h = 0;
-  return h * 60 + min;
-}
+import { fmtMoney } from "@/lib/pricing";
 
 export async function POST(req: NextRequest) {
   if (!(await verifyAdmin(req))) {
@@ -78,6 +65,26 @@ export async function POST(req: NextRequest) {
   }
 
   const chargeLateFee = isLate && feeChoice === "charge";
+
+  // Whether this was part of a bulk/volume-discounted weekly booking (the
+  // 10%/15% off for booking several sessions at once) — the full-forfeiture
+  // late-cancellation policy only applies to those, not a plain 1-3 session
+  // weekly booking at the regular rate (which keeps the old 50% late-fee
+  // policy). Same live-rate comparison the client-facing endpoint uses.
+  let isBulkDiscountedWeekly = false;
+  if (reg.type === "weekly" && reg.session_price !== null && reg.booked_date && reg.booked_start_time) {
+    try {
+      const sessions = await getWeeklySchedule({ noCache: true });
+      const groupLabel = reg.booked_group || reg.session_details.split(" — ")[0] || "";
+      const match = sessions.find((s) => s.group === groupLabel && s.date === reg.booked_date && s.startTime === reg.booked_start_time);
+      if (match) {
+        const standardRate = match.price * (reg.total_participants || 1);
+        isBulkDiscountedWeekly = reg.session_price < standardRate;
+      }
+    } catch {
+      // Sheet lookup failed — default to not-discounted rather than guessing.
+    }
+  }
 
   // A multi-day camp booking is actually SEVERAL rows sharing a referral_code
   // (see getCampGroupByReferralCode), each still carrying the ORIGINAL
@@ -332,95 +339,44 @@ export async function POST(req: NextRequest) {
 
   // A package-covered session has no Stripe payment on this row (it was
   // covered by the package's lump-sum charge instead) — an on-time cancel
-  // needs nothing further (slot already freed above). A LATE cancel the
-  // admin chose to CHARGE still needs to cost something, same policy and
-  // mechanism as the client-facing flow: a fresh Stripe Checkout for 50% of
-  // what a session like this actually costs right now, sent directly to the
-  // client (the admin isn't the one paying). Waiving is simply not entering
-  // this block at all.
-  let packageLateFeeCheckoutUrl: string | undefined;
-  let packageLateFeeAmount: number | undefined;
-  if (reg.package_id && chargeLateFee && reg.email) {
-    const durationMins = reg.booked_start_time && reg.booked_end_time
-      ? Math.max(60, parseMinsFromTime(reg.booked_end_time) - parseMinsFromTime(reg.booked_start_time))
-      : 60;
-    const liveFullPrice = calcPrivatePrice(durationMins, reg.total_participants || 1, getTrainerTier(reg.booked_trainer));
-    packageLateFeeAmount = Math.round(liveFullPrice * 0.5 * 100) / 100;
-    if (packageLateFeeAmount > 0) {
-      try {
-        // Logged with no charged amount yet — not real until the client
-        // actually pays it via the Checkout below. Filled in by the webhook
-        // once payment confirms (finalizePaidCheckoutSession's
-        // package_late_fee branch), same as the client-facing equivalent.
-        const eventId = await logLateFeeEvent({
-          registrationId: id,
-          parentName: reg.parent_name,
-          email: reg.email,
-          kids: reg.kids,
-          sessionType: reg.type,
-          sessionDetails: reg.session_details,
-          bookedDate: reg.booked_date,
-          bookedStartTime: reg.booked_start_time,
-          action: "cancel",
-          initiatedBy: "admin",
-        });
-        const stripe = getStripe();
-        const origin = req.nextUrl.origin;
-        const plainDetails = (reg.session_details || "").replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "").trim();
-        const feeSession = await stripe.checkout.sessions.create({
-          mode: "payment",
-          payment_method_types: ["card"],
-          customer_creation: "always",
-          customer_email: reg.email,
-          metadata: {
-            purpose: "package_late_fee",
-            action: "cancel",
-            parent_name: reg.parent_name,
-            session_details: plainDetails,
-            late_fee_event_id: eventId || "",
-          },
-          line_items: [
-            {
-              price_data: {
-                currency: "usd",
-                product_data: { name: `Late Cancellation Fee: ${plainDetails || "Mesa Basketball Training Session"}` },
-                unit_amount: Math.round(packageLateFeeAmount * 100),
-              },
-              quantity: 1,
-            },
-            {
-              price_data: {
-                currency: "usd",
-                product_data: { name: serviceFeeItemName(packageLateFeeAmount) },
-                unit_amount: Math.round(calcServiceFee(packageLateFeeAmount) * 100),
-              },
-              quantity: 1,
-            },
-          ],
-          success_url: `${origin}/booking-confirmed?session_id={CHECKOUT_SESSION_ID}`,
-          cancel_url: `${origin}/my-bookings`,
-          expires_at: Math.floor(Date.now() / 1000) + 30 * 60,
-        });
-        packageLateFeeCheckoutUrl = feeSession.url ?? undefined;
-      } catch (err) {
-        console.error("Failed to create package late-cancellation fee checkout (admin):", err);
-      }
-    }
+  // (or the admin choosing to WAIVE a late one) needs nothing further (slot
+  // already freed above). A LATE cancel the admin chose to CHARGE no longer
+  // triggers a fresh 50% Stripe charge — same forfeiture policy as the
+  // client-facing flow: the session itself is simply lost (already reflected
+  // by the recompute above, since is_late_cancel was set from chargeLateFee).
+  const packageSessionForfeited = !!(reg.package_id && chargeLateFee);
+  if (packageSessionForfeited) {
+    await logLateFeeEvent({
+      registrationId: id,
+      parentName: reg.parent_name,
+      email: reg.email,
+      kids: reg.kids,
+      sessionType: reg.type,
+      sessionDetails: reg.session_details,
+      bookedDate: reg.booked_date,
+      bookedStartTime: reg.booked_start_time,
+      action: "cancel",
+      initiatedBy: "admin",
+    });
   }
 
   // Full refund/credit unless the admin explicitly chose to charge the
   // standard late fee — in which case it's exactly the client-initiated
   // late-cancellation policy: half kept (no refund needed, it's already
-  // been captured), half credited. No new Stripe charge is ever needed
-  // here either way — this only decides how much of the EXISTING captured
+  // been captured), half credited — EXCEPT for bulk-discounted weekly group
+  // sessions, where "charge" now means full forfeiture (0% credited),
+  // replacing the old 50% policy there too. A plain (non-bulk) weekly
+  // booking keeps the 50% policy. No new Stripe charge is ever needed here
+  // either way — this only decides how much of the EXISTING captured
   // payment gets refunded back vs kept.
   const wasPaid = !!reg.is_paid || !!reg.stripe_payment_intent_id;
+  const fullForfeitNoRefund = isBulkDiscountedWeekly && chargeLateFee;
   let stripeRefundResult: { refundedAmount: number; creditedAmount: number; failed: boolean } | undefined;
   let creditIssued = 0;
   if (wasPaid && reg.email) {
     const paidAmount = Math.max(0, resolvedSessionPrice(reg) - (reg.applied_account_credit || 0));
     if (chargeLateFee) {
-      creditIssued = Math.round(paidAmount * 0.5 * 100) / 100;
+      creditIssued = fullForfeitNoRefund ? 0 : Math.round(paidAmount * 0.5 * 100) / 100;
       if (creditIssued > 0) await addAccountCredit(reg.email, creditIssued).catch(() => {});
     } else if (paidAmount > 0) {
       if (reg.stripe_payment_intent_id) {
@@ -500,27 +456,32 @@ export async function POST(req: NextRequest) {
         sessionType: reg.type,
         isLateCancel: chargeLateFee,
         stripeRefundResult,
-        cancelCredit: !stripeRefundResult && creditIssued > 0 ? creditIssued : undefined,
+        cancelCredit: !stripeRefundResult && creditIssued > 0 && !fullForfeitNoRefund ? creditIssued : undefined,
+        packageSessionForfeited,
+        fullForfeitNoRefund,
       });
       if (reg.sms_consent && reg.phone) {
         const sessionLine = reg.booked_date && reg.booked_start_time
           ? `\n${formatDateWithDay(reg.booked_date)} | ${reg.booked_start_time}${reg.booked_end_time ? `-${reg.booked_end_time}` : ""}${bookedLocation ? `\nLocation: ${resolveLocationName(bookedLocation)}` : ""}`
           : "";
         const moneyOutcome = wasPaid ? describeMoneyOutcome(stripeRefundResult, creditIssued, chargeLateFee, false) : "";
-        const moneyNote = reg.package_id
-          ? (packageLateFeeCheckoutUrl
-              ? `\nLate cancellation fee: $${fmtMoney((packageLateFeeAmount || 0) + calcServiceFee(packageLateFeeAmount || 0))}. Finish payment here: ${packageLateFeeCheckoutUrl}`
-              : "\nYour package session is available for you to rebook.")
-          : moneyOutcome ? `\n${moneyOutcome}.` : "";
+        const moneyNote = packageSessionForfeited
+          ? "\nLate cancellation: this session is forfeited from your package — no additional charge."
+          : fullForfeitNoRefund
+            ? "\nLate cancellation: this session is non-refundable per our 24-hour policy."
+            : reg.package_id
+              ? "\nYour package session is available for you to rebook."
+              : moneyOutcome ? `\n${moneyOutcome}.` : "";
         await sendSMS(reg.phone, `Mesa Basketball: Session cancelled by your trainer.${sessionLine}\nAthlete: ${reg.kids}${moneyNote}\nQuestions? mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
       }
       const adminMoneyOutcome = wasPaid ? describeMoneyOutcome(stripeRefundResult, creditIssued, chargeLateFee, true) : "";
-      const adminPackageNote = reg.package_id
-        ? packageLateFeeCheckoutUrl
-          ? `\nPackage session — late fee checkout sent: $${fmtMoney((packageLateFeeAmount || 0) + calcServiceFee(packageLateFeeAmount || 0))}`
-          : "\nPackage session — slot freed"
-        : "";
-      await sendAdminSMS(`CANCELLED: ${reg.parent_name}\n${sessionDetails}\nPlayers: ${reg.kids}${chargeLateFee ? "\n(Late fee charged)" : isLate ? "\n(Late fee waived)" : ""}${adminMoneyOutcome ? `\n${adminMoneyOutcome}` : ""}${adminPackageNote}`);
+      const adminPackageNote = packageSessionForfeited
+        ? "\nPackage session — late cancellation, session forfeited, no fee charged"
+        : reg.package_id
+          ? "\nPackage session — slot freed"
+          : "";
+      const adminForfeitNote = fullForfeitNoRefund ? "\nWeekly late cancellation — full forfeiture, no refund" : "";
+      await sendAdminSMS(`CANCELLED: ${reg.parent_name}\n${sessionDetails}\nPlayers: ${reg.kids}${chargeLateFee ? "\n(Late fee charged)" : isLate ? "\n(Late fee waived)" : ""}${adminMoneyOutcome ? `\n${adminMoneyOutcome}` : ""}${adminPackageNote}${adminForfeitNote}`);
     } catch (err) {
       console.error("Email/SMS notification error (admin cancel):", err);
     }
@@ -550,5 +511,7 @@ export async function POST(req: NextRequest) {
     refundedAmount: stripeRefundResult?.refundedAmount ?? 0,
     creditedAmount: (stripeRefundResult?.creditedAmount ?? 0) + creditIssued,
     refundFailed: !!stripeRefundResult?.failed,
+    packageSessionForfeited,
+    fullForfeitNoRefund,
   });
 }

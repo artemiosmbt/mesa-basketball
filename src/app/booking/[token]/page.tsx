@@ -73,6 +73,7 @@ interface Booking {
   sessionPrice: number | null;
   totalParticipants: number;
   campGroupDays?: { token: string; bookedDate: string | null; bookedStartTime: string | null; status: string }[];
+  isPackageBooking?: boolean;
 }
 
 interface TimeWindow {
@@ -196,6 +197,8 @@ export default function ManageBooking({
   const [cancelling, setCancelling] = useState(false);
   const [cancelled, setCancelled] = useState(false);
   const [isLateCancel, setIsLateCancel] = useState(false);
+  const [cancelPackageForfeited, setCancelPackageForfeited] = useState(false);
+  const [cancelFullForfeit, setCancelFullForfeit] = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [cancelDayConfirmToken, setCancelDayConfirmToken] = useState<string | null>(null);
   const [cancellingDayToken, setCancellingDayToken] = useState<string | null>(null);
@@ -204,6 +207,9 @@ export default function ManageBooking({
   const [rescheduling, setRescheduling] = useState(false);
   const [rescheduled, setRescheduled] = useState(false);
   const [isLateReschedule, setIsLateReschedule] = useState(false);
+  const [reschedulePackageForfeited, setReschedulePackageForfeited] = useState(false);
+  const [rescheduleNewSessionCovered, setRescheduleNewSessionCovered] = useState(false);
+  const [rescheduleFullForfeit, setRescheduleFullForfeit] = useState(false);
 
   // Player editing state
   const [showEditPlayers, setShowEditPlayers] = useState(false);
@@ -512,6 +518,8 @@ export default function ManageBooking({
       }
       setCancelled(true);
       setIsLateCancel(data.isLateCancel);
+      setCancelPackageForfeited(!!data.packageSessionForfeited);
+      setCancelFullForfeit(!!data.fullForfeitNoRefund);
     } else {
       setError(data.error || "Failed to cancel");
     }
@@ -598,6 +606,9 @@ export default function ManageBooking({
       }
       setRescheduled(true);
       setIsLateReschedule(data.isLateReschedule ?? false);
+      setReschedulePackageForfeited(!!data.packageSessionForfeited);
+      setRescheduleNewSessionCovered(!!data.newSessionPackageCovered);
+      setRescheduleFullForfeit(!!data.fullForfeitNoRefund);
     } else {
       setError(data.error || "Failed to reschedule");
     }
@@ -643,7 +654,11 @@ export default function ManageBooking({
             <p className="mt-3 rounded-lg bg-yellow-900/30 px-4 py-2 text-sm text-yellow-400">
               {isFullCampCancel
                 ? "This cancellation was made within 24 hours of the camp. Per our policy, 50% of the total camp fee is still due."
-                : "This change was made within 24 hours of the session. Per our policy, 50% of the session fee is still due."}
+                : cancelPackageForfeited
+                  ? "This cancellation was made within 24 hours of the session. Per our policy, this session is forfeited from your package — no additional charge, but it doesn't carry over or refund."
+                  : cancelFullForfeit
+                    ? "This cancellation was made within 24 hours of the session. Per our policy, this session is non-refundable."
+                    : "This change was made within 24 hours of the session. Per our policy, 50% of the session fee is still due."}
             </p>
           )}
           <a href="/" className="mt-6 inline-block rounded bg-mesa-accent px-6 py-2 font-semibold text-white hover:bg-yellow-600">
@@ -664,7 +679,13 @@ export default function ManageBooking({
           </p>
           {isLateReschedule && (
             <p className="mt-3 rounded-lg bg-yellow-900/30 px-4 py-2 text-sm text-yellow-400">
-              This reschedule was made within 24 hours of the session. Per our policy, 50% of the session fee is still due.
+              {reschedulePackageForfeited
+                ? (rescheduleNewSessionCovered
+                    ? "This reschedule was made within 24 hours of the session. Per our policy, your original session was forfeited from your package — but your new session is still covered, nothing further due."
+                    : "This reschedule was made within 24 hours of the session. Per our policy, your original session was forfeited from your package, and it no longer has capacity to cover the new date — your new session was charged separately.")
+                : rescheduleFullForfeit
+                  ? "This reschedule was made within 24 hours of the session. Per our policy, your original session was fully forfeited (non-refundable), and the new session was charged at full price."
+                  : "This reschedule was made within 24 hours of the session. Per our policy, 50% of the session fee is still due."}
             </p>
           )}
           <a href="/" className="mt-6 inline-block rounded bg-mesa-accent px-6 py-2 font-semibold text-white hover:bg-yellow-600">
@@ -824,7 +845,7 @@ export default function ManageBooking({
                       {isDiscountedGroup && (
                         <div className="mt-4 rounded-lg border border-brown-600 bg-brown-800/50 px-4 py-3 text-sm text-brown-300">
                           <p className="font-medium text-white mb-1">Cancellation unavailable</p>
-                          <p>This session was booked at a discounted rate and cannot be cancelled. You&apos;re welcome to reschedule — the same late policy applies (changes within 24 hours incur a 50% fee). For anything else, reach out at <a href="mailto:artemios@mesabasketballtraining.com" className="text-mesa-accent underline">artemios@mesabasketballtraining.com</a> or call/text <a href="tel:+15163003376" className="text-mesa-accent underline">(516) 300-3376</a>.</p>
+                          <p>This session was booked at a discounted rate and cannot be cancelled. You&apos;re welcome to reschedule — the same late policy applies (a reschedule within 24 hours forfeits this session with no refund, and the new session is charged at full price). For anything else, reach out at <a href="mailto:artemios@mesabasketballtraining.com" className="text-mesa-accent underline">artemios@mesabasketballtraining.com</a> or call/text <a href="tel:+15163003376" className="text-mesa-accent underline">(516) 300-3376</a>.</p>
                         </div>
                       )}
                     <div className="mt-6 flex flex-wrap gap-3">
@@ -1053,8 +1074,11 @@ export default function ManageBooking({
                     <div className="mt-6 rounded-lg border border-red-800 bg-red-900/20 p-4">
                       <p className="text-sm text-brown-300">
                         Are you sure you want to cancel this session?
-                        {within24Hours && !withinGracePeriod &&
-                          " Since this is within 24 hours, 50% of the session fee will still be due per our rescheduling/cancellation policy."}
+                        {within24Hours && !withinGracePeriod && (
+                          booking.isPackageBooking
+                            ? " Since this is within 24 hours, this session will be forfeited from your package — no additional charge, but no refund either."
+                            : " Since this is within 24 hours, 50% of the session fee will still be due per our rescheduling/cancellation policy."
+                        )}
                       </p>
                       <div className="mt-3 flex gap-3">
                         <button

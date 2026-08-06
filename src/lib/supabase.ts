@@ -1240,8 +1240,11 @@ export async function setPackageSessions(id: string, count: number): Promise<voi
  * on a row only when that exact package covered its price, so this is exact
  * (no email/phone fuzzy-matching, no risk of counting an individually-paid
  * overflow session against the package that didn't cover it). A no-show
- * still counts (the session slot is forfeited as the no-show penalty); a
- * cancelled or rescheduled-away row does not (the slot is freed back).
+ * still counts (the session slot is forfeited as the no-show penalty). A
+ * cancelled-ON-TIME row does not (the slot is freed back) — but a LATE
+ * cancellation (is_late_cancel) also still counts: the late-cancellation
+ * policy for a package session is losing the session itself, not a 50% fee,
+ * so it has to stay "used" for exactly the same reason a no-show does.
  */
 export async function countPackageSessionsUsed(packageId: string): Promise<number> {
   const supabase = getSupabase();
@@ -1249,7 +1252,7 @@ export async function countPackageSessionsUsed(packageId: string): Promise<numbe
     .from("registrations")
     .select("id")
     .eq("package_id", packageId)
-    .in("status", ["confirmed", "no_show"]);
+    .or("status.in.(confirmed,no_show),and(status.eq.cancelled,is_late_cancel.eq.true)");
   if (error || !data) return 0;
   return data.length;
 }

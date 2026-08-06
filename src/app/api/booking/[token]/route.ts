@@ -89,6 +89,7 @@ export async function GET(
     sessionPrice: reg.session_price,
     totalParticipants: reg.total_participants,
     campGroupDays,
+    isPackageBooking: !!reg.package_id,
   });
 }
 
@@ -114,7 +115,14 @@ export async function DELETE(
   // per-session rate) — those get rescheduled instead so the discount math
   // isn't disturbed. Compare against the group's actual live sheet rate, not
   // a flat $50 — some groups (e.g. "HS Pickup") are normally priced below
-  // $50, and that's not a discount, just their regular rate.
+  // $50, and that's not a discount, just their regular rate. Also captured
+  // here for reuse below: the full-forfeiture-on-late-cancel policy only
+  // applies to these bulk/volume-discounted bookings, not a plain 1-3
+  // session weekly booking at the regular rate (which keeps the old 50%
+  // late-fee policy) — though in practice a request only reaches the fee
+  // logic below at all when this is false, since a true bulk booking is
+  // rejected right here.
+  let isBulkDiscountedWeekly = false;
   if (reg.type === "weekly" && reg.session_price !== null && reg.booked_date && reg.booked_start_time) {
     try {
       const sessions = await getWeeklySchedule({ noCache: true });
@@ -122,7 +130,8 @@ export async function DELETE(
       const match = sessions.find((s) => s.group === groupLabel && s.date === reg.booked_date && s.startTime === reg.booked_start_time);
       if (match) {
         const standardRate = match.price * (reg.total_participants || 1);
-        if (reg.session_price < standardRate) {
+        isBulkDiscountedWeekly = reg.session_price < standardRate;
+        if (isBulkDiscountedWeekly) {
           return NextResponse.json(
             { error: "Cancellation is not available for sessions booked at a discounted rate. Please use the reschedule option instead." },
             { status: 403 }
@@ -451,7 +460,15 @@ export async function DELETE(
   if (wasPaid && reg.email) {
     const paidAmount = Math.max(0, resolvedSessionPrice(reg) - (reg.applied_account_credit || 0));
     if (isLateCancel) {
-      cancelCredit = Math.round(paidAmount * 0.5 * 100) / 100;
+      // Weekly group sessions booked in bulk (the 10%/15% volume discount)
+      // are now full forfeiture on late cancel — 0% credited. A plain
+      // (non-bulk) weekly booking, plain private, and group-private all keep
+      // the original 50% credit. Package-covered sessions never reach this
+      // branch (wasPaid is always false for them — see the
+      // packageSessionForfeited handling below). In practice this route
+      // never actually sees a bulk-discounted weekly cancellation (blocked
+      // above, reschedule-only), so this only matters for consistency.
+      cancelCredit = isBulkDiscountedWeekly ? 0 : Math.round(paidAmount * 0.5 * 100) / 100;
       if (cancelCredit > 0) await addAccountCredit(reg.email, cancelCredit).catch(() => {});
     } else {
       cancelCredit = paidAmount;
@@ -504,95 +521,43 @@ export async function DELETE(
   // A package-covered session has no Stripe payment on this row to credit
   // or refund (it was covered by the package's lump-sum charge instead), so
   // wasPaid above is always false for it — that's exactly right for an
-  // on-time cancel (nothing owed, slot already freed above). But a LATE
-  // cancel still needs to cost something, per policy: a fresh charge for
-  // 50% of what a session like this actually costs right now — live
-  // pricing, not whatever happened to be true when they originally booked
-  // — sent to real Stripe Checkout like every other charge in this system,
-  // never off-session. The session slot itself isn't taken away (only a
-  // no-show does that) — it's already been freed back above.
-  let packageLateFeeCheckoutUrl: string | undefined;
-  let packageLateFeeAmount: number | undefined;
-  if (reg.package_id && isLateCancel && reg.email) {
-    const durationMins = reg.booked_start_time && reg.booked_end_time
-      ? Math.max(60, parseMins(reg.booked_end_time) - parseMins(reg.booked_start_time))
-      : 60;
-    const liveFullPrice = calcPrivatePrice(durationMins, reg.total_participants || 1, getTrainerTier(reg.booked_trainer));
-    packageLateFeeAmount = Math.round(liveFullPrice * 0.5 * 100) / 100;
-    if (packageLateFeeAmount > 0) {
-      try {
-        // Logged BEFORE the checkout exists, deliberately with no charged
-        // amount yet — this fee isn't real until the client actually pays
-        // it via the separate Checkout below. The event gets updated with
-        // the real amount only once the webhook confirms that payment
-        // (finalizePaidCheckoutSession's package_late_fee branch), so an
-        // abandoned checkout never shows up in the admin activity feed as
-        // money that was never actually collected.
-        const eventId = await logLateFeeEvent({
-          registrationId: reg.id,
-          parentName: reg.parent_name,
-          email: reg.email,
-          kids: reg.kids,
-          sessionType: reg.type,
-          sessionDetails: reg.session_details,
-          bookedDate: reg.booked_date,
-          bookedStartTime: reg.booked_start_time,
-          action: "cancel",
-          initiatedBy: "client",
-        });
-        const stripe = getStripe();
-        const origin = req.nextUrl.origin;
-        const plainDetails = reg.session_details.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "").trim();
-        const feeSession = await stripe.checkout.sessions.create({
-          mode: "payment",
-          payment_method_types: ["card"],
-          customer_creation: "always",
-          customer_email: reg.email,
-          metadata: {
-            purpose: "package_late_fee",
-            action: "cancel",
-            parent_name: reg.parent_name,
-            session_details: plainDetails,
-            late_fee_event_id: eventId || "",
-          },
-          line_items: [
-            {
-              price_data: {
-                currency: "usd",
-                product_data: { name: `Late Cancellation Fee: ${plainDetails || "Mesa Basketball Training Session"}` },
-                unit_amount: Math.round(packageLateFeeAmount * 100),
-              },
-              quantity: 1,
-            },
-            {
-              price_data: {
-                currency: "usd",
-                product_data: { name: serviceFeeItemName(packageLateFeeAmount) },
-                unit_amount: Math.round(calcServiceFee(packageLateFeeAmount) * 100),
-              },
-              quantity: 1,
-            },
-          ],
-          success_url: `${origin}/booking-confirmed?session_id={CHECKOUT_SESSION_ID}`,
-          cancel_url: `${origin}/my-bookings`,
-          expires_at: Math.floor(Date.now() / 1000) + 30 * 60,
-        });
-        packageLateFeeCheckoutUrl = feeSession.url ?? undefined;
-      } catch (err) {
-        console.error("Failed to create package late-cancellation fee checkout:", err);
-      }
-    }
+  // on-time cancel (nothing owed, slot already freed above). A LATE cancel
+  // no longer triggers a fresh 50% Stripe charge — per current policy the
+  // session itself is simply forfeited (stays counted as "used" against the
+  // package, same as a no-show), which the recompute above already applied
+  // by re-deriving from countPackageSessionsUsed. If this was their last
+  // session, the package is just exhausted — nothing further to charge here.
+  const packageSessionForfeited = !!(reg.package_id && isLateCancel);
+  if (packageSessionForfeited) {
+    await logLateFeeEvent({
+      registrationId: reg.id,
+      parentName: reg.parent_name,
+      email: reg.email,
+      kids: reg.kids,
+      sessionType: reg.type,
+      sessionDetails: reg.session_details,
+      bookedDate: reg.booked_date,
+      bookedStartTime: reg.booked_start_time,
+      action: "cancel",
+      initiatedBy: "client",
+    });
   }
 
-  // Late fee wording only makes sense when nothing was paid — someone who
-  // already paid is being credited (possibly $0 if their existing account
-  // credit already covered the whole thing), never asked for more. Also
-  // subtract any credit already applied at booking time, so the fee
-  // reflects what's actually still owed, not the full sticker price. A
-  // package-covered session uses the live fee computed above instead (a
-  // fresh Stripe charge, not a stored-price estimate).
-  const lateFeeAmount = reg.package_id
-    ? packageLateFeeAmount
+  // Bulk-discounted weekly group sessions (booked as part of the 10%/15%
+  // volume discount): late cancellation is now full forfeiture (0%
+  // refunded/credited) instead of the old 50%-credited policy. A plain
+  // (non-bulk) weekly booking, and plain/group-private sessions, are
+  // unaffected — this route never actually reaches here for a bulk
+  // cancellation though (blocked above as reschedule-only).
+  const fullForfeitNoRefund = isBulkDiscountedWeekly && isLateCancel;
+
+  // Late fee wording only makes sense for the original (non-package,
+  // non-weekly) policy — someone who already paid is being credited
+  // (possibly $0 if their existing account credit already covered the whole
+  // thing), never asked for more. Package and weekly sessions now forfeit
+  // instead of owing a fee, so they never populate this.
+  const lateFeeAmount = reg.package_id || fullForfeitNoRefund
+    ? undefined
     : isLateCancel && !wasPaid
       ? Math.round(Math.max(0, resolvedSessionPrice(reg) - (reg.applied_account_credit || 0)) * 0.5 * 100) / 100
       : undefined;
@@ -615,8 +580,10 @@ export async function DELETE(
       sessionType: reg.type,
       isLateCancel,
       lateFeeAmount,
-      cancelCredit: wasPaid && isLateCancel ? cancelCredit : undefined,
+      cancelCredit: wasPaid && isLateCancel && !fullForfeitNoRefund ? cancelCredit : undefined,
       stripeRefundResult,
+      packageSessionForfeited,
+      fullForfeitNoRefund,
     });
   } catch (notifyErr) {
     console.error("Cancellation email failed (cancel/refund already applied):", notifyErr);
@@ -628,22 +595,25 @@ export async function DELETE(
       ? `\n${formatDateWithDay(reg.booked_date)} | ${reg.booked_start_time}${reg.booked_end_time ? `-${reg.booked_end_time}` : ""}${cancelLocation ? `\nLocation: ${resolveLocationName(cancelLocation)}` : ""}`
       : "";
     const moneyOutcome = wasPaid ? describeMoneyOutcome(stripeRefundResult, cancelCredit, isLateCancel, false) : "";
-    const lateNote = reg.package_id
-      ? (packageLateFeeCheckoutUrl
-          ? `\nLate cancellation fee: $${fmtMoney((packageLateFeeAmount || 0) + calcServiceFee(packageLateFeeAmount || 0))}. Finish payment here: ${packageLateFeeCheckoutUrl}`
-          : isLateCancel ? "\nA late cancellation fee applies — we'll be in touch." : "\nYour package session is available for you to rebook.")
-      : wasPaid
-        ? (moneyOutcome ? `\n${moneyOutcome}.` : "\nNothing additional is due — your account credit already covered this.")
-        : isLateCancel ? "\nA late cancellation fee applies." : "";
+    const lateNote = packageSessionForfeited
+      ? "\nLate cancellation: this session is forfeited from your package — no additional charge."
+      : fullForfeitNoRefund
+        ? "\nLate cancellation: this session is non-refundable per our 24-hour policy."
+        : reg.package_id
+          ? "\nYour package session is available for you to rebook."
+          : wasPaid
+            ? (moneyOutcome ? `\n${moneyOutcome}.` : "\nNothing additional is due — your account credit already covered this.")
+            : isLateCancel ? "\nA late cancellation fee applies." : "";
     await sendSMS(reg.phone, `Mesa Basketball: ${cancelLabel} cancelled.${sessionLine}\nAthlete: ${reg.kids}${lateNote}\nmesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
   }
   const adminMoneyOutcome = describeMoneyOutcome(stripeRefundResult, cancelCredit, isLateCancel, true);
-  const adminPackageNote = reg.package_id
-    ? packageLateFeeCheckoutUrl
-      ? `\nPackage session — late fee checkout sent: $${fmtMoney((packageLateFeeAmount || 0) + calcServiceFee(packageLateFeeAmount || 0))}`
-      : "\nPackage session — on-time, no fee, slot freed"
-    : "";
-  await sendAdminSMS(`CANCELLED: ${reg.parent_name}\n${cancelSessionDetails}${isLateCancel ? " (late)" : ""}${adminMoneyOutcome ? `\n${adminMoneyOutcome}` : ""}${adminPackageNote}\nPlayers: ${reg.kids}`);
+  const adminPackageNote = packageSessionForfeited
+    ? "\nPackage session — late cancellation, session forfeited, no fee charged"
+    : reg.package_id
+      ? "\nPackage session — on-time, no fee, slot freed"
+      : "";
+  const adminForfeitNote = fullForfeitNoRefund ? "\nWeekly late cancellation — full forfeiture, no refund" : "";
+  await sendAdminSMS(`CANCELLED: ${reg.parent_name}\n${cancelSessionDetails}${isLateCancel ? " (late)" : ""}${adminMoneyOutcome ? `\n${adminMoneyOutcome}` : ""}${adminPackageNote}${adminForfeitNote}\nPlayers: ${reg.kids}`);
 
   if (reg.booked_date && reg.booked_start_time && reg.booked_trainer) {
     await notifyTrainerOfCancellation({
@@ -689,7 +659,7 @@ export async function DELETE(
     }
   }
 
-  return NextResponse.json({ success: true, isLateCancel, checkoutUrl: packageLateFeeCheckoutUrl });
+  return NextResponse.json({ success: true, isLateCancel, packageSessionForfeited, fullForfeitNoRefund });
 }
 
 // Helpers for PATCH
@@ -997,6 +967,28 @@ export async function PUT(
   // Check if original session is within 24h (with grace period) → late reschedule fee applies
   const isLateReschedule = !!(reg.booked_date && reg.booked_start_time && isLateAction(reg.booked_date, reg.booked_start_time, reg.created_at, reg.admin_change_at));
 
+  // Whether the OLD session was part of a bulk/volume-discounted weekly
+  // booking (the 10%/15% off for booking several sessions at once) — the
+  // full-forfeiture-on-late-reschedule policy only applies to those, not a
+  // plain 1-3 session weekly booking at the regular rate (which keeps the
+  // old 50% late-fee policy). Same live-rate comparison as the cancel
+  // handler's volume-discount gate, just without blocking anything here —
+  // reschedule is always allowed regardless of discount.
+  let isBulkDiscountedWeekly = false;
+  if (reg.type === "weekly" && reg.session_price !== null && reg.booked_date && reg.booked_start_time) {
+    try {
+      const oldSessions = await getWeeklySchedule({ noCache: true });
+      const oldGroupLabel = reg.booked_group || reg.session_details.split(" — ")[0] || "";
+      const oldMatch = oldSessions.find((s) => s.group === oldGroupLabel && s.date === reg.booked_date && s.startTime === reg.booked_start_time);
+      if (oldMatch) {
+        const oldStandardRate = oldMatch.price * (reg.total_participants || 1);
+        isBulkDiscountedWeekly = reg.session_price < oldStandardRate;
+      }
+    } catch {
+      // Sheet lookup failed — default to not-discounted rather than guessing.
+    }
+  }
+
   // What was actually paid for the old session via Stripe (if it was), net
   // of any account credit applied at booking time — this is the baseline
   // the new session's price gets reconciled against below.
@@ -1008,9 +1000,24 @@ export async function PUT(
   // booking (double-click, retry, race) — bail out here, before any credit
   // refund, Stripe refund, or new booking gets created against a booking that's
   // no longer actually confirmed.
-  const oldCancelled = await cancelRegistration(token);
+  const oldCancelled = await cancelRegistration(token, isLateReschedule);
   if (!oldCancelled) {
     return NextResponse.json({ error: "This booking was already cancelled or rescheduled" }, { status: 409 });
+  }
+
+  // Recompute the old package's used-count now that the old row is
+  // cancelled, before anything below relies on it: a late reschedule keeps
+  // this row counted as "used" (forfeited, same as a no-show), an on-time
+  // reschedule frees it back — mirroring the cancel handler's identical
+  // recompute. The sameMonthCovered capacity check further below depends on
+  // this having already landed.
+  if (reg.package_id) {
+    try {
+      const used = await countPackageSessionsUsed(reg.package_id);
+      await setPackageSessions(reg.package_id, used);
+    } catch {
+      // non-critical — don't fail the reschedule
+    }
   }
 
   // Notify the OLD trainer their slot is gone if this reschedule swaps to a
@@ -1142,7 +1149,13 @@ export async function PUT(
   let lateFeeEventId: string | null = null;
   if (oldPaymentIntentId) {
     if (isLateReschedule) {
-      lateFeeCredited = Math.round(oldPaidAmount * 0.5 * 100) / 100;
+      // Bulk-discounted weekly group sessions: late reschedule is full
+      // forfeiture of the old session — nothing carried forward as credit —
+      // so the new session below is always charged at full price instead of
+      // blended against a 50% credit. A plain (non-bulk) weekly booking, and
+      // every other paid session type (plain private, group-private), keeps
+      // the original 50%-credited-toward-new-session policy.
+      lateFeeCredited = isBulkDiscountedWeekly ? 0 : Math.round(oldPaidAmount * 0.5 * 100) / 100;
       if (lateFeeCredited > 0) await addAccountCredit(reg.email, lateFeeCredited).catch(() => {});
       if (newPriceKnown && newEffectivePrice! > 0) {
         lateFeeCreditApplied = Math.min(lateFeeCredited, newEffectivePrice!);
@@ -1193,89 +1206,36 @@ export async function PUT(
   // A package-covered session has no Stripe payment on this row (it was
   // covered by the package's lump-sum charge instead), so oldPaymentIntentId
   // is always undefined for it and the block above never runs. A late
-  // reschedule still needs to cost something, per policy: a fresh charge for
-  // 50% of what a session like this actually costs right now (live pricing,
-  // not whatever was true when it was originally booked) — sent to real
-  // Stripe Checkout, separate from the reschedule itself, never off-session.
-  // If the new date lands in the same month as the package, the same slot
-  // just moves there for free (nothing lost); otherwise it's priced and
-  // charged like a normal new booking rather than accidentally given away.
-  let packageLateFeeCheckoutUrl: string | undefined;
-  let packageLateFeeAmount: number | undefined;
+  // reschedule no longer triggers a fresh 50% Stripe charge — per current
+  // policy the OLD session is simply forfeited (already reflected by the
+  // recompute right after cancelRegistration above). Whether the NEW session
+  // is still covered depends on whether the package has any capacity left
+  // AFTER that forfeiture: if so, the new date is covered for free (so long
+  // as it's still the same month); if not — either a different month, or
+  // this really was their last session — it's priced and charged like a
+  // normal new booking, same as buying a fresh session outright.
   let newPackageId: string | undefined;
+  const packageSessionForfeited = !!(reg.package_id && isLateReschedule);
+  if (packageSessionForfeited) {
+    await logLateFeeEvent({
+      registrationId: reg.id,
+      parentName: reg.parent_name,
+      email: reg.email,
+      kids: reg.kids,
+      sessionType: reg.type,
+      sessionDetails: reg.session_details,
+      bookedDate: reg.booked_date,
+      bookedStartTime: reg.booked_start_time,
+      action: "reschedule",
+      initiatedBy: "client",
+      newSessionDetails,
+    });
+  }
+  let newSessionPackageCovered = false;
   if (reg.package_id) {
-    if (isLateReschedule) {
-      const oldDuration = reg.booked_start_time && reg.booked_end_time
-        ? Math.max(60, parseMins(reg.booked_end_time) - parseMins(reg.booked_start_time))
-        : 60;
-      const liveFullPrice = calcPrivatePrice(oldDuration, reg.total_participants || 1, getTrainerTier(reg.booked_trainer));
-      packageLateFeeAmount = Math.round(liveFullPrice * 0.5 * 100) / 100;
-      if (packageLateFeeAmount > 0) {
-        try {
-          // Logged BEFORE the checkout exists, with no charged amount yet —
-          // see the matching cancel-side comment above. Filled in by the
-          // webhook once payment actually confirms.
-          const packageFeeEventId = await logLateFeeEvent({
-            registrationId: reg.id,
-            parentName: reg.parent_name,
-            email: reg.email,
-            kids: reg.kids,
-            sessionType: reg.type,
-            sessionDetails: reg.session_details,
-            bookedDate: reg.booked_date,
-            bookedStartTime: reg.booked_start_time,
-            action: "reschedule",
-            initiatedBy: "client",
-            newSessionDetails,
-          });
-          const stripe = getStripe();
-          const origin = req.nextUrl.origin;
-          const plainOldDetails = reg.session_details.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "").trim();
-          const feeSession = await stripe.checkout.sessions.create({
-            mode: "payment",
-            payment_method_types: ["card"],
-            customer_creation: "always",
-            customer_email: reg.email,
-            metadata: {
-              purpose: "package_late_fee",
-              action: "reschedule",
-              parent_name: reg.parent_name,
-              session_details: plainOldDetails,
-              late_fee_event_id: packageFeeEventId || "",
-            },
-            line_items: [
-              {
-                price_data: {
-                  currency: "usd",
-                  product_data: { name: `Late Reschedule Fee: ${plainOldDetails || "Mesa Basketball Training Session"}` },
-                  unit_amount: Math.round(packageLateFeeAmount * 100),
-                },
-                quantity: 1,
-              },
-              {
-                price_data: {
-                  currency: "usd",
-                  product_data: { name: serviceFeeItemName(packageLateFeeAmount) },
-                  unit_amount: Math.round(calcServiceFee(packageLateFeeAmount) * 100),
-                },
-                quantity: 1,
-              },
-            ],
-            success_url: `${origin}/booking-confirmed?session_id={CHECKOUT_SESSION_ID}`,
-            cancel_url: `${origin}/my-bookings`,
-            expires_at: Math.floor(Date.now() / 1000) + 30 * 60,
-          });
-          packageLateFeeCheckoutUrl = feeSession.url ?? undefined;
-        } catch (err) {
-          console.error("Failed to create package late-reschedule fee checkout:", err);
-        }
-      }
-    }
-
     // Packages only ever cover a standard private session (up to 3 kids) —
     // never a 4+ kid group-private rate, regardless of remaining capacity.
     const oldPkg = await getPackageById(reg.package_id).catch(() => null);
-    let sameMonthCovered = false;
     // Also requires the NEW trainer to match the package's own tier — a
     // reschedule can change trainer (resolvedTrainer comes straight from
     // the client), and without this check a package bought for one tier
@@ -1287,18 +1247,34 @@ export async function PUT(
       if (!isNaN(d.getTime())) {
         const newMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
         if (newMonth === oldPkg.month_year) {
-          newPackageId = oldPkg.id;
-          sameMonthCovered = true;
+          // Re-checked live rather than trusting oldPkg's own (possibly
+          // stale) sessions_used field — the recompute above just landed the
+          // old row's forfeiture (if late) or freed slot (if on-time)
+          // straight to the database, so this is the true remaining
+          // capacity right now.
+          const usedSoFar = await countPackageSessionsUsed(oldPkg.id).catch(() => oldPkg.package_type);
+          if (usedSoFar < oldPkg.package_type) {
+            newPackageId = oldPkg.id;
+            newSessionPackageCovered = true;
+          }
         }
       }
     }
-    // Different month, switched away from private, or bumped to 4+ kids —
-    // the old package can't cover it, so price and charge the new session
-    // like a normal booking rather than silently giving it away for free.
-    if (!sameMonthCovered && newPriceKnown && newEffectivePrice! > 0) {
+    // Different month, switched away from private, bumped to 4+ kids, or the
+    // package has no capacity left (this was their last session) — the
+    // package can't cover it, so price and charge the new session like a
+    // normal booking rather than silently giving it away for free.
+    if (!newSessionPackageCovered && newPriceKnown && newEffectivePrice! > 0) {
       priceReconciliation = { kind: "charge", amount: newEffectivePrice! };
     }
   }
+  // Bulk-discounted weekly group sessions: late reschedule is full
+  // forfeiture of the old session, and the new session is always charged at
+  // full price — the charge itself already happens naturally above
+  // (lateFeeCredited was forced to 0 for a bulk booking, so the full
+  // newEffectivePrice flows through as priceReconciliation); this flag only
+  // drives the wording below.
+  const fullForfeitNoRefund = isBulkDiscountedWeekly && isLateReschedule;
 
   // Price increased (or a late reschedule needs a fresh full charge): the
   // new booking isn't confirmed yet — send the client to Stripe Checkout for
@@ -1343,6 +1319,7 @@ export async function PUT(
         old_session_details: reg.session_details,
         old_trainer: reg.booked_trainer || "",
         is_late_reschedule: String(!!isLateReschedule),
+        is_bulk_discounted_weekly: String(isBulkDiscountedWeekly),
         topup_amount: String(priceReconciliation.amount),
         late_fee_credited: String(lateFeeCredited),
         late_fee_credit_applied: String(lateFeeCreditApplied),
@@ -1387,11 +1364,7 @@ export async function PUT(
 
     await attachStripeCheckoutSession(bookingBatchId, checkoutSession.id);
 
-    // The new session's checkout takes priority for the redirect — if a
-    // package late fee is also owed (a rare double-edge: late AND the new
-    // date fell outside the package's month), its link rides along
-    // separately rather than getting silently dropped.
-    return NextResponse.json({ success: true, checkoutUrl: checkoutSession.url, isLateReschedule: !!isLateReschedule, packageLateFeeCheckoutUrl });
+    return NextResponse.json({ success: true, checkoutUrl: checkoutSession.url, isLateReschedule: !!isLateReschedule, packageSessionForfeited, fullForfeitNoRefund });
   }
 
   // No further payment needed (same price, a price decrease, or a
@@ -1446,6 +1419,19 @@ export async function PUT(
     packageId: newPackageId,
   });
 
+  // The new row's own package consumption (if the package covered it) —
+  // separate from the forfeiture recompute already done right after the old
+  // row was cancelled, since that only reflected the OLD row's outcome, not
+  // this new one.
+  if (newPackageId) {
+    try {
+      const used = await countPackageSessionsUsed(newPackageId);
+      await setPackageSessions(newPackageId, used);
+    } catch {
+      // non-critical — don't fail the reschedule
+    }
+  }
+
   // Sync calendar for the new booking
   try {
     if (newType === "private" || newType === "group-private") {
@@ -1476,12 +1462,16 @@ export async function PUT(
     console.error("Calendar sync error (reschedule new):", err);
   }
 
-  const lateFeeAmount = reg.package_id
-    ? packageLateFeeAmount
+  const lateFeeAmount = reg.package_id || fullForfeitNoRefund
+    ? undefined
     : isLateReschedule && !priceReconciliation && !lateFeeCredited
       ? Math.round(resolvedSessionPrice(reg) * 0.5 * 100) / 100
       : undefined;
 
+  // priceReconciliation is never "charge" by this point — that branch
+  // returns early via Stripe Checkout above, well before this code runs; the
+  // confirmation for that case fires later from finalizeRescheduleTopup once
+  // the webhook confirms payment, not here.
   const refundAdjustment = priceReconciliation?.kind === "refund" && rescheduleRefundResult
     ? { kind: "refund" as const, refundedAmount: rescheduleRefundResult.refundedAmount, creditedAmount: rescheduleRefundResult.creditedAmount, failed: rescheduleRefundResult.failed }
     : undefined;
@@ -1499,6 +1489,9 @@ export async function PUT(
       priceAdjustment: refundAdjustment,
       lateFeeCredited: lateFeeCredited || undefined,
       lateFeeCreditApplied: lateFeeCreditApplied || undefined,
+      packageSessionForfeited,
+      newSessionPackageCovered: packageSessionForfeited ? newSessionPackageCovered : undefined,
+      fullForfeitNoRefund,
     });
   } catch (notifyErr) {
     console.error("Reschedule email failed (booking already updated):", notifyErr);
@@ -1508,14 +1501,15 @@ export async function PUT(
   const refundOutcomeText = refundAdjustment ? describeMoneyOutcome(refundAdjustment, 0, false, false) : "";
   const refundOutcomeAdminText = refundAdjustment ? describeMoneyOutcome(refundAdjustment, 0, false, true) : "";
   const leftoverLateFeeCredit = Math.max(0, lateFeeCredited - lateFeeCreditApplied);
-  const packageFeeTotal = packageLateFeeAmount != null ? Math.round((packageLateFeeAmount + calcServiceFee(packageLateFeeAmount)) * 100) / 100 : undefined;
   if (reg.sms_consent && reg.phone) {
     const rescheduleLabel = newSessionDetails.split(" — ")[0] || "Session";
-    const lateNote = reg.package_id
-      ? (packageLateFeeCheckoutUrl
-          ? `\nLate reschedule fee: $${fmtMoney(packageFeeTotal!)}. Finish payment here: ${packageLateFeeCheckoutUrl}`
-          : isLateReschedule ? "\nA late reschedule fee applies — we'll be in touch." : "")
-      : isLateReschedule && !priceReconciliation && !lateFeeCredited ? "\nA late reschedule fee applies." : "";
+    const lateNote = packageSessionForfeited
+      ? (newSessionPackageCovered
+          ? "\nLate reschedule: your original session was forfeited from your package, but your new session is still covered — nothing further charged."
+          : "\nLate reschedule: your original session was forfeited from your package, and it no longer has capacity to cover the new date — see below for what's owed.")
+      : fullForfeitNoRefund
+        ? "\nLate reschedule: your original session is fully forfeited (non-refundable) — the new session is charged at full price, see below."
+        : isLateReschedule && !priceReconciliation && !lateFeeCredited ? "\nA late reschedule fee applies." : "";
     const creditNote = lateFeeCreditApplied > 0
       ? `\n$${fmtMoney(lateFeeCreditApplied)} of your late fee credit covered your new session${leftoverLateFeeCredit > 0 ? ` ($${fmtMoney(leftoverLateFeeCredit)} left in your account)` : ""} — nothing further charged.`
       : lateFeeCredited > 0
@@ -1529,12 +1523,13 @@ export async function PUT(
     : lateFeeCredited > 0
       ? `\n$${fmtMoney(lateFeeCredited)} credited (late fee)`
       : "";
-  const adminPackageNote = reg.package_id
-    ? packageLateFeeCheckoutUrl
-      ? `\nPackage session — late fee checkout sent: $${fmtMoney(packageFeeTotal!)}`
-      : "\nPackage session — slot moved, no fee"
-    : "";
-  await sendAdminSMS(`RESCHEDULED: ${newParentName}\nFrom: ${reg.session_details}\nTo: ${newSessionDetails}${rescheduleTrainerLine}\nPlayers: ${kidsToUse}${refundOutcomeAdminText ? `\n${refundOutcomeAdminText}` : ""}${adminCreditNote}${adminPackageNote}`);
+  const adminPackageNote = packageSessionForfeited
+    ? (newSessionPackageCovered ? "\nPackage session — late reschedule, old session forfeited, new session still covered" : "\nPackage session — late reschedule, old session forfeited, package exhausted (new session charged)")
+    : reg.package_id
+      ? "\nPackage session — slot moved, no fee"
+      : "";
+  const adminForfeitNote = fullForfeitNoRefund ? "\nWeekly late reschedule — old session forfeited, new session full price" : "";
+  await sendAdminSMS(`RESCHEDULED: ${newParentName}\nFrom: ${reg.session_details}\nTo: ${newSessionDetails}${rescheduleTrainerLine}\nPlayers: ${kidsToUse}${refundOutcomeAdminText ? `\n${refundOutcomeAdminText}` : ""}${adminCreditNote}${adminPackageNote}${adminForfeitNote}`);
 
   // Trainer-facing NEW-side notification only — the old trainer (if this
   // swapped trainers) was already notified right after the old booking was
@@ -1574,5 +1569,12 @@ export async function PUT(
     }
   }
 
-  return NextResponse.json({ success: true, newToken, isLateReschedule: !!isLateReschedule, checkoutUrl: packageLateFeeCheckoutUrl });
+  return NextResponse.json({
+    success: true,
+    newToken,
+    isLateReschedule: !!isLateReschedule,
+    packageSessionForfeited,
+    newSessionPackageCovered: packageSessionForfeited ? newSessionPackageCovered : undefined,
+    fullForfeitNoRefund,
+  });
 }

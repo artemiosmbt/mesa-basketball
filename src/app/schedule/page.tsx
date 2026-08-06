@@ -2514,6 +2514,9 @@ export default function Home() {
           <p className="mt-6 text-center text-xs text-brown-500">
             Cancellations &amp; reschedules within 24 hours incur a 50% fee. No-shows without prior notice are charged the full session fee.
           </p>
+          <p className="mt-1 text-center text-xs text-brown-500">
+            For sessions booked in bulk (4+ or 8+ at once): cancellations &amp; reschedules within 24 hours are non-refundable, and a reschedule is charged at full price for the new session.
+          </p>
         </div>
       </section>
 
@@ -2770,7 +2773,7 @@ export default function Home() {
             </div>
             <p className="mt-4 text-center text-xs text-brown-500">
               Sessions expire at the end of the calendar month — unused sessions do not carry over.
-              Cancellations &amp; reschedules within 24 hours incur a fee of 50% of the standard private rate. No-shows without prior notice are charged the full session fee.
+              Cancellations &amp; reschedules within 24 hours forfeit that session from your package — no fee, but no refund either. If it was your last session, rescheduling requires paying full price for the new one. No-shows without prior notice are charged the full session fee.
             </p>
           </div>
 

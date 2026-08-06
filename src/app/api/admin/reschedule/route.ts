@@ -9,7 +9,7 @@ import {
 import { sendRescheduleNotification } from "@/lib/email";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import { getWeeklySchedule } from "@/lib/sheets";
-import { addAccountCredit, deductAccountCredit, addReferralCredit, logLateFeeEvent, getPackageById, countPackageSessionsUsed, setPackageSessions } from "@/lib/supabase";
+import { addAccountCredit, deductAccountCredit, addReferralCredit, addRegistration, cancelRegistration, logLateFeeEvent, getPackageById, countPackageSessionsUsed, setPackageSessions } from "@/lib/supabase";
 import { isLateAction, resolveOffSessionPaymentSource, chargeSavedCardOffSession, issueStripeRefund } from "@/lib/booking-finalize";
 import { calcServiceFee, serviceFeeLabel, fmtMoney, calcPrivatePrice, fullPriceForType, getTrainerTier, normalizeTrainerTier } from "@/lib/pricing";
 import { notifyTrainerOfCancellation, notifyTrainerOfReschedule, notifyTrainerOfNewBooking } from "@/lib/trainer-notify";
@@ -120,6 +120,27 @@ export async function POST(req: NextRequest) {
   }
   const chargeLateFee = isLateReschedule && feeChoice === "charge";
 
+  // Whether the OLD session was part of a bulk/volume-discounted weekly
+  // booking (the 10%/15% off for booking several sessions at once) — the
+  // full-forfeiture late-reschedule policy only applies to those, not a
+  // plain 1-3 session weekly booking at the regular rate (which keeps the
+  // old 50% late-fee policy). Same live-rate comparison the client-facing
+  // endpoint uses.
+  let isBulkDiscountedWeekly = false;
+  if (reg.type === "weekly" && reg.session_price !== null && reg.booked_date && reg.booked_start_time) {
+    try {
+      const oldSessions = await getWeeklySchedule({ noCache: true });
+      const oldGroupLabel = reg.booked_group || reg.session_details.split(" — ")[0] || "";
+      const oldMatch = oldSessions.find((s) => s.group === oldGroupLabel && s.date === reg.booked_date && s.startTime === reg.booked_start_time);
+      if (oldMatch) {
+        const oldStandardRate = oldMatch.price * (reg.total_participants || 1);
+        isBulkDiscountedWeekly = reg.session_price < oldStandardRate;
+      }
+    } catch {
+      // Sheet lookup failed — default to not-discounted rather than guessing.
+    }
+  }
+
   const oldSessionDetails: string = reg.session_details;
   const oldBookedDate: string | null = reg.booked_date;
   const oldBookedStartTime: string | null = reg.booked_start_time;
@@ -209,27 +230,44 @@ export async function POST(req: NextRequest) {
   // A package-covered session has no direct per-session Stripe payment on
   // this row (wasPaid is always false for it — it was covered by the
   // package's lump-sum charge instead), so every wasPaid-gated branch below
-  // silently no-ops for it. That used to mean an admin choosing to CHARGE a
-  // late fee on a package session actually charged nothing, logged nothing,
-  // and still told the client "$0.00 credited to your account" as if it had
-  // worked. Handled explicitly here instead: a late reschedule fee is always
-  // a fresh 50%-of-live-rate charge (packages only ever cover a standard,
-  // up-to-3-kid private session, same live-pricing rule as the client-facing
-  // package late fee); whether the SESSION itself costs anything on top
-  // depends on whether the new date still falls within the package's own
-  // covered month — if not, the package can no longer cover it and this slot
-  // needs to be priced and charged like a normal booking, with the OLD
-  // package's session count freed back up.
-  let packageLateFeeAmount = 0;
+  // silently no-ops for it. A late reschedule the admin chooses to CHARGE no
+  // longer triggers a fresh 50% fee — per current policy, the OLD session is
+  // simply forfeited from the package (the same "lose a whole session"
+  // policy as the client-facing flow), and whether the NEW session is still
+  // covered depends on whether the package has any capacity left AFTER that
+  // forfeiture. This route mutates the same row in place rather than
+  // cancelling+recreating it (unlike the client-facing flow), so there's no
+  // natural second row to mark "forfeited" — instead, a purely internal
+  // bookkeeping row is inserted and immediately cancelled as late, which
+  // makes it count as "used" via the exact same countPackageSessionsUsed
+  // mechanism every other cancellation in this codebase relies on. It's
+  // never surfaced to the client (no manage_token exposed, no notification
+  // sent for it) — the client only ever sees the ONE row that's actually
+  // being rescheduled below.
   let sameMonthCovered = false;
   let clearPackageId = false;
   if (reg.package_id) {
     if (chargeLateFee) {
-      const oldDuration = reg.booked_start_time && reg.booked_end_time
-        ? Math.max(60, parseMinsFromTime(reg.booked_end_time) - parseMinsFromTime(reg.booked_start_time))
-        : 60;
-      const liveFullPrice = calcPrivatePrice(oldDuration, reg.total_participants || 1, getTrainerTier(reg.booked_trainer));
-      packageLateFeeAmount = Math.round(liveFullPrice * 0.5 * 100) / 100;
+      try {
+        const { manageToken: forfeitToken } = await addRegistration({
+          parentName: reg.parent_name,
+          email: reg.email,
+          phone: reg.phone,
+          kids: reg.kids,
+          type: reg.type,
+          sessionDetails: oldSessionDetails,
+          totalParticipants: reg.total_participants || 1,
+          bookedDate: oldBookedDate || undefined,
+          bookedStartTime: oldBookedStartTime || undefined,
+          bookedEndTime: reg.booked_end_time || undefined,
+          bookedLocation: reg.booked_location || undefined,
+          bookedTrainer: reg.booked_trainer || undefined,
+          packageId: reg.package_id,
+        });
+        await cancelRegistration(forfeitToken, true);
+      } catch (err) {
+        console.error("Failed to record package session forfeiture (admin reschedule):", err);
+      }
     }
     // Packages only ever cover a standard private session (up to 3 kids) —
     // never a 4+ kid group-private rate, regardless of remaining capacity.
@@ -242,11 +280,18 @@ export async function POST(req: NextRequest) {
       const d = new Date(bookedDate);
       if (!isNaN(d.getTime())) {
         const newMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-        sameMonthCovered = newMonth === oldPkg.month_year;
+        if (newMonth === oldPkg.month_year) {
+          // Re-checked live (not oldPkg's own possibly-stale sessions_used)
+          // — the forfeiture bookkeeping row above, if this was late, has
+          // already landed, so this reflects the true remaining capacity.
+          const usedSoFar = await countPackageSessionsUsed(oldPkg.id).catch(() => oldPkg.package_type);
+          sameMonthCovered = usedSoFar < oldPkg.package_type;
+        }
       }
     }
     clearPackageId = !sameMonthCovered;
   }
+  const packageSessionForfeited = !!(reg.package_id && chargeLateFee);
   // Nothing was ever paid directly for this specific session while it was
   // package-covered, so if it's leaving the package, the FULL new price is
   // owed — not a delta off of some prior payment that never actually happened.
@@ -266,19 +311,23 @@ export async function POST(req: NextRequest) {
   // was, and it's on the admin to have the client sort out their card.
   // resolveOffSessionPaymentSource already falls back to the PACKAGE's own
   // saved card when the row itself has no direct payment on file, so the
-  // packageLateFeeAmount/packageMoveOutCharge pieces below can charge
-  // through the exact same mechanism with no separate code path needed.
+  // packageMoveOutCharge piece below can charge through the exact same
+  // mechanism with no separate code path needed.
+  const fullForfeitNoRefund = isBulkDiscountedWeekly && chargeLateFee;
   let lateFeeCredited = 0;
   let lateFeeCreditApplied = 0;
   let amountToCharge = 0;
   if (wasPaid && chargeLateFee) {
-    lateFeeCredited = Math.round(oldAmount * 0.5 * 100) / 100;
+    // Weekly group sessions: late reschedule is full forfeiture — nothing
+    // credited toward the new session, which is charged in full below.
+    // Every other paid session type keeps the original 50%-credited policy.
+    lateFeeCredited = fullForfeitNoRefund ? 0 : Math.round(oldAmount * 0.5 * 100) / 100;
     lateFeeCreditApplied = Math.min(lateFeeCredited, newAmount);
     amountToCharge = Math.max(0, Math.round((newAmount - lateFeeCreditApplied) * 100) / 100);
   } else if (wasPaid && priceDelta > 0) {
     amountToCharge = priceDelta;
   }
-  amountToCharge = Math.round((amountToCharge + packageLateFeeAmount + packageMoveOutCharge) * 100) / 100;
+  amountToCharge = Math.round((amountToCharge + packageMoveOutCharge) * 100) / 100;
 
   let autoChargedAmount = 0;
   let autoChargePaymentIntentId: string | undefined;
@@ -455,11 +504,13 @@ export async function POST(req: NextRequest) {
     } catch (err) {
       console.error("Failed to grant account credit (admin reschedule):", err);
     }
-  } else if (reg.package_id && chargeLateFee && packageLateFeeAmount > 0) {
-    // Package late fee — a fresh charge, not a credit-from-a-prior-payment
-    // (there was no prior direct payment for this session at all), so this
-    // doesn't fit the wasPaid branch above. Charged synchronously off-session
-    // already (folded into amountToCharge), so the confirmed amount is known
+  } else if (packageSessionForfeited) {
+    // Package forfeiture — no fee, no prior direct payment on this session
+    // to credit against (it was covered by the package's lump sum), so this
+    // doesn't fit the wasPaid branch above. If the package still had
+    // capacity, nothing further is owed; if not, the new session was charged
+    // in full (packageMoveOutCharge, folded into amountToCharge) and already
+    // went through synchronously above, so the confirmed amount is known
     // immediately — logged directly rather than deferred to a webhook.
     await logLateFeeEvent({
       registrationId: id,
@@ -472,7 +523,7 @@ export async function POST(req: NextRequest) {
       bookedStartTime: oldBookedStartTime,
       action: "reschedule",
       initiatedBy: "admin",
-      amountChargedExtra: Math.round((autoChargedAmount + calcServiceFee(autoChargedAmount)) * 100) / 100,
+      amountChargedExtra: autoChargedAmount > 0 ? Math.round((autoChargedAmount + calcServiceFee(autoChargedAmount)) * 100) / 100 : 0,
       newSessionDetails,
     });
   }
@@ -530,31 +581,39 @@ export async function POST(req: NextRequest) {
   }
 
   // Notify the client. On-time (or waived), this was the business's call —
-  // no fee. Late + charged: same policy a client-initiated late reschedule
-  // pays, so the note explains the 50% fee credit and how much of it (if
-  // any) covered the new session. The price note is appended directly (not
-  // part of the shared template) since only this admin flow needs to say
-  // "no change" vs "credited" vs "due".
+  // no fee. Late + charged for a package or weekly session: full forfeiture,
+  // no fee (package: the old session is simply lost; weekly: nothing
+  // refunded), so the note explains that instead of a 50% credit. Every
+  // other late + charged session keeps the original 50% fee-credit wording.
+  // The price note is appended directly (not part of the shared template)
+  // since only this admin flow needs to say "no change" vs "credited" vs "due".
   const priceNote = reg.package_id
-    ? [
-        chargeLateFee && packageLateFeeAmount > 0 ? `\nLate reschedule fee: $${fmtMoney(packageLateFeeAmount + calcServiceFee(packageLateFeeAmount))} charged to your card on file.` : "",
-        clearPackageId
-          ? packageMoveOutCharge > 0
-            ? `\nThis date falls outside your package month, so it's priced as a regular session: $${fmtMoney(packageMoveOutCharge + (chargeLateFee ? 0 : calcServiceFee(packageMoveOutCharge)))} charged to your card on file.`
-            : "\nThis date falls outside your package month, so it's no longer covered by it."
-          : "\nStill covered by your monthly package — nothing further due for this session.",
-      ].filter(Boolean).join("")
-    : chargeLateFee
-      ? `\nLate reschedule fee: $${fmtMoney(lateFeeCredited)} (50% of what you paid) credited to your account${lateFeeCreditApplied > 0 ? `, $${fmtMoney(lateFeeCreditApplied)} applied to your new session` : ""}.${autoChargedAmount > 0 ? ` $${fmtMoney(autoChargedAmount + calcServiceFee(autoChargedAmount))} was charged to your card on file to cover the rest.` : ""}`
-      : newFullPrice === undefined
-        ? ""
-        : creditGranted > 0
-          ? `\n$${fmtMoney(oldAmount)} → $${fmtMoney(newAmount)}. $${fmtMoney(creditGranted)} credited to your account for your next booking.`
-          : autoChargedAmount > 0
-            ? `\n$${fmtMoney(oldAmount)} → $${fmtMoney(newAmount)}. $${fmtMoney(autoChargedAmount + calcServiceFee(autoChargedAmount))} was charged to your card on file.`
-            : priceDelta !== 0
-              ? `\n$${fmtMoney(oldAmount)} → $${fmtMoney(newAmount)}.`
-              : "";
+    ? packageSessionForfeited
+      ? (clearPackageId
+          ? (packageMoveOutCharge > 0
+              ? `\nYour original session was forfeited from your package (late reschedule policy), and it no longer has capacity to cover the new date — priced as a regular session: $${fmtMoney(packageMoveOutCharge + calcServiceFee(packageMoveOutCharge))} charged to your card on file.`
+              : "\nYour original session was forfeited from your package (late reschedule policy), and it no longer has capacity to cover the new date.")
+          : "\nYour original session was forfeited from your package (late reschedule policy), but your new session is still covered — nothing further due.")
+      : [
+          clearPackageId
+            ? packageMoveOutCharge > 0
+              ? `\nThis date falls outside your package month, so it's priced as a regular session: $${fmtMoney(packageMoveOutCharge + calcServiceFee(packageMoveOutCharge))} charged to your card on file.`
+              : "\nThis date falls outside your package month, so it's no longer covered by it."
+            : "\nStill covered by your monthly package — nothing further due for this session.",
+        ].filter(Boolean).join("")
+    : fullForfeitNoRefund
+      ? `\nYour original session was fully forfeited (non-refundable) — the new session is charged at full price.${autoChargedAmount > 0 ? ` $${fmtMoney(autoChargedAmount + calcServiceFee(autoChargedAmount))} was charged to your card on file.` : ""}`
+      : chargeLateFee
+        ? `\nLate reschedule fee: $${fmtMoney(lateFeeCredited)} (50% of what you paid) credited to your account${lateFeeCreditApplied > 0 ? `, $${fmtMoney(lateFeeCreditApplied)} applied to your new session` : ""}.${autoChargedAmount > 0 ? ` $${fmtMoney(autoChargedAmount + calcServiceFee(autoChargedAmount))} was charged to your card on file to cover the rest.` : ""}`
+        : newFullPrice === undefined
+          ? ""
+          : creditGranted > 0
+            ? `\n$${fmtMoney(oldAmount)} → $${fmtMoney(newAmount)}. $${fmtMoney(creditGranted)} credited to your account for your next booking.`
+            : autoChargedAmount > 0
+              ? `\n$${fmtMoney(oldAmount)} → $${fmtMoney(newAmount)}. $${fmtMoney(autoChargedAmount + calcServiceFee(autoChargedAmount))} was charged to your card on file.`
+              : priceDelta !== 0
+                ? `\n$${fmtMoney(oldAmount)} → $${fmtMoney(newAmount)}.`
+                : "";
   const creditRefundNote = creditRefunded ? "\nYour referral credit was refunded since it's no longer applied to this booking." : "";
 
   // Spell out exactly what moved — which session type/name, on what day, at
@@ -577,6 +636,9 @@ export async function POST(req: NextRequest) {
       lateFeeCreditApplied: chargeLateFee ? lateFeeCreditApplied : undefined,
       priceAdjustment: autoChargedAmount > 0 ? { kind: "charge", amount: autoChargedAmount } : undefined,
       newTrainer: resolvedTrainer,
+      packageSessionForfeited,
+      newSessionPackageCovered: packageSessionForfeited ? !clearPackageId : undefined,
+      fullForfeitNoRefund,
     });
     if (reg.sms_consent && reg.phone) {
       await sendSMS(
@@ -585,25 +647,32 @@ export async function POST(req: NextRequest) {
       );
     }
     const adminPriceNote = reg.package_id
-      ? [
-          chargeLateFee && packageLateFeeAmount > 0 ? `\nPackage late fee: $${fmtMoney(packageLateFeeAmount + calcServiceFee(packageLateFeeAmount))} auto-charged to their card on file (${autoChargePaymentIntentId}).` : "",
-          clearPackageId
-            ? packageMoveOutCharge > 0
-              ? `\nOutside package month — $${fmtMoney(packageMoveOutCharge + (chargeLateFee ? 0 : calcServiceFee(packageMoveOutCharge)))} auto-charged to their card on file (${autoChargePaymentIntentId}), package slot freed.`
-              : "\nOutside package month — package slot freed, no charge."
-            : "\nStill within package month — no charge.",
-        ].filter(Boolean).join("")
-      : chargeLateFee
-        ? `\nLate fee charged: $${fmtMoney(lateFeeCredited)} credited (50% of $${fmtMoney(oldAmount)} paid)${lateFeeCreditApplied > 0 ? `, $${fmtMoney(lateFeeCreditApplied)} applied to new session ($${fmtMoney(newAmount)})` : ""}.${autoChargedAmount > 0 ? ` $${fmtMoney(autoChargedAmount + calcServiceFee(autoChargedAmount))} auto-charged to their card on file (${autoChargePaymentIntentId}).` : ""}`
-        : newFullPrice === undefined
-          ? ""
-          : creditGranted > 0
-            ? `\n$${fmtMoney(oldAmount)} -> $${fmtMoney(newAmount)}: $${fmtMoney(creditGranted)} credited to their account (already paid)`
-            : autoChargedAmount > 0
-              ? `\n$${fmtMoney(oldAmount)} -> $${fmtMoney(newAmount)}: $${fmtMoney(autoChargedAmount + calcServiceFee(autoChargedAmount))} auto-charged to their card on file (${autoChargePaymentIntentId}).`
-              : priceDelta !== 0
-                ? `\nPrice: $${fmtMoney(oldAmount)} -> $${fmtMoney(newAmount)}`
-                : "";
+      ? packageSessionForfeited
+        ? (clearPackageId
+            ? (packageMoveOutCharge > 0
+                ? `\nPackage session forfeited (late reschedule) — capacity exhausted, $${fmtMoney(packageMoveOutCharge + calcServiceFee(packageMoveOutCharge))} auto-charged to their card on file (${autoChargePaymentIntentId}).`
+                : "\nPackage session forfeited (late reschedule) — capacity exhausted, no charge captured.")
+            : "\nPackage session forfeited (late reschedule) — new session still covered, no charge.")
+        : [
+            clearPackageId
+              ? packageMoveOutCharge > 0
+                ? `\nOutside package month — $${fmtMoney(packageMoveOutCharge + calcServiceFee(packageMoveOutCharge))} auto-charged to their card on file (${autoChargePaymentIntentId}), package slot freed.`
+                : "\nOutside package month — package slot freed, no charge."
+              : "\nStill within package month — no charge.",
+          ].filter(Boolean).join("")
+      : fullForfeitNoRefund
+        ? `\nWeekly late reschedule — old session fully forfeited, no refund.${autoChargedAmount > 0 ? ` $${fmtMoney(autoChargedAmount + calcServiceFee(autoChargedAmount))} auto-charged to their card on file (${autoChargePaymentIntentId}) for the new session at full price.` : ""}`
+        : chargeLateFee
+          ? `\nLate fee charged: $${fmtMoney(lateFeeCredited)} credited (50% of $${fmtMoney(oldAmount)} paid)${lateFeeCreditApplied > 0 ? `, $${fmtMoney(lateFeeCreditApplied)} applied to new session ($${fmtMoney(newAmount)})` : ""}.${autoChargedAmount > 0 ? ` $${fmtMoney(autoChargedAmount + calcServiceFee(autoChargedAmount))} auto-charged to their card on file (${autoChargePaymentIntentId}).` : ""}`
+          : newFullPrice === undefined
+            ? ""
+            : creditGranted > 0
+              ? `\n$${fmtMoney(oldAmount)} -> $${fmtMoney(newAmount)}: $${fmtMoney(creditGranted)} credited to their account (already paid)`
+              : autoChargedAmount > 0
+                ? `\n$${fmtMoney(oldAmount)} -> $${fmtMoney(newAmount)}: $${fmtMoney(autoChargedAmount + calcServiceFee(autoChargedAmount))} auto-charged to their card on file (${autoChargePaymentIntentId}).`
+                : priceDelta !== 0
+                  ? `\nPrice: $${fmtMoney(oldAmount)} -> $${fmtMoney(newAmount)}`
+                  : "";
     const adminCreditRefundNote = creditRefunded ? "\nReferral credit refunded (no longer applied)." : "";
     const priceLookupFailedNote = priceLookupFailed ? `\n⚠️ Couldn't verify the new price on the schedule sheet — price left at $${fmtMoney(reg.session_price ?? 0)}, double-check it manually.` : "";
     await sendAdminSMS(`ADMIN RESCHEDULED: ${reg.parent_name}\nFrom: ${oldSessionDetails}\nTo: ${newSessionDetails}\nPlayers: ${reg.kids}${adminPriceNote}${adminCreditRefundNote}${priceLookupFailedNote}`);
@@ -679,5 +748,8 @@ export async function POST(req: NextRequest) {
     lateFeeCredited: chargeLateFee ? lateFeeCredited : undefined,
     lateFeeCreditApplied: chargeLateFee ? lateFeeCreditApplied : undefined,
     autoChargedAmount: autoChargedAmount > 0 ? autoChargedAmount : undefined,
+    packageSessionForfeited,
+    newSessionPackageCovered: packageSessionForfeited ? !clearPackageId : undefined,
+    fullForfeitNoRefund,
   });
 }
