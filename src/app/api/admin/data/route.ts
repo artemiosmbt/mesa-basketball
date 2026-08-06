@@ -39,19 +39,41 @@ export async function GET(req: NextRequest) {
     registrationsQuery = registrationsQuery.eq("booked_trainer", ctx.trainerName);
   }
 
-  const [{ data: registrations }, { data: profiles }, { data: referralCredits }, { data: packages }, { data: accountCredits }, { data: lateFeeEvents }] = await Promise.all([
+  const [{ data: registrations }, { data: profilesRaw }, { data: referralCreditsRaw }, { data: packages }, { data: accountCreditsRaw }, { data: lateFeeEventsRaw }] = await Promise.all([
     registrationsQuery,
     supabase.from("profiles").select("email, phone, kids, video_consent"),
     supabase.from("referral_credits").select("email, credits, total_referrals"),
-    // Same payment_abandoned exclusion as /api/admin/packages — an
-    // never-completed Checkout Session shouldn't count as a real package
-    // when deciding whether a private session is "within" a paid package.
+    // Deliberately NOT trainer-scoped, unlike everything else below — an
+    // "Any Available Trainer" package floats across whichever substitute has
+    // an open slot, so any trainer plausibly needs to know a walk-in client
+    // has one, not just clients they've personally already served.
     supabase.from("monthly_packages").select("id, email, package_type, month_year, is_paid").neq("status", "payment_abandoned"),
     supabase.from("account_credits").select("email, balance").gt("balance", 0),
     // Recent-activity feed only — older rows are irrelevant clutter, so the
     // query itself narrows to the last week rather than filtering client-side.
     supabase.from("late_fee_events").select("*").gte("created_at", sevenDaysAgo).order("created_at", { ascending: false }),
   ]);
+
+  // A plain trainer's registrations query above is already scoped to their
+  // own bookings — but profiles/referralCredits/accountCredits/lateFeeEvents
+  // were still being fetched completely unscoped and shipped to their
+  // browser in full, regardless of role. That directly contradicts this
+  // route's own stated invariant just above ("their browser never receives
+  // another trainer's clients' contact info in the first place") — a plain
+  // trainer account could open devtools and read every client's phone
+  // number, kids, and credit balances site-wide, not just their own
+  // clients', even though the UI never renders most of it. Scope these the
+  // same way registrations already is: down to only the clients who
+  // actually appear in THIS trainer's own scoped registrations. Elevated
+  // trainers and admin are unaffected (they're meant to see everyone).
+  const isPlainTrainer = ctx.role === "trainer" && !!ctx.trainerName;
+  const ownClientEmails = isPlainTrainer
+    ? new Set((registrations || []).map((r) => (r.email || "").toLowerCase().trim()).filter(Boolean))
+    : null;
+  const profiles = ownClientEmails ? (profilesRaw || []).filter((p) => ownClientEmails.has((p.email || "").toLowerCase().trim())) : profilesRaw;
+  const referralCredits = ownClientEmails ? (referralCreditsRaw || []).filter((r) => ownClientEmails.has((r.email || "").toLowerCase().trim())) : referralCreditsRaw;
+  const accountCredits = ownClientEmails ? (accountCreditsRaw || []).filter((a) => ownClientEmails.has((a.email || "").toLowerCase().trim())) : accountCreditsRaw;
+  const lateFeeEvents = ownClientEmails ? (lateFeeEventsRaw || []).filter((e) => ownClientEmails.has((e.email || "").toLowerCase().trim())) : lateFeeEventsRaw;
 
   return NextResponse.json({ registrations: registrations || [], profiles: profiles || [], referralCredits: referralCredits || [], packages: packages || [], accountCredits: accountCredits || [], lateFeeEvents: lateFeeEvents || [] });
 }
