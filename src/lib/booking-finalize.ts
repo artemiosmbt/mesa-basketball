@@ -1130,6 +1130,27 @@ export async function finalizeRescheduleTopup(params: FinalizeRescheduleTopupPar
 
   await sendAdminSMS(`RESCHEDULED (paid $${fmtMoney(topupTotalWithFee)}${creditAppliedNote}): ${params.parentName}\nFrom: ${params.oldSessionDetails}\nTo: ${params.newSessionDetails}\nPlayers: ${params.kids}`).catch(() => {});
 
+  // The OLD trainer (if this swapped trainers) was already notified their
+  // slot was gone synchronously when the reschedule was first requested —
+  // long before this payment confirmation. This just tells the trainer on
+  // the NEW booking that it's real now that payment succeeded; no structured
+  // old date/time survives to this point to distinguish "rescheduled" vs.
+  // "new booking" wording, so this always reads as a fresh booking, which is
+  // accurate either way from the perspective of whoever's now on the hook
+  // for it.
+  if (params.bookedTrainer) {
+    await notifyTrainerOfNewBooking({
+      trainer: params.bookedTrainer,
+      parentName: params.parentName,
+      kids: params.kids,
+      sessionLabel: isPrivateType ? (params.type === "group-private" ? "Group Private Session" : "Private Session") : (params.bookedGroup || "Group Session"),
+      date: params.bookedDate,
+      startTime: params.bookedStartTime,
+      endTime: params.bookedEndTime,
+      location: params.bookedLocation,
+    }).catch((err) => console.error("Trainer reschedule-topup notify failed:", err));
+  }
+
   try {
     if (isPrivateType) {
       await addPrivateSessionToCalendar({

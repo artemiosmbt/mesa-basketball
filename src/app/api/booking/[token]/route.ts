@@ -1013,6 +1013,26 @@ export async function PUT(
     return NextResponse.json({ error: "This booking was already cancelled or rescheduled" }, { status: 409 });
   }
 
+  // Notify the OLD trainer their slot is gone if this reschedule swaps to a
+  // different trainer — fires here, immediately, since the old booking is
+  // genuinely cancelled at this exact point regardless of whether a Stripe
+  // top-up is still needed for the new one below. The NEW trainer's own
+  // notification (new booking, or "rescheduled" if staying with the same
+  // trainer) fires later: either near the end of this function (no further
+  // payment needed) or from finalizeRescheduleTopup once a required top-up
+  // payment actually succeeds — never before the new booking is real.
+  if (reg.booked_trainer && reg.booked_trainer !== resolvedTrainer && reg.booked_date && reg.booked_start_time) {
+    await notifyTrainerOfCancellation({
+      trainer: reg.booked_trainer,
+      parentName: reg.parent_name,
+      sessionLabel: reg.type === "weekly" ? (reg.booked_group || "Group Session") : reg.type === "group-private" ? "Group Private Session" : "Private Session",
+      date: reg.booked_date,
+      startTime: reg.booked_start_time,
+      endTime: reg.booked_end_time || reg.booked_start_time,
+      location: reg.booked_location || "",
+    }).catch((err) => console.error("Trainer reschedule-cancel notify failed:", err));
+  }
+
   // Refund referral credit from the old booking (always — they'll re-apply to the new one if they want)
   if (reg.used_referral_credit && reg.email) {
     await addReferralCredit(reg.email).catch(() => {});
@@ -1321,6 +1341,7 @@ export async function PUT(
         booking_batch_id: bookingBatchId,
         purpose: "reschedule_topup",
         old_session_details: reg.session_details,
+        old_trainer: reg.booked_trainer || "",
         is_late_reschedule: String(!!isLateReschedule),
         topup_amount: String(priceReconciliation.amount),
         late_fee_credited: String(lateFeeCredited),
@@ -1515,16 +1536,16 @@ export async function PUT(
     : "";
   await sendAdminSMS(`RESCHEDULED: ${newParentName}\nFrom: ${reg.session_details}\nTo: ${newSessionDetails}${rescheduleTrainerLine}\nPlayers: ${kidsToUse}${refundOutcomeAdminText ? `\n${refundOutcomeAdminText}` : ""}${adminCreditNote}${adminPackageNote}`);
 
-  // Trainer-facing: same trainer keeping the session just at a new time gets
-  // one "rescheduled" notice; a trainer swap tells the OLD trainer it's off
-  // their schedule and the NEW trainer it's a fresh booking, rather than
-  // both getting a confusing "rescheduled" message for a session one of them
-  // never actually had.
+  // Trainer-facing NEW-side notification only — the old trainer (if this
+  // swapped trainers) was already notified right after the old booking was
+  // cancelled, near the top of this function; that fires unconditionally
+  // regardless of which branch we take, while this point is only reached
+  // when no further payment was needed (see finalizeRescheduleTopup for the
+  // equivalent new-side notification when a Stripe top-up was required).
   if (bookedDate && bookedStartTime) {
     const oldTrainer = reg.booked_trainer;
     const newTrainer = resolvedTrainer;
     const newLabel = newType === "weekly" ? (sessionGroup || "Group Session") : newType === "group-private" ? "Group Private Session" : "Private Session";
-    const oldLabel = reg.type === "weekly" ? (reg.booked_group || "Group Session") : reg.type === "group-private" ? "Group Private Session" : "Private Session";
     if (oldTrainer && newTrainer && oldTrainer === newTrainer && reg.booked_date && reg.booked_start_time) {
       await notifyTrainerOfReschedule({
         trainer: newTrainer,
@@ -1538,30 +1559,17 @@ export async function PUT(
         newEndTime: bookedEndTime || bookedStartTime,
         location: bookedLocation || "",
       }).catch((err) => console.error("Trainer reschedule notify failed:", err));
-    } else {
-      if (oldTrainer && oldTrainer !== newTrainer && reg.booked_date && reg.booked_start_time) {
-        await notifyTrainerOfCancellation({
-          trainer: oldTrainer,
-          parentName: newParentName,
-          sessionLabel: oldLabel,
-          date: reg.booked_date,
-          startTime: reg.booked_start_time,
-          endTime: reg.booked_end_time || reg.booked_start_time,
-          location: reg.booked_location || "",
-        }).catch((err) => console.error("Trainer reschedule-cancel notify failed:", err));
-      }
-      if (newTrainer && newTrainer !== oldTrainer) {
-        await notifyTrainerOfNewBooking({
-          trainer: newTrainer,
-          parentName: newParentName,
-          kids: kidsToUse,
-          sessionLabel: newLabel,
-          date: bookedDate,
-          startTime: bookedStartTime,
-          endTime: bookedEndTime || bookedStartTime,
-          location: bookedLocation || "",
-        }).catch((err) => console.error("Trainer reschedule-newbooking notify failed:", err));
-      }
+    } else if (newTrainer && newTrainer !== oldTrainer) {
+      await notifyTrainerOfNewBooking({
+        trainer: newTrainer,
+        parentName: newParentName,
+        kids: kidsToUse,
+        sessionLabel: newLabel,
+        date: bookedDate,
+        startTime: bookedStartTime,
+        endTime: bookedEndTime || bookedStartTime,
+        location: bookedLocation || "",
+      }).catch((err) => console.error("Trainer reschedule-newbooking notify failed:", err));
     }
   }
 
