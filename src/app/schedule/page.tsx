@@ -1089,7 +1089,7 @@ export default function Home() {
     window: TimeWindow
   ) {
     setWindowSelections((prev) => {
-      const current = prev[windowIdx] || { start: window.startMins, duration: 60, trainer: window.trainers[0] };
+      const current = prev[windowIdx] || { start: window.startMins, duration: 60, trainer: "" };
       const updated = { ...current, [field]: value };
       // If changing start, clamp duration to max available
       if (field === "start") {
@@ -1108,7 +1108,7 @@ export default function Home() {
 
   function updateWindowTrainer(windowIdx: number, window: TimeWindow, trainer: string) {
     setWindowSelections((prev) => {
-      const current = prev[windowIdx] || { start: window.startMins, duration: 60, trainer: window.trainers[0] };
+      const current = prev[windowIdx] || { start: window.startMins, duration: 60, trainer: "" };
       return { ...prev, [windowIdx]: { ...current, trainer } };
     });
   }
@@ -2901,13 +2901,17 @@ export default function Home() {
                             const rawSel = windowSelections[wi] || {
                               start: defaultStart,
                               duration: Math.min(60, window.endMins - defaultStart),
-                              trainer: window.trainers[0],
+                              trainer: "",
                             };
                             const startInRange = rawSel.start >= window.startMins && rawSel.start < window.endMins;
                             const sel = startInRange
                               ? { ...rawSel, duration: Math.min(rawSel.duration, window.endMins - rawSel.start) || Math.min(60, window.endMins - rawSel.start) }
                               : { start: defaultStart, duration: Math.min(60, window.endMins - defaultStart), trainer: rawSel.trainer };
-                            const selectedTrainer = window.trainers.includes(sel.trainer) ? sel.trainer : window.trainers[0];
+                            // "" means no trainer picked yet — never
+                            // auto-default to trainers[0], since the Book
+                            // button below stays disabled until the client
+                            // actually makes a choice.
+                            const selectedTrainer = window.trainers.includes(sel.trainer) ? sel.trainer : "";
                             // Only "included in your package" if the active
                             // package's tier matches whichever trainer is
                             // currently selected on THIS card — a package
@@ -2924,27 +2928,23 @@ export default function Home() {
                                 key={wi}
                                 className="rounded-lg bg-brown-800/50 border border-brown-700/60 p-4"
                               >
-                                <p className="text-sm text-brown-400 mb-3">
-                                  <LocationLink location={window.location} className="text-brown-400" /> &bull; Available {window.startLabel} - {window.endLabel} &bull; {selectedTrainer}
+                                <p className="text-sm text-brown-400 mb-3 flex flex-wrap items-center gap-x-1">
+                                  <span><LocationLink location={window.location} className="text-brown-400" /> &bull; Available {window.startLabel} - {window.endLabel} &bull;</span>
+                                  <select
+                                    value={selectedTrainer}
+                                    onChange={(e) => updateWindowTrainer(wi, window, e.target.value)}
+                                    className="rounded border border-brown-700 bg-brown-800 px-1.5 py-0.5 text-xs text-white focus:border-mesa-accent focus:outline-none"
+                                  >
+                                    <option value="">Select a trainer</option>
+                                    {window.trainers.map((t) => (
+                                      <option key={t} value={t}>
+                                        {t}
+                                      </option>
+                                    ))}
+                                  </select>
                                   <TrainerBioLink trainer={selectedTrainer} />
                                 </p>
                                 <div className="flex flex-wrap items-end gap-4">
-                                  <div>
-                                    <label className="mb-1 block text-xs text-brown-400">Trainer</label>
-                                    <select
-                                      value={selectedTrainer}
-                                      onChange={(e) => updateWindowTrainer(wi, window, e.target.value)}
-                                      disabled={window.trainers.length <= 1}
-                                      className={`rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-sm text-white focus:border-mesa-accent focus:outline-none ${window.trainers.length <= 1 ? "opacity-70 cursor-default" : ""}`}
-                                    >
-                                      {window.trainers.map((t) => (
-                                        <option key={t} value={t}>
-                                          {t}
-                                        </option>
-                                      ))}
-                                    </select>
-                                  </div>
-
                                   <div>
                                     <label className="mb-1 block text-xs text-brown-400">Start Time</label>
                                     <select
@@ -2989,8 +2989,14 @@ export default function Home() {
                                   </div>
 
                                   <button
-                                    onClick={() => openPrivateBooking(wi, window, { ...sel, trainer: selectedTrainer })}
-                                    className="rounded bg-mesa-accent px-4 py-2 text-sm font-semibold text-white transition hover:bg-yellow-600"
+                                    onClick={() => selectedTrainer && openPrivateBooking(wi, window, { ...sel, trainer: selectedTrainer })}
+                                    disabled={!selectedTrainer}
+                                    title={selectedTrainer ? "" : "Select a trainer first"}
+                                    className={`rounded px-4 py-2 text-sm font-semibold text-white transition ${
+                                      selectedTrainer
+                                        ? "bg-mesa-accent hover:bg-yellow-600"
+                                        : "bg-brown-700 opacity-60 cursor-not-allowed"
+                                    }`}
                                   >
                                     Book
                                   </button>
