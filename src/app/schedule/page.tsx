@@ -772,6 +772,16 @@ export default function Home() {
   const [isReturningClient, setIsReturningClient] = useState(false);
   const [kids, setKids] = useState([{ name: "", dob: "", grade: "", gender: "" }]);
   const [showGenderWarning, setShowGenderWarning] = useState(false);
+  // Set when the client has an active package this month, but for a
+  // DIFFERENT trainer tier than the one they're about to book with — e.g.
+  // a package bought for "Any Available Trainer" won't cover a session with
+  // Artemios himself, or vice versa. Booking is never blocked, just warned
+  // (see the "Continue Anyway" flow, same shape as the gender mismatch
+  // warning below) — allocatePackageCoverage on the server already refuses
+  // to apply a mismatched-tier package regardless, so this is purely an
+  // informational heads-up before that happens.
+  const [mismatchedPackageTier, setMismatchedPackageTier] = useState<TrainerTier | null>(null);
+  const [showPackageTierWarning, setShowPackageTierWarning] = useState(false);
   const [isGroupRate, setIsGroupRate] = useState(false);
   const [hideUpsell, setHideUpsell] = useState(false);
   const [filterDays, setFilterDays] = useState<Set<number>>(new Set());
@@ -845,28 +855,33 @@ export default function Home() {
   useEffect(() => {
     const isPrivate = modal.type === "private" || modal.type === "group-private";
     const effectiveGroup = isGroupRate || kids.length >= 4;
-    if (!modal.open || !isPrivate || effectiveGroup || !modal.bookedDate) { setPackageSessionsRemaining(0); return; }
+    if (!modal.open || !isPrivate || effectiveGroup || !modal.bookedDate) { setPackageSessionsRemaining(0); setMismatchedPackageTier(null); return; }
     const trimmed = email.trim().toLowerCase();
-    if (!trimmed || !trimmed.includes("@")) { setPackageSessionsRemaining(0); return; }
+    if (!trimmed || !trimmed.includes("@")) { setPackageSessionsRemaining(0); setMismatchedPackageTier(null); return; }
     const d = new Date(modal.bookedDate);
-    if (isNaN(d.getTime())) { setPackageSessionsRemaining(0); return; }
+    if (isNaN(d.getTime())) { setPackageSessionsRemaining(0); setMismatchedPackageTier(null); return; }
     const monthYear = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
     let cancelled = false;
     sessionEmailMatches(trimmed).then((matches) => {
       if (cancelled) return;
-      if (!matches) { setPackageSessionsRemaining(0); return; }
+      if (!matches) { setPackageSessionsRemaining(0); setMismatchedPackageTier(null); return; }
       authedJsonFetch(`/api/packages?email=${encodeURIComponent(trimmed)}&monthYear=${monthYear}`)
         .then((d) => {
           if (cancelled) return;
           const pkg = d.package as { package_type: number; sessions_used: number; trainer_tier?: string } | null;
           // Only counts as coverage if this package's tier matches the
           // trainer actually being booked — a package bought for one tier
-          // never covers a session with the other tier's trainer.
+          // never covers a session with the other tier's trainer. When
+          // there IS an active package but it's for the OTHER tier, surface
+          // that mismatch separately so the booking form can warn (not
+          // block) instead of just silently showing the full price.
           const pkgTier: TrainerTier = normalizeTrainerTier(pkg?.trainer_tier);
-          const covers = !!pkg && pkgTier === getTrainerTier(modal.bookedTrainer);
+          const bookedTier = getTrainerTier(modal.bookedTrainer);
+          const covers = !!pkg && pkgTier === bookedTier;
           setPackageSessionsRemaining(covers && pkg ? Math.max(0, pkg.package_type - pkg.sessions_used) : 0);
+          setMismatchedPackageTier(!!pkg && !covers ? pkgTier : null);
         })
-        .catch(() => { if (!cancelled) setPackageSessionsRemaining(0); });
+        .catch(() => { if (!cancelled) { setPackageSessionsRemaining(0); setMismatchedPackageTier(null); } });
     });
     return () => { cancelled = true; };
   }, [email, modal.open, modal.type, modal.bookedDate, modal.bookedTrainer, isGroupRate, kids.length]);
@@ -1584,6 +1599,11 @@ export default function Home() {
         setShowGenderWarning(true);
         return;
       }
+    }
+
+    if (mismatchedPackageTier) {
+      setShowPackageTierWarning(true);
+      return;
     }
 
     // Re-validate the referral code at submit time — a blur check may never have
@@ -3192,6 +3212,37 @@ export default function Home() {
               </button>
               <button
                 onClick={() => { setShowGenderWarning(false); performSubmit(); }}
+                className="flex-1 rounded-lg bg-yellow-700 px-4 py-2 text-sm font-semibold text-white hover:bg-yellow-600"
+              >
+                Continue Anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Package Trainer-Tier Mismatch Warning */}
+      {showPackageTierWarning && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-sm rounded-2xl border border-yellow-700 bg-brown-900 p-6 shadow-2xl">
+            <h3 className="text-lg font-bold text-yellow-400">This Won&apos;t Use Your Package</h3>
+            <p className="mt-2 text-sm text-brown-300">
+              {mismatchedPackageTier === "artemios"
+                ? "You have an active package with Artemios, but this session is with a different trainer — it won't be covered. You'd pay the regular rate for this trainer instead."
+                : "You have an active package with one of our other trainers, but this session is with Artemios — it won't be covered. You'd pay Artemios's regular rate instead."}
+            </p>
+            <p className="mt-2 text-xs text-brown-500">
+              To use your package, go back and book with {mismatchedPackageTier === "artemios" ? "Artemios" : "your package trainer"} instead — or continue to book this session at full price.
+            </p>
+            <div className="mt-5 flex gap-3">
+              <button
+                onClick={() => setShowPackageTierWarning(false)}
+                className="flex-1 rounded-lg bg-brown-700 px-4 py-2 text-sm text-brown-300 hover:bg-brown-600"
+              >
+                Go Back
+              </button>
+              <button
+                onClick={() => { setShowPackageTierWarning(false); performSubmit(); }}
                 className="flex-1 rounded-lg bg-yellow-700 px-4 py-2 text-sm font-semibold text-white hover:bg-yellow-600"
               >
                 Continue Anyway
