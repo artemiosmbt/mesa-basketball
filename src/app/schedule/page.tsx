@@ -2735,17 +2735,15 @@ export default function Home() {
             </p>
             <p className="mt-1 text-center text-xs text-brown-500">Up to 3 players per package.</p>
             <p className="mt-1 text-center text-xs text-brown-500">
-              Prices shown are for Any Available Trainer — pick Artemios in the enrollment form if he&apos;s on the schedule that month.
+              Pick your trainer inside the enrollment form to see pricing.
             </p>
             <div className="mt-6 grid gap-4 sm:grid-cols-2">
               {/* 4-session */}
               <div className="rounded-xl border border-brown-700 bg-brown-900/40 p-5 text-center">
-                <p className="text-3xl font-bold text-mesa-accent">${packagePrice(4, "other")}</p>
+                <p className="text-3xl font-bold text-mesa-accent">4-Pack</p>
                 <p className="mt-0.5 text-sm text-brown-300">4 sessions / month</p>
-                <div className="mt-3 rounded-lg bg-brown-800/50 p-3 space-y-0.5">
-                  <p className="text-xs text-brown-500">Normally <span className="line-through">${PRIVATE_RATE_BY_TIER.other * 4}</span></p>
-                  <p className="text-sm font-semibold text-green-400">Save ${PRIVATE_RATE_BY_TIER.other * 4 - packagePrice(4, "other")} — {Math.round((1 - packagePrice(4, "other") / (PRIVATE_RATE_BY_TIER.other * 4)) * 100)}% off</p>
-                  <p className="text-xs text-brown-400">${(packagePrice(4, "other") / 4).toFixed(2)} per session</p>
+                <div className="mt-3 rounded-lg bg-brown-800/50 p-3">
+                  <p className="text-sm font-semibold text-green-400">Save vs. booking sessions individually</p>
                 </div>
                 <button
                   onClick={() => { if (!userEmail) { setAuthPrompt(true); return; } setPkgModal({ open: true, packageType: 4, trainerTier: "other" }); setPkgFirstName(profileRef.current?.firstName ?? ""); setPkgLastName(profileRef.current?.lastName ?? ""); setPkgEmail(userEmail ?? ""); setPkgPhone(profileRef.current?.phone ?? ""); setPkgMonth(pkgMonthOptions[0]?.value || ""); setPkgResult(null); setKids(profileRef.current?.kids ?? [{ name: "", dob: "", grade: "", gender: "" }]); setPkgReferralCode(""); setPkgReferralCodeError(""); setPkgApplyAccountCredit(true); }}
@@ -2757,12 +2755,10 @@ export default function Home() {
               {/* 8-session */}
               <div className="relative rounded-xl border border-mesa-accent/50 bg-brown-900/40 p-5 text-center">
                 <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-mesa-accent px-3 py-0.5 text-xs font-bold text-white whitespace-nowrap">BEST VALUE</span>
-                <p className="text-3xl font-bold text-mesa-accent">${packagePrice(8, "other")}</p>
+                <p className="text-3xl font-bold text-mesa-accent">8-Pack</p>
                 <p className="mt-0.5 text-sm text-brown-300">8 sessions / month</p>
-                <div className="mt-3 rounded-lg bg-brown-800/50 p-3 space-y-0.5">
-                  <p className="text-xs text-brown-500">Normally <span className="line-through">${PRIVATE_RATE_BY_TIER.other * 8}</span></p>
-                  <p className="text-sm font-semibold text-green-400">Save ${PRIVATE_RATE_BY_TIER.other * 8 - packagePrice(8, "other")} — {Math.round((1 - packagePrice(8, "other") / (PRIVATE_RATE_BY_TIER.other * 8)) * 100)}% off</p>
-                  <p className="text-xs text-brown-400">${(packagePrice(8, "other") / 8).toFixed(2)} per session</p>
+                <div className="mt-3 rounded-lg bg-brown-800/50 p-3">
+                  <p className="text-sm font-semibold text-green-400">Save vs. booking sessions individually</p>
                 </div>
                 <button
                   onClick={() => { if (!userEmail) { setAuthPrompt(true); return; } setPkgModal({ open: true, packageType: 8, trainerTier: "other" }); setPkgFirstName(profileRef.current?.firstName ?? ""); setPkgLastName(profileRef.current?.lastName ?? ""); setPkgEmail(userEmail ?? ""); setPkgPhone(profileRef.current?.phone ?? ""); setPkgMonth(pkgMonthOptions[0]?.value || ""); setPkgResult(null); setKids(profileRef.current?.kids ?? [{ name: "", dob: "", grade: "", gender: "" }]); setPkgReferralCode(""); setPkgReferralCodeError(""); setPkgApplyAccountCredit(true); }}
@@ -2933,22 +2929,21 @@ export default function Home() {
                                   <TrainerBioLink trainer={selectedTrainer} />
                                 </p>
                                 <div className="flex flex-wrap items-end gap-4">
-                                  {window.trainers.length > 1 && (
-                                    <div>
-                                      <label className="mb-1 block text-xs text-brown-400">Trainer</label>
-                                      <select
-                                        value={selectedTrainer}
-                                        onChange={(e) => updateWindowTrainer(wi, window, e.target.value)}
-                                        className="rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-sm text-white focus:border-mesa-accent focus:outline-none"
-                                      >
-                                        {window.trainers.map((t) => (
-                                          <option key={t} value={t}>
-                                            {t}
-                                          </option>
-                                        ))}
-                                      </select>
-                                    </div>
-                                  )}
+                                  <div>
+                                    <label className="mb-1 block text-xs text-brown-400">Trainer</label>
+                                    <select
+                                      value={selectedTrainer}
+                                      onChange={(e) => updateWindowTrainer(wi, window, e.target.value)}
+                                      disabled={window.trainers.length <= 1}
+                                      className={`rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-sm text-white focus:border-mesa-accent focus:outline-none ${window.trainers.length <= 1 ? "opacity-70 cursor-default" : ""}`}
+                                    >
+                                      {window.trainers.map((t) => (
+                                        <option key={t} value={t}>
+                                          {t}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
 
                                   <div>
                                     <label className="mb-1 block text-xs text-brown-400">Start Time</label>
