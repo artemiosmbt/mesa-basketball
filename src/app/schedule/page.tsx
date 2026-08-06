@@ -2938,8 +2938,21 @@ export default function Home() {
                             // Only "included in your package" if the active
                             // package's tier matches whichever trainer is
                             // currently selected on THIS card — a package
-                            // never covers the other tier's trainer.
-                            const groupPackageRemaining = groupPackageInfo && groupPackageInfo.trainerTier === getTrainerTier(selectedTrainer)
+                            // never covers the other tier's trainer. Before a
+                            // trainer is picked, getTrainerTier("") would
+                            // default to 'other' and could wrongly claim
+                            // "included" for a card where the ONLY trainer
+                            // actually available (e.g. just Artemios that
+                            // day) doesn't match an "Any Available Trainer"
+                            // package at all — so instead check whether ANY
+                            // trainer actually offered on this card matches,
+                            // same "actually available" spirit as
+                            // cheapestAvailablePrice just below.
+                            const groupPackageRemaining = groupPackageInfo && groupPackageInfo.remaining > 0 && (
+                              selectedTrainer
+                                ? groupPackageInfo.trainerTier === getTrainerTier(selectedTrainer)
+                                : window.trainers.some((t) => getTrainerTier(t) === groupPackageInfo.trainerTier)
+                            )
                               ? groupPackageInfo.remaining
                               : 0;
                             const durationOptions = getDurationOptions(sel.start, window.endMins);
