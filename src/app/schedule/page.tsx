@@ -3916,7 +3916,7 @@ export default function Home() {
                 const savings = normally - price;
                 const pct = Math.round((1 - price / normally) * 100);
                 return (
-                  <div className="mt-3 rounded-lg bg-brown-800/50 p-3 space-y-0.5">
+                  <div className="mt-3 rounded-lg bg-brown-800/50 p-3 space-y-0.5 text-center">
                     <p className="text-xs text-brown-500">Normally <span className="line-through">${normally}</span></p>
                     <p className="text-sm font-semibold text-green-400">Save ${savings} — {pct}% off</p>
                     <p className="text-xs text-brown-400">${(price / packageType).toFixed(2)} per session</p>
