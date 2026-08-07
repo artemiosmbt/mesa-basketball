@@ -23,6 +23,10 @@
     {
       "path": "/api/cron/payroll-sync",
       "schedule": "0 10 * * *"
+    },
+    {
+      "path": "/api/cron/detect-time-changes",
+      "schedule": "0 9 * * *"
     }
   ]
 }
