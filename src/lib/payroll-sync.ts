@@ -347,10 +347,6 @@ export interface PayrollSyncResult {
   packagesWritten: number;
   packagesUpdated: number;
   errors: string[];
-  /** Temporary diagnostic: distinct booked_trainer values that didn't match
-   * one of the 5 known names, with counts — remove once trainer matching is
-   * confirmed correct against real data. */
-  unknownTrainerBreakdown?: Record<string, number>;
 }
 
 export async function runPayrollSync(): Promise<PayrollSyncResult> {
@@ -433,14 +429,12 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
     }
   }
 
-  const unknownTrainerCounts = new Map<string, number>();
   for (const reg of registrations) {
     if (writesThisRun >= MAX_WRITES_PER_RUN) break;
 
     const trainer = (reg.booked_trainer || "").trim();
     if (!trainerSet.has(trainer)) {
       result.sessionsSkippedUnknownTrainer++;
-      unknownTrainerCounts.set(trainer, (unknownTrainerCounts.get(trainer) || 0) + 1);
       continue;
     }
     if (reg.status === "cancelled" && !isLateCancelById.get(reg.id)) {
@@ -490,11 +484,6 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
     } catch (err) {
       result.errors.push(`registration ${reg.id}: ${err instanceof Error ? err.message : String(err)}`);
     }
-  }
-  if (unknownTrainerCounts.size > 0) {
-    result.unknownTrainerBreakdown = Object.fromEntries(
-      [...unknownTrainerCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 15)
-    );
   }
 
   // ---- package purchases -> Package Sales Log ----
