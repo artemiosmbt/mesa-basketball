@@ -31,6 +31,7 @@ export interface TrainerAccount {
 export const TRAINER_ACCOUNTS: TrainerAccount[] = [
   { email: "ckaterinakis@hchc.edu", role: "elevated_trainer" },
   // { email: "coach@example.com", role: "trainer", trainerName: "John Smith", phone: "631-555-0100" },
+  { email: "giftedtraining24@gmail.com", role: "trainer", trainerName: "Joseph Owens", phone: "516-439-6467" },
 ];
 
 // Looks up a trainer's contact info by their exact schedule-sheet name (the
