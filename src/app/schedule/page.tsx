@@ -905,7 +905,7 @@ export default function Home() {
   const [packageRemainingByMonth, setPackageRemainingByMonth] = useState<Record<string, { remaining: number; trainerTier: TrainerTier }>>({});
 
   const [recurringWeeks, setRecurringWeeks] = useState<
-    { date: string; startTime: string; endTime: string; location: string; trainer: string; selected: boolean }[]
+    { date: string; startTime: string; endTime: string; location: string; trainer: string; availableTrainers: string[]; selected: boolean }[]
   >([]);
   const [submitting, setSubmitting] = useState(false);
   const [submitResult, setSubmitResult] = useState<{
@@ -1181,9 +1181,12 @@ export default function Home() {
     const endLabel = formatTimeFromMins(endMins);
     const details = `Private Session — ${window.date} ${startLabel}-${endLabel} (${sel.duration} min) at ${window.location}`;
 
-    // Find future weeks with matching day, time, AND the same selected
-    // trainer available — a recurring series stays with one trainer
-    // throughout rather than silently switching week to week.
+    // Find future weeks with matching day and time. The series stays with
+    // the same trainer when they're still available that week; when they're
+    // not, the week is still offered (not silently dropped) with whichever
+    // trainer(s) the sheet actually has for that slot — a single name is
+    // pre-filled automatically, multiple options are left for the parent to
+    // choose via a dropdown, same as the primary slot's own trainer picker.
     const selectedDate = new Date(window.date);
     const dayOfWeek = selectedDate.getUTCDay();
     const futureWeeks: typeof recurringWeeks = [];
@@ -1193,15 +1196,16 @@ export default function Home() {
       const wDate = new Date(w.date);
       if (wDate.getUTCDay() !== dayOfWeek) continue;
       if (wDate <= selectedDate) continue;
-      if (!w.trainers.includes(selectedTrainer)) continue;
       // Check if the selected time range fits in this window
       if (sel.start >= w.startMins && endMins <= w.endMins) {
+        const defaultTrainer = w.trainers.includes(selectedTrainer) ? selectedTrainer : (w.trainers[0] || "");
         futureWeeks.push({
           date: w.date,
           startTime: startLabel,
           endTime: endLabel,
           location: w.location,
-          trainer: selectedTrainer,
+          trainer: defaultTrainer,
+          availableTrainers: w.trainers,
           selected: false,
         });
       }
@@ -3900,26 +3904,49 @@ export default function Home() {
                       {(showAllRecurring ? recurringWeeks : recurringWeeks.slice(0, 3)).map((week, wi) => {
                         const diffLocation = week.location !== modal.bookedLocation;
                         return (
-                          <label key={wi} className="flex items-center gap-2 text-sm cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={week.selected}
-                              onChange={() =>
-                                setRecurringWeeks((prev) =>
-                                  prev.map((w, i) =>
-                                    i === wi ? { ...w, selected: !w.selected } : w
+                          <div key={wi} className="flex items-center justify-between gap-2 text-sm">
+                            <label className="flex min-w-0 flex-1 items-center gap-2 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={week.selected}
+                                onChange={() =>
+                                  setRecurringWeeks((prev) =>
+                                    prev.map((w, i) =>
+                                      i === wi ? { ...w, selected: !w.selected } : w
+                                    )
                                   )
-                                )
-                              }
-                              className="rounded border-brown-600 accent-mesa-accent"
-                            />
-                            <span className="text-brown-300">
-                              {fmtDate(week.date)}{" "}
-                              <span className={diffLocation ? "text-mesa-accent font-medium" : "text-brown-500"}>
-                                ({week.location})
+                                }
+                                className="shrink-0 rounded border-brown-600 accent-mesa-accent"
+                              />
+                              <span className="truncate text-brown-300">
+                                {fmtDate(week.date)}{" "}
+                                <span className={diffLocation ? "text-mesa-accent font-medium" : "text-brown-500"}>
+                                  ({week.location})
+                                </span>
                               </span>
-                            </span>
-                          </label>
+                            </label>
+                            {week.availableTrainers.length > 1 ? (
+                              <select
+                                value={week.trainer}
+                                onChange={(e) =>
+                                  setRecurringWeeks((prev) =>
+                                    prev.map((w, i) =>
+                                      i === wi ? { ...w, trainer: e.target.value } : w
+                                    )
+                                  )
+                                }
+                                className="shrink-0 rounded border border-brown-700 bg-brown-800 px-1.5 py-0.5 text-xs text-white focus:border-mesa-accent focus:outline-none"
+                              >
+                                {week.availableTrainers.map((t) => (
+                                  <option key={t} value={t}>{formatTrainerForDisplay(t)}</option>
+                                ))}
+                              </select>
+                            ) : (
+                              <span className="shrink-0 text-xs text-brown-500">
+                                {week.trainer ? formatTrainerForDisplay(week.trainer) : "TBD"}
+                              </span>
+                            )}
+                          </div>
                         );
                       })}
                       {!showAllRecurring && recurringWeeks.length > 3 && (
