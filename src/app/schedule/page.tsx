@@ -3639,8 +3639,15 @@ export default function Home() {
                         </>
                       ) : (
                         <div className="flex gap-2 items-center justify-between">
-                          <button type="button" onClick={() => toggleKidExpanded(i)} className="flex-1 text-left text-white hover:text-mesa-accent">
-                            {kid.name} <span className="text-brown-400 text-xs">— Edit</span>
+                          <button
+                            type="button"
+                            onClick={() => toggleKidExpanded(i)}
+                            className="inline-flex items-center gap-1.5 rounded-full border border-brown-700 bg-brown-800 px-3 py-1.5 text-sm text-white hover:border-mesa-accent transition"
+                          >
+                            <span>{kid.name || "Player"}</span>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-brown-400 shrink-0">
+                              <polyline points="6 9 12 15 18 9" />
+                            </svg>
                           </button>
                           {kids.length > 1 && (
                             <button type="button" onClick={() => removeKid(i)} className="text-brown-500 hover:text-red-400 text-xl leading-none">
@@ -4235,8 +4242,15 @@ export default function Home() {
                         </>
                       ) : (
                         <div className="flex gap-2 items-center justify-between">
-                          <button type="button" onClick={() => toggleKidExpanded(i)} className="flex-1 text-left text-white hover:text-mesa-accent">
-                            {kid.name} <span className="text-brown-400 text-xs">— Edit</span>
+                          <button
+                            type="button"
+                            onClick={() => toggleKidExpanded(i)}
+                            className="inline-flex items-center gap-1.5 rounded-full border border-brown-700 bg-brown-800 px-3 py-1.5 text-sm text-white hover:border-mesa-accent transition"
+                          >
+                            <span>{kid.name || "Player"}</span>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-brown-400 shrink-0">
+                              <polyline points="6 9 12 15 18 9" />
+                            </svg>
                           </button>
                           {kids.length > 1 && (
                             <button type="button" onClick={() => removeKid(i)} className="text-brown-500 hover:text-red-400 text-xl leading-none">&times;</button>

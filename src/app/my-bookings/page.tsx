@@ -350,9 +350,14 @@ export default function MyBookings() {
               return da.getTime() - db.getTime();
             });
 
-          // Past: anything with a past date OR any cancelled session
+          // Past: anything with a past date OR any cancelled session — except
+          // a booking whose payment was never actually completed. Those
+          // never really happened (no session was ever secured), so they'd
+          // just confuse a client scrolling their history rather than
+          // informing them.
           const past = bookings
             .filter((b) => {
+              if (b.status === "pending_payment" || b.status === "payment_abandoned") return false;
               if (b.status === "cancelled") return true;
               const dt = sessionDateTime(b);
               return dt !== null && dt <= now;
@@ -412,10 +417,7 @@ export default function MyBookings() {
                     )}
                     {!isConfirmed && !isCancelled && (
                       <span className="inline-block rounded-full bg-brown-700 px-3 py-1 text-xs font-medium text-brown-300">
-                        {b.status === "no_show" ? "No-Show"
-                          : b.status === "payment_abandoned" ? "Payment Not Completed"
-                          : b.status === "pending_payment" ? "Payment Pending"
-                          : b.status}
+                        {b.status === "no_show" ? "No-Show" : b.status}
                       </span>
                     )}
                   </div>

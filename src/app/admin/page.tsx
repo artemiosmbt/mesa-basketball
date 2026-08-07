@@ -47,6 +47,7 @@ interface ProfileKid {
   grade: string;
   gender?: string;
   groups?: CanonicalGroupId[];
+  hidden?: boolean;
 }
 
 interface PackageData {
@@ -1450,7 +1451,7 @@ export default function AdminPage() {
     };
     for (const [email, profile] of Object.entries(profilesMap)) {
       for (const kid of profile.kids) {
-        if (!kid.name || !kid.id) continue;
+        if (!kid.name || !kid.id || kid.hidden) continue;
         const groups = kid.groups || [];
         if (groups.length === 0) {
           buckets["all-else"].push({ email, parentName: profile.parentName, athlete: kid });
@@ -1473,6 +1474,52 @@ export default function AdminPage() {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
         body: JSON.stringify({ email, athleteId, groupId, action }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setProfilesMap((prev) => ({ ...prev, [email]: { ...prev[email], kids: data.kids } }));
+      }
+    } finally {
+      setGroupActionPending(null);
+    }
+  }
+
+  // Cosmetic-only: removes an athlete from the Groups tab's rendered list.
+  // Does not touch their `groups` (still drives reminder emails) or
+  // anything on the client's own account.
+  async function hideAthleteFromGroupsTab(email: string, athleteId: string) {
+    const actionKey = `hide|${email}|${athleteId}`;
+    setGroupActionPending(actionKey);
+    try {
+      const res = await fetch("/api/admin/athletes/visibility", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ email, athleteId, hidden: true }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setProfilesMap((prev) => ({ ...prev, [email]: { ...prev[email], kids: data.kids } }));
+        if (expandedGroupAthlete === `${email}|${athleteId}`) setExpandedGroupAthlete(null);
+      }
+    } finally {
+      setGroupActionPending(null);
+    }
+  }
+
+  // Merges two saved-athlete entries within the same client that are
+  // actually the same kid recorded under two different name spellings
+  // across past bookings (e.g. "Remy" vs "Remy Trudeau") — unions their
+  // groups, keeps keepId, deletes mergeId. Always an explicit two-athlete
+  // choice, never automatic — a real athlete legitimately in two groups is
+  // already just one entry and never needs this.
+  async function mergeAthletes(email: string, keepId: string, mergeId: string) {
+    const actionKey = `merge|${email}|${mergeId}`;
+    setGroupActionPending(actionKey);
+    try {
+      const res = await fetch("/api/admin/athletes/merge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ email, keepId, mergeId }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -2163,21 +2210,33 @@ export default function AdminPage() {
                         const rowKey = `${email}|${athlete.id}`;
                         const isExpanded = expandedGroupAthlete === rowKey;
                         const otherKids = (profilesMap[email]?.kids || []).filter((k) => k.id !== athlete.id);
+                        const hidePending = groupActionPending === `hide|${email}|${athlete.id}`;
                         return (
                           <div key={rowKey} className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-3">
-                            <button
-                              type="button"
-                              onClick={() => setExpandedGroupAthlete(isExpanded ? null : rowKey)}
-                              className="w-full text-left flex items-center justify-between gap-3"
-                            >
-                              <div className="min-w-0">
-                                <span className="font-medium text-sm text-white">{athlete.name}</span>
-                                <span className="text-brown-400 text-xs ml-2">
-                                  {athlete.grade ? `Grade ${athlete.grade}` : ""}{athlete.grade && athlete.gender ? " · " : ""}{athlete.gender || ""}
-                                </span>
-                              </div>
-                              <span className="text-brown-500 text-xs shrink-0">{isExpanded ? "▲" : "▼"}</span>
-                            </button>
+                            <div className="flex items-center justify-between gap-3">
+                              <button
+                                type="button"
+                                onClick={() => setExpandedGroupAthlete(isExpanded ? null : rowKey)}
+                                className="flex-1 min-w-0 text-left flex items-center justify-between gap-3"
+                              >
+                                <div className="min-w-0">
+                                  <span className="font-medium text-sm text-white">{athlete.name}</span>
+                                  <span className="text-brown-400 text-xs ml-2">
+                                    {athlete.grade ? `Grade ${athlete.grade}` : ""}{athlete.grade && athlete.gender ? " · " : ""}{athlete.gender || ""}
+                                  </span>
+                                </div>
+                                <span className="text-brown-500 text-xs shrink-0">{isExpanded ? "▲" : "▼"}</span>
+                              </button>
+                              <button
+                                type="button"
+                                disabled={hidePending || !athlete.id}
+                                onClick={() => athlete.id && hideAthleteFromGroupsTab(email, athlete.id)}
+                                title="Remove from this view (doesn't affect their account)"
+                                className="shrink-0 text-brown-500 hover:text-red-400 text-lg leading-none disabled:opacity-50"
+                              >
+                                &times;
+                              </button>
+                            </div>
                             {isExpanded && (
                               <div className="mt-3 pt-3 border-t border-brown-700 space-y-3">
                                 <div className="text-sm">
@@ -2186,13 +2245,26 @@ export default function AdminPage() {
                                 </div>
                                 {otherKids.length > 0 && (
                                   <div>
-                                    <p className="text-brown-500 uppercase tracking-wider text-[10px] mb-1">Other Athletes</p>
-                                    <div className="space-y-0.5">
-                                      {otherKids.map((k) => (
-                                        <p key={k.id} className="text-xs text-brown-300">
-                                          {k.name}{k.grade ? ` · Grade ${k.grade}` : ""}{k.gender ? ` · ${k.gender}` : ""}
-                                        </p>
-                                      ))}
+                                    <p className="text-brown-500 uppercase tracking-wider text-[10px] mb-1">
+                                      Other Athletes <span className="normal-case text-brown-600">(same kid under a different spelling? merge them)</span>
+                                    </p>
+                                    <div className="space-y-1">
+                                      {otherKids.map((k) => {
+                                        const mergePending = groupActionPending === `merge|${email}|${k.id}`;
+                                        return (
+                                          <div key={k.id} className="flex items-center justify-between gap-2 text-xs text-brown-300">
+                                            <span>{k.name}{k.grade ? ` · Grade ${k.grade}` : ""}{k.gender ? ` · ${k.gender}` : ""}</span>
+                                            <button
+                                              type="button"
+                                              disabled={mergePending || !athlete.id || !k.id}
+                                              onClick={() => athlete.id && k.id && mergeAthletes(email, athlete.id!, k.id!)}
+                                              className="shrink-0 text-mesa-accent hover:text-yellow-300 disabled:opacity-50"
+                                            >
+                                              {mergePending ? "Merging..." : `Merge into ${athlete.name}`}
+                                            </button>
+                                          </div>
+                                        );
+                                      })}
                                     </div>
                                   </div>
                                 )}

@@ -17,6 +17,11 @@ export interface Athlete {
   // Auto-expands (never auto-shrinks) as the athlete registers for new
   // canonical groups; the admin Groups tab can also add/remove directly.
   groups: CanonicalGroupId[];
+  // Admin-only cosmetic suppression from the Groups tab list — does NOT
+  // affect `groups` (still drives reminder emails) or anything the client
+  // sees. For "I've already handled this one, stop cluttering my outreach
+  // view" — never a data deletion.
+  hidden?: boolean;
 }
 
 export const ALL_GRADES = [
