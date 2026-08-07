@@ -1242,8 +1242,9 @@ export async function sendTrainerRescheduleEmail(data: {
 // src/app/globals.css, not the brown/gold one described in CLAUDE.md, which
 // is stale) rather than a bare-text transactional email, since this one is
 // meant to drive a click, not just confirm something already done.
-// Artemios is BCC'd on every send regardless of group, so he can confirm
-// from his own inbox that sends are actually going out.
+// Not BCC'd to Artemios individually — with 10-15+ parents matched per run
+// that would flood his inbox with one copy each. He gets a single
+// consolidated summary instead, see sendReminderEmailAdminSummary below.
 export async function sendReminderEmail(data: {
   to: string;
   parentName: string;
@@ -1278,7 +1279,6 @@ export async function sendReminderEmail(data: {
   const result = await resend.emails.send({
     from: FROM_EMAIL,
     to: data.to,
-    bcc: ARTEMI_EMAIL,
     subject: "Group session reminder — Mesa Basketball Training",
     html: `
       <div style="background: #091530; padding: 32px 16px; font-family: Arial, Helvetica, sans-serif;">
@@ -1318,4 +1318,64 @@ export async function sendReminderEmail(data: {
     `,
   });
   if (result.error) console.error("Resend reminder email error:", result.error, "to:", data.to);
+}
+
+// One consolidated email to Artemios per cron run — not a copy of each
+// parent email, a single summary of everyone who got one — so he can
+// confirm from his own inbox that a run actually fired without getting
+// flooded with 10-15+ individual BCCs every time it runs. Sent for every
+// real (non-dry-run) run, even when nobody matched, so silence never gets
+// mistaken for "it's working."
+export async function sendReminderEmailAdminSummary(data: {
+  window: "morning" | "evening";
+  targetDate: string;
+  sessionsInWindow: number;
+  parents: {
+    email: string;
+    parentName: string;
+    athletes: { athleteName: string; sessions: { group: string; dateLabel: string; timeLabel: string; location: string }[] }[];
+  }[];
+  failedEmails: string[];
+}) {
+  const resend = getResend();
+  const windowLabel = data.window === "morning" ? "Morning (9am)" : "Evening (6pm)";
+
+  const rows = data.parents
+    .map((p) => {
+      const athleteLines = p.athletes
+        .map((a) => {
+          const sessionLines = a.sessions.map((s) => `${escapeHtml(s.group)} — ${escapeHtml(s.dateLabel)}, ${escapeHtml(s.timeLabel)} at ${escapeHtml(s.location)}`).join("<br/>");
+          return `<strong>${escapeHtml(a.athleteName)}</strong><br/>${sessionLines}`;
+        })
+        .join("<br/><br/>");
+      return `
+        <tr>
+          <td style="padding: 8px 10px; border-bottom: 1px solid #333; vertical-align: top; font-size: 13px;">${escapeHtml(p.parentName || "(no name on file)")}<br/><span style="color: #999;">${escapeHtml(p.email)}</span></td>
+          <td style="padding: 8px 10px; border-bottom: 1px solid #333; vertical-align: top; font-size: 13px;">${athleteLines}</td>
+        </tr>`;
+    })
+    .join("");
+
+  const result = await resend.emails.send({
+    from: FROM_EMAIL,
+    to: ARTEMI_EMAIL,
+    subject: `Reminder emails ${data.parents.length > 0 ? "sent" : "ran (no matches)"}: ${windowLabel} — ${data.parents.length} parent${data.parents.length !== 1 ? "s" : ""}`,
+    html: `
+      <h2>Reminder email run complete</h2>
+      <p><strong>Window:</strong> ${windowLabel}</p>
+      <p><strong>Covering:</strong> ${escapeHtml(data.targetDate)}</p>
+      <p><strong>Sessions in window:</strong> ${data.sessionsInWindow}</p>
+      <p><strong>Parents emailed:</strong> ${data.parents.length}</p>
+      ${data.failedEmails.length > 0 ? `<p style="color: #f87171;"><strong>Failed to send (${data.failedEmails.length}):</strong> ${data.failedEmails.map(escapeHtml).join(", ")}</p>` : ""}
+      ${
+        data.parents.length > 0
+          ? `<table cellpadding="0" cellspacing="0" style="border-collapse: collapse; width: 100%; margin-top: 12px;">
+              <tr><th align="left" style="padding: 8px 10px; border-bottom: 2px solid #555; font-size: 12px;">Parent</th><th align="left" style="padding: 8px 10px; border-bottom: 2px solid #555; font-size: 12px;">Athlete(s) &amp; Session(s)</th></tr>
+              ${rows}
+            </table>`
+          : `<p style="color: #999;">No saved athletes matched a session in this window.</p>`
+      }
+    `,
+  });
+  if (result.error) console.error("Resend reminder-email admin summary error:", result.error);
 }

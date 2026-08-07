@@ -2,7 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 import { getWeeklySchedule, parseTimeToMins, type WeeklySession } from "@/lib/sheets";
 import { normalizeDate } from "@/lib/calendar";
 import { canonicalGroupForLabel } from "@/lib/group-matching";
-import { sendReminderEmail } from "@/lib/email";
+import { sendReminderEmail, sendReminderEmailAdminSummary } from "@/lib/email";
 import type { Athlete, CanonicalGroupId } from "@/lib/athletes";
 
 export type ReminderWindow = "morning" | "evening";
@@ -112,27 +112,45 @@ export async function runReminderEmailWindow(window: ReminderWindow, options?: {
 
   let emailsSent = 0;
   if (!options?.dryRun) {
+    const sentSummary: { email: string; parentName: string; athletes: { athleteName: string; sessions: { group: string; dateLabel: string; timeLabel: string; location: string }[] }[] }[] = [];
+    const failedEmails: string[] = [];
+
     for (const [email, { parentName, athletes }] of byEmail) {
+      const formattedAthletes = athletes.map((a) => ({
+        athleteName: a.athleteName,
+        sessions: a.sessions.map((s) => ({
+          group: s.group,
+          dateLabel: formatDateLabel(normalizeDate(s.date)),
+          timeLabel: s.endTime ? `${s.startTime}–${s.endTime}` : s.startTime,
+          location: s.location,
+        })),
+      }));
       try {
-        await sendReminderEmail({
-          to: email,
-          parentName,
-          athletes: athletes.map((a) => ({
-            athleteName: a.athleteName,
-            sessions: a.sessions.map((s) => ({
-              group: s.group,
-              dateLabel: formatDateLabel(normalizeDate(s.date)),
-              timeLabel: s.endTime ? `${s.startTime}–${s.endTime}` : s.startTime,
-              location: s.location,
-            })),
-          })),
-        });
+        await sendReminderEmail({ to: email, parentName, athletes: formattedAthletes });
         emailsSent++;
+        sentSummary.push({ email, parentName, athletes: formattedAthletes });
       } catch (err) {
         console.error(`Reminder email failed for ${email}:`, err);
+        failedEmails.push(email);
       }
     }
     await supabase.from("reminder_email_runs").update({ emails_sent: emailsSent }).eq("run_key", runKey);
+
+    // One consolidated summary to Artemios per run (not a per-parent BCC —
+    // with 10-15+ matches that would flood his inbox) so he can confirm a
+    // run actually fired without digging through logs, and see any real
+    // send failures at a glance.
+    try {
+      await sendReminderEmailAdminSummary({
+        window,
+        targetDate,
+        sessionsInWindow: windowSessions.length,
+        parents: sentSummary,
+        failedEmails,
+      });
+    } catch (err) {
+      console.error("Reminder email admin summary failed:", err);
+    }
   }
 
   return {
