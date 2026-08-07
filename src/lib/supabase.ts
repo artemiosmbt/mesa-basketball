@@ -1,6 +1,7 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { sendAdminSMS } from "@/lib/sms";
 import { REFERRAL_PROGRAM_ENABLED } from "@/lib/feature-flags";
+import { trainerNamesMatch } from "@/lib/trainers";
 
 let _supabase: SupabaseClient | null = null;
 
@@ -1493,17 +1494,28 @@ export async function checkGroupSessionCapacity(
   // different coaches — one trainer can never run two groups at once, so
   // trainer is what actually distinguishes them. Without this, two
   // independent 8-spot sessions would share one pooled capacity count.
-  const { count, error } = await supabase
+  //
+  // Trainer is compared in JS (normalizeTrainerNameForComparison), not via
+  // a DB .eq(), because the sheet cell is hand-typed — a stray capital
+  // letter or extra space on one schedule edit vs. another must never split
+  // one trainer's enrolled count into two under-counted halves, which would
+  // silently let a group get overbooked past maxSpots.
+  // Row count, not summed participants — preserves the exact pre-existing
+  // counting semantics (each registration row already counted as 1
+  // "enrolled" regardless of its own total_participants); only the trainer
+  // match itself moves from a DB .eq() to a normalized JS comparison here.
+  const { data, error } = await supabase
     .from("registrations")
-    .select("*", { count: "exact", head: true })
+    .select("booked_trainer")
     .eq("type", "weekly")
     .or(pendingPaymentGraceFilter())
     .eq("booked_date", date)
     .eq("booked_start_time", startTime)
-    .eq("booked_group", group || "")
-    .eq("booked_trainer", trainer || "Artemios Gavalas");
+    .eq("booked_group", group || "");
 
-  const enrolled = error ? 0 : count || 0;
+  const enrolled = error || !data
+    ? 0
+    : data.filter((r) => trainerNamesMatch(r.booked_trainer || "Artemios Gavalas", trainer || "Artemios Gavalas")).length;
   return { available: enrolled < maxSpots, enrolled };
 }
 
@@ -1535,18 +1547,22 @@ export async function hasConflictingPrivateBooking(
   trainer: string
 ): Promise<boolean> {
   const supabase = getSupabase();
+  // Trainer is compared in JS (normalizeTrainerNameForComparison), not via
+  // a DB .eq() — same reasoning as checkGroupSessionCapacity above: a
+  // casing/whitespace difference between two schedule-sheet edits must
+  // never let this miss a real double-booking of the same trainer.
   const { data, error } = await supabase
     .from("registrations")
-    .select("booked_start_time, booked_end_time")
+    .select("booked_start_time, booked_end_time, booked_trainer")
     .in("type", ["private", "group-private"])
     .or(pendingPaymentGraceFilter())
     .eq("booked_date", date)
-    .eq("booked_location", location)
-    .eq("booked_trainer", trainer);
+    .eq("booked_location", location);
   if (error || !data) return false;
   const wantStart = parseTimeToMins(startTime);
   const wantEnd = parseTimeToMins(endTime);
   return data.some((r) => {
+    if (!trainerNamesMatch(r.booked_trainer, trainer)) return false;
     const rowStart = parseTimeToMins(r.booked_start_time as string);
     const rowEnd = parseTimeToMins(r.booked_end_time as string);
     return rowStart < wantEnd && rowEnd > wantStart;

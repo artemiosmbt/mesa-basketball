@@ -12,6 +12,28 @@ export function getTrainerBioSlug(name: string): string | null {
   return TRAINER_BIO_SLUGS[name.trim()] ?? null;
 }
 
+// Normalizes a hand-typed trainer name for EQUALITY COMPARISONS only (never
+// for storage/display — always keep/write whatever the sheet's real casing
+// is). Every site that compares two trainer-name strings for equality
+// (group-capacity pooling, private-slot conflict detection, trainer
+// dashboard scoping, trainer contact/notification lookup) must run both
+// sides through this first. Without it, a stray capitalization or extra
+// space typed into the schedule sheet on one edit vs. another silently
+// splits what should be one trainer's data in two — e.g. a group's
+// capacity pool fragmenting into "Zain Amjad" and "zain amjad" halves (each
+// under-counting, allowing an accidental overbook), or the same trainer
+// getting double-booked across two private slots because the conflict
+// check never sees them as the same person. payroll-sync.ts already
+// learned this the hard way (see its own normalizeTrainerName) — this is
+// the same fix applied everywhere else trainer names get compared.
+export function normalizeTrainerNameForComparison(name: string | null | undefined): string {
+  return (name || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+export function trainerNamesMatch(a: string | null | undefined, b: string | null | undefined): boolean {
+  return normalizeTrainerNameForComparison(a) === normalizeTrainerNameForComparison(b);
+}
+
 export type TrainerTier = "artemios" | "other";
 
 // The one name that prices/redeems at the "owner" tier. Every other trainer

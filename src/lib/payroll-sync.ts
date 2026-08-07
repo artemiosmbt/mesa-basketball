@@ -177,7 +177,28 @@ interface SyncLogEntry {
   key: string; // registration id, or "pkg:<monthly_package id>"
   tab: string; // trainer tab name, or PSL_TAB
   row: number; // 1-indexed row in that tab
-  status: string; // last-written cancellation flag / state, to detect no-op reruns
+  // Last-written fingerprint (see deriveRowFingerprint) for a registration
+  // row, or the literal string "purchased" for a package row (packages
+  // never change after the fact, so no fingerprint is needed there).
+  status: string;
+}
+
+/** Serializes every field actually WRITTEN to the sheet (not just the
+ * cancellation flag) so a rerun can tell whether anything relevant changed
+ * since the last sync, not just whether the flag changed. Without this, a
+ * post-completion correction — e.g. admin "Add Player" retroactively
+ * changing participants/price on an already-"Completed" row, since that
+ * route only guards on status === "confirmed", never on whether the
+ * session date has already passed — would silently never re-sync: the flag
+ * reads "Completed" before and after, so a flag-only check treats it as
+ * "already synced, unchanged" and skips it forever, permanently
+ * understating that trainer's pay in the Sheet with no visible sign
+ * anything's wrong. */
+function deriveRowFingerprint(r: DerivedRow): string {
+  return JSON.stringify([
+    r.cancellationFlag, r.participants, r.startTime, r.endTime,
+    r.paymentType, r.packageSize, r.discount, r.creditApplied,
+  ]);
 }
 
 async function ensureSyncLogTab(spreadsheetId: string): Promise<void> {
@@ -463,13 +484,14 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
     }
 
     try {
+      const fingerprint = deriveRowFingerprint(derived);
       const existing = log.get(reg.id);
       if (existing) {
-        if (existing.status === derived.cancellationFlag) continue; // already synced, unchanged
+        if (existing.status === fingerprint) continue; // already synced, unchanged
         await writeTrainerRow(spreadsheetId, trainer, existing.row, derived);
-        existing.status = derived.cancellationFlag as string;
+        existing.status = fingerprint;
         await appendValues(spreadsheetId, `${a1Quote(SYNC_LOG_TAB)}!A:D`, [
-          [reg.id, trainer, existing.row, derived.cancellationFlag],
+          [reg.id, trainer, existing.row, fingerprint],
         ]);
         result.sessionsUpdated++;
       } else {
@@ -483,9 +505,9 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
         );
         await writeTrainerRow(spreadsheetId, trainer, row, derived);
         nextRow.set(trainer, row);
-        log.set(reg.id, { key: reg.id, tab: trainer, row, status: derived.cancellationFlag as string });
+        log.set(reg.id, { key: reg.id, tab: trainer, row, status: fingerprint });
         await appendValues(spreadsheetId, `${a1Quote(SYNC_LOG_TAB)}!A:D`, [
-          [reg.id, trainer, row, derived.cancellationFlag],
+          [reg.id, trainer, row, fingerprint],
         ]);
         result.sessionsWritten++;
       }

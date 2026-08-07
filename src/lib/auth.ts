@@ -1,5 +1,6 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import type { NextRequest } from "next/server";
+import { trainerNamesMatch } from "@/lib/trainers";
 
 export const ADMIN_EMAIL = "artemios@mesabasketballtraining.com";
 
@@ -40,7 +41,13 @@ export const TRAINER_ACCOUNTS: TrainerAccount[] = [
 // silently doesn't fire, rather than erroring the booking.
 export function getTrainerContact(trainerName: string | null | undefined): TrainerAccount | null {
   if (!trainerName) return null;
-  return TRAINER_ACCOUNTS.find((t) => t.trainerName === trainerName) ?? null;
+  // Normalized comparison (not exact ===) — trainerName here is whatever
+  // casing was live on the hand-typed schedule sheet at booking/reassignment
+  // time, which can drift from the exact spelling configured below. Without
+  // this, a stray capitalization difference would silently no-op every
+  // notification for a real, configured trainer — the same class of gap
+  // payroll-sync.ts already had to guard against for its own name matching.
+  return TRAINER_ACCOUNTS.find((t) => trainerNamesMatch(t.trainerName, trainerName)) ?? null;
 }
 
 export type AuthRole = "admin" | "elevated_trainer" | "trainer";

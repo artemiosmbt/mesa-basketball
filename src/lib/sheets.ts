@@ -1,3 +1,5 @@
+import { trainerNamesMatch } from "@/lib/trainers";
+
 export interface WeeklySession {
   group: string;
   date: string;
@@ -156,12 +158,20 @@ export async function isPrivateWindowOfferedByTrainer(
   location: string,
   trainer: string
 ): Promise<boolean> {
-  const slots = await getPrivateSlots();
+  // noCache: true — this is a real pricing/availability gate (trainer
+  // determines price), not a display read, so it must never validate
+  // against a stale up-to-60-second-old cached schedule. Mirrors the same
+  // noCache choice register/route.ts makes for the weekly live-schedule
+  // re-verification, for the same reason.
+  const slots = await getPrivateSlots({ noCache: true });
   const wantStart = parseTimeToMins(startTime);
   const wantEnd = parseTimeToMins(endTime);
   if (wantEnd <= wantStart) return false;
+  // Trainer compared via normalizeTrainerNameForComparison, not exact `===`
+  // — see trainers.ts for why (hand-typed sheet cell casing/whitespace
+  // drift must never make this reject a real, currently-offered window).
   const relevant = slots
-    .filter((s) => s.date === date && s.location === location && s.trainer === trainer && s.available)
+    .filter((s) => s.date === date && s.location === location && trainerNamesMatch(s.trainer, trainer) && s.available)
     .map((s) => ({ start: parseTimeToMins(s.startTime), end: parseTimeToMins(s.endTime) }))
     .sort((a, b) => a.start - b.start);
 

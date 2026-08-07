@@ -9,7 +9,7 @@ import {
 import { sendRescheduleNotification } from "@/lib/email";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import { getWeeklySchedule } from "@/lib/sheets";
-import { addAccountCredit, deductAccountCredit, addReferralCredit, addRegistration, cancelRegistration, logLateFeeEvent, getPackageById, countPackageSessionsUsed, setPackageSessions } from "@/lib/supabase";
+import { addAccountCredit, deductAccountCredit, addReferralCredit, addRegistration, cancelRegistration, logLateFeeEvent, getPackageById, countPackageSessionsUsed, setPackageSessions, checkGroupSessionCapacity } from "@/lib/supabase";
 import { isLateAction, resolveOffSessionPaymentSource, chargeSavedCardOffSession, issueStripeRefund } from "@/lib/booking-finalize";
 import { calcServiceFee, serviceFeeLabel, fmtMoney, calcPrivatePrice, fullPriceForType, getTrainerTier, normalizeTrainerTier } from "@/lib/pricing";
 import { notifyTrainerOfCancellation, notifyTrainerOfReschedule, notifyTrainerOfNewBooking } from "@/lib/trainer-notify";
@@ -192,15 +192,16 @@ export async function POST(req: NextRequest) {
   // rate, referral discounts) to safely auto-recompute.
   let newFullPrice: number | undefined;
   let priceLookupFailed = false;
+  let weeklyMatch: Awaited<ReturnType<typeof getWeeklySchedule>>[number] | undefined;
   if (isNewPrivate) {
     const durationMins = Math.max(60, parseMinsFromTime(bookedEndTime) - parseMinsFromTime(bookedStartTime));
     newFullPrice = calcPrivatePrice(durationMins, reg.total_participants || 1, getTrainerTier(resolvedTrainer));
   } else if (effectiveType === "weekly") {
     try {
       const sessions = await getWeeklySchedule({ noCache: true });
-      const match = sessions.find((s) => s.group === newSessionLabel && s.date === bookedDate && s.startTime === bookedStartTime);
-      if (match) {
-        newFullPrice = Math.round(match.price * (reg.total_participants || 1));
+      weeklyMatch = sessions.find((s) => s.group === newSessionLabel && s.date === bookedDate && s.startTime === bookedStartTime);
+      if (weeklyMatch) {
+        newFullPrice = Math.round(weeklyMatch.price * (reg.total_participants || 1));
       } else {
         priceLookupFailed = true;
       }
@@ -210,6 +211,29 @@ export async function POST(req: NextRequest) {
     }
     if (priceLookupFailed) {
       console.error(`Admin reschedule: couldn't find "${newSessionLabel}" on ${bookedDate} ${bookedStartTime} in the live sheet — session_price left unchanged at $${reg.session_price}. Verify manually.`);
+    }
+  }
+
+  // Verify capacity too, not just price — an admin reschedule into an
+  // already-full session would otherwise silently overbook it, same
+  // reasoning as the client-facing path (see booking/[token]/route.ts).
+  // Skipped when nothing about the slot is actually changing (e.g. only a
+  // fee/credit choice on the same session) — the booking's own still-
+  // confirmed row would otherwise count as a "conflict" against itself.
+  if (effectiveType === "weekly" && weeklyMatch) {
+    const isSameWeeklySlotAsBefore = reg.type === "weekly"
+      && reg.booked_date === bookedDate && reg.booked_start_time === bookedStartTime
+      && reg.booked_end_time === bookedEndTime && reg.booked_location === bookedLocation
+      && (reg.booked_group || undefined) === (newSessionLabel || undefined)
+      && (reg.booked_trainer || undefined) === (resolvedTrainer || undefined);
+    if (!isSameWeeklySlotAsBefore) {
+      const { available } = await checkGroupSessionCapacity(
+        bookedDate, bookedStartTime, newSessionLabel, weeklyMatch.maxSpots, resolvedTrainer || "Artemios Gavalas"
+      );
+      if (!available) {
+        await releaseClaim();
+        return NextResponse.json({ error: "That session is now full." }, { status: 400 });
+      }
     }
   }
 

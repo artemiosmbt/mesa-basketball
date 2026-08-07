@@ -35,8 +35,13 @@ export async function GET(req: NextRequest) {
   // A plain trainer account only ever sees their own schedule — scoped at
   // the query itself so their browser never receives another trainer's
   // clients' contact info in the first place, not just a UI that hides it.
+  // Case-insensitive (ilike, not eq) since booked_trainer is whatever
+  // casing was live on the hand-typed schedule sheet at booking time, which
+  // can drift from the exact casing configured in TRAINER_ACCOUNTS —
+  // without this, a stray capitalization difference would silently show
+  // this trainer an incomplete schedule instead of their real one.
   if (ctx.role === "trainer" && ctx.trainerName) {
-    registrationsQuery = registrationsQuery.eq("booked_trainer", ctx.trainerName);
+    registrationsQuery = registrationsQuery.ilike("booked_trainer", ctx.trainerName);
   }
 
   const [{ data: registrations }, { data: profilesRaw }, { data: referralCreditsRaw }, { data: packages }, { data: accountCreditsRaw }, { data: lateFeeEventsRaw }] = await Promise.all([

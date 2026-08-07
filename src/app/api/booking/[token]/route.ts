@@ -18,6 +18,7 @@ import {
   logLateFeeEvent,
   recordCampDayRefund,
   hasConflictingPrivateBooking,
+  checkGroupSessionCapacity,
 } from "@/lib/supabase";
 import { issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome, isLateAction, parseSessionDateTimeET } from "@/lib/booking-finalize";
 import { getStripe } from "@/lib/stripe";
@@ -915,7 +916,11 @@ export async function PUT(
   }
 
   const body = await req.json();
-  const { bookedDate, bookedStartTime, bookedEndTime, bookedLocation, bookedTrainer, kids: bodyKids, sessionType: bodySessionType, sessionGroup, sessionTrainer, parentName: bodyParentName, phone: bodyPhone, useReferralCredit } = body;
+  // Note: the client also submits a `sessionTrainer` field for weekly
+  // reschedules, but it's deliberately never read — the live-schedule
+  // lookup below is the only trusted source for the weekly trainer. See the
+  // resolvedTrainer block just below.
+  const { bookedDate, bookedStartTime, bookedEndTime, bookedLocation, bookedTrainer, kids: bodyKids, sessionType: bodySessionType, sessionGroup, parentName: bodyParentName, phone: bodyPhone, useReferralCredit } = body;
 
   if (!bookedDate || !bookedStartTime || !bookedEndTime || !bookedLocation) {
     return NextResponse.json(
@@ -938,7 +943,51 @@ export async function PUT(
   const newSessionDetails = newType === "weekly" && sessionGroup
     ? `${sessionGroup} — ${bookedDate} ${bookedStartTime}-${bookedEndTime} at ${bookedLocation}`
     : `Private Session — ${bookedDate} ${bookedStartTime}-${bookedEndTime} at ${bookedLocation}`;
-  const resolvedTrainer: string | undefined = newType === "weekly" ? sessionTrainer : bookedTrainer;
+  // Weekly-only: is the request actually moving the session at all, or just
+  // editing something else (e.g. kid count) on the SAME still-confirmed
+  // slot? Computed from the reg's own stored fields, before any live-sheet
+  // lookup or trainer resolution — needed up front so an unchanged slot can
+  // skip both entirely (a live-schedule hiccup or a since-removed sheet row
+  // must never block a client from editing kids on a booking that isn't
+  // actually moving, and the booking's own still-confirmed row would
+  // otherwise count as a false "conflict"/"full" against itself).
+  const weeklySlotUnchanged = newType === "weekly" && reg.type === "weekly"
+    && reg.booked_date === bookedDate && reg.booked_start_time === bookedStartTime
+    && reg.booked_end_time === bookedEndTime && reg.booked_location === bookedLocation
+    && (reg.booked_group || undefined) === (sessionGroup || undefined);
+
+  // Weekly: never trust the client's own trainer field, same reasoning as a
+  // fresh booking (see register/route.ts) — capacity is pooled per trainer,
+  // so an unverified trainer name here could land in a pool nothing else
+  // counts against, silently bypassing that group's real capacity limit.
+  // Re-resolve it from the live sheet instead of the client-submitted
+  // sessionTrainer, and reject outright if that exact session no longer
+  // exists there (schedule changed since the client's page loaded) — but
+  // only when the session is actually moving; see weeklySlotUnchanged above.
+  let resolvedTrainer: string | undefined;
+  if (newType === "weekly") {
+    if (weeklySlotUnchanged) {
+      resolvedTrainer = reg.booked_trainer || "Artemios Gavalas";
+    } else {
+      const liveWeeklySchedule = await getWeeklySchedule({ noCache: true });
+      const liveMatch = liveWeeklySchedule.find(
+        (ls) => ls.group === sessionGroup && ls.date === bookedDate && ls.startTime === bookedStartTime
+      );
+      if (!liveMatch) {
+        return NextResponse.json(
+          { error: "Couldn't verify that session against the current schedule. Please refresh and try again." },
+          { status: 400 }
+        );
+      }
+      resolvedTrainer = liveMatch.trainer || "Artemios Gavalas";
+      const { available } = await checkGroupSessionCapacity(bookedDate, bookedStartTime, sessionGroup || "", liveMatch.maxSpots, resolvedTrainer);
+      if (!available) {
+        return NextResponse.json({ error: "That session is now full. Please refresh and try again." }, { status: 400 });
+      }
+    }
+  } else {
+    resolvedTrainer = bookedTrainer;
+  }
 
   // Same authoritative slot+trainer+conflict check as a fresh booking (see
   // register/route.ts) — required here too now that trainer determines

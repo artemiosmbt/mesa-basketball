@@ -4,6 +4,7 @@ import { verifyDashboardAccess } from "@/lib/auth";
 import { sendAdminSMS } from "@/lib/sms";
 import { countPackageSessionsUsed, setPackageSessions } from "@/lib/supabase";
 import { fmtMoney, fullPriceForType, getTrainerTier } from "@/lib/pricing";
+import { trainerNamesMatch } from "@/lib/trainers";
 
 // The one write action every trainer tier (not just full admin) can take —
 // they're the one who'd actually know a client didn't show up.
@@ -33,7 +34,7 @@ export async function POST(req: NextRequest) {
   // sessions — the UI already only ever shows them their own, but this is
   // the actual enforcement (a crafted request with someone else's id must
   // not work just because the caller is a recognized trainer account).
-  if (ctx.role === "trainer" && reg.booked_trainer !== ctx.trainerName) {
+  if (ctx.role === "trainer" && !trainerNamesMatch(reg.booked_trainer, ctx.trainerName)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
   }
 
