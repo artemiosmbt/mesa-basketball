@@ -1236,69 +1236,88 @@ export async function sendTrainerRescheduleEmail(data: {
 // sent to EVERY opted-in parent whose saved athlete fits a group running in
 // this window, whether or not they're actually booked (that's the whole
 // point: catching last-minute sign-ups and schedule changes people would
-// otherwise only find out about by luck). One email per parent, even if
-// several of their athletes each matched a different session. Branded (logo
-// + navy/gold theme, matching the live site's actual current palette —
-// src/app/globals.css, not the brown/gold one described in CLAUDE.md, which
-// is stale) rather than a bare-text transactional email, since this one is
-// meant to drive a click, not just confirm something already done.
+// otherwise only find out about by luck). One email per parent. Session-
+// first, not athlete-first: two siblings matching the exact same session
+// collapse into one card listing both names ("Athlete One & Athlete Two")
+// instead of two near-identical cards — less to read reads as more urgent,
+// not less. Branded (logo + navy/gold theme, matching the live site's
+// actual current palette — src/app/globals.css, not the brown/gold one
+// described in CLAUDE.md, which is stale).
 // Not BCC'd to Artemios individually — with 10-15+ parents matched per run
 // that would flood his inbox with one copy each. He gets a single
 // consolidated summary instead, see sendReminderEmailAdminSummary below.
 export async function sendReminderEmail(data: {
   to: string;
   parentName: string;
-  athletes: {
-    athleteName: string;
+  // Every session in one run shares the same date (see
+  // reminder-emails.ts) — true for the 9am run (covers later TODAY), false
+  // for the 6pm run (covers TOMORROW morning).
+  isToday: boolean;
+  sessions: {
+    group: string;
     // Pre-formatted display strings — date/time formatting is the caller's
     // job (src/lib/reminder-emails.ts), this function only interpolates.
-    sessions: { group: string; dateLabel: string; timeLabel: string; location: string }[];
+    dateLabel: string;
+    timeLabel: string;
+    location: string;
+    athleteNames: string[];
   }[];
 }) {
   const resend = getResend();
+  const whenLabel = data.isToday ? "TODAY" : "TOMORROW";
 
-  const athleteBlocks = data.athletes
-    .map((a) => {
-      const sessionRows = a.sessions
-        .map(
-          (s) => `
-            <p style="margin: 0 0 6px; color: #3a3a3a; font-size: 13px; line-height: 1.5;">
-              <strong style="color: #091530;">${escapeHtml(s.group)}</strong><br/>
-              ${escapeHtml(s.dateLabel)}, ${escapeHtml(s.timeLabel)} &middot; ${escapeHtml(s.location)}
-            </p>`
-        )
-        .join("");
-      return `
+  const sessionBlocks = data.sessions
+    .map(
+      (s) => `
         <div style="background: #ffffff; border: 1px solid #e5decf; border-left: 4px solid #d4af37; border-radius: 8px; padding: 14px 16px; margin-bottom: 12px;">
-          <p style="margin: 0 0 8px; color: #091530; font-size: 15px; font-weight: bold;">${escapeHtml(a.athleteName)}</p>
-          ${sessionRows}
-        </div>`;
-    })
+          <p style="margin: 0 0 6px; color: #091530; font-size: 15px; font-weight: bold;">${s.athleteNames.map(escapeHtml).join(" &amp; ")}</p>
+          <p style="margin: 0; color: #3a3a3a; font-size: 13px; line-height: 1.5;">
+            <strong style="color: #091530;">${escapeHtml(s.group)}</strong><br/>
+            ${escapeHtml(s.dateLabel)}, ${escapeHtml(s.timeLabel)} &middot; ${escapeHtml(s.location)}
+          </p>
+        </div>`
+    )
     .join("");
 
   const result = await resend.emails.send({
     from: FROM_EMAIL,
     to: data.to,
-    subject: "Group session reminder — Mesa Basketball Training",
+    subject: `⏰ ${whenLabel}: Spots Open — Mesa Basketball Training`,
     html: `
       <div style="background: #091530; padding: 32px 16px; font-family: Arial, Helvetica, sans-serif;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width: 560px; margin: 0 auto; background: #0f1f42; border-radius: 12px; overflow: hidden; border: 1px solid #1e3a6e;">
           <tr>
             <td style="background: #091530; padding: 28px 24px; text-align: center; border-bottom: 2px solid #d4af37;">
-              <img src="${BASE_URL}/logo.png" width="64" height="64" alt="Mesa Basketball Training" style="display: block; margin: 0 auto 10px; border-radius: 50%;" />
-              <p style="margin: 0; color: #d4af37; font-size: 12px; letter-spacing: 2px; text-transform: uppercase; font-weight: bold;">Mesa Basketball Training</p>
+              <!--[if mso]>
+              <v:oval xmlns:v="urn:schemas-microsoft-com:vml" style="width:72px;height:72px;margin:0 auto;" fillcolor="#ffffff" stroked="false">
+              <v:fill type="solid" color="#ffffff" />
+              <v:textbox inset="0,0,0,0">
+              <![endif]-->
+              <table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin: 0 auto;">
+                <tr>
+                  <td width="72" height="72" align="center" valign="middle" bgcolor="#ffffff" style="width: 72px; height: 72px; background-color: #ffffff; border-radius: 50%; mso-border-radius-alt: 50%;">
+                    <img src="${BASE_URL}/logo.png" width="60" height="60" alt="Mesa Basketball Training" style="display: block; border-radius: 50%;" />
+                  </td>
+                </tr>
+              </table>
+              <!--[if mso]>
+              </v:textbox>
+              </v:oval>
+              <![endif]-->
+              <p style="margin: 10px 0 0; color: #d4af37; font-size: 12px; letter-spacing: 2px; text-transform: uppercase; font-weight: bold;">Mesa Basketball Training</p>
             </td>
           </tr>
           <tr>
             <td style="padding: 32px 28px; background: #fffbeb;">
-              <h1 style="margin: 0 0 12px; color: #091530; font-size: 22px; font-family: Arial, Helvetica, sans-serif;">Don't miss it!</h1>
+              <p style="margin: 0 0 6px; color: #b91c1c; font-size: 12px; font-weight: bold; letter-spacing: 1px; text-transform: uppercase;">⏰ Time-Sensitive — ${whenLabel}</p>
+              <h1 style="margin: 0 0 12px; color: #091530; font-size: 22px; font-family: Arial, Helvetica, sans-serif;">Don't Miss This!</h1>
               <p style="margin: 0 0 20px; color: #3a3a3a; font-size: 15px; line-height: 1.6;">
-                Hey ${escapeHtml(data.parentName || "there")}, here's a heads up on group session(s) coming up that your athlete(s) fit into — whether or not you're already booked:
+                Hey ${escapeHtml(data.parentName || "there")} — spots are open ${data.isToday ? "later today" : "tomorrow"} for the session${data.sessions.length !== 1 ? "s" : ""} below. Grab a spot now, whether or not you're already booked:
               </p>
-              ${athleteBlocks}
+              ${sessionBlocks}
               <div style="text-align: center; margin: 28px 0 8px;">
                 <a href="${BASE_URL}/schedule" style="display: inline-block; background: #d4af37; color: #091530; font-weight: bold; font-size: 15px; padding: 14px 28px; border-radius: 8px; text-decoration: none;">
-                  View &amp; Book on the Schedule &rarr;
+                  Book Now Before It Fills Up &rarr;
                 </a>
               </div>
             </td>
@@ -1333,7 +1352,7 @@ export async function sendReminderEmailAdminSummary(data: {
   parents: {
     email: string;
     parentName: string;
-    athletes: { athleteName: string; sessions: { group: string; dateLabel: string; timeLabel: string; location: string }[] }[];
+    sessions: { group: string; dateLabel: string; timeLabel: string; location: string; athleteNames: string[] }[];
   }[];
   failedEmails: string[];
 }) {
@@ -1342,16 +1361,13 @@ export async function sendReminderEmailAdminSummary(data: {
 
   const rows = data.parents
     .map((p) => {
-      const athleteLines = p.athletes
-        .map((a) => {
-          const sessionLines = a.sessions.map((s) => `${escapeHtml(s.group)} — ${escapeHtml(s.dateLabel)}, ${escapeHtml(s.timeLabel)} at ${escapeHtml(s.location)}`).join("<br/>");
-          return `<strong>${escapeHtml(a.athleteName)}</strong><br/>${sessionLines}`;
-        })
-        .join("<br/><br/>");
+      const sessionLines = p.sessions
+        .map((s) => `<strong>${s.athleteNames.map(escapeHtml).join(" &amp; ")}</strong> — ${escapeHtml(s.group)}, ${escapeHtml(s.dateLabel)} ${escapeHtml(s.timeLabel)} at ${escapeHtml(s.location)}`)
+        .join("<br/>");
       return `
         <tr>
           <td style="padding: 8px 10px; border-bottom: 1px solid #333; vertical-align: top; font-size: 13px;">${escapeHtml(p.parentName || "(no name on file)")}<br/><span style="color: #999;">${escapeHtml(p.email)}</span></td>
-          <td style="padding: 8px 10px; border-bottom: 1px solid #333; vertical-align: top; font-size: 13px;">${athleteLines}</td>
+          <td style="padding: 8px 10px; border-bottom: 1px solid #333; vertical-align: top; font-size: 13px;">${sessionLines}</td>
         </tr>`;
     })
     .join("");

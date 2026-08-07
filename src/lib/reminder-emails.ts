@@ -33,11 +33,12 @@ function formatDateLabel(isoDate: string): string {
   return d.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
 }
 
-interface Match {
-  email: string;
-  parentName: string;
-  athleteName: string;
-  sessions: WeeklySession[];
+interface SessionGroup {
+  group: string;
+  dateLabel: string;
+  timeLabel: string;
+  location: string;
+  athleteNames: string[];
 }
 
 // Core logic shared by both cron routes. Reads each athlete's PERSISTED
@@ -51,6 +52,10 @@ export async function runReminderEmailWindow(window: ReminderWindow, options?: {
   const today = todayET();
   const targetDate = window === "morning" ? today : tomorrowET();
   const runKey = `${today}-${window}`;
+  // Every session considered in a single run shares this one target date
+  // (see the windowSessions filter below), so a single TODAY/TOMORROW
+  // badge for the whole email is always accurate — never per-session.
+  const isToday = window === "morning";
 
   const supabase = getSupabaseAdmin();
 
@@ -79,7 +84,13 @@ export async function runReminderEmailWindow(window: ReminderWindow, options?: {
     groupToSessions.get(cg)!.push(s);
   }
 
-  const matches: Match[] = [];
+  // Session-first, not athlete-first: two siblings matching the exact same
+  // session collapse into one card listing both names, instead of two
+  // near-identical cards repeating the same group/date/time/location — the
+  // whole point being less to read, so it reads as more urgent, not less.
+  const sessionKey = (s: WeeklySession) => `${s.group}|${s.date}|${s.startTime}|${s.endTime}|${s.location}`;
+  const byEmail = new Map<string, { parentName: string; sessionsByKey: Map<string, SessionGroup> }>();
+
   if (groupToSessions.size > 0) {
     const { data: profiles, error: profilesError } = await supabase
       .from("profiles")
@@ -91,44 +102,41 @@ export async function runReminderEmailWindow(window: ReminderWindow, options?: {
       if (!p.email || !Array.isArray(p.kids)) continue;
       for (const kid of p.kids as Athlete[]) {
         if (!kid.name || !kid.groups?.length) continue;
-        const matchedSessions: WeeklySession[] = [];
         for (const g of kid.groups) {
           const sessions = groupToSessions.get(g);
-          if (sessions) matchedSessions.push(...sessions);
+          if (!sessions) continue;
+          for (const s of sessions) {
+            if (!byEmail.has(p.email)) byEmail.set(p.email, { parentName: p.parent_name || "", sessionsByKey: new Map() });
+            const parentEntry = byEmail.get(p.email)!;
+            const key = sessionKey(s);
+            if (!parentEntry.sessionsByKey.has(key)) {
+              parentEntry.sessionsByKey.set(key, {
+                group: s.group,
+                dateLabel: formatDateLabel(normalizeDate(s.date)),
+                timeLabel: s.endTime ? `${s.startTime}–${s.endTime}` : s.startTime,
+                location: s.location,
+                athleteNames: [],
+              });
+            }
+            const sessionGroup = parentEntry.sessionsByKey.get(key)!;
+            if (!sessionGroup.athleteNames.includes(kid.name)) sessionGroup.athleteNames.push(kid.name);
+          }
         }
-        if (matchedSessions.length === 0) continue;
-        matches.push({ email: p.email, parentName: p.parent_name || "", athleteName: kid.name, sessions: matchedSessions });
       }
     }
   }
 
-  // One email per parent, even when several of their athletes each matched
-  // a different session.
-  const byEmail = new Map<string, { parentName: string; athletes: { athleteName: string; sessions: WeeklySession[] }[] }>();
-  for (const m of matches) {
-    if (!byEmail.has(m.email)) byEmail.set(m.email, { parentName: m.parentName, athletes: [] });
-    byEmail.get(m.email)!.athletes.push({ athleteName: m.athleteName, sessions: m.sessions });
-  }
-
   let emailsSent = 0;
   if (!options?.dryRun) {
-    const sentSummary: { email: string; parentName: string; athletes: { athleteName: string; sessions: { group: string; dateLabel: string; timeLabel: string; location: string }[] }[] }[] = [];
+    const sentSummary: { email: string; parentName: string; sessions: SessionGroup[] }[] = [];
     const failedEmails: string[] = [];
 
-    for (const [email, { parentName, athletes }] of byEmail) {
-      const formattedAthletes = athletes.map((a) => ({
-        athleteName: a.athleteName,
-        sessions: a.sessions.map((s) => ({
-          group: s.group,
-          dateLabel: formatDateLabel(normalizeDate(s.date)),
-          timeLabel: s.endTime ? `${s.startTime}–${s.endTime}` : s.startTime,
-          location: s.location,
-        })),
-      }));
+    for (const [email, { parentName, sessionsByKey }] of byEmail) {
+      const sessions = Array.from(sessionsByKey.values());
       try {
-        await sendReminderEmail({ to: email, parentName, athletes: formattedAthletes });
+        await sendReminderEmail({ to: email, parentName, isToday, sessions });
         emailsSent++;
-        sentSummary.push({ email, parentName, athletes: formattedAthletes });
+        sentSummary.push({ email, parentName, sessions });
       } catch (err) {
         console.error(`Reminder email failed for ${email}:`, err);
         failedEmails.push(email);
@@ -164,10 +172,7 @@ export async function runReminderEmailWindow(window: ReminderWindow, options?: {
       ? Array.from(byEmail.entries()).map(([email, v]) => ({
           email,
           parentName: v.parentName,
-          athletes: v.athletes.map((a) => ({
-            name: a.athleteName,
-            sessions: a.sessions.map((s) => ({ group: s.group, date: s.date, startTime: s.startTime, endTime: s.endTime, location: s.location })),
-          })),
+          sessions: Array.from(v.sessionsByKey.values()),
         }))
       : undefined,
   };
