@@ -116,6 +116,12 @@ function parsePlayerStr(str: string): { name: string; dob: string; grade: string
   };
 }
 
+function splitName(full: string): { first: string; last: string } {
+  const parts = full.trim().split(/\s+/);
+  if (parts.length <= 1) return { first: parts[0] || "", last: "" };
+  return { first: parts.slice(0, -1).join(" "), last: parts[parts.length - 1] };
+}
+
 function parseDob(dob: string): [string, string, string] {
   const p = dob.split("/");
   return [p[0] || "", p[1] || "", p[2] || ""];
@@ -126,21 +132,21 @@ function buildDob(mm: string, dd: string, yyyy: string): string {
   if (!yyyy) return `${mm}/${dd}`;
   return `${mm}/${dd}/${yyyy}`;
 }
-function DobInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function DobInput({ value, onChange, required }: { value: string; onChange: (v: string) => void; required?: boolean }) {
   const [mm, dd, yyyy] = parseDob(value);
   const ddRef = useRef<HTMLInputElement>(null);
   const yyyyRef = useRef<HTMLInputElement>(null);
   return (
     <div className="flex items-center w-full rounded border border-brown-700 bg-brown-900 text-sm text-white focus-within:border-mesa-accent pl-3">
-      <input type="text" inputMode="numeric" maxLength={2} placeholder="MM" value={mm}
+      <input type="text" inputMode="numeric" maxLength={2} placeholder="MM" value={mm} required={required}
         onChange={e => { const v = e.target.value.replace(/\D/g, "").slice(0, 2); onChange(buildDob(v, dd, yyyy)); if (v.length === 2) ddRef.current?.focus(); }}
         className="w-10 bg-transparent pr-1 py-2 text-center placeholder-brown-600 focus:outline-none" />
       <span className="text-brown-500 select-none">/</span>
-      <input ref={ddRef} type="text" inputMode="numeric" maxLength={2} placeholder="DD" value={dd}
+      <input ref={ddRef} type="text" inputMode="numeric" maxLength={2} placeholder="DD" value={dd} required={required}
         onChange={e => { const v = e.target.value.replace(/\D/g, "").slice(0, 2); onChange(buildDob(mm, v, yyyy)); if (v.length === 2) yyyyRef.current?.focus(); }}
         className="w-10 bg-transparent px-1 py-2 text-center placeholder-brown-600 focus:outline-none" />
       <span className="text-brown-500 select-none">/</span>
-      <input ref={yyyyRef} type="text" inputMode="numeric" maxLength={4} placeholder="YYYY" value={yyyy}
+      <input ref={yyyyRef} type="text" inputMode="numeric" maxLength={4} placeholder="YYYY" value={yyyy} required={required}
         onChange={e => { const v = e.target.value.replace(/\D/g, "").slice(0, 4); onChange(buildDob(mm, dd, v)); }}
         className="w-16 bg-transparent px-1 py-2 text-center placeholder-brown-600 focus:outline-none" />
     </div>
@@ -247,9 +253,12 @@ export default function ManageBooking({
   const [hideUpsell, setHideUpsell] = useState(false);
   const [selectedGroupName, setSelectedGroupName] = useState("");
   const [selectedGroupDate, setSelectedGroupDate] = useState("");
-  const [reschedulePlayers, setReschedulePlayers] = useState<{ name: string; dob: string; grade: string; gender: string }[]>([]);
+  const [reschedulePlayers, setReschedulePlayers] = useState<{ name: string; firstName: string; lastName: string; dob: string; grade: string; gender: string }[]>([]);
+  const [expandedPlayers, setExpandedPlayers] = useState<Set<number>>(new Set());
   const [showRescheduleForm, setShowRescheduleForm] = useState(false);
-  const [rescheduleFormParentName, setRescheduleFormParentName] = useState("");
+  const [rescheduleFormFirstName, setRescheduleFormFirstName] = useState("");
+  const [rescheduleFormLastName, setRescheduleFormLastName] = useState("");
+  const rescheduleFormParentName = [rescheduleFormFirstName.trim(), rescheduleFormLastName.trim()].filter(Boolean).join(" ");
   const [rescheduleFormEmail, setRescheduleFormEmail] = useState("");
   const [rescheduleFormPhone, setRescheduleFormPhone] = useState("");
 
@@ -459,6 +468,27 @@ export default function ManageBooking({
       return windowStart > now;
     });
   }, [privateSlots, bookedSlots, booking?.bookedDate, booking?.bookedStartTime, booking?.bookedEndTime, booking?.bookedLocation, booking?.bookedTrainer]);
+
+  // Keeps the combined `name` (what actually gets saved) in sync with the
+  // two required First/Last inputs — same first+last join convention used
+  // for the parent's own name above.
+  function updateReschedulePlayerName(i: number, part: "first" | "last", value: string) {
+    setReschedulePlayers((prev) => prev.map((p, j) => {
+      if (j !== i) return p;
+      const firstName = part === "first" ? value : p.firstName;
+      const lastName = part === "last" ? value : p.lastName;
+      return { ...p, firstName, lastName, name: [firstName.trim(), lastName.trim()].filter(Boolean).join(" ") };
+    }));
+  }
+
+  function toggleReschedulePlayerExpanded(i: number) {
+    setExpandedPlayers((s) => {
+      const next = new Set(s);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
+  }
 
   function openEditPlayers() {
     if (!booking) return;
@@ -866,8 +896,14 @@ export default function ManageBooking({
                           onClick={() => {
                             const defaultType = booking.type === "weekly" ? "weekly" : "private";
                             setRescheduleType(defaultType);
-                            setReschedulePlayers(parseKids(booking.kids).map(parsePlayerStr));
-                            setRescheduleFormParentName(booking.parentName);
+                            setReschedulePlayers(parseKids(booking.kids).map(parsePlayerStr).map((p) => {
+                              const nameSplit = splitName(p.name);
+                              return { ...p, firstName: nameSplit.first, lastName: nameSplit.last };
+                            }));
+                            setExpandedPlayers(new Set());
+                            const parentNameSplit = splitName(booking.parentName);
+                            setRescheduleFormFirstName(parentNameSplit.first);
+                            setRescheduleFormLastName(parentNameSplit.last);
                             setRescheduleFormEmail(booking.email);
                             setRescheduleFormPhone(booking.phone);
                             setSelectedWindow(-1);
@@ -1245,8 +1281,8 @@ export default function ManageBooking({
           ? `${fmtDate(groupSession.date)} · ${groupSession.startTime}–${groupSession.endTime} · ${groupSession.location}`
           : "";
 
-        const canSubmit = rescheduleFormParentName.trim() &&
-          reschedulePlayers.every(p => p.name.trim() && p.dob.length >= 8 && p.grade && p.gender);
+        const canSubmit = rescheduleFormFirstName.trim() && rescheduleFormLastName.trim() && rescheduleFormPhone.trim() &&
+          reschedulePlayers.every(p => p.firstName?.trim() && p.lastName?.trim() && p.dob.length >= 8 && p.grade && p.gender);
 
         return (
           <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/70 p-4 overflow-y-auto">
@@ -1303,58 +1339,130 @@ export default function ManageBooking({
 
                 {/* Parent info */}
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-brown-300">Parent / Guardian Name</label>
-                  <input type="text" required value={rescheduleFormParentName} onChange={e => setRescheduleFormParentName(e.target.value)} className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none" />
+                  <label className="mb-1 block text-sm font-medium text-brown-300">Parent / Guardian Name <span className="text-red-500">*</span></label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <input type="text" required placeholder="First name" value={rescheduleFormFirstName} onChange={e => setRescheduleFormFirstName(e.target.value)} className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none" />
+                    <input type="text" required placeholder="Last name" value={rescheduleFormLastName} onChange={e => setRescheduleFormLastName(e.target.value)} className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none" />
+                  </div>
                 </div>
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-brown-300">Email</label>
+                  <label className="mb-1 block text-sm font-medium text-brown-300">Email <span className="text-red-500">*</span></label>
                   <input type="email" value={rescheduleFormEmail} readOnly className="w-full rounded-lg border border-brown-700 bg-brown-800/50 px-3 py-2 text-brown-400 focus:outline-none cursor-not-allowed" />
                 </div>
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-brown-300">Phone</label>
-                  <input type="tel" value={rescheduleFormPhone} onChange={e => setRescheduleFormPhone(e.target.value)} className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none" />
+                  <label className="mb-1 block text-sm font-medium text-brown-300">Phone <span className="text-red-500">*</span></label>
+                  <input type="tel" required value={rescheduleFormPhone} onChange={e => setRescheduleFormPhone(e.target.value)} className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none" />
                 </div>
 
                 {/* Players */}
                 <div>
                   <div className="mb-2 flex items-center justify-between">
-                    <label className="text-sm font-medium text-brown-300">Player(s)</label>
-                    <button type="button" onClick={() => setReschedulePlayers(prev => [...prev, { name: "", dob: "", grade: "", gender: "" }])} className="text-sm text-mesa-accent hover:text-yellow-300">+ Add another player</button>
+                    <label className="text-sm font-medium text-brown-300">Player(s) <span className="text-red-500">*</span></label>
+                    <button
+                      type="button"
+                      onClick={() => setReschedulePlayers(prev => {
+                        setExpandedPlayers(s => new Set(s).add(prev.length));
+                        return [...prev, { name: "", firstName: "", lastName: "", dob: "", grade: "", gender: "" }];
+                      })}
+                      className="text-sm text-mesa-accent hover:text-yellow-300"
+                    >
+                      + Add another player
+                    </button>
                   </div>
-                  {reschedulePlayers.map((player, i) => (
-                    <div key={i} className={`flex flex-col gap-2 pb-3 ${i > 0 ? "border-t border-brown-700 pt-3" : ""}`}>
-                      <div className="flex gap-2 items-center">
-                        <input type="text" placeholder="Player's Name" required value={player.name} onChange={e => setReschedulePlayers(prev => prev.map((p, j) => j === i ? { ...p, name: e.target.value } : p))} className="flex-1 rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none" />
-                        {reschedulePlayers.length > 1 && (
-                          <button type="button" onClick={() => setReschedulePlayers(prev => prev.filter((_, j) => j !== i))} className="text-brown-500 hover:text-red-400 text-xl leading-none">&times;</button>
-                        )}
-                      </div>
-                      <div>
-                        <label className="mb-1 block text-xs text-brown-300">Date of Birth</label>
-                        <DobInput value={player.dob} onChange={v => setReschedulePlayers(prev => prev.map((p, j) => j === i ? { ...p, dob: v } : p))} />
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="mb-1 block text-xs text-brown-300">Grade</label>
-                          <select required value={player.grade} onChange={e => setReschedulePlayers(prev => prev.map((p, j) => j === i ? { ...p, grade: e.target.value } : p))} className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white text-sm focus:border-mesa-accent focus:outline-none">
-                            <option value="">Select grade...</option>
-                            <option value="K">Kindergarten</option>
-                            <option value="1">1st Grade</option><option value="2">2nd Grade</option><option value="3">3rd Grade</option><option value="4">4th Grade</option><option value="5">5th Grade</option><option value="6">6th Grade</option><option value="7">7th Grade</option><option value="8">8th Grade</option><option value="9">9th Grade</option><option value="10">10th Grade</option><option value="11">11th Grade</option><option value="12">12th Grade</option>
-                            <option value="College +">College / Pro</option>
-                            <option value="Adult">Adult</option>
-                          </select>
+                  {reschedulePlayers.map((player, i) => {
+                    const isExpanded = expandedPlayers.has(i) || !player.firstName?.trim() || !player.lastName?.trim() || !player.dob || !player.grade || !player.gender;
+                    return (
+                    <div key={i} className="flex flex-col gap-2 pb-2">
+                      {isExpanded ? (
+                        <>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <div>
+                              <label className="mb-1 block text-xs text-brown-300">First Name <span className="text-red-500">*</span></label>
+                              <input
+                                type="text"
+                                placeholder="First name"
+                                required
+                                value={player.firstName}
+                                onChange={e => updateReschedulePlayerName(i, "first", e.target.value)}
+                                className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
+                              />
+                            </div>
+                            <div>
+                              <label className="mb-1 block text-xs text-brown-300">Last Name <span className="text-red-500">*</span></label>
+                              <input
+                                type="text"
+                                placeholder="Last name"
+                                required
+                                value={player.lastName}
+                                onChange={e => updateReschedulePlayerName(i, "last", e.target.value)}
+                                className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
+                              />
+                            </div>
+                          </div>
+                          <div className="flex justify-end gap-3">
+                            {player.name && (
+                              <button type="button" onClick={() => toggleReschedulePlayerExpanded(i)} className="text-brown-500 hover:text-mesa-accent text-xs px-1" aria-label="Collapse">
+                                Done
+                              </button>
+                            )}
+                            {reschedulePlayers.length > 1 && (
+                              <button type="button" onClick={() => setReschedulePlayers(prev => prev.filter((_, j) => j !== i))} className="text-brown-500 hover:text-red-400 text-xl leading-none">
+                                &times;
+                              </button>
+                            )}
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-xs text-brown-300">Date of Birth <span className="text-red-500">*</span></label>
+                            <DobInput value={player.dob} onChange={v => setReschedulePlayers(prev => prev.map((p, j) => j === i ? { ...p, dob: v } : p))} required />
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <div>
+                              <label className="mb-1 block text-xs text-brown-300">Grade <span className="text-red-500">*</span></label>
+                              <select required value={player.grade} onChange={e => setReschedulePlayers(prev => prev.map((p, j) => j === i ? { ...p, grade: e.target.value } : p))} className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white text-sm focus:border-mesa-accent focus:outline-none">
+                                <option value="">Select grade...</option>
+                                <option value="K">Kindergarten</option>
+                                <option value="1">1st Grade</option><option value="2">2nd Grade</option><option value="3">3rd Grade</option><option value="4">4th Grade</option><option value="5">5th Grade</option><option value="6">6th Grade</option><option value="7">7th Grade</option><option value="8">8th Grade</option><option value="9">9th Grade</option><option value="10">10th Grade</option><option value="11">11th Grade</option><option value="12">12th Grade</option>
+                                <option value="College +">College / Pro</option>
+                                <option value="Adult">Adult</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label className="mb-1 block text-xs text-brown-300">Gender <span className="text-red-500">*</span></label>
+                              <select required value={player.gender} onChange={e => setReschedulePlayers(prev => prev.map((p, j) => j === i ? { ...p, gender: e.target.value } : p))} className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white text-sm focus:border-mesa-accent focus:outline-none">
+                                <option value="">Select...</option>
+                                <option value="Male">Male</option>
+                                <option value="Female">Female</option>
+                              </select>
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="flex items-center justify-between gap-3 rounded-full border-2 border-mesa-accent bg-brown-800 py-1.5 pl-4 pr-2 shadow-lg shadow-black/30 hover:bg-brown-700 transition min-w-[180px]">
+                          <button
+                            type="button"
+                            onClick={() => toggleReschedulePlayerExpanded(i)}
+                            className="flex h-7 items-center gap-2 text-sm text-white"
+                          >
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-mesa-accent shrink-0">
+                              <polyline points="6 9 12 15 18 9" />
+                            </svg>
+                            <span className="font-medium whitespace-nowrap">{player.name || "Player"}</span>
+                            {player.grade && <span className="text-brown-300 text-xs whitespace-nowrap">Grade {player.grade}</span>}
+                          </button>
+                          {reschedulePlayers.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => setReschedulePlayers(prev => prev.filter((_, j) => j !== i))}
+                              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-brown-300 hover:bg-brown-900 hover:text-red-400 text-xl leading-none"
+                            >
+                              &times;
+                            </button>
+                          )}
                         </div>
-                        <div>
-                          <label className="mb-1 block text-xs text-brown-300">Gender</label>
-                          <select required value={player.gender} onChange={e => setReschedulePlayers(prev => prev.map((p, j) => j === i ? { ...p, gender: e.target.value } : p))} className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white text-sm focus:border-mesa-accent focus:outline-none">
-                            <option value="">Select...</option>
-                            <option value="Male">Male</option>
-                            <option value="Female">Female</option>
-                          </select>
-                        </div>
-                      </div>
+                      )}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
 
                 {/* Price summary */}
