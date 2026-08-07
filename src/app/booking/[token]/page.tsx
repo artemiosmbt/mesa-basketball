@@ -358,11 +358,10 @@ export default function ManageBooking({
   // Build time windows for rescheduling
   const timeWindows = useMemo(() => {
     if (privateSlots.length === 0) return [];
-    // Excludes "TBD" for the same reason the main schedule page does (see
-    // buildTimeWindows in src/app/schedule/page.tsx) — a client rescheduling
-    // a private 1-on-1 session needs an actually-confirmed trainer, not the
-    // owner's internal "not sure who yet" placeholder.
-    const available = privateSlots.filter((s) => s.available && s.trainer !== "TBD");
+    // "TBD" is a real, selectable option here too (see buildTimeWindows in
+    // src/app/schedule/page.tsx) — it means the client is open to whichever
+    // trainer ends up covering the session.
+    const available = privateSlots.filter((s) => s.available);
     // Group by date + location + trainer and merge consecutive — keeps two
     // trainers at the same location/time from being merged into one window.
     const groups: Record<string, typeof available> = {};
@@ -1151,7 +1150,7 @@ export default function ManageBooking({
                               className="block w-full rounded-lg border border-brown-700 bg-brown-800/50 p-4 text-left transition hover:border-brown-500"
                             >
                               <p className="font-medium">{dayName}, {dateLabel}</p>
-                              <p className="text-sm text-brown-400">{w.location} &bull; {w.startLabel} – {w.endLabel} &bull; {w.trainer}</p>
+                              <p className="text-sm text-brown-400">{w.location} &bull; {w.startLabel} – {w.endLabel} &bull; {formatTrainerForDisplay(w.trainer)}</p>
                             </button>
                           );
                         })}

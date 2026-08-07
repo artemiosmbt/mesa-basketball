@@ -11,10 +11,16 @@ import { calcServiceFee, serviceFeeLabel, serviceFeeItemName, isPercentServiceFe
 const OWNER_TRAINER_NAME = "Artemios Gavalas";
 const SUBSTITUTE_TRAINER_LABEL = "Any Available Trainer";
 
-// Owner first (when present), then alphabetical — used everywhere a set of
-// trainers for the same date/time/location needs a stable, predictable order.
+// Owner first (when present), then alphabetical, "TBD" ("Any Available
+// Trainer" — see formatTrainerForDisplay) always last regardless of where it
+//'d otherwise alphabetize to, since it's a flexible fallback option rather
+// than a specific person to pick among the named trainers. Used everywhere a
+// set of trainers for the same date/time/location needs a stable order.
 function sortTrainerNames(names: string[]): string[] {
   return [...names].sort((a, b) => {
+    const aTbd = a === "TBD";
+    const bTbd = b === "TBD";
+    if (aTbd !== bTbd) return aTbd ? 1 : -1;
     const aOwner = a === OWNER_TRAINER_NAME;
     const bOwner = b === OWNER_TRAINER_NAME;
     if (aOwner !== bOwner) return aOwner ? -1 : 1;
@@ -499,16 +505,13 @@ function buildTimeWindows(slots: PrivateSlot[]): TimeWindow[] {
     for (let i = 0; i < sortedBounds.length - 1; i++) {
       const segStart = sortedBounds[i];
       const segEnd = sortedBounds[i + 1];
-      // Excludes "TBD" — the owner's internal placeholder for "someone will
-      // cover this, not sure who yet" (see the weekly schedule sheet's same
-      // convention). A client picking a private 1-on-1 session needs to
-      // actually know who's running it; unlike a weekly group session
-      // (where the trainer isn't client-selected at all), letting "TBD"
-      // appear as a selectable private-session trainer would let a client
-      // book a real paid session with literally no one confirmed to run it.
+      // "TBD" is a real, selectable option here — it means the client is
+      // open to whichever trainer ends up covering the session, not that
+      // the slot is unbookable. Displayed as "Any Available Trainer" (see
+      // formatTrainerForDisplay) rather than the bare letters "TBD".
       const trainersHere = sortTrainerNames(Array.from(new Set(
         group
-          .filter((s) => parseTime(s.startTime) <= segStart && parseTime(s.endTime) >= segEnd && s.trainer !== "TBD")
+          .filter((s) => parseTime(s.startTime) <= segStart && parseTime(s.endTime) >= segEnd)
           .map((s) => s.trainer)
       )));
       if (trainersHere.length > 0) segments.push({ start: segStart, end: segEnd, trainers: trainersHere });
@@ -2994,7 +2997,7 @@ export default function Home() {
                                     <option value="">Select a Trainer</option>
                                     {window.trainers.map((t) => (
                                       <option key={t} value={t}>
-                                        {t}
+                                        {formatTrainerForDisplay(t)}
                                       </option>
                                     ))}
                                   </select>

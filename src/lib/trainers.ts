@@ -36,15 +36,14 @@ export function trainerNamesMatch(a: string | null | undefined, b: string | null
 
 // Client-facing display only — never use this for storage, comparison, or
 // tier/price lookups (those must keep reading the raw "TBD" value; getTrainerTier
-// still needs to see the literal string). The owner's internal schedule-sheet
-// placeholder ("TBD" = "someone will cover this, not sure who yet") reads as
-// a confusing/unexplained trainer name to a client seeing it verbatim on a
-// session listing, booking confirmation, or email. Session context (a group
-// session on the schedule) makes "not yet assigned" self-explanatory in a way
-// the bare letters "TBD" aren't to someone outside the business.
+// still needs to see the literal string). "TBD" on the schedule sheet is a
+// real, bookable option meaning "any trainer covering this session works for
+// me" (client-facing, opt-in flexibility) — NOT "unconfirmed"/"not decided
+// yet." Shown as "Any Available Trainer" so that meaning is explicit rather
+// than the bare, ambiguous letters "TBD".
 export function formatTrainerForDisplay(name: string | null | undefined): string {
   const n = (name || "").trim();
-  return n === "TBD" ? "Trainer to be announced" : (n || "Artemios Gavalas");
+  return n === "TBD" ? "Any Available Trainer" : (n || "Artemios Gavalas");
 }
 
 export type TrainerTier = "artemios" | "other";
