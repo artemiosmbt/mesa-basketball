@@ -268,7 +268,7 @@ export async function recordCampDayRefund(token: string, amount: number): Promis
   const supabase = getSupabase();
   const { error } = await supabase
     .from("registrations")
-    .update({ camp_day_refund_issued: Math.round(amount) })
+    .update({ camp_day_refund_issued: Math.round(amount * 100) / 100 })
     .eq("manage_token", token);
   // If this silently fails (e.g. the migration adding this column was never
   // run), every later cancellation in the same camp group loses track of

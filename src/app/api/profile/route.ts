@@ -71,7 +71,12 @@ export async function POST(req: NextRequest) {
     phone: body.phone || null,
     kids: body.kids || [],
     marketing_emails: body.marketingEmails ?? true,
-    sms_consent: body.smsConsent ?? true,
+    // Defaults to false (opt-out), not true — TCPA consent must never be
+    // assumed. Every current caller (signup, settings, post-confirmation
+    // profile save) already sends an explicit boolean, so this default
+    // isn't reachable today; it's a guard against a future caller silently
+    // opting someone into texts by omitting the field.
+    sms_consent: body.smsConsent ?? false,
     video_consent: body.videoConsent ?? true,
     updated_at: new Date().toISOString(),
   };

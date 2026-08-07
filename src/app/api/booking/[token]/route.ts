@@ -306,7 +306,7 @@ export async function DELETE(
     }
 
     // Partial-day cancel — recompute the capped total and accrue this day's late fee (if any).
-    const perDayRate = reg.camp_drop_in_rate ?? Math.round((reg.session_price ?? 0) / totalOriginalDays);
+    const perDayRate = reg.camp_drop_in_rate ?? Math.round((reg.session_price ?? 0) / totalOriginalDays * 100) / 100;
     const thisDayLateFee = isLateCancel ? Math.round(perDayRate * 0.5 * 100) / 100 : 0;
     const success = await cancelRegistration(token, isLateCancel, thisDayLateFee);
     if (!success) {

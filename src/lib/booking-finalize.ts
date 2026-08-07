@@ -561,6 +561,7 @@ export async function finalizeConfirmedWeeklyBooking(params: FinalizeWeeklyBooki
       referralCodeUsed: params.submittedReferralCode || undefined,
       trainer: weeklySessions[0]?.trainer,
       calendarEvent: weeklySessions[0] ? { date: weeklySessions[0].date, startTime: weeklySessions[0].startTime, endTime: weeklySessions[0].endTime, location: weeklySessions[0].location } : undefined,
+      calendarEvents: weeklySessions.map((s) => ({ date: s.date, startTime: s.startTime, endTime: s.endTime, location: s.location })),
       isPickup: isPickupBooking,
       sessionDetailsIsHtml: true,
     });
@@ -702,6 +703,7 @@ export async function finalizeConfirmedCampBooking(params: FinalizeCampBookingPa
       referredBy: campReferrer?.name,
       referralCodeUsed: params.submittedReferralCode || undefined,
       calendarEvent: { date: firstSession.date, startTime: firstSession.startTime, endTime: firstSession.endTime || firstSession.startTime, location: firstSession.location },
+      calendarEvents: campSessions.map((s) => ({ date: s.date, startTime: s.startTime, endTime: s.endTime || s.startTime, location: s.location })),
       sessionDetailsIsHtml: true,
     });
 
@@ -883,6 +885,7 @@ export async function finalizeConfirmedPrivateSeriesBooking(params: FinalizePriv
       referralCodeUsed: params.submittedReferralCode || undefined,
       trainer: privateSessions[0]?.trainer,
       calendarEvent: privateSessions[0] ? { date: privateSessions[0].date, startTime: privateSessions[0].startTime, endTime: privateSessions[0].endTime, location: privateSessions[0].location } : undefined,
+      calendarEvents: privateSessions.map((s) => ({ date: s.date, startTime: s.startTime, endTime: s.endTime, location: s.location })),
       accountCreditApplied: params.accountCreditApplied,
       fullPrice: totalPaid,
       sessionDetailsIsHtml: true,

@@ -107,23 +107,33 @@ function buildGoogleCalendarUrl(date: string, startTime: string, endTime: string
   return `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(title)}&dates=${d}T${calTimeStr(startTime)}/${d}T${calTimeStr(endTime)}&ctz=America%2FNew_York&location=${encodeURIComponent(location)}&details=${encodeURIComponent("Mesa Basketball Training")}`;
 }
 
-function buildICSContent(date: string, startTime: string, endTime: string, location: string, title: string): string {
-  const d = calDateStr(date);
-  if (!d) return "";
+// A single .ics file can validly contain more than one VEVENT — used to give
+// a multi-date private series (or any other multi-date booking) ONE
+// calendar file covering every date, instead of just the first one. Each
+// event still needs its own globally-unique UID (date+time is enough here).
+function buildICSContent(events: { date: string; startTime: string; endTime: string; location: string; title: string }[]): string {
+  const vevents = events.flatMap(({ date, startTime, endTime, location, title }) => {
+    const d = calDateStr(date);
+    if (!d) return [];
+    return [
+      "BEGIN:VEVENT",
+      `UID:mesa-${d}T${calTimeStr(startTime)}@mesabasketballtraining.com`,
+      `DTSTART;TZID=America/New_York:${d}T${calTimeStr(startTime)}`,
+      `DTEND;TZID=America/New_York:${d}T${calTimeStr(endTime)}`,
+      `SUMMARY:${title}`,
+      `LOCATION:${location}`,
+      "DESCRIPTION:Mesa Basketball Training",
+      "END:VEVENT",
+    ];
+  });
+  if (vevents.length === 0) return "";
   return [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
     "PRODID:-//Mesa Basketball Training//EN",
     "CALSCALE:GREGORIAN",
     "METHOD:PUBLISH",
-    "BEGIN:VEVENT",
-    `UID:mesa-${d}T${calTimeStr(startTime)}@mesabasketballtraining.com`,
-    `DTSTART;TZID=America/New_York:${d}T${calTimeStr(startTime)}`,
-    `DTEND;TZID=America/New_York:${d}T${calTimeStr(endTime)}`,
-    `SUMMARY:${title}`,
-    `LOCATION:${location}`,
-    "DESCRIPTION:Mesa Basketball Training",
-    "END:VEVENT",
+    ...vevents,
     "END:VCALENDAR",
   ].join("\r\n");
 }
@@ -146,6 +156,13 @@ export async function sendRegistrationNotification(data: {
   referralCodeUsed?: string;
   trainer?: string;
   calendarEvent?: { date: string; startTime: string; endTime: string; location: string; };
+  // A multi-date series (e.g. recurring private sessions) — when set, the
+  // .ics attachment covers EVERY date, not just calendarEvent's one. The
+  // Google/Apple "Add to Calendar" buttons above the attachment still only
+  // ever offer the first date (Google's URL scheme is single-event only) —
+  // the attachment is what actually gets every date into the client's own
+  // calendar app in one action.
+  calendarEvents?: { date: string; startTime: string; endTime: string; location: string; }[];
   accountCreditApplied?: number;
   fullPrice?: number;
   // The actual dollar amount charged via Stripe for this booking (net of any
@@ -276,18 +293,33 @@ export async function sendRegistrationNotification(data: {
     const googleUrl = buildGoogleCalendarUrl(date, startTime, endTime, loc, title);
     const params = new URLSearchParams({ date, start: startTime, end: endTime, location: loc, title });
     const icsUrl = `${BASE_URL}/api/ics?${params.toString()}`;
+    // Google's URL-based "add to calendar" scheme only ever supports one
+    // event — for a multi-date series these two buttons can only offer the
+    // first date. The attached .ics file (below, via icsAttachment) covers
+    // every date; this note tells the client that file exists and is the
+    // one to use for the full series.
+    const seriesNote = data.calendarEvents && data.calendarEvents.length > 1
+      ? `<br/><span style="font-size: 11px; color: #93c5fd;">(buttons add just this first date — this email's attached calendar file has all ${data.calendarEvents.length} dates)</span>`
+      : "";
     return `<p style="margin-top: 8px;">
       <a href="${googleUrl}" target="_blank" style="display: inline-block; background: #1a73e8; color: #ffffff; padding: 7px 14px; border-radius: 6px; text-decoration: none; font-size: 12px; font-weight: bold; margin-right: 8px;">Add to Google Calendar</a>
       <a href="${icsUrl}" style="display: inline-block; background: #3a3a3a; color: #ffffff; padding: 7px 14px; border-radius: 6px; text-decoration: none; font-size: 12px; font-weight: bold;">Add to Apple Calendar</a>
+      ${seriesNote}
     </p>`;
   })();
 
   const icsAttachment = (() => {
-    if (!data.calendarEvent) return null;
-    const { date, startTime, endTime, location } = data.calendarEvent;
-    const loc = LOCATION_MAP[location]?.name || location;
+    // Prefer the full multi-date list when the caller provided one — falls
+    // back to the single calendarEvent for every non-series booking (the
+    // overwhelming majority of call sites, unaffected by this change).
+    const events = data.calendarEvents && data.calendarEvents.length > 0
+      ? data.calendarEvents
+      : data.calendarEvent
+        ? [data.calendarEvent]
+        : [];
+    if (events.length === 0) return null;
     const icsTitle = data.type === "camp" ? "Mesa Basketball Training — Camp" : isPickup ? "Mesa Basketball Training — Pickup Session" : data.type === "weekly" ? "Mesa Basketball Training — Group Session" : "Mesa Basketball Training — Private Session";
-    const content = buildICSContent(date, startTime, endTime, loc, icsTitle);
+    const content = buildICSContent(events.map((e) => ({ ...e, location: LOCATION_MAP[e.location]?.name || e.location, title: icsTitle })));
     if (!content) return null;
     return { filename: "mesa-basketball.ics", content: Buffer.from(content) };
   })();
