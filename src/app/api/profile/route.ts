@@ -100,11 +100,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Failed to save profile." }, { status: 500 });
   }
 
-  // Keep auth display name in sync so it shows in Supabase dashboard
+  // Keep auth display name in sync so it shows in Supabase dashboard —
+  // previously uncaught/unlogged, so a future transient failure here would
+  // silently leave the Auth dashboard's display name blank with no trace.
   if (body.parentName) {
-    await supabase.auth.admin.updateUserById(user.id, {
+    const { error: metaError } = await supabase.auth.admin.updateUserById(user.id, {
       user_metadata: { display_name: body.parentName },
     });
+    if (metaError) console.error(`Failed to sync auth display_name for user ${user.id}:`, metaError);
   }
 
   return NextResponse.json({ ok: true });
