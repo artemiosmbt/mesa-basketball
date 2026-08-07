@@ -633,35 +633,6 @@ export async function logLateFeeEvent(event: {
   }
 }
 
-// Fills in the actual charged amount on an existing late_fee_events row once
-// a separate Stripe Checkout for the remainder actually completes — the
-// initial log call deliberately omits amountChargedExtra for any path that
-// redirects to its own Checkout Session, since logging it at creation time
-// would record real money as "charged" before the client ever paid it (and
-// permanently overstate it if they abandon that checkout).
-/**
- * Returns true only if THIS call actually flipped the row from its default
- * "not yet charged" (amount_charged_extra = 0) state — a Stripe webhook
- * redelivery for the same checkout session would otherwise match zero rows
- * (already charged) but the caller previously had no way to tell, and would
- * re-send the "fee PAID" admin SMS every time the same event redelivers.
- */
-export async function markLateFeeEventCharged(eventId: string, amountChargedExtra: number): Promise<boolean> {
-  try {
-    const supabase = getSupabase();
-    const { data } = await supabase
-      .from("late_fee_events")
-      .update({ amount_charged_extra: amountChargedExtra })
-      .eq("id", eventId)
-      .eq("amount_charged_extra", 0)
-      .select("id");
-    return !!data && data.length > 0;
-  } catch (err) {
-    console.error("Failed to mark late fee event as charged:", err);
-    return false;
-  }
-}
-
 /** Check if email OR phone has any previous registrations (fraud-resistant new client check) */
 export async function isNewClient(email: string, phone: string): Promise<boolean> {
   const supabase = getSupabase();
@@ -1247,13 +1218,26 @@ export async function setPackageSessions(id: string, count: number): Promise<voi
  * policy for a package session is losing the session itself, not a 50% fee,
  * so it has to stay "used" for exactly the same reason a no-show does.
  */
-export async function countPackageSessionsUsed(packageId: string): Promise<number> {
+// excludeRegistrationId: for a reschedule that's deferred until payment
+// succeeds (see settleOldBookingForReschedule in booking-finalize.ts), the
+// OLD row is still sitting in the DB as "confirmed" — which this query would
+// otherwise count as used — even though an ON-TIME reschedule's eventual,
+// about-to-happen outcome is "freed back". Passing the old row's own id here
+// lets a caller ask "how many sessions would be used AFTER this reschedule's
+// outcome lands" without having to actually mutate anything yet. Only
+// meaningful for that on-time-preview case — a LATE reschedule's outcome
+// (still counted as used, whether left "confirmed" or already flipped to
+// "cancelled" + is_late_cancel) is identical either way, so callers never
+// need to exclude it there.
+export async function countPackageSessionsUsed(packageId: string, excludeRegistrationId?: string): Promise<number> {
   const supabase = getSupabase();
-  const { data, error } = await supabase
+  let query = supabase
     .from("registrations")
     .select("id")
     .eq("package_id", packageId)
     .or("status.in.(confirmed,no_show),and(status.eq.cancelled,is_late_cancel.eq.true)");
+  if (excludeRegistrationId) query = query.neq("id", excludeRegistrationId);
+  const { data, error } = await query;
   if (error || !data) return 0;
   return data.length;
 }

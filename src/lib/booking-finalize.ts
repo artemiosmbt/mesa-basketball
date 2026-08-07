@@ -4,12 +4,15 @@ import { addPrivateSessionToCalendar, deletePrivateSessionFromCalendar, upsertGr
 import { sendSMS, sendAdminSMS, formatDateWithDay, formatMonthYear, resolveLocationName } from "@/lib/sms";
 import { getStripe } from "@/lib/stripe";
 import { calcServiceFee, fmtMoney, packagePrice, fullPriceForType, getTrainerTier, normalizeTrainerTier } from "@/lib/pricing";
-import { notifyTrainerOfNewBooking } from "@/lib/trainer-notify";
+import { notifyTrainerOfNewBooking, notifyTrainerOfCancellation } from "@/lib/trainer-notify";
 import { trainerNamesMatch, formatTrainerForDisplay } from "@/lib/trainers";
 import {
   addReferralCredit,
   awardReferralCreditOnce,
   addAccountCredit,
+  deductAccountCredit,
+  cancelRegistration,
+  logLateFeeEvent,
   abandonPendingBookingBatch,
   finalizePaidBookingBatch,
   getActivePackage,
@@ -21,7 +24,7 @@ import {
   abandonPendingPackage,
   getRegistrationByToken,
   updateRegistrationPlayers,
-  markLateFeeEventCharged,
+  type Registration,
 } from "@/lib/supabase";
 
 // Parse a session date + hours/mins (Eastern time) into a UTC Date for comparison.
@@ -972,16 +975,13 @@ export async function finalizeConfirmedPrivateSeriesBooking(params: FinalizePriv
  */
 export async function expireAbandonedBookingBatch(
   bookingBatchId: string,
-  // Set only for an ON-TIME reschedule's price-increase topup checkout — the
-  // OLD (already-paid) booking was already cancelled synchronously when the
-  // reschedule was requested, on the assumption this topup completes. If the
-  // client abandons it instead, they end up with NO booking at all (old
-  // cancelled, new never confirmed) — under on-time policy nothing was ever
-  // supposed to be forfeited, so the original charge must come back to them
-  // here rather than being silently kept. A LATE reschedule's 50% "kept as
-  // fee" forfeiture is already correct regardless of whether the new
-  // session's topup ever completes, so callers never pass this for that case.
-  originalChargeRefund?: { paymentIntentId: string; amountDollars: number; sessionLabel: string }
+  // Set only for a reschedule's price-increase topup checkout — the
+  // client's ORIGINAL booking is deliberately left untouched until this
+  // topup actually succeeds (see settleOldBookingForReschedule's doc
+  // comment), so there's nothing to refund or restore on abandonment here —
+  // it's exactly as if the reschedule was never attempted. Only changes the
+  // admin-facing copy below.
+  isRescheduleTopup?: boolean
 ): Promise<void> {
   const abandoned = await abandonPendingBookingBatch(bookingBatchId);
   if (abandoned.length === 0) return;
@@ -999,27 +999,9 @@ export async function expireAbandonedBookingBatch(
   }
   const first = abandoned[0];
 
-  let refundResult: StripeRefundResult | undefined;
-  if (originalChargeRefund && originalChargeRefund.amountDollars > 0) {
-    refundResult = await issueStripeRefund({
-      email: first.email,
-      paymentIntentId: originalChargeRefund.paymentIntentId,
-      amountDollars: originalChargeRefund.amountDollars,
-      sessionLabel: originalChargeRefund.sessionLabel,
-    });
-    if (refundResult.refundedAmount > 0 && first.sms_consent && first.phone) {
-      await sendSMS(
-        first.phone,
-        `Mesa Basketball: Your reschedule wasn't completed, so $${fmtMoney(refundResult.refundedAmount)} has been refunded to your original payment method for your previous session. Book anytime at mesabasketballtraining.com/schedule.\nReply STOP to opt out.`
-      ).catch(() => {});
-    }
-  }
-
   // Informational, not urgent — an email instead of a text, since abandoned
   // checkouts happen constantly (someone starts, backs out) and there's
-  // nothing to act on immediately. When a refund happened above, the copy
-  // says so explicitly — the usual "no charge was made" line would otherwise
-  // be flatly wrong here.
+  // nothing to act on immediately.
   try {
     await sendAbandonedCheckoutEmail({
       parentName: first.parent_name,
@@ -1031,8 +1013,7 @@ export async function expireAbandonedBookingBatch(
         bookedDate: reg.booked_date,
         sessionPrice: reg.session_price,
       })),
-      refundedAmount: refundResult?.refundedAmount,
-      refundFailed: refundResult?.failed,
+      isRescheduleTopup,
     });
   } catch (err) {
     console.error("Failed to send abandoned checkout email:", err);
@@ -1069,15 +1050,205 @@ export async function expireAbandonedCheckoutSession(session: Stripe.Checkout.Se
     await expireAbandonedPackage(referenceId);
     return;
   }
-  const isOnTimeRescheduleTopup = session.metadata?.purpose === "reschedule_topup" && session.metadata?.is_late_reschedule !== "true";
-  const originalChargeRefund = isOnTimeRescheduleTopup && session.metadata?.old_payment_intent_id && session.metadata?.old_paid_amount
-    ? {
-        paymentIntentId: session.metadata.old_payment_intent_id,
-        amountDollars: parseFloat(session.metadata.old_paid_amount),
-        sessionLabel: session.metadata.old_session_details || "your previous session",
+  await expireAbandonedBookingBatch(referenceId, session.metadata?.purpose === "reschedule_topup");
+}
+
+// Pure math, no DB calls — how much of a late reschedule's 50% forfeiture
+// gets credited, and how much of that credit actually applies toward the
+// new session's price. Shared between a route handler's PREVIEW of this
+// (to size the Stripe topup Checkout charge, before anything is real) and
+// settleOldBookingForReschedule's REAL application of it (after payment
+// actually succeeds) — using the same function for both guarantees the
+// number a client is asked to pay always matches the number that actually
+// gets applied later, rather than two independently-written copies of this
+// math silently drifting apart.
+export function computeLateFeeAmounts(
+  oldPaidAmount: number,
+  isBulkDiscountedWeekly: boolean,
+  newPriceKnown: boolean,
+  newEffectivePrice: number | undefined
+): { lateFeeCredited: number; lateFeeCreditApplied: number } {
+  // Bulk-discounted weekly group sessions: late reschedule is full
+  // forfeiture of the old session — nothing carried forward as credit.
+  const lateFeeCredited = isBulkDiscountedWeekly ? 0 : Math.round(oldPaidAmount * 0.5 * 100) / 100;
+  const lateFeeCreditApplied = newPriceKnown && newEffectivePrice != null && newEffectivePrice > 0 && lateFeeCredited > 0
+    ? Math.min(lateFeeCredited, newEffectivePrice)
+    : 0;
+  return { lateFeeCredited, lateFeeCreditApplied };
+}
+
+export interface SettleOldBookingForRescheduleParams {
+  reg: Registration;
+  isLateReschedule: boolean;
+  isBulkDiscountedWeekly: boolean;
+  resolvedTrainer: string | undefined;
+  newSessionDetails: string;
+  newEffectivePrice: number | undefined;
+  newPriceKnown: boolean;
+  // Only set once the new session's Stripe topup has actually been paid
+  // (called from the webhook) — folds the real charged amount straight into
+  // the SAME late_fee_events row this function logs, instead of the old
+  // two-phase "log a placeholder now, patch in the real amount later once
+  // payment confirms" dance, which is no longer needed now that this whole
+  // function only ever runs once the outcome is already real.
+  amountChargedExtra?: number;
+}
+
+export interface SettleOldBookingForRescheduleResult {
+  // False only if the old row was no longer "confirmed" by the time this
+  // ran (a race — e.g. a duplicate webhook delivery, or the client
+  // double-submitting the reschedule and completing both payments). Every
+  // other field is a zeroed no-op in that case; the caller should treat this
+  // as "someone else already settled it," not retry.
+  cancelled: boolean;
+  lateFeeCredited: number;
+  lateFeeCreditApplied: number;
+  packageSessionForfeited: boolean;
+}
+
+/**
+ * The "old booking is really gone now" half of a reschedule — cancels the
+ * original registration and fires every side effect that follows from that
+ * (trainer notified, referral/account credit refunded, calendar event
+ * removed, and — for a late reschedule — the 50% forfeiture credited and
+ * applied toward the new session, logged to late_fee_events). Called from
+ * exactly two places:
+ *   - Synchronously from the client reschedule route, when no further
+ *     Stripe payment is needed (same price, a price decrease, or a late
+ *     reschedule whose credit fully covers the new session) — the whole
+ *     reschedule completes in one request, so there's no async gap to worry
+ *     about; this mirrors exactly what used to be inlined at the top of
+ *     that route.
+ *   - From the Stripe webhook, once a required topup payment actually
+ *     succeeds — NOT synchronously when the reschedule is first requested.
+ *     This is the fix for the real incident that motivated splitting this
+ *     out: previously the old booking was cancelled (and, if late, its 50%
+ *     fee already credited) the instant the client submitted the form,
+ *     before they'd paid anything toward the new session — so an abandoned
+ *     Stripe Checkout left them with no original booking, a fee already
+ *     taken, and no new session actually booked. Deferring this call until
+ *     payment is confirmed means an abandoned/expired checkout now leaves
+ *     the original booking completely untouched, exactly as if the
+ *     reschedule had never been attempted — no fee, no credit, no cancelled
+ *     slot, nothing to refund or restore.
+ */
+export async function settleOldBookingForReschedule(params: SettleOldBookingForRescheduleParams): Promise<SettleOldBookingForRescheduleResult> {
+  const { reg, isLateReschedule, isBulkDiscountedWeekly, resolvedTrainer, newSessionDetails, newEffectivePrice, newPriceKnown, amountChargedExtra } = params;
+
+  const oldCancelled = await cancelRegistration(reg.manage_token, isLateReschedule);
+  if (!oldCancelled) {
+    return { cancelled: false, lateFeeCredited: 0, lateFeeCreditApplied: 0, packageSessionForfeited: false };
+  }
+
+  if (reg.package_id) {
+    try {
+      const used = await countPackageSessionsUsed(reg.package_id);
+      await setPackageSessions(reg.package_id, used);
+    } catch {
+      // non-critical — don't fail the reschedule settlement over this
+    }
+  }
+
+  // Notify the OLD trainer their slot is gone if this reschedule swaps to a
+  // different trainer.
+  if (reg.booked_trainer && reg.booked_trainer !== resolvedTrainer && reg.booked_date && reg.booked_start_time) {
+    await notifyTrainerOfCancellation({
+      trainer: reg.booked_trainer,
+      parentName: reg.parent_name,
+      sessionLabel: reg.type === "weekly" ? (reg.booked_group || "Group Session") : reg.type === "group-private" ? "Group Private Session" : "Private Session",
+      date: reg.booked_date,
+      startTime: reg.booked_start_time,
+      endTime: reg.booked_end_time || reg.booked_start_time,
+      location: reg.booked_location || "",
+    }).catch((err) => console.error("Trainer reschedule-cancel notify failed:", err));
+  }
+
+  // Refund referral credit from the old booking (always — they'll re-apply to the new one if they want)
+  if (reg.used_referral_credit && reg.email) {
+    await addReferralCredit(reg.email).catch(() => {});
+  }
+
+  // Refund account credit from the old booking (same — they can re-apply to the new one)
+  if (reg.applied_account_credit && reg.email) {
+    await addAccountCredit(reg.email, reg.applied_account_credit).catch(() => {});
+  }
+
+  // Sync calendar for the old booking
+  if (reg.booked_date && reg.booked_start_time) {
+    const wasPrivate = reg.type === "private" || reg.type === "group-private";
+    try {
+      if (wasPrivate) {
+        await deletePrivateSessionFromCalendar({ email: reg.email, bookedDate: reg.booked_date, bookedStartTime: reg.booked_start_time });
+      } else {
+        const sessionLabel = reg.booked_group || reg.session_details.split(" — ")[0] || "Group Session";
+        await upsertGroupSessionCalendarEvent({
+          sessionType: reg.type as "weekly" | "camp",
+          sessionLabel,
+          bookedDate: reg.booked_date,
+          bookedStartTime: reg.booked_start_time,
+          bookedEndTime: reg.booked_end_time || reg.booked_start_time,
+          bookedLocation: reg.booked_location || "",
+          kidsJustRegistered: reg.kids,
+          participantsJustRegistered: reg.total_participants || 1,
+        });
       }
-    : undefined;
-  await expireAbandonedBookingBatch(referenceId, originalChargeRefund);
+    } catch (err) {
+      console.error("Calendar sync error (reschedule old):", err);
+    }
+  }
+
+  const oldPaymentIntentId = reg.stripe_payment_intent_id || undefined;
+  const oldPaidAmount = Math.max(0, resolvedSessionPrice(reg) - (reg.applied_account_credit || 0));
+
+  let lateFeeCredited = 0;
+  let lateFeeCreditApplied = 0;
+  if (oldPaymentIntentId) {
+    if (isLateReschedule) {
+      const amounts = computeLateFeeAmounts(oldPaidAmount, isBulkDiscountedWeekly, newPriceKnown, newEffectivePrice);
+      lateFeeCredited = amounts.lateFeeCredited;
+      if (lateFeeCredited > 0) await addAccountCredit(reg.email, lateFeeCredited).catch(() => {});
+      if (amounts.lateFeeCreditApplied > 0) {
+        const applied = await deductAccountCredit(reg.email, amounts.lateFeeCreditApplied).catch(() => false);
+        if (applied) lateFeeCreditApplied = amounts.lateFeeCreditApplied;
+      }
+      await logLateFeeEvent({
+        registrationId: reg.id,
+        parentName: reg.parent_name,
+        email: reg.email,
+        kids: reg.kids,
+        sessionType: reg.type,
+        sessionDetails: reg.session_details,
+        bookedDate: reg.booked_date,
+        bookedStartTime: reg.booked_start_time,
+        action: "reschedule",
+        initiatedBy: "client",
+        amountKept: Math.round((oldPaidAmount - lateFeeCredited) * 100) / 100,
+        amountCredited: lateFeeCredited,
+        amountApplied: lateFeeCreditApplied,
+        amountChargedExtra: amountChargedExtra || undefined,
+        newSessionDetails,
+      });
+    }
+  }
+
+  const packageSessionForfeited = !!(reg.package_id && isLateReschedule);
+  if (packageSessionForfeited) {
+    await logLateFeeEvent({
+      registrationId: reg.id,
+      parentName: reg.parent_name,
+      email: reg.email,
+      kids: reg.kids,
+      sessionType: reg.type,
+      sessionDetails: reg.session_details,
+      bookedDate: reg.booked_date,
+      bookedStartTime: reg.booked_start_time,
+      action: "reschedule",
+      initiatedBy: "client",
+      newSessionDetails,
+    });
+  }
+
+  return { cancelled: true, lateFeeCredited, lateFeeCreditApplied, packageSessionForfeited };
 }
 
 export interface FinalizeRescheduleTopupParams {
@@ -1089,6 +1260,10 @@ export interface FinalizeRescheduleTopupParams {
   oldSessionDetails: string;
   newSessionDetails: string;
   manageToken: string;
+  // The OLD booking's own manage_token — looked up fresh here (rather than
+  // trusting a payload built back when the reschedule was first requested)
+  // so settleOldBookingForReschedule always acts on its actual current state.
+  originalManageToken: string;
   bookedDate: string;
   bookedStartTime: string;
   bookedEndTime: string;
@@ -1098,38 +1273,52 @@ export interface FinalizeRescheduleTopupParams {
   totalParticipants: number;
   smsConsent: boolean;
   isLateReschedule: boolean;
+  isBulkDiscountedWeekly: boolean;
   amountCharged: number;
-  lateFeeCredited?: number;
-  lateFeeCreditApplied?: number;
-  // True when this topup exists because a late-rescheduled package session
-  // was forfeited and the package no longer had capacity to cover the new
-  // date — the old session is simply lost (no fee), and the new one is paid
-  // for outright like a normal booking. Mutually exclusive with
-  // lateFeeCredited/lateFeeCreditApplied (those only apply to the general,
-  // non-package 50%-credited policy).
-  packageSessionForfeited?: boolean;
-  // True when this topup is for a weekly group session that was part of a
-  // bulk/volume-discounted booking (10%/15% off) rescheduled late — the old
-  // session is fully forfeited (no credit at all), and this topup is the new
-  // session's full, undiscounted price. A plain (non-bulk) weekly late
-  // reschedule still uses the general 50%-credited policy above, so this
-  // must be computed by the caller (which knows whether the OLD booking was
-  // bulk-discounted) rather than derived from `type` alone.
-  fullForfeitNoRefund?: boolean;
+  // The NEW (already-confirmed) booking's own effective price — used only to
+  // cap how much of a late reschedule's credit applies toward it; always
+  // known by this point since the row is real and priced.
+  newEffectivePrice: number;
 }
 
 /**
  * A reschedule needed real money to move (the new session costs more than
  * what was already paid on the old one) — the client was sent to Stripe
- * Checkout for just the difference (or, after a late reschedule's 50% fee
- * was kept, the new session's full price) and the webhook calls this once
- * that payment succeeds. The old booking was already cancelled synchronously
- * when the reschedule was requested; this only confirms/announces the new
- * one, mirroring how a brand-new paid booking is only announced once paid.
+ * Checkout for just the difference (or, after a late reschedule's 50% fee,
+ * the new session's full price) and the webhook calls this once that
+ * payment actually succeeds. The old booking is deliberately left fully
+ * untouched until THIS point — see settleOldBookingForReschedule's own doc
+ * comment for why (an abandoned/expired Checkout must leave the client
+ * exactly where they started, not mid-cancelled with a fee already taken).
  */
 export async function finalizeRescheduleTopup(params: FinalizeRescheduleTopupParams): Promise<void> {
   const isPrivateType = params.type === "private" || params.type === "group-private";
-  const fullForfeitNoRefund = !!params.fullForfeitNoRefund;
+
+  const oldReg = await getRegistrationByToken(params.originalManageToken);
+  let lateFeeCredited = 0;
+  let lateFeeCreditApplied = 0;
+  let packageSessionForfeited = false;
+  if (!oldReg) {
+    console.error(`finalizeRescheduleTopup: original booking (token ${params.originalManageToken}) not found — settlement skipped, new booking still confirmed.`);
+  } else {
+    const settled = await settleOldBookingForReschedule({
+      reg: oldReg,
+      isLateReschedule: params.isLateReschedule,
+      isBulkDiscountedWeekly: params.isBulkDiscountedWeekly,
+      resolvedTrainer: params.bookedTrainer,
+      newSessionDetails: params.newSessionDetails,
+      newEffectivePrice: params.newEffectivePrice,
+      newPriceKnown: true,
+      amountChargedExtra: params.amountCharged,
+    });
+    if (!settled.cancelled) {
+      console.error(`finalizeRescheduleTopup: original booking (token ${params.originalManageToken}) was no longer confirmed by payment time — settlement skipped (likely a duplicate webhook or a double-submitted reschedule), new booking still confirmed.`);
+    }
+    lateFeeCredited = settled.lateFeeCredited;
+    lateFeeCreditApplied = settled.lateFeeCreditApplied;
+    packageSessionForfeited = settled.packageSessionForfeited;
+  }
+  const fullForfeitNoRefund = params.isBulkDiscountedWeekly && params.isLateReschedule;
 
   try {
     await sendRescheduleNotification({
@@ -1141,9 +1330,9 @@ export async function finalizeRescheduleTopup(params: FinalizeRescheduleTopupPar
       isLateReschedule: params.isLateReschedule,
       newTrainer: params.bookedTrainer,
       priceAdjustment: { kind: "charge", amount: params.amountCharged },
-      lateFeeCredited: params.lateFeeCredited,
-      lateFeeCreditApplied: params.lateFeeCreditApplied,
-      packageSessionForfeited: params.packageSessionForfeited,
+      lateFeeCredited: lateFeeCredited || undefined,
+      lateFeeCreditApplied: lateFeeCreditApplied || undefined,
+      packageSessionForfeited,
       newSessionPackageCovered: false,
       fullForfeitNoRefund,
     });
@@ -1152,10 +1341,10 @@ export async function finalizeRescheduleTopup(params: FinalizeRescheduleTopupPar
   }
 
   const topupTotalWithFee = Math.round((params.amountCharged + calcServiceFee(params.amountCharged)) * 100) / 100;
-  const creditAppliedNote = params.lateFeeCreditApplied
-    ? ` ($${fmtMoney(params.lateFeeCreditApplied)} late-fee credit applied, remainder charged)`
+  const creditAppliedNote = lateFeeCreditApplied
+    ? ` ($${fmtMoney(lateFeeCreditApplied)} late-fee credit applied, remainder charged)`
     : "";
-  const forfeitSmsNote = params.packageSessionForfeited
+  const forfeitSmsNote = packageSessionForfeited
     ? " (your original package session was forfeited — this is your new session, paid separately)"
     : fullForfeitNoRefund
       ? " (your original session was fully forfeited, non-refundable — this is your new session at full price)"
@@ -1165,16 +1354,16 @@ export async function finalizeRescheduleTopup(params: FinalizeRescheduleTopupPar
     await sendSMS(params.phone, `Mesa Basketball: Reschedule confirmed — $${fmtMoney(topupTotalWithFee)} charged${creditAppliedNote}${forfeitSmsNote}!\n${formatDateWithDay(params.bookedDate)} | ${params.bookedStartTime}-${params.bookedEndTime}\nLocation: ${resolveLocationName(params.bookedLocation)}${trainerLine}\nAthlete: ${params.kids}\nManage: mesabasketballtraining.com/booking/${params.manageToken}\nReply STOP to opt out.`);
   }
 
-  await sendAdminSMS(`RESCHEDULED (paid $${fmtMoney(topupTotalWithFee)}${creditAppliedNote}${params.packageSessionForfeited ? " — package session forfeited" : fullForfeitNoRefund ? " — weekly full forfeiture" : ""}): ${params.parentName}\nFrom: ${params.oldSessionDetails}\nTo: ${params.newSessionDetails}\nPlayers: ${params.kids}`).catch(() => {});
+  await sendAdminSMS(`RESCHEDULED (paid $${fmtMoney(topupTotalWithFee)}${creditAppliedNote}${packageSessionForfeited ? " — package session forfeited" : fullForfeitNoRefund ? " — weekly full forfeiture" : ""}): ${params.parentName}\nFrom: ${params.oldSessionDetails}\nTo: ${params.newSessionDetails}\nPlayers: ${params.kids}`).catch(() => {});
 
   // The OLD trainer (if this swapped trainers) was already notified their
-  // slot was gone synchronously when the reschedule was first requested —
-  // long before this payment confirmation. This just tells the trainer on
-  // the NEW booking that it's real now that payment succeeded; no structured
-  // old date/time survives to this point to distinguish "rescheduled" vs.
-  // "new booking" wording, so this always reads as a fresh booking, which is
-  // accurate either way from the perspective of whoever's now on the hook
-  // for it.
+  // slot was gone by settleOldBookingForReschedule above, just now (payment
+  // only just confirmed — nothing about the old booking happens before
+  // this). This just tells the trainer on the NEW booking that it's real
+  // now that payment succeeded; no structured old date/time survives to
+  // this point to distinguish "rescheduled" vs. "new booking" wording, so
+  // this always reads as a fresh booking, which is accurate either way from
+  // the perspective of whoever's now on the hook for it.
   if (params.bookedTrainer) {
     await notifyTrainerOfNewBooking({
       trainer: params.bookedTrainer,
@@ -1482,17 +1671,16 @@ export async function finalizePaidCheckoutSession(session: Stripe.Checkout.Sessi
   if (confirmedRows.length === 0) return;
 
   // A reschedule that needed a Stripe topup (or, after a late reschedule's
-  // 50% fee, a fresh full charge) — the old booking was already cancelled
-  // synchronously when the reschedule was requested; this just announces
-  // the new one now that payment has actually gone through.
+  // 50% fee, a fresh full charge) — the OLD booking is still fully
+  // untouched at this point (see settleOldBookingForReschedule's doc
+  // comment) and only gets cancelled/settled now, inside
+  // finalizeRescheduleTopup, now that payment has actually gone through.
   if (metadata.purpose === "reschedule_topup") {
     const reg = confirmedRows[0];
     if (!reg.booked_date || !reg.booked_start_time) return;
-    // Only set for a LATE reschedule's remainder charge — fills in the real
-    // charged amount on the late_fee_events row logged when the reschedule
-    // was first requested, now that this topup has actually been paid.
-    if (metadata.late_fee_event_id && session.amount_total != null) {
-      await markLateFeeEventCharged(metadata.late_fee_event_id, session.amount_total / 100);
+    if (!metadata.original_manage_token) {
+      console.error(`reschedule_topup checkout ${session.id} completed with no original_manage_token in metadata — cannot settle the old booking.`);
+      return;
     }
     await finalizeRescheduleTopup({
       parentName: reg.parent_name,
@@ -1503,6 +1691,7 @@ export async function finalizePaidCheckoutSession(session: Stripe.Checkout.Sessi
       oldSessionDetails: metadata.old_session_details || "your previous session",
       newSessionDetails: reg.session_details,
       manageToken: reg.manage_token,
+      originalManageToken: metadata.original_manage_token,
       bookedDate: reg.booked_date,
       bookedStartTime: reg.booked_start_time,
       bookedEndTime: reg.booked_end_time || reg.booked_start_time,
@@ -1512,18 +1701,9 @@ export async function finalizePaidCheckoutSession(session: Stripe.Checkout.Sessi
       totalParticipants: reg.total_participants,
       smsConsent: !!reg.sms_consent,
       isLateReschedule: metadata.is_late_reschedule === "true",
+      isBulkDiscountedWeekly: metadata.is_bulk_discounted_weekly === "true",
       amountCharged: metadata.topup_amount ? Number(metadata.topup_amount) : 0,
-      lateFeeCredited: metadata.late_fee_credited ? Number(metadata.late_fee_credited) : undefined,
-      lateFeeCreditApplied: metadata.late_fee_credit_applied ? Number(metadata.late_fee_credit_applied) : undefined,
-      // A package-covered old session never has its own Stripe payment
-      // intent (see the identical old_payment_intent_id comment in
-      // booking/[token]/route.ts) — the only other path that reaches this
-      // topup with that field empty is a package late reschedule whose
-      // package ran out of capacity. An on-time package reschedule to a
-      // different month also charges full price with this field empty, so
-      // this is deliberately gated on is_late_reschedule too.
-      packageSessionForfeited: !metadata.old_payment_intent_id && metadata.is_late_reschedule === "true",
-      fullForfeitNoRefund: metadata.is_bulk_discounted_weekly === "true" && metadata.is_late_reschedule === "true",
+      newEffectivePrice: resolvedSessionPrice(reg),
     });
     return;
   }

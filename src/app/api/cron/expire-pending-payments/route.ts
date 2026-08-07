@@ -51,12 +51,13 @@ export async function GET(req: NextRequest) {
           skipped++;
           continue;
         }
-        // Route through the session-aware expiry, not just the batch id —
-        // an on-time reschedule's price-increase topup checkout carries
-        // metadata identifying the client's original (already-cancelled)
-        // charge, which needs a real refund on abandonment. Falling back to
-        // the plain batch-id path below would silently skip that refund
-        // whenever the webhook missed this expiry and the cron catches it.
+        // Route through the session-aware expiry, not just the batch id — a
+        // reschedule's price-increase topup checkout carries metadata
+        // identifying it as such, which only changes the admin-facing
+        // abandonment email's wording (the client's original booking was
+        // never touched either way — see settleOldBookingForReschedule in
+        // booking-finalize.ts). Falling back to the plain batch-id path
+        // below would just show the generic wording instead.
         await expireAbandonedCheckoutSession(session);
         expired++;
         continue;
