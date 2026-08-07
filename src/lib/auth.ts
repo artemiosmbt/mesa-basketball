@@ -1,6 +1,5 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import type { NextRequest } from "next/server";
-import { trainerNamesMatch } from "@/lib/trainers";
 
 export const ADMIN_EMAIL = "artemios@mesabasketballtraining.com";
 
@@ -18,41 +17,30 @@ export const ADMIN_EMAIL = "artemios@mesabasketballtraining.com";
 // To add a trainer: have them sign up normally on the site, then add a row
 // here with their login email and redeploy. trainerName is only needed
 // (and only meaningful) for role "trainer" — omit it for "elevated_trainer".
+//
+// Deliberately holds NO phone numbers. This file is imported by several
+// "use client" components (nav bars, the admin dashboard) for role/nav-link
+// resolution — anything referenced here ends up baked into a public,
+// unauthenticated JS bundle that ships to every site visitor, not just
+// logged-in trainers. Notification phone numbers live in the server-only
+// src/lib/trainer-contacts.ts instead, which nothing client-side ever
+// imports. Learned this the hard way: phone numbers used to live directly
+// on this array and were confirmed (via a build + bundle grep) to be
+// present in a publicly-fetchable static chunk.
 export interface TrainerAccount {
   email: string;
   role: "trainer" | "elevated_trainer";
   trainerName?: string;
-  // Notification phone (SMS) — separate from the login email above; only
-  // used to text this trainer about their own bookings (new/cancelled/
-  // rescheduled), never for dashboard auth. Omit if they don't want texts.
-  phone?: string;
 }
 
 export const TRAINER_ACCOUNTS: TrainerAccount[] = [
   { email: "ckaterinakis@hchc.edu", role: "elevated_trainer" },
-  // { email: "coach@example.com", role: "trainer", trainerName: "John Smith", phone: "631-555-0100" },
-  { email: "giftedtraining24@gmail.com", role: "trainer", trainerName: "Joseph Owens", phone: "516-439-6467" },
-  { email: "zthybulle@gmail.com", role: "trainer", trainerName: "Zhaneia Thybulle", phone: "347-355-1168" },
-  { email: "zamjadh786@gmail.com", role: "trainer", trainerName: "Zain Amjad", phone: "516-303-5963" },
-  { email: "sjpapadi@gmail.com", role: "trainer", trainerName: "Steven Papadimitropoulos", phone: "929-465-3066" },
+  // { email: "coach@example.com", role: "trainer", trainerName: "John Smith" },
+  { email: "giftedtraining24@gmail.com", role: "trainer", trainerName: "Joseph Owens" },
+  { email: "zthybulle@gmail.com", role: "trainer", trainerName: "Zhaneia Thybulle" },
+  { email: "zamjadh786@gmail.com", role: "trainer", trainerName: "Zain Amjad" },
+  { email: "sjpapadi@gmail.com", role: "trainer", trainerName: "Steven Papadimitropoulos" },
 ];
-
-// Looks up a trainer's contact info by their exact schedule-sheet name (the
-// same string stored in booked_trainer) — used to notify THEM (not just the
-// admin) about their own bookings. Returns null for Artemios (not in this
-// list — he already gets every admin notification) or any name with no
-// matching account, so a sheet typo just means that trainer's notification
-// silently doesn't fire, rather than erroring the booking.
-export function getTrainerContact(trainerName: string | null | undefined): TrainerAccount | null {
-  if (!trainerName) return null;
-  // Normalized comparison (not exact ===) — trainerName here is whatever
-  // casing was live on the hand-typed schedule sheet at booking/reassignment
-  // time, which can drift from the exact spelling configured below. Without
-  // this, a stray capitalization difference would silently no-op every
-  // notification for a real, configured trainer — the same class of gap
-  // payroll-sync.ts already had to guard against for its own name matching.
-  return TRAINER_ACCOUNTS.find((t) => trainerNamesMatch(t.trainerName, trainerName)) ?? null;
-}
 
 export type AuthRole = "admin" | "elevated_trainer" | "trainer";
 

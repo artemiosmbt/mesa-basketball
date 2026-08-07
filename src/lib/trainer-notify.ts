@@ -1,4 +1,4 @@
-import { getTrainerContact } from "./auth";
+import { getTrainerContact } from "./trainer-contacts";
 import { sendTrainerNewBookingEmail, sendTrainerCancellationEmail, sendTrainerRescheduleEmail } from "./email";
 import { sendSMS } from "./sms";
 

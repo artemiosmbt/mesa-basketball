@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { authClient, resolveAuthRole, type AuthContext } from "@/lib/auth";
+import { authClient, resolveAuthRole, TRAINER_ACCOUNTS, type AuthContext } from "@/lib/auth";
 import type { WeeklySession, Camp, PrivateSlot } from "@/lib/sheets";
 import { fullPriceForType, calcPrivatePrice as calcPrivatePricePreview, getTrainerTier } from "@/lib/pricing";
 import { trainerNamesMatch, normalizeTrainerNameForComparison } from "@/lib/trainers";
@@ -1343,12 +1343,23 @@ export default function AdminPage() {
     [registrations, trainerFilter]
   );
 
-  // Deduped by normalized name so a casing/whitespace variant never shows
-  // up as a separate, near-identical filter option — one representative
-  // (first-seen) raw spelling per real trainer, which visibleRegistrations
+  // Seeded with every configured trainer account FIRST (so a trainer with
+  // zero sessions booked yet — brand new, or just hasn't been assigned
+  // anything — still shows up as a real filter option, not just names that
+  // happen to already appear on a registration), then layered with whatever
+  // actually shows up in registrations for anyone not already covered (the
+  // owner himself, "TBD", or a substitute not yet added as a dashboard
+  // account). Deduped by normalized name so a casing/whitespace variant
+  // never shows up as a separate, near-identical option — one
+  // representative spelling per real trainer (the configured account's
+  // canonical spelling wins when both exist), which visibleRegistrations
   // above then normalized-matches against every casing variant anyway.
   const availableTrainers = useMemo(() => {
     const byNormalized = new Map<string, string>();
+    for (const t of TRAINER_ACCOUNTS) {
+      if (!t.trainerName) continue;
+      byNormalized.set(normalizeTrainerNameForComparison(t.trainerName), t.trainerName);
+    }
     for (const r of registrations) {
       const raw = r.booked_trainer || "";
       if (!raw) continue;
