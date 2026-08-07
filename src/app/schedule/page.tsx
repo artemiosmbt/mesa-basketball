@@ -3638,7 +3638,7 @@ export default function Home() {
                           </div>
                         </>
                       ) : (
-                        <div className="inline-flex items-center gap-1 rounded-full border border-brown-700 bg-brown-800 py-1 pl-3 pr-1 hover:border-mesa-accent transition">
+                        <div className="inline-flex items-center gap-1 rounded-full border-2 border-brown-600 bg-brown-800 py-1.5 pl-4 pr-1.5 shadow-lg shadow-black/30 hover:border-mesa-accent transition">
                           <button
                             type="button"
                             onClick={() => toggleKidExpanded(i)}
@@ -4246,7 +4246,7 @@ export default function Home() {
                           </div>
                         </>
                       ) : (
-                        <div className="inline-flex items-center gap-1 rounded-full border border-brown-700 bg-brown-800 py-1 pl-3 pr-1 hover:border-mesa-accent transition">
+                        <div className="inline-flex items-center gap-1 rounded-full border-2 border-brown-600 bg-brown-800 py-1.5 pl-4 pr-1.5 shadow-lg shadow-black/30 hover:border-mesa-accent transition">
                           <button
                             type="button"
                             onClick={() => toggleKidExpanded(i)}
