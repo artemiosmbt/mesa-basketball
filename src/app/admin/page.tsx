@@ -2237,7 +2237,7 @@ export default function AdminPage() {
                         const otherKids = (profilesMap[email]?.kids || []).filter((k) => k.id !== athlete.id);
                         const hidePending = groupActionPending === `hide|${email}|${athlete.id}`;
                         return (
-                          <div key={rowKey} className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-3">
+                          <div key={rowKey} className="rounded-xl border-2 border-brown-600 bg-brown-900/40 px-4 py-3 shadow-lg shadow-black/30">
                             <div className="flex items-center justify-between gap-3">
                               <button
                                 type="button"
