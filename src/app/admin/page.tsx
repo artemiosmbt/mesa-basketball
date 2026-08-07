@@ -155,6 +155,27 @@ function athleteNames(kids: string) {
   return kids ? kids.split(",").map((k) => k.split("(")[0].trim()).filter(Boolean).join(", ") : "—";
 }
 
+// Last whitespace-separated token of a name, or "" if it's a single word
+// (nothing to call a "last name"). Used both to display a last name for an
+// athlete who was only ever saved with a first name, and to sort the Groups
+// tab by last name so siblings land next to each other.
+function lastNameOf(fullName: string): string {
+  const parts = (fullName || "").trim().split(/\s+/).filter(Boolean);
+  return parts.length > 1 ? parts[parts.length - 1] : "";
+}
+
+// Groups-tab-only display fallback — an athlete saved with just a first
+// name borrows the parent's last name so there's something to show/sort
+// by. Purely cosmetic: never written back to the athlete's saved data.
+function groupsTabDisplayName(athleteName: string, parentName: string): { displayName: string; sortLastName: string } {
+  const athleteLast = lastNameOf(athleteName);
+  if (athleteLast) return { displayName: athleteName, sortLastName: athleteLast };
+  const parentLast = lastNameOf(parentName);
+  return parentLast
+    ? { displayName: `${athleteName} ${parentLast}`, sortLastName: parentLast }
+    : { displayName: athleteName, sortLastName: athleteName };
+}
+
 function nameTokens(name: string): string[] {
   return name.toLowerCase().split(/\s+/).filter(Boolean);
 }
@@ -1446,22 +1467,26 @@ export default function AdminPage() {
   // intentionally appears in both sections, and the owner's manual
   // add/move/remove edits are exactly what's reflected here.
   const groupBuckets = useMemo(() => {
-    const buckets: Record<CanonicalGroupId | "all-else", { email: string; parentName: string; athlete: ProfileKid }[]> = {
+    const buckets: Record<CanonicalGroupId | "all-else", { email: string; parentName: string; athlete: ProfileKid; displayName: string; sortLastName: string }[]> = {
       junior: [], "ms-boys": [], "ms-girls": [], "hs-girls": [], "hs-boys": [], "all-else": [],
     };
     for (const [email, profile] of Object.entries(profilesMap)) {
       for (const kid of profile.kids) {
         if (!kid.name || !kid.id || kid.hidden) continue;
+        const { displayName, sortLastName } = groupsTabDisplayName(kid.name, profile.parentName);
+        const row = { email, parentName: profile.parentName, athlete: kid, displayName, sortLastName };
         const groups = kid.groups || [];
         if (groups.length === 0) {
-          buckets["all-else"].push({ email, parentName: profile.parentName, athlete: kid });
+          buckets["all-else"].push(row);
           continue;
         }
-        for (const g of groups) buckets[g]?.push({ email, parentName: profile.parentName, athlete: kid });
+        for (const g of groups) buckets[g]?.push(row);
       }
     }
     for (const key of Object.keys(buckets) as (CanonicalGroupId | "all-else")[]) {
-      buckets[key].sort((a, b) => a.athlete.name.localeCompare(b.athlete.name));
+      // Last name first (so siblings land next to each other), full display
+      // name as a stable tiebreaker among same-last-name siblings.
+      buckets[key].sort((a, b) => a.sortLastName.localeCompare(b.sortLastName) || a.displayName.localeCompare(b.displayName));
     }
     return buckets;
   }, [profilesMap]);
@@ -2206,7 +2231,7 @@ export default function AdminPage() {
                     <p className="text-sm text-brown-500">No athletes.</p>
                   ) : (
                     <div className="space-y-2">
-                      {rows.map(({ email, parentName, athlete }) => {
+                      {rows.map(({ email, parentName, athlete, displayName }) => {
                         const rowKey = `${email}|${athlete.id}`;
                         const isExpanded = expandedGroupAthlete === rowKey;
                         const otherKids = (profilesMap[email]?.kids || []).filter((k) => k.id !== athlete.id);
@@ -2220,7 +2245,7 @@ export default function AdminPage() {
                                 className="flex-1 min-w-0 text-left flex items-center justify-between gap-3"
                               >
                                 <div className="min-w-0">
-                                  <span className="font-medium text-sm text-white">{athlete.name}</span>
+                                  <span className="font-medium text-sm text-white">{displayName}</span>
                                   <span className="text-brown-400 text-xs ml-2">
                                     {athlete.grade ? `Grade ${athlete.grade}` : ""}{athlete.grade && athlete.gender ? " · " : ""}{athlete.gender || ""}
                                   </span>
@@ -2251,16 +2276,17 @@ export default function AdminPage() {
                                     <div className="space-y-1">
                                       {otherKids.map((k) => {
                                         const mergePending = groupActionPending === `merge|${email}|${k.id}`;
+                                        const otherDisplayName = groupsTabDisplayName(k.name, parentName).displayName;
                                         return (
                                           <div key={k.id} className="flex items-center justify-between gap-2 text-xs text-brown-300">
-                                            <span>{k.name}{k.grade ? ` · Grade ${k.grade}` : ""}{k.gender ? ` · ${k.gender}` : ""}</span>
+                                            <span>{otherDisplayName}{k.grade ? ` · Grade ${k.grade}` : ""}{k.gender ? ` · ${k.gender}` : ""}</span>
                                             <button
                                               type="button"
                                               disabled={mergePending || !athlete.id || !k.id}
                                               onClick={() => athlete.id && k.id && mergeAthletes(email, athlete.id!, k.id!)}
                                               className="shrink-0 text-mesa-accent hover:text-yellow-300 disabled:opacity-50"
                                             >
-                                              {mergePending ? "Merging..." : `Merge into ${athlete.name}`}
+                                              {mergePending ? "Merging..." : `Merge into ${displayName}`}
                                             </button>
                                           </div>
                                         );
