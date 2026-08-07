@@ -1302,41 +1302,50 @@ export async function sendReminderEmail(data: {
 <meta name="supported-color-schemes" content="light only" />
 <title>Mesa Basketball Training</title>
 <style>
-  /* Outlook (web + new desktop) stamps [data-ogsc] on elements it has
-     dark-mode-recolored — these force the real light-mode colors back. */
-  [data-ogsc] .mesa-outer-bg { background-color: #091530 !important; }
+  /* Belt-and-suspenders against client dark-mode auto-recoloring, which
+     doesn't reliably respect the color-scheme meta tags above in every
+     client (confirmed against a real Outlook/Chrome screenshot where the
+     whole navy/cream palette got muted despite them):
+     1) [data-ogsc] is the attribute Outlook (web + new desktop) stamps on
+        elements it has dark-mode-recolored — these force the real
+        light-mode colors back for that mechanism specifically.
+     2) prefers-color-scheme:dark re-asserts the same light colors for
+        clients using the standard CSS media-query mechanism instead
+        (Apple Mail, Gmail app, Yahoo). */
+  [data-ogsc] .mesa-outer-bg, [data-ogsc] .mesa-outer-bg td { background-color: #091530 !important; }
   [data-ogsc] .mesa-card-bg { background-color: #0f1f42 !important; }
   [data-ogsc] .mesa-content-bg { background-color: #fffbeb !important; }
-  [data-ogsc] .mesa-white-circle { background-color: #ffffff !important; }
   [data-ogsc] .mesa-session-card { background-color: #ffffff !important; }
   [data-ogsc] .mesa-cta-bg { background-color: #d4af37 !important; }
   [data-ogsc] .mesa-gold-text { color: #d4af37 !important; }
   [data-ogsc] .mesa-navy-text { color: #091530 !important; }
   [data-ogsc] .mesa-body-text { color: #3a3a3a !important; }
   [data-ogsc] .mesa-muted-text { color: #7d8bab !important; }
+  @media (prefers-color-scheme: dark) {
+    .mesa-outer-bg, .mesa-outer-bg td { background-color: #091530 !important; }
+    .mesa-card-bg { background-color: #0f1f42 !important; }
+    .mesa-content-bg { background-color: #fffbeb !important; }
+    .mesa-session-card { background-color: #ffffff !important; }
+    .mesa-cta-bg { background-color: #d4af37 !important; }
+    .mesa-gold-text { color: #d4af37 !important; }
+    .mesa-navy-text { color: #091530 !important; }
+    .mesa-body-text { color: #3a3a3a !important; }
+    .mesa-muted-text { color: #7d8bab !important; }
+  }
 </style>
 </head>
-<body style="margin: 0; padding: 0;">
+<body class="mesa-outer-bg" bgcolor="#091530" style="margin: 0; padding: 0; background-color: #091530;">
       <div class="mesa-outer-bg" style="background: #091530; padding: 32px 16px; font-family: Arial, Helvetica, sans-serif;">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width: 560px; margin: 0 auto; background: #0f1f42; border-radius: 12px; overflow: hidden; border: 1px solid #1e3a6e;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="mesa-card-bg" style="max-width: 560px; margin: 0 auto; background: #0f1f42; border-radius: 12px; overflow: hidden; border: 1px solid #1e3a6e;">
           <tr>
             <td class="mesa-outer-bg" style="background: #091530; padding: 28px 24px; text-align: center; border-bottom: 2px solid #d4af37;">
-              <!--[if mso]>
-              <v:oval style="width:72px;height:72px;margin:0 auto;" fillcolor="#ffffff" stroked="false">
-              <v:fill type="solid" color="#ffffff" />
-              <v:textbox inset="0,0,0,0">
-              <![endif]-->
-              <table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin: 0 auto;">
-                <tr>
-                  <td width="72" height="72" align="center" valign="middle" bgcolor="#ffffff" class="mesa-white-circle" style="width: 72px; height: 72px; background-color: #ffffff; border-radius: 50%; mso-border-radius-alt: 50%;">
-                    <img src="${BASE_URL}/logo.png" width="60" height="60" alt="Mesa Basketball Training" style="display: block; border-radius: 50%;" />
-                  </td>
-                </tr>
-              </table>
-              <!--[if mso]>
-              </v:textbox>
-              </v:oval>
-              <![endif]-->
+              <!-- White circle is baked directly into this image's pixels
+                   (see public/logo-circle.png, generated from logo.png) —
+                   not a CSS background-color — so no client's dark-mode
+                   color remapping can touch it, unlike the previous
+                   background-color-behind-a-transparent-logo approach
+                   that Outlook was recoloring black. -->
+              <img src="${BASE_URL}/logo-circle.png" width="72" height="72" alt="Mesa Basketball Training" style="display: block; margin: 0 auto;" />
               <p class="mesa-gold-text" style="margin: 10px 0 0; color: #d4af37; font-size: 12px; letter-spacing: 2px; text-transform: uppercase; font-weight: bold;">Mesa Basketball Training</p>
             </td>
           </tr>
