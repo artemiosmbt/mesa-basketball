@@ -2224,8 +2224,8 @@ export default function AdminPage() {
               const rows = groupBuckets[g.id];
               return (
                 <div key={g.id}>
-                  <h3 className="text-xs font-semibold uppercase tracking-widest text-mesa-accent mb-2">
-                    {g.label} <span className="text-brown-500 normal-case">({rows.length})</span>
+                  <h3 className="mb-3 rounded-lg bg-mesa-accent px-4 py-3 text-xl font-extrabold uppercase tracking-wide text-brown-900 shadow-lg shadow-black/30">
+                    {g.label} <span className="text-base font-semibold normal-case text-brown-800">({rows.length})</span>
                   </h3>
                   {rows.length === 0 ? (
                     <p className="text-sm text-brown-500">No athletes.</p>
