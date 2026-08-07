@@ -34,6 +34,19 @@ export function trainerNamesMatch(a: string | null | undefined, b: string | null
   return normalizeTrainerNameForComparison(a) === normalizeTrainerNameForComparison(b);
 }
 
+// Client-facing display only — never use this for storage, comparison, or
+// tier/price lookups (those must keep reading the raw "TBD" value; getTrainerTier
+// still needs to see the literal string). The owner's internal schedule-sheet
+// placeholder ("TBD" = "someone will cover this, not sure who yet") reads as
+// a confusing/unexplained trainer name to a client seeing it verbatim on a
+// session listing, booking confirmation, or email. Session context (a group
+// session on the schedule) makes "not yet assigned" self-explanatory in a way
+// the bare letters "TBD" aren't to someone outside the business.
+export function formatTrainerForDisplay(name: string | null | undefined): string {
+  const n = (name || "").trim();
+  return n === "TBD" ? "Trainer to be announced" : (n || "Artemios Gavalas");
+}
+
 export type TrainerTier = "artemios" | "other";
 
 // The one name that prices/redeems at the "owner" tier. Every other trainer

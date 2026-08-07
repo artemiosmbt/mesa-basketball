@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, use, useRef } from "react";
 import { PRIVATE_RATE_BY_TIER, GROUP_PRIVATE_RATE_BY_TIER, calcPrivatePrice as getPrivatePrice, getTrainerTier } from "@/lib/pricing";
+import { formatTrainerForDisplay } from "@/lib/trainers";
 
 const LOCATION_LINKS: Record<string, { name: string; url: string }> = {
   "St. Pauls": { name: "St. Paul's Cathedral", url: "https://share.google/kVGkfSgr6SaShDWF7" },
@@ -357,7 +358,11 @@ export default function ManageBooking({
   // Build time windows for rescheduling
   const timeWindows = useMemo(() => {
     if (privateSlots.length === 0) return [];
-    const available = privateSlots.filter((s) => s.available);
+    // Excludes "TBD" for the same reason the main schedule page does (see
+    // buildTimeWindows in src/app/schedule/page.tsx) — a client rescheduling
+    // a private 1-on-1 session needs an actually-confirmed trainer, not the
+    // owner's internal "not sure who yet" placeholder.
+    const available = privateSlots.filter((s) => s.available && s.trainer !== "TBD");
     // Group by date + location + trainer and merge consecutive — keeps two
     // trainers at the same location/time from being merged into one window.
     const groups: Record<string, typeof available> = {};
@@ -1184,7 +1189,7 @@ export default function ManageBooking({
                                         onClick={() => { setSelectedGroupDate(s.date); setShowRescheduleForm(true); }}
                                         className={`w-full rounded border p-3 text-left transition ${isFull ? "cursor-not-allowed border-brown-800 bg-brown-900/50 opacity-50" : "border-brown-700 bg-brown-800 hover:border-brown-500"}`}>
                                         <p className="text-sm font-medium text-white">{fmtDate(s.date)}</p>
-                                        <p className="mt-0.5 text-xs text-brown-400">{s.startTime}–{s.endTime} · {s.location} · {s.trainer || "Artemios Gavalas"}</p>
+                                        <p className="mt-0.5 text-xs text-brown-400">{s.startTime}–{s.endTime} · {s.location} · {formatTrainerForDisplay(s.trainer)}</p>
                                         {(isFull || spotsLeft <= 3) && (
                                           <p className={`mt-0.5 text-xs ${isFull ? "text-red-400" : "text-yellow-400"}`}>
                                             {isFull ? "Full" : `${spotsLeft} spot${spotsLeft !== 1 ? "s" : ""} left`}

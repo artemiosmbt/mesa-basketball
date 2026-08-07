@@ -6,6 +6,7 @@ import Link from "next/link";
 import { authClient, resolveAuthRole, type AuthContext } from "@/lib/auth";
 import type { WeeklySession, Camp, PrivateSlot } from "@/lib/sheets";
 import { fullPriceForType, calcPrivatePrice as calcPrivatePricePreview, getTrainerTier } from "@/lib/pricing";
+import { trainerNamesMatch, normalizeTrainerNameForComparison } from "@/lib/trainers";
 
 interface Registration {
   id: string;
@@ -1332,15 +1333,30 @@ export default function AdminPage() {
   // deliberately do NOT use this (see their own comments) — narrowing the
   // registrations that feed those would make their cross-session math wrong,
   // not just narrower.
+  // trainerNamesMatch (not ===) — booked_trainer is whatever casing was
+  // live on the hand-typed schedule sheet at booking time, which can drift
+  // row to row for the same real trainer (see the same fix already applied
+  // server-side, e.g. checkGroupSessionCapacity). An exact-match filter
+  // here would silently miss some of a trainer's own rows.
   const visibleRegistrations = useMemo(
-    () => (trainerFilter === "all" ? registrations : registrations.filter((r) => r.booked_trainer === trainerFilter)),
+    () => (trainerFilter === "all" ? registrations : registrations.filter((r) => trainerNamesMatch(r.booked_trainer, trainerFilter))),
     [registrations, trainerFilter]
   );
 
-  const availableTrainers = useMemo(
-    () => uniqueSorted(registrations.map((r) => r.booked_trainer || "")),
-    [registrations]
-  );
+  // Deduped by normalized name so a casing/whitespace variant never shows
+  // up as a separate, near-identical filter option — one representative
+  // (first-seen) raw spelling per real trainer, which visibleRegistrations
+  // above then normalized-matches against every casing variant anyway.
+  const availableTrainers = useMemo(() => {
+    const byNormalized = new Map<string, string>();
+    for (const r of registrations) {
+      const raw = r.booked_trainer || "";
+      if (!raw) continue;
+      const key = normalizeTrainerNameForComparison(raw);
+      if (!byNormalized.has(key)) byNormalized.set(key, raw);
+    }
+    return uniqueSorted(Array.from(byNormalized.values()));
+  }, [registrations]);
 
   const upcoming = useMemo(() => {
     const now = Date.now();

@@ -1,5 +1,6 @@
 import { Resend } from "resend";
 import { calcServiceFee, fmtMoney, PRIVATE_RATE_BY_TIER, GROUP_PRIVATE_RATE_BY_TIER, getTrainerTier } from "./pricing";
+import { formatTrainerForDisplay } from "./trainers";
 import { formatMonthYear } from "./sms";
 
 const ARTEMI_EMAIL = "artemios@mesabasketballtraining.com";
@@ -163,6 +164,17 @@ export async function sendRegistrationNotification(data: {
   // True when sessionDetails is server-built HTML (weekly/camp/private-series
   // batch bookings), not raw client input — see formatSessionDetailsForEmail.
   sessionDetailsIsHtml?: boolean;
+  // A multi-date private series can legitimately span more than one trainer
+  // (different dates, different substitute covering) — `trainer` above is
+  // only ever the FIRST session's, so the standalone "Trainer:"/"Rate:"
+  // summary lines below would misrepresent every OTHER date in the series
+  // (wrong name, and — since price is trainer-tier-dependent — a rate that
+  // may not match what several of the dates actually cost). The accurate
+  // per-series total is already itemized directly in `sessionDetails` by
+  // the caller, so these two summary lines are just redundant (not the
+  // source of truth) for a series and safe to omit entirely rather than
+  // show a number/name that only applies to one date out of several.
+  suppressTrainerAndRateLines?: boolean;
 }) {
   const resend = getResend();
 
@@ -196,7 +208,7 @@ export async function sendRegistrationNotification(data: {
       <p><strong>Phone:</strong> ${escapeHtml(data.phone)}</p>
       <p><strong>Players:</strong> ${escapeHtml(data.kids)}</p>
       <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails, data.sessionDetailsIsHtml)}</p>
-      ${data.trainer ? `<p><strong>Trainer:</strong> ${escapeHtml(data.trainer)}</p>` : ""}
+      ${data.trainer && !data.suppressTrainerAndRateLines ? `<p><strong>Trainer:</strong> ${escapeHtml(data.trainer)}</p>` : ""}
       <p><strong>Total Participants:</strong> ${data.totalParticipants}</p>
       ${isPackageBooking ? `<p><strong>Package:</strong> ${data.packageType}-session monthly plan — ${data.packageSessionsRemaining} session${data.packageSessionsRemaining !== 1 ? "s" : ""} remaining after this booking</p>` : ""}
       ${data.isFree && !isPackageBooking ? `<p><strong style="color: #d4af37;">${data.isFirstTime ? "First-Time Discount" : "Referral Credit"}: 50% off applied</strong></p>` : ""}
@@ -217,7 +229,7 @@ export async function sendRegistrationNotification(data: {
     : "";
 
   const emailTrainerTier = getTrainerTier(data.trainer);
-  const priceNote = isPackageBooking || data.isFree
+  const priceNote = isPackageBooking || data.isFree || data.suppressTrainerAndRateLines
     ? ""
     : data.type === "private"
       ? `<p><strong>Rate:</strong> $${PRIVATE_RATE_BY_TIER[emailTrainerTier]} (up to 3 participants)</p>`
@@ -296,7 +308,7 @@ export async function sendRegistrationNotification(data: {
       <p>Hi ${escapeHtml(data.parentName)},</p>
       <p>Your ${typeLabel.toLowerCase()} has been confirmed.</p>
       <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails, data.sessionDetailsIsHtml)}</p>
-      ${data.trainer ? `<p><strong>Trainer:</strong> ${escapeHtml(data.trainer)}</p>` : ""}
+      ${data.trainer && !data.suppressTrainerAndRateLines ? `<p><strong>Trainer:</strong> ${escapeHtml(formatTrainerForDisplay(data.trainer))}</p>` : ""}
       <p><strong>Players:</strong> ${escapeHtml(data.kids)}</p>
       ${packageNote}
       ${freeNote}
@@ -523,7 +535,6 @@ export async function sendPackageConfirmation(data: {
   packageType: number;
   monthYear: string;
   totalPrice: number;
-  trainerTier?: string;
   appliedAccountCredit?: number;
   kids?: string;
   referralCode?: string;

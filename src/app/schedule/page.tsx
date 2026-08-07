@@ -5,7 +5,7 @@ import Image from "next/image";
 import { authClient, ADMIN_EMAIL } from "@/lib/auth";
 import LandingNav from "@/app/LandingNav";
 import { REFERRAL_PROGRAM_ENABLED, NEW_CLIENT_DISCOUNT_ENABLED, ARTEMIOS_PACKAGES_AVAILABLE } from "@/lib/feature-flags";
-import { getTrainerBioSlug, getTrainerTier, normalizeTrainerTier, type TrainerTier } from "@/lib/trainers";
+import { getTrainerBioSlug, getTrainerTier, normalizeTrainerTier, formatTrainerForDisplay, type TrainerTier } from "@/lib/trainers";
 import { calcServiceFee, serviceFeeLabel, serviceFeeItemName, isPercentServiceFee, SERVICE_FEE_PERCENT_TEXT, packagePrice, PRIVATE_RATE_BY_TIER, GROUP_PRIVATE_RATE_BY_TIER, calcPrivatePrice as getPrivatePrice } from "@/lib/pricing";
 
 const OWNER_TRAINER_NAME = "Artemios Gavalas";
@@ -499,9 +499,16 @@ function buildTimeWindows(slots: PrivateSlot[]): TimeWindow[] {
     for (let i = 0; i < sortedBounds.length - 1; i++) {
       const segStart = sortedBounds[i];
       const segEnd = sortedBounds[i + 1];
+      // Excludes "TBD" — the owner's internal placeholder for "someone will
+      // cover this, not sure who yet" (see the weekly schedule sheet's same
+      // convention). A client picking a private 1-on-1 session needs to
+      // actually know who's running it; unlike a weekly group session
+      // (where the trainer isn't client-selected at all), letting "TBD"
+      // appear as a selectable private-session trainer would let a client
+      // book a real paid session with literally no one confirmed to run it.
       const trainersHere = sortTrainerNames(Array.from(new Set(
         group
-          .filter((s) => parseTime(s.startTime) <= segStart && parseTime(s.endTime) >= segEnd)
+          .filter((s) => parseTime(s.startTime) <= segStart && parseTime(s.endTime) >= segEnd && s.trainer !== "TBD")
           .map((s) => s.trainer)
       )));
       if (trainersHere.length > 0) segments.push({ start: segStart, end: segEnd, trainers: trainersHere });
@@ -2369,7 +2376,7 @@ export default function Home() {
                                 <div className="flex-1 min-w-0">
                                   <p className="font-medium text-sm">{dayName}, {s.date}</p>
                                   <p className="text-xs text-brown-400">
-                                    {s.startTime} - {s.endTime} &bull; <LocationLink location={s.location} /> &bull; {s.trainer || "Artemios Gavalas"}
+                                    {s.startTime} - {s.endTime} &bull; <LocationLink location={s.location} /> &bull; {formatTrainerForDisplay(s.trainer)}
                                     <TrainerBioLink trainer={s.trainer || "Artemios Gavalas"} />
                                   </p>
                                 </div>
@@ -2439,7 +2446,7 @@ export default function Home() {
                                 <div className="flex-1 min-w-0">
                                   <p className="font-medium text-sm">{dayName}, {s.date}</p>
                                   <p className="text-xs text-brown-400">
-                                    {s.startTime} - {s.endTime} &bull; <LocationLink location={s.location} /> &bull; {s.trainer || "Artemios Gavalas"}
+                                    {s.startTime} - {s.endTime} &bull; <LocationLink location={s.location} /> &bull; {formatTrainerForDisplay(s.trainer)}
                                     <TrainerBioLink trainer={s.trainer || "Artemios Gavalas"} />
                                   </p>
                                 </div>
@@ -3283,10 +3290,10 @@ export default function Home() {
             </div>
             <p className="mt-1 text-sm text-brown-400">{injectDayIntoDetails(modal.sessionDetails, modal.bookedDate)}</p>
             {modal.type === "private" && modal.bookedTrainer && (
-              <p className="mt-1 text-sm text-brown-400">Trainer: {modal.bookedTrainer}</p>
+              <p className="mt-1 text-sm text-brown-400">Trainer: {formatTrainerForDisplay(modal.bookedTrainer)}</p>
             )}
             {modal.type === "weekly" && modal.selectedGroupSessions?.[0]?.trainer && (
-              <p className="mt-1 text-sm text-brown-400">Trainer: {modal.selectedGroupSessions[0].trainer}</p>
+              <p className="mt-1 text-sm text-brown-400">Trainer: {formatTrainerForDisplay(modal.selectedGroupSessions[0].trainer)}</p>
             )}
 
             {/* Camp day selector */}

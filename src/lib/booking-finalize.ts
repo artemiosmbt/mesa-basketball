@@ -5,6 +5,7 @@ import { sendSMS, sendAdminSMS, formatDateWithDay, formatMonthYear, resolveLocat
 import { getStripe } from "@/lib/stripe";
 import { calcServiceFee, fmtMoney, packagePrice, fullPriceForType, getTrainerTier, normalizeTrainerTier } from "@/lib/pricing";
 import { notifyTrainerOfNewBooking } from "@/lib/trainer-notify";
+import { trainerNamesMatch, formatTrainerForDisplay } from "@/lib/trainers";
 import {
   addReferralCredit,
   awardReferralCreditOnce,
@@ -851,6 +852,14 @@ export async function finalizeConfirmedPrivateSeriesBooking(params: FinalizePriv
   const allSessionsList = privateSessions
     .map((s) => `${s.date} ${s.startTime}-${s.endTime} at ${s.location}`)
     .join("<br/>");
+  // A recurring series can legitimately use different trainers on different
+  // dates (see notifyTrainerOfNewBooking's per-session loop below) — the
+  // standalone "Trainer:"/"Rate:" summary lines only ever reflect
+  // privateSessions[0], so they'd misrepresent every other date whenever
+  // the series isn't all one trainer. The accurate per-series total is
+  // already itemized in priceNote/sessionDetails below, so it's safe (and
+  // more accurate) to omit those two summary lines entirely in that case.
+  const allSameTrainer = privateSessions.every((s) => trainerNamesMatch(s.trainer, privateSessions[0]?.trainer));
   const totalPaid = privateSessions.reduce((sum, s) => sum + (s.packageCovered ? 0 : s.isFree ? Math.round(s.fullPrice * 0.5 * 100) / 100 : s.fullPrice), 0);
   const seriesAmountCharged = Math.max(0, totalPaid - params.accountCreditApplied);
   const seriesTotalWithFee = seriesAmountCharged > 0 ? Math.round((seriesAmountCharged + calcServiceFee(seriesAmountCharged)) * 100) / 100 : 0;
@@ -877,6 +886,7 @@ export async function finalizeConfirmedPrivateSeriesBooking(params: FinalizePriv
       accountCreditApplied: params.accountCreditApplied,
       fullPrice: totalPaid,
       sessionDetailsIsHtml: true,
+      suppressTrainerAndRateLines: !allSameTrainer,
     });
   } catch (notifyErr) {
     console.error("Private series booking email failed (booking was paid):", notifyErr);
@@ -889,7 +899,7 @@ export async function finalizeConfirmedPrivateSeriesBooking(params: FinalizePriv
     const pkgNote = packageSessionsRemaining !== undefined
       ? `\n${packageSessionsRemaining} session${packageSessionsRemaining !== 1 ? "s" : ""} remaining in your package.`
       : "";
-    const trainerLine = privateSessions[0]?.trainer ? `\nTrainer: ${privateSessions[0].trainer}` : "";
+    const trainerLine = privateSessions[0]?.trainer && allSameTrainer ? `\nTrainer: ${formatTrainerForDisplay(privateSessions[0].trainer)}` : "";
     const creditLine = params.accountCreditApplied > 0 ? `\n$${fmtMoney(params.accountCreditApplied)} account credit applied.` : "";
     const chargeLine = seriesAmountCharged > 0 ? `\nCharged: $${fmtMoney(seriesTotalWithFee)}.` : "";
     await sendSMS(params.phone, `Mesa Basketball: ${privateSessions.length} private sessions confirmed!\n${sessionLines}${trainerLine}${pkgNote}${creditLine}${chargeLine}\nAthlete: ${params.kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
@@ -898,7 +908,7 @@ export async function finalizeConfirmedPrivateSeriesBooking(params: FinalizePriv
   const adminLines = privateSessions.map((s) =>
     `${formatDateWithDay(s.date)} | ${s.startTime}-${s.endTime}\nLocation: ${resolveLocationName(s.location)}`
   ).join("\n");
-  const trainerLine = privateSessions[0]?.trainer ? `\nTrainer: ${privateSessions[0].trainer}` : "";
+  const trainerLine = privateSessions[0]?.trainer && allSameTrainer ? `\nTrainer: ${privateSessions[0].trainer}` : "";
   const adminTypeLabel = params.type === "group-private" ? "group private" : "private";
   await sendAdminSMS(`NEW BOOKING (paid): ${params.parentName}\n${privateSessions.length} ${adminTypeLabel} sessions:\n${adminLines}${trainerLine}\nPlayers: ${params.kids}${params.submittedReferralCode ? `\nRef code: ${params.submittedReferralCode} ${params.privateReferrer ? "✓ applied" : "✗ NOT applied"}` : ""}`).catch(() => {});
 
@@ -1263,7 +1273,6 @@ export async function finalizePaidPackageEnrollment(
       packageType: pkg.package_type,
       monthYear: pkg.month_year,
       totalPrice,
-      trainerTier: pkg.trainer_tier || "artemios",
       appliedAccountCredit: appliedCredit,
       kids: kids || undefined,
       referralCode: submittedReferralCode,

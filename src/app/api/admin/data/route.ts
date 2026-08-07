@@ -31,6 +31,17 @@ export async function GET(req: NextRequest) {
 
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
+  // A misconfigured TRAINER_ACCOUNTS row (role: "trainer" but no
+  // trainerName set) must fail CLOSED, not open — every scoping guard below
+  // is gated on `ctx.trainerName` being truthy, so silently letting this
+  // through would skip all of them and hand this account every client's
+  // full registrations, contact info, and credit balances sitewide instead
+  // of the intended narrow scope. Checked once, up front, rather than
+  // trusting every downstream `if (... && ctx.trainerName)` to agree.
+  if (ctx.role === "trainer" && !ctx.trainerName) {
+    return NextResponse.json({ error: "Trainer account is missing its name configuration — contact the admin." }, { status: 403 });
+  }
+
   let registrationsQuery = supabase.from("registrations").select("*").order("created_at", { ascending: false });
   // A plain trainer account only ever sees their own schedule — scoped at
   // the query itself so their browser never receives another trainer's
@@ -40,8 +51,8 @@ export async function GET(req: NextRequest) {
   // can drift from the exact casing configured in TRAINER_ACCOUNTS —
   // without this, a stray capitalization difference would silently show
   // this trainer an incomplete schedule instead of their real one.
-  if (ctx.role === "trainer" && ctx.trainerName) {
-    registrationsQuery = registrationsQuery.ilike("booked_trainer", ctx.trainerName);
+  if (ctx.role === "trainer") {
+    registrationsQuery = registrationsQuery.ilike("booked_trainer", ctx.trainerName!);
   }
 
   const [{ data: registrations }, { data: profilesRaw }, { data: referralCreditsRaw }, { data: packages }, { data: accountCreditsRaw }, { data: lateFeeEventsRaw }] = await Promise.all([
@@ -71,7 +82,7 @@ export async function GET(req: NextRequest) {
   // same way registrations already is: down to only the clients who
   // actually appear in THIS trainer's own scoped registrations. Elevated
   // trainers and admin are unaffected (they're meant to see everyone).
-  const isPlainTrainer = ctx.role === "trainer" && !!ctx.trainerName;
+  const isPlainTrainer = ctx.role === "trainer";
   const ownClientEmails = isPlainTrainer
     ? new Set((registrations || []).map((r) => (r.email || "").toLowerCase().trim()).filter(Boolean))
     : null;

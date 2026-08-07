@@ -34,7 +34,13 @@ export async function POST(req: NextRequest) {
   // sessions — the UI already only ever shows them their own, but this is
   // the actual enforcement (a crafted request with someone else's id must
   // not work just because the caller is a recognized trainer account).
-  if (ctx.role === "trainer" && !trainerNamesMatch(reg.booked_trainer, ctx.trainerName)) {
+  // The explicit !ctx.trainerName check matters on its own, separate from
+  // trainerNamesMatch: a misconfigured TRAINER_ACCOUNTS row (role "trainer"
+  // with no trainerName set) must fail closed here — without it,
+  // trainerNamesMatch(null, undefined) normalizes both sides to "" and
+  // returns true, wrongly authorizing that account against any registration
+  // whose booked_trainer also happens to be null (e.g. a legacy/camp row).
+  if (ctx.role === "trainer" && (!ctx.trainerName || !trainerNamesMatch(reg.booked_trainer, ctx.trainerName))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
   }
 
