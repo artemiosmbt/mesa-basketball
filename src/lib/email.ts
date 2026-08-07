@@ -1237,7 +1237,13 @@ export async function sendTrainerRescheduleEmail(data: {
 // this window, whether or not they're actually booked (that's the whole
 // point: catching last-minute sign-ups and schedule changes people would
 // otherwise only find out about by luck). One email per parent, even if
-// several of their athletes each matched a different session.
+// several of their athletes each matched a different session. Branded (logo
+// + navy/gold theme, matching the live site's actual current palette —
+// src/app/globals.css, not the brown/gold one described in CLAUDE.md, which
+// is stale) rather than a bare-text transactional email, since this one is
+// meant to drive a click, not just confirm something already done.
+// Artemios is BCC'd on every send regardless of group, so he can confirm
+// from his own inbox that sends are actually going out.
 export async function sendReminderEmail(data: {
   to: string;
   parentName: string;
@@ -1252,27 +1258,63 @@ export async function sendReminderEmail(data: {
 
   const athleteBlocks = data.athletes
     .map((a) => {
-      const sessionLines = a.sessions
-        .map((s) => `<li>${escapeHtml(s.group)} — ${escapeHtml(s.dateLabel)}, ${escapeHtml(s.timeLabel)} at ${escapeHtml(s.location)}</li>`)
+      const sessionRows = a.sessions
+        .map(
+          (s) => `
+            <p style="margin: 0 0 6px; color: #3a3a3a; font-size: 13px; line-height: 1.5;">
+              <strong style="color: #091530;">${escapeHtml(s.group)}</strong><br/>
+              ${escapeHtml(s.dateLabel)}, ${escapeHtml(s.timeLabel)} &middot; ${escapeHtml(s.location)}
+            </p>`
+        )
         .join("");
-      return `<p style="margin-bottom: 4px;"><strong>${escapeHtml(a.athleteName)}</strong></p><ul style="margin-top: 0;">${sessionLines}</ul>`;
+      return `
+        <div style="background: #ffffff; border: 1px solid #e5decf; border-left: 4px solid #d4af37; border-radius: 8px; padding: 14px 16px; margin-bottom: 12px;">
+          <p style="margin: 0 0 8px; color: #091530; font-size: 15px; font-weight: bold;">${escapeHtml(a.athleteName)}</p>
+          ${sessionRows}
+        </div>`;
     })
     .join("");
 
   const result = await resend.emails.send({
     from: FROM_EMAIL,
     to: data.to,
+    bcc: ARTEMI_EMAIL,
     subject: "Group session reminder — Mesa Basketball Training",
     html: `
-      <h2>Don't miss it!</h2>
-      <p>Hey ${escapeHtml(data.parentName || "there")},</p>
-      <p>Here's a heads up on group session(s) coming up that your athlete(s) fit into — whether or not you're already booked:</p>
-      ${athleteBlocks}
-      <p><a href="${BASE_URL}/schedule" style="color: #d4af37; font-weight: bold; font-size: 16px;">View &amp; Book on the Schedule &rarr;</a></p>
-      <br/>
-      <p>Questions? Reach out to Artemios at (631) 599-1280 or <a href="mailto:artemios@mesabasketballtraining.com">artemios@mesabasketballtraining.com</a>.</p>
-      <p>— Mesa Basketball Training</p>
-      <p style="color: #999; font-size: 12px; margin-top: 24px;">You're getting this because Reminder Emails are on in your <a href="${BASE_URL}/settings" style="color: #999;">account settings</a> — turn them off there anytime.</p>
+      <div style="background: #091530; padding: 32px 16px; font-family: Arial, Helvetica, sans-serif;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width: 560px; margin: 0 auto; background: #0f1f42; border-radius: 12px; overflow: hidden; border: 1px solid #1e3a6e;">
+          <tr>
+            <td style="background: #091530; padding: 28px 24px; text-align: center; border-bottom: 2px solid #d4af37;">
+              <img src="${BASE_URL}/logo.png" width="64" height="64" alt="Mesa Basketball Training" style="display: block; margin: 0 auto 10px; border-radius: 50%;" />
+              <p style="margin: 0; color: #d4af37; font-size: 12px; letter-spacing: 2px; text-transform: uppercase; font-weight: bold;">Mesa Basketball Training</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 32px 28px; background: #fffbeb;">
+              <h1 style="margin: 0 0 12px; color: #091530; font-size: 22px; font-family: Arial, Helvetica, sans-serif;">Don't miss it!</h1>
+              <p style="margin: 0 0 20px; color: #3a3a3a; font-size: 15px; line-height: 1.6;">
+                Hey ${escapeHtml(data.parentName || "there")}, here's a heads up on group session(s) coming up that your athlete(s) fit into — whether or not you're already booked:
+              </p>
+              ${athleteBlocks}
+              <div style="text-align: center; margin: 28px 0 8px;">
+                <a href="${BASE_URL}/schedule" style="display: inline-block; background: #d4af37; color: #091530; font-weight: bold; font-size: 15px; padding: 14px 28px; border-radius: 8px; text-decoration: none;">
+                  View &amp; Book on the Schedule &rarr;
+                </a>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td style="background: #091530; padding: 20px 24px; text-align: center;">
+              <p style="margin: 0 0 6px; color: #fffbeb; font-size: 13px;">
+                Questions? Call/text (631) 599-1280 or email <a href="mailto:artemios@mesabasketballtraining.com" style="color: #d4af37;">artemios@mesabasketballtraining.com</a>
+              </p>
+              <p style="margin: 0; color: #7d8bab; font-size: 11px;">
+                You're getting this because Reminder Emails are on in your <a href="${BASE_URL}/settings" style="color: #7d8bab;">account settings</a> — turn them off there anytime.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </div>
     `,
   });
   if (result.error) console.error("Resend reminder email error:", result.error, "to:", data.to);
