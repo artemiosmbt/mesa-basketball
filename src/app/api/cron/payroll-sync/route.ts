@@ -14,6 +14,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const result = await runPayrollSync();
+    console.log("Payroll sync result:", JSON.stringify(result));
     return NextResponse.json(result);
   } catch (err) {
     console.error("Payroll sync failed:", err);

@@ -337,10 +337,13 @@ async function writeTrainerRow(
 // ---------------------------------------------------------------------------
 
 export interface PayrollSyncResult {
+  sessionsConsidered: number;
   sessionsWritten: number;
   sessionsUpdated: number;
   sessionsSkippedUnknownTrainer: number;
   sessionsSkippedNoLoggableStatus: number;
+  sessionsSkippedNonLateCancel: number;
+  packagesConsidered: number;
   packagesWritten: number;
   packagesUpdated: number;
   errors: string[];
@@ -352,10 +355,13 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
 
   const supabase = getSupabase();
   const result: PayrollSyncResult = {
+    sessionsConsidered: 0,
     sessionsWritten: 0,
     sessionsUpdated: 0,
     sessionsSkippedUnknownTrainer: 0,
     sessionsSkippedNoLoggableStatus: 0,
+    sessionsSkippedNonLateCancel: 0,
+    packagesConsidered: 0,
     packagesWritten: 0,
     packagesUpdated: 0,
     errors: [],
@@ -381,6 +387,7 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
   }
 
   const registrations = (regs || []) as RegistrationRow[];
+  result.sessionsConsidered = registrations.length;
 
   // Only fetch late_fee_events / packages for the registrations we're actually considering.
   const cancelledIds = registrations.filter((r) => r.status === "cancelled").map((r) => r.id);
@@ -432,6 +439,7 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
     }
     if (reg.status === "cancelled" && !isLateCancelById.get(reg.id)) {
       // Non-late cancellation — no compensable work, spec says don't log it.
+      result.sessionsSkippedNonLateCancel++;
       continue;
     }
 
@@ -484,6 +492,7 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
     .select("id, created_at, package_type, status, total_price, trainer_tier")
     .in("status", ["active", "cancelled"]); // both mean it was actually paid at some point
   if (pkgErr) result.errors.push(`monthly_packages query: ${pkgErr.message}`);
+  result.packagesConsidered = (pkgSales || []).length;
 
   for (const pkg of (pkgSales || []) as MonthlyPackageRow[]) {
     if (writesThisRun >= MAX_WRITES_PER_RUN) break;
