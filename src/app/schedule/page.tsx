@@ -3575,7 +3575,7 @@ export default function Home() {
                   {kids.map((kid, i) => {
                     const isExpanded = expandedKids.has(i) || !kid.name;
                     return (
-                    <div key={i} className={`flex flex-col gap-2 pb-3 ${i > 0 ? "border-t border-brown-700 pt-3" : ""}`}>
+                    <div key={i} className="flex flex-col gap-2 pb-2">
                       {isExpanded ? (
                         <>
                           <div className="flex gap-2 items-center">
@@ -3638,23 +3638,23 @@ export default function Home() {
                           </div>
                         </>
                       ) : (
-                        <div className="inline-flex items-center gap-1 rounded-full border-2 border-brown-600 bg-brown-800 py-1.5 pl-4 pr-1.5 shadow-lg shadow-black/30 hover:border-mesa-accent transition">
+                        <div className="inline-flex items-center gap-4 rounded-full border-2 border-mesa-accent bg-brown-800 py-2.5 pl-4 pr-2 shadow-lg shadow-black/30 hover:bg-brown-700 transition">
                           <button
                             type="button"
                             onClick={() => toggleKidExpanded(i)}
-                            className="flex items-center gap-1.5 text-sm text-white"
+                            className="flex items-center gap-2 text-sm text-white"
                           >
-                            <span>{kid.name || "Player"}</span>
-                            {kid.grade && <span className="text-brown-400 text-xs">Grade {kid.grade}</span>}
-                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-brown-400 shrink-0">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-mesa-accent shrink-0">
                               <polyline points="6 9 12 15 18 9" />
                             </svg>
+                            <span className="font-medium">{kid.name || "Player"}</span>
+                            {kid.grade && <span className="text-brown-300 text-xs">Grade {kid.grade}</span>}
                           </button>
                           {kids.length > 1 && (
                             <button
                               type="button"
                               onClick={() => removeKid(i)}
-                              className="flex h-6 w-6 items-center justify-center rounded-full text-brown-400 hover:bg-brown-700 hover:text-red-400 text-lg leading-none"
+                              className="flex h-7 w-7 items-center justify-center rounded-full text-brown-300 hover:bg-brown-900 hover:text-red-400 text-xl leading-none shrink-0"
                             >
                               &times;
                             </button>
@@ -4193,7 +4193,7 @@ export default function Home() {
                   {kids.map((kid, i) => {
                     const isExpanded = expandedKids.has(i) || !kid.name;
                     return (
-                    <div key={i} className={`flex flex-col gap-2 pb-3 ${i > 0 ? "border-t border-brown-700 pt-3" : ""}`}>
+                    <div key={i} className="flex flex-col gap-2 pb-2">
                       {isExpanded ? (
                         <>
                           <div className="flex gap-2 items-center">
@@ -4246,23 +4246,23 @@ export default function Home() {
                           </div>
                         </>
                       ) : (
-                        <div className="inline-flex items-center gap-1 rounded-full border-2 border-brown-600 bg-brown-800 py-1.5 pl-4 pr-1.5 shadow-lg shadow-black/30 hover:border-mesa-accent transition">
+                        <div className="inline-flex items-center gap-4 rounded-full border-2 border-mesa-accent bg-brown-800 py-2.5 pl-4 pr-2 shadow-lg shadow-black/30 hover:bg-brown-700 transition">
                           <button
                             type="button"
                             onClick={() => toggleKidExpanded(i)}
-                            className="flex items-center gap-1.5 text-sm text-white"
+                            className="flex items-center gap-2 text-sm text-white"
                           >
-                            <span>{kid.name || "Player"}</span>
-                            {kid.grade && <span className="text-brown-400 text-xs">Grade {kid.grade}</span>}
-                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-brown-400 shrink-0">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-mesa-accent shrink-0">
                               <polyline points="6 9 12 15 18 9" />
                             </svg>
+                            <span className="font-medium">{kid.name || "Player"}</span>
+                            {kid.grade && <span className="text-brown-300 text-xs">Grade {kid.grade}</span>}
                           </button>
                           {kids.length > 1 && (
                             <button
                               type="button"
                               onClick={() => removeKid(i)}
-                              className="flex h-6 w-6 items-center justify-center rounded-full text-brown-400 hover:bg-brown-700 hover:text-red-400 text-lg leading-none"
+                              className="flex h-7 w-7 items-center justify-center rounded-full text-brown-300 hover:bg-brown-900 hover:text-red-400 text-xl leading-none shrink-0"
                             >
                               &times;
                             </button>
