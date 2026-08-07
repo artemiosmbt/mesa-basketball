@@ -1232,20 +1232,30 @@ export async function sendTrainerRescheduleEmail(data: {
   if (result.error) console.error("Resend trainer-reschedule email error:", result.error);
 }
 
-// The day-of/night-before "don't miss it" group-session awareness email —
-// sent to EVERY opted-in parent whose saved athlete fits a group running in
-// this window, whether or not they're actually booked (that's the whole
-// point: catching last-minute sign-ups and schedule changes people would
-// otherwise only find out about by luck). One email per parent. Session-
-// first, not athlete-first: two siblings matching the exact same session
-// collapse into one card listing both names ("Athlete One & Athlete Two")
-// instead of two near-identical cards — less to read reads as more urgent,
-// not less. Branded (logo + navy/gold theme, matching the live site's
-// actual current palette — src/app/globals.css, not the brown/gold one
-// described in CLAUDE.md, which is stale).
+// The day-of/night-before "spots open" awareness email — sent to EVERY
+// opted-in parent whose saved athlete fits a group running in this window
+// AND isn't already registered for that specific session (reminding someone
+// of a session they already booked is just spam — see the exclusion filter
+// in reminder-emails.ts). One email per parent. Session-first, not
+// athlete-first: two siblings matching the exact same session collapse into
+// one card listing both names ("Athlete One & Athlete Two") instead of two
+// near-identical cards — less to read reads as more urgent, not less.
+// Branded (logo + navy/gold theme, matching the live site's actual current
+// palette — src/app/globals.css, not the brown/gold one described in
+// CLAUDE.md, which is stale).
 // Not BCC'd to Artemios individually — with 10-15+ parents matched per run
 // that would flood his inbox with one copy each. He gets a single
 // consolidated summary instead, see sendReminderEmailAdminSummary below.
+//
+// This is a FULL html document (doctype/html/head/body), unlike every other
+// email in this file which sends a bare fragment — needed because Outlook
+// (web and new desktop) auto-recolors light background colors in its own
+// dark mode, which turned the logo's white backing circle black and washed
+// out the navy/cream palette (confirmed via a real screenshot). The <head>
+// carries a `color-scheme` opt-out plus `[data-ogsc]` overrides — the
+// attribute Outlook itself stamps on elements once it has dark-mode-
+// recolored them — that force the real colors back. This is the
+// established fix for this exact, well-documented Outlook behavior.
 export async function sendReminderEmail(data: {
   to: string;
   parentName: string;
@@ -1264,15 +1274,15 @@ export async function sendReminderEmail(data: {
   }[];
 }) {
   const resend = getResend();
-  const whenLabel = data.isToday ? "TODAY" : "TOMORROW";
+  const whenLabel = data.isToday ? "Today" : "Tomorrow";
 
   const sessionBlocks = data.sessions
     .map(
       (s) => `
-        <div style="background: #ffffff; border: 1px solid #e5decf; border-left: 4px solid #d4af37; border-radius: 8px; padding: 14px 16px; margin-bottom: 12px;">
-          <p style="margin: 0 0 6px; color: #091530; font-size: 15px; font-weight: bold;">${s.athleteNames.map(escapeHtml).join(" &amp; ")}</p>
-          <p style="margin: 0; color: #3a3a3a; font-size: 13px; line-height: 1.5;">
-            <strong style="color: #091530;">${escapeHtml(s.group)}</strong><br/>
+        <div class="mesa-session-card" style="background: #ffffff; border: 1px solid #e5decf; border-left: 4px solid #d4af37; border-radius: 8px; padding: 14px 16px; margin-bottom: 12px;">
+          <p class="mesa-navy-text" style="margin: 0 0 6px; color: #091530; font-size: 15px; font-weight: bold;">${s.athleteNames.map(escapeHtml).join(" &amp; ")}</p>
+          <p class="mesa-body-text" style="margin: 0; color: #3a3a3a; font-size: 13px; line-height: 1.5;">
+            <strong class="mesa-navy-text" style="color: #091530;">${escapeHtml(s.group)}</strong><br/>
             ${escapeHtml(s.dateLabel)}, ${escapeHtml(s.timeLabel)} &middot; ${escapeHtml(s.location)}
           </p>
         </div>`
@@ -1282,20 +1292,43 @@ export async function sendReminderEmail(data: {
   const result = await resend.emails.send({
     from: FROM_EMAIL,
     to: data.to,
-    subject: `⏰ ${whenLabel}: Spots Open — Mesa Basketball Training`,
-    html: `
-      <div style="background: #091530; padding: 32px 16px; font-family: Arial, Helvetica, sans-serif;">
+    subject: `⏰ Spots Open ${whenLabel} — Mesa Basketball Training`,
+    html: `<!doctype html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="color-scheme" content="light only" />
+<meta name="supported-color-schemes" content="light only" />
+<title>Mesa Basketball Training</title>
+<style>
+  /* Outlook (web + new desktop) stamps [data-ogsc] on elements it has
+     dark-mode-recolored — these force the real light-mode colors back. */
+  [data-ogsc] .mesa-outer-bg { background-color: #091530 !important; }
+  [data-ogsc] .mesa-card-bg { background-color: #0f1f42 !important; }
+  [data-ogsc] .mesa-content-bg { background-color: #fffbeb !important; }
+  [data-ogsc] .mesa-white-circle { background-color: #ffffff !important; }
+  [data-ogsc] .mesa-session-card { background-color: #ffffff !important; }
+  [data-ogsc] .mesa-cta-bg { background-color: #d4af37 !important; }
+  [data-ogsc] .mesa-gold-text { color: #d4af37 !important; }
+  [data-ogsc] .mesa-navy-text { color: #091530 !important; }
+  [data-ogsc] .mesa-body-text { color: #3a3a3a !important; }
+  [data-ogsc] .mesa-muted-text { color: #7d8bab !important; }
+</style>
+</head>
+<body style="margin: 0; padding: 0;">
+      <div class="mesa-outer-bg" style="background: #091530; padding: 32px 16px; font-family: Arial, Helvetica, sans-serif;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width: 560px; margin: 0 auto; background: #0f1f42; border-radius: 12px; overflow: hidden; border: 1px solid #1e3a6e;">
           <tr>
-            <td style="background: #091530; padding: 28px 24px; text-align: center; border-bottom: 2px solid #d4af37;">
+            <td class="mesa-outer-bg" style="background: #091530; padding: 28px 24px; text-align: center; border-bottom: 2px solid #d4af37;">
               <!--[if mso]>
-              <v:oval xmlns:v="urn:schemas-microsoft-com:vml" style="width:72px;height:72px;margin:0 auto;" fillcolor="#ffffff" stroked="false">
+              <v:oval style="width:72px;height:72px;margin:0 auto;" fillcolor="#ffffff" stroked="false">
               <v:fill type="solid" color="#ffffff" />
               <v:textbox inset="0,0,0,0">
               <![endif]-->
               <table role="presentation" cellpadding="0" cellspacing="0" align="center" style="margin: 0 auto;">
                 <tr>
-                  <td width="72" height="72" align="center" valign="middle" bgcolor="#ffffff" style="width: 72px; height: 72px; background-color: #ffffff; border-radius: 50%; mso-border-radius-alt: 50%;">
+                  <td width="72" height="72" align="center" valign="middle" bgcolor="#ffffff" class="mesa-white-circle" style="width: 72px; height: 72px; background-color: #ffffff; border-radius: 50%; mso-border-radius-alt: 50%;">
                     <img src="${BASE_URL}/logo.png" width="60" height="60" alt="Mesa Basketball Training" style="display: block; border-radius: 50%;" />
                   </td>
                 </tr>
@@ -1304,37 +1337,36 @@ export async function sendReminderEmail(data: {
               </v:textbox>
               </v:oval>
               <![endif]-->
-              <p style="margin: 10px 0 0; color: #d4af37; font-size: 12px; letter-spacing: 2px; text-transform: uppercase; font-weight: bold;">Mesa Basketball Training</p>
+              <p class="mesa-gold-text" style="margin: 10px 0 0; color: #d4af37; font-size: 12px; letter-spacing: 2px; text-transform: uppercase; font-weight: bold;">Mesa Basketball Training</p>
             </td>
           </tr>
           <tr>
-            <td style="padding: 32px 28px; background: #fffbeb;">
-              <p style="margin: 0 0 6px; color: #b91c1c; font-size: 12px; font-weight: bold; letter-spacing: 1px; text-transform: uppercase;">⏰ Time-Sensitive — ${whenLabel}</p>
-              <h1 style="margin: 0 0 12px; color: #091530; font-size: 22px; font-family: Arial, Helvetica, sans-serif;">Don't Miss This!</h1>
-              <p style="margin: 0 0 20px; color: #3a3a3a; font-size: 15px; line-height: 1.6;">
-                Hey ${escapeHtml(data.parentName || "there")} — spots are open ${data.isToday ? "later today" : "tomorrow"} for the session${data.sessions.length !== 1 ? "s" : ""} below. Grab a spot now, whether or not you're already booked:
-              </p>
+            <td class="mesa-content-bg" style="padding: 32px 28px; background: #fffbeb;">
+              <h1 class="mesa-navy-text" style="margin: 0 0 20px; color: #091530; font-size: 24px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.5px; font-family: Arial, Helvetica, sans-serif;">
+                ⏰ Spots Open ${whenLabel}
+              </h1>
               ${sessionBlocks}
               <div style="text-align: center; margin: 28px 0 8px;">
-                <a href="${BASE_URL}/schedule" style="display: inline-block; background: #d4af37; color: #091530; font-weight: bold; font-size: 15px; padding: 14px 28px; border-radius: 8px; text-decoration: none;">
+                <a href="${BASE_URL}/schedule" class="mesa-cta-bg mesa-navy-text" style="display: inline-block; background: #d4af37; color: #091530; font-weight: bold; font-size: 15px; padding: 14px 28px; border-radius: 8px; text-decoration: none;">
                   Book Now Before It Fills Up &rarr;
                 </a>
               </div>
             </td>
           </tr>
           <tr>
-            <td style="background: #091530; padding: 20px 24px; text-align: center;">
+            <td class="mesa-outer-bg" style="background: #091530; padding: 20px 24px; text-align: center;">
               <p style="margin: 0 0 6px; color: #fffbeb; font-size: 13px;">
-                Questions? Call/text (631) 599-1280 or email <a href="mailto:artemios@mesabasketballtraining.com" style="color: #d4af37;">artemios@mesabasketballtraining.com</a>
+                Questions? Call/text (631) 599-1280 or email <a href="mailto:artemios@mesabasketballtraining.com" class="mesa-gold-text" style="color: #d4af37;">artemios@mesabasketballtraining.com</a>
               </p>
-              <p style="margin: 0; color: #7d8bab; font-size: 11px;">
-                You're getting this because Reminder Emails are on in your <a href="${BASE_URL}/settings" style="color: #7d8bab;">account settings</a> — turn them off there anytime.
+              <p class="mesa-muted-text" style="margin: 0; color: #7d8bab; font-size: 11px;">
+                You're getting this because Reminder Emails are on in your <a href="${BASE_URL}/settings" class="mesa-muted-text" style="color: #7d8bab;">account settings</a> — turn them off there anytime.
               </p>
             </td>
           </tr>
         </table>
       </div>
-    `,
+</body>
+</html>`,
   });
   if (result.error) console.error("Resend reminder email error:", result.error, "to:", data.to);
 }

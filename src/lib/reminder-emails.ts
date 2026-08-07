@@ -3,6 +3,7 @@ import { getWeeklySchedule, parseTimeToMins, type WeeklySession } from "@/lib/sh
 import { normalizeDate } from "@/lib/calendar";
 import { canonicalGroupForLabel } from "@/lib/group-matching";
 import { sendReminderEmail, sendReminderEmailAdminSummary } from "@/lib/email";
+import { regGroupKey } from "@/lib/weekly-schedule-matching";
 import type { Athlete, CanonicalGroupId } from "@/lib/athletes";
 
 export type ReminderWindow = "morning" | "evening";
@@ -92,6 +93,32 @@ export async function runReminderEmailWindow(window: ReminderWindow, options?: {
   const byEmail = new Map<string, { parentName: string; sessionsByKey: Map<string, SessionGroup> }>();
 
   if (groupToSessions.size > 0) {
+    // A parent already confirmed for a specific session doesn't need to be
+    // reminded about it — that's just spam. Keyed at the parent-email +
+    // session level (not per specific kid): matching a registration back to
+    // exactly which saved athlete it was for would mean fuzzy-matching
+    // names, the same fragile territory as the athlete-duplicate problem
+    // elsewhere — the parent's inbox already has confirmation for that
+    // slot, and that's what actually matters for "don't spam them" here.
+    // regGroupKey/exact date+start+end+location match is the same
+    // battle-tested logic buildWeeklyPlan already relies on for matching a
+    // registration back to a live sheet session.
+    const { data: existingRegs } = await supabase
+      .from("registrations")
+      .select("email, booked_date, booked_start_time, booked_end_time, booked_location, booked_group, session_details")
+      .eq("status", "confirmed")
+      .eq("booked_date", targetDate);
+
+    const alreadyBookedKeys = new Set<string>();
+    for (const r of existingRegs || []) {
+      if (!r.email) continue;
+      const group = regGroupKey(r);
+      if (!group) continue;
+      alreadyBookedKeys.add(
+        `${r.email.toLowerCase().trim()}|${group}|${r.booked_date}|${r.booked_start_time}|${r.booked_end_time || ""}|${r.booked_location || ""}`
+      );
+    }
+
     const { data: profiles, error: profilesError } = await supabase
       .from("profiles")
       .select("email, parent_name, kids")
@@ -100,12 +127,16 @@ export async function runReminderEmailWindow(window: ReminderWindow, options?: {
 
     for (const p of profiles || []) {
       if (!p.email || !Array.isArray(p.kids)) continue;
+      const emailNorm = p.email.toLowerCase().trim();
       for (const kid of p.kids as Athlete[]) {
         if (!kid.name || !kid.groups?.length) continue;
         for (const g of kid.groups) {
           const sessions = groupToSessions.get(g);
           if (!sessions) continue;
           for (const s of sessions) {
+            const bookedKey = `${emailNorm}|${s.group}|${s.date}|${s.startTime}|${s.endTime}|${s.location}`;
+            if (alreadyBookedKeys.has(bookedKey)) continue;
+
             if (!byEmail.has(p.email)) byEmail.set(p.email, { parentName: p.parent_name || "", sessionsByKey: new Map() });
             const parentEntry = byEmail.get(p.email)!;
             const key = sessionKey(s);
