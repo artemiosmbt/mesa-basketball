@@ -1231,3 +1231,49 @@ export async function sendTrainerRescheduleEmail(data: {
   });
   if (result.error) console.error("Resend trainer-reschedule email error:", result.error);
 }
+
+// The day-of/night-before "don't miss it" group-session awareness email —
+// sent to EVERY opted-in parent whose saved athlete fits a group running in
+// this window, whether or not they're actually booked (that's the whole
+// point: catching last-minute sign-ups and schedule changes people would
+// otherwise only find out about by luck). One email per parent, even if
+// several of their athletes each matched a different session.
+export async function sendReminderEmail(data: {
+  to: string;
+  parentName: string;
+  athletes: {
+    athleteName: string;
+    // Pre-formatted display strings — date/time formatting is the caller's
+    // job (src/lib/reminder-emails.ts), this function only interpolates.
+    sessions: { group: string; dateLabel: string; timeLabel: string; location: string }[];
+  }[];
+}) {
+  const resend = getResend();
+
+  const athleteBlocks = data.athletes
+    .map((a) => {
+      const sessionLines = a.sessions
+        .map((s) => `<li>${escapeHtml(s.group)} — ${escapeHtml(s.dateLabel)}, ${escapeHtml(s.timeLabel)} at ${escapeHtml(s.location)}</li>`)
+        .join("");
+      return `<p style="margin-bottom: 4px;"><strong>${escapeHtml(a.athleteName)}</strong></p><ul style="margin-top: 0;">${sessionLines}</ul>`;
+    })
+    .join("");
+
+  const result = await resend.emails.send({
+    from: FROM_EMAIL,
+    to: data.to,
+    subject: "Group session reminder — Mesa Basketball Training",
+    html: `
+      <h2>Don't miss it!</h2>
+      <p>Hey ${escapeHtml(data.parentName || "there")},</p>
+      <p>Here's a heads up on group session(s) coming up that your athlete(s) fit into — whether or not you're already booked:</p>
+      ${athleteBlocks}
+      <p><a href="${BASE_URL}/schedule" style="color: #d4af37; font-weight: bold; font-size: 16px;">View &amp; Book on the Schedule &rarr;</a></p>
+      <br/>
+      <p>Questions? Reach out to Artemios at (631) 599-1280 or <a href="mailto:artemios@mesabasketballtraining.com">artemios@mesabasketballtraining.com</a>.</p>
+      <p>— Mesa Basketball Training</p>
+      <p style="color: #999; font-size: 12px; margin-top: 24px;">You're getting this because Reminder Emails are on in your <a href="${BASE_URL}/settings" style="color: #999;">account settings</a> — turn them off there anytime.</p>
+    `,
+  });
+  if (result.error) console.error("Resend reminder email error:", result.error, "to:", data.to);
+}

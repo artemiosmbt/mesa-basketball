@@ -120,7 +120,7 @@ const CALENDAR_BASE = "https://www.googleapis.com/calendar/v3/calendars";
  * Normalize any date string to YYYY-MM-DD for the Calendar API.
  * Handles "March 20, 2026", "2026-03-20", "3/20/2026", etc.
  */
-function normalizeDate(dateStr: string): string {
+export function normalizeDate(dateStr: string): string {
   if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
   const d = new Date(dateStr);
   if (!isNaN(d.getTime())) {

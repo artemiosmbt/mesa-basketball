@@ -64,12 +64,22 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // This route's kids array is a full overwrite (correct for the settings
+  // page's "manage my whole roster" UI) — normalize every kid to guarantee
+  // an id/groups here since a client-supplied kid (e.g. a newly-added row
+  // in settings) may have neither yet.
+  const kidsNormalized = (body.kids || []).map((k: Record<string, unknown>) => ({
+    ...k,
+    id: (k.id as string) || crypto.randomUUID(),
+    groups: Array.isArray(k.groups) ? k.groups : [],
+  }));
+
   const upsertData: Record<string, unknown> = {
     id: user.id,
     email: user.email,
     parent_name: body.parentName || null,
     phone: body.phone || null,
-    kids: body.kids || [],
+    kids: kidsNormalized,
     marketing_emails: body.marketingEmails ?? true,
     // Defaults to false (opt-out), not true — TCPA consent must never be
     // assumed. Every current caller (signup, settings, post-confirmation
@@ -78,6 +88,10 @@ export async function POST(req: NextRequest) {
     // opting someone into texts by omitting the field.
     sms_consent: body.smsConsent ?? false,
     video_consent: body.videoConsent ?? true,
+    // Opt-out by default (true), unlike sms_consent above — the owner's
+    // explicit choice for this preference, backfilled to true for every
+    // existing profile via supabase-migration-reminder-emails-consent.sql.
+    reminder_emails: body.reminderEmails ?? true,
     updated_at: new Date().toISOString(),
   };
   if (referralCodeToSave) upsertData.referral_code = referralCodeToSave;

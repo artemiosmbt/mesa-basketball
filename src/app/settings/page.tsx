@@ -4,24 +4,15 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { authClient } from "@/lib/auth";
-
-const ALL_GRADES = [
-  { value: "K", label: "Kindergarten" },
-  { value: "1", label: "1st Grade" }, { value: "2", label: "2nd Grade" },
-  { value: "3", label: "3rd Grade" }, { value: "4", label: "4th Grade" },
-  { value: "5", label: "5th Grade" }, { value: "6", label: "6th Grade" },
-  { value: "7", label: "7th Grade" }, { value: "8", label: "8th Grade" },
-  { value: "9", label: "9th Grade" }, { value: "10", label: "10th Grade" },
-  { value: "11", label: "11th Grade" }, { value: "12", label: "12th Grade" },
-  { value: "College +", label: "College / Pro" },
-  { value: "Adult", label: "Adult" },
-];
+import { ALL_GRADES, type CanonicalGroupId } from "@/lib/athletes";
 
 interface Kid {
+  id?: string;
   name: string;
   dob: string;
   grade: string;
   gender?: string;
+  groups?: CanonicalGroupId[];
 }
 
 // Convert YYYY-MM-DD (old date input format) → MM/DD/YYYY
@@ -83,6 +74,7 @@ export default function SettingsPage() {
   const [marketingEmails, setMarketingEmails] = useState(true);
   const [smsConsent, setSmsConsent] = useState(true);
   const [videoConsent, setVideoConsent] = useState(true);
+  const [reminderEmails, setReminderEmails] = useState(true);
   const [referralCode, setReferralCode] = useState("");
   const [referralCodeError, setReferralCodeError] = useState("");
 
@@ -115,6 +107,9 @@ export default function SettingsPage() {
         }
         if (typeof data.video_consent === "boolean") {
           setVideoConsent(data.video_consent);
+        }
+        if (typeof data.reminder_emails === "boolean") {
+          setReminderEmails(data.reminder_emails);
         }
         if (data.referral_code) setReferralCode(data.referral_code);
       }
@@ -150,7 +145,7 @@ export default function SettingsPage() {
         "Content-Type": "application/json",
         Authorization: `Bearer ${session.access_token}`,
       },
-      body: JSON.stringify({ parentName, phone, kids, marketingEmails, smsConsent, videoConsent, referralCode: referralCode.trim() || undefined }),
+      body: JSON.stringify({ parentName, phone, kids, marketingEmails, smsConsent, videoConsent, reminderEmails, referralCode: referralCode.trim() || undefined }),
     });
 
     setSaving(false);
@@ -384,6 +379,23 @@ export default function SettingsPage() {
                 <p className="text-sm text-white font-medium">Photo & video consent</p>
                 <p className="text-xs text-brown-400 mt-0.5 leading-relaxed">
                   Allow Mesa Basketball Training to photograph or film my athlete during sessions for use in promotional materials, including social media.
+                </p>
+              </div>
+            </label>
+
+            <label className="flex items-start gap-3 cursor-pointer">
+              <div className="mt-0.5 shrink-0">
+                <input
+                  type="checkbox"
+                  checked={reminderEmails}
+                  onChange={(e) => setReminderEmails(e.target.checked)}
+                  className="h-4 w-4 rounded border-brown-600 bg-brown-800 accent-mesa-accent cursor-pointer"
+                />
+              </div>
+              <div>
+                <p className="text-sm text-white font-medium">Reminder emails</p>
+                <p className="text-xs text-brown-400 mt-0.5 leading-relaxed">
+                  Get a heads up on days your athlete has a group session coming up, even if you haven&apos;t booked it yet.
                 </p>
               </div>
             </label>

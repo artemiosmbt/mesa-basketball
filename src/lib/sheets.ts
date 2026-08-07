@@ -132,7 +132,7 @@ export async function getPrivateSlots(options?: { noCache?: boolean }): Promise<
   }));
 }
 
-function parseTimeToMins(t: string): number {
+export function parseTimeToMins(t: string): number {
   const m = t.match(/(\d+):(\d+)\s*(AM|PM)/i);
   if (!m) return 0;
   let h = parseInt(m[1]);

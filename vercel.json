@@ -27,6 +27,14 @@
     {
       "path": "/api/cron/detect-time-changes",
       "schedule": "0 9 * * *"
+    },
+    {
+      "path": "/api/cron/reminder-emails-morning",
+      "schedule": "0 13 * * *"
+    },
+    {
+      "path": "/api/cron/reminder-emails-evening",
+      "schedule": "0 22 * * *"
     }
   ]
 }

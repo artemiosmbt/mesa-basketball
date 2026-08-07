@@ -7,6 +7,8 @@ import { authClient, resolveAuthRole, TRAINER_ACCOUNTS, type AuthContext } from 
 import type { WeeklySession, Camp, PrivateSlot } from "@/lib/sheets";
 import { fullPriceForType, calcPrivatePrice as calcPrivatePricePreview, getTrainerTier } from "@/lib/pricing";
 import { trainerNamesMatch, normalizeTrainerNameForComparison } from "@/lib/trainers";
+import { type CanonicalGroupId } from "@/lib/athletes";
+import { CANONICAL_GROUPS } from "@/lib/group-matching";
 
 interface Registration {
   id: string;
@@ -39,10 +41,12 @@ interface Registration {
 }
 
 interface ProfileKid {
+  id?: string;
   name: string;
   dob: string;
   grade: string;
   gender?: string;
+  groups?: CanonicalGroupId[];
 }
 
 interface PackageData {
@@ -966,10 +970,10 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true);
   const [registrations, setRegistrations] = useState<Registration[]>([]);
   const [videoConsentMap, setVideoConsentMap] = useState<Record<string, boolean>>({});
-  const [profilesMap, setProfilesMap] = useState<Record<string, { phone: string; kids: ProfileKid[] }>>({});
+  const [profilesMap, setProfilesMap] = useState<Record<string, { phone: string; parentName: string; kids: ProfileKid[] }>>({});
   const [referralCreditsMap, setReferralCreditsMap] = useState<Record<string, { available: number; total: number }>>({});
   const [packages, setPackages] = useState<PackageData[]>([]);
-  const [tab, setTab] = useState<"upcoming" | "past" | "clients" | "calendar">("upcoming");
+  const [tab, setTab] = useState<"upcoming" | "past" | "clients" | "calendar" | "groups">("upcoming");
   const [typeFilter, setTypeFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [clientSearch, setClientSearch] = useState("");
@@ -981,6 +985,12 @@ export default function AdminPage() {
   const [authCtx, setAuthCtx] = useState<AuthContext | null>(null);
   const [trainerFilter, setTrainerFilter] = useState("all");
   const [selectedClient, setSelectedClient] = useState<string | null>(null);
+
+  // Groups tab state — which athlete row (keyed "email|athleteId") is
+  // expanded to show parent info, and which group-assignment mutation (if
+  // any) is currently in flight, to disable its button while saving.
+  const [expandedGroupAthlete, setExpandedGroupAthlete] = useState<string | null>(null);
+  const [groupActionPending, setGroupActionPending] = useState<string | null>(null);
 
   // Admin reschedule state
   const [reschedulingId, setReschedulingId] = useState<string | null>(null);
@@ -1018,11 +1028,11 @@ export default function AdminPage() {
       }).then((r) => r.json()).then((adminData) => {
         setRegistrations(adminData.registrations || []);
         const map: Record<string, boolean> = {};
-        const profMap: Record<string, { phone: string; kids: ProfileKid[] }> = {};
+        const profMap: Record<string, { phone: string; parentName: string; kids: ProfileKid[] }> = {};
         for (const p of (adminData.profiles || [])) {
           if (!p.email) continue;
           map[p.email] = p.video_consent ?? true;
-          profMap[p.email] = { phone: p.phone || "", kids: Array.isArray(p.kids) ? p.kids : [] };
+          profMap[p.email] = { phone: p.phone || "", parentName: p.parent_name || "", kids: Array.isArray(p.kids) ? p.kids : [] };
         }
         setVideoConsentMap(map);
         setProfilesMap(profMap);
@@ -1396,9 +1406,13 @@ export default function AdminPage() {
   }, [visibleRegistrations]);
 
   // Unique clients sorted by name — an abandoned checkout never counts
-  // toward a client's history (they never actually booked or paid).
+  // toward a client's history (they never actually booked or paid). Athlete
+  // names/count come from the client's saved profile roster (every distinct
+  // athlete they've ever booked, kept up to date) when one exists — falling
+  // back to just the FIRST registration's kids string only for guest
+  // clients with no account, since that's all there is to go on for them.
   const clients = useMemo(() => {
-    const map = new Map<string, { name: string; email: string; phone: string; kids: string; count: number; lastDate: number; videoConsent: boolean | null; referralsAvailable: number; referralsTotal: number }>();
+    const map = new Map<string, { name: string; email: string; phone: string; kids: string; athleteCount: number; count: number; lastDate: number; videoConsent: boolean | null; referralsAvailable: number; referralsTotal: number }>();
     for (const r of visibleRegistrations) {
       if (r.status === "payment_abandoned") continue;
       const key = r.email || r.parent_name;
@@ -1410,16 +1424,64 @@ export default function AdminPage() {
       } else {
         const vc = r.email && r.email in videoConsentMap ? videoConsentMap[r.email] : null;
         const rc = r.email ? (referralCreditsMap[r.email] ?? { available: 0, total: 0 }) : { available: 0, total: 0 };
-        map.set(key, { name: r.parent_name, email: r.email, phone: r.phone, kids: athleteNames(r.kids || ""), count: 1, lastDate: d, videoConsent: vc, referralsAvailable: rc.available, referralsTotal: rc.total });
+        const profile = r.email ? profilesMap[r.email] : undefined;
+        const profileKidNames = profile?.kids?.length ? profile.kids.map((k) => k.name).filter(Boolean) : null;
+        const kidsDisplay = profileKidNames ? (profileKidNames.join(", ") || "—") : athleteNames(r.kids || "");
+        const athleteCount = profileKidNames ? profileKidNames.length : (kidsDisplay === "—" ? 0 : kidsDisplay.split(",").length);
+        map.set(key, { name: r.parent_name, email: r.email, phone: r.phone, kids: kidsDisplay, athleteCount, count: 1, lastDate: d, videoConsent: vc, referralsAvailable: rc.available, referralsTotal: rc.total });
       }
     }
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
-  }, [visibleRegistrations, videoConsentMap, referralCreditsMap]);
+  }, [visibleRegistrations, videoConsentMap, referralCreditsMap, profilesMap]);
 
   const filteredClients = useMemo(
     () => clients.filter((c) => clientMatchesSearch(c, clientSearch)),
     [clients, clientSearch]
   );
+
+  // Buckets every saved athlete directly by their PERSISTED groups field —
+  // never recomputed live from grade/gender — so an athlete assigned to two
+  // groups (e.g. transitioning between Middle School and High School)
+  // intentionally appears in both sections, and the owner's manual
+  // add/move/remove edits are exactly what's reflected here.
+  const groupBuckets = useMemo(() => {
+    const buckets: Record<CanonicalGroupId | "all-else", { email: string; parentName: string; athlete: ProfileKid }[]> = {
+      junior: [], "ms-boys": [], "ms-girls": [], "hs-girls": [], "hs-boys": [], "all-else": [],
+    };
+    for (const [email, profile] of Object.entries(profilesMap)) {
+      for (const kid of profile.kids) {
+        if (!kid.name || !kid.id) continue;
+        const groups = kid.groups || [];
+        if (groups.length === 0) {
+          buckets["all-else"].push({ email, parentName: profile.parentName, athlete: kid });
+          continue;
+        }
+        for (const g of groups) buckets[g]?.push({ email, parentName: profile.parentName, athlete: kid });
+      }
+    }
+    for (const key of Object.keys(buckets) as (CanonicalGroupId | "all-else")[]) {
+      buckets[key].sort((a, b) => a.athlete.name.localeCompare(b.athlete.name));
+    }
+    return buckets;
+  }, [profilesMap]);
+
+  async function setAthleteGroup(email: string, athleteId: string, groupId: CanonicalGroupId, action: "add" | "remove") {
+    const actionKey = `${email}|${athleteId}|${groupId}`;
+    setGroupActionPending(actionKey);
+    try {
+      const res = await fetch("/api/admin/athletes/group", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ email, athleteId, groupId, action }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setProfilesMap((prev) => ({ ...prev, [email]: { ...prev[email], kids: data.kids } }));
+      }
+    } finally {
+      setGroupActionPending(null);
+    }
+  }
 
   const clientRegistrations = useMemo(() => {
     if (!selectedClient) return [];
@@ -1830,7 +1892,7 @@ export default function AdminPage() {
 
         {/* Tabs */}
         <div className="flex flex-wrap gap-2 mb-6">
-          {(authCtx?.role === "admin" ? (["upcoming", "past", "calendar", "clients"] as const) : (["upcoming", "past", "calendar"] as const)).map((t) => (
+          {(authCtx?.role === "admin" ? (["upcoming", "past", "calendar", "clients", "groups"] as const) : (["upcoming", "past", "calendar"] as const)).map((t) => (
             <button
               key={t}
               onClick={() => { setTab(t); setSelectedClient(null); }}
@@ -1841,7 +1903,7 @@ export default function AdminPage() {
                   <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
                   Calendar
                 </span>
-              ) : "Clients"}
+              ) : t === "clients" ? "Clients" : "Groups"}
             </button>
           ))}
         </div>
@@ -1984,6 +2046,9 @@ export default function AdminPage() {
                   <div className="shrink-0 text-right space-y-1">
                     <div className="text-mesa-accent font-bold text-sm">{c.count}</div>
                     <div className="text-xs text-brown-500">session{c.count !== 1 ? "s" : ""}</div>
+                    {c.athleteCount > 0 && (
+                      <div className="text-xs text-brown-500">{c.athleteCount} athlete{c.athleteCount !== 1 ? "s" : ""}</div>
+                    )}
                     {c.referralsTotal > 0 && (
                       <div className="rounded-full px-2 py-0.5 text-xs font-medium bg-purple-900/40 text-purple-300">
                         {c.referralsAvailable} avail / {c.referralsTotal} total ref{c.referralsTotal !== 1 ? "s" : ""}
@@ -2030,12 +2095,23 @@ export default function AdminPage() {
                         <p className="text-brown-500 uppercase tracking-wider text-[10px] mb-1">Players</p>
                         <div className="space-y-0.5">
                           {kids.map((k, i) => (
-                            <p key={i} className="text-sm text-brown-200">
-                              <span className="font-medium">{k.name}</span>
-                              {k.dob && <span className="text-brown-400"> · DOB {k.dob}</span>}
-                              {k.grade && <span className="text-brown-400"> · Grade {k.grade}</span>}
-                              {k.gender && <span className="text-brown-400"> · {k.gender}</span>}
-                            </p>
+                            <div key={i} className="text-sm text-brown-200">
+                              <p>
+                                <span className="font-medium">{k.name}</span>
+                                {k.dob && <span className="text-brown-400"> · DOB {k.dob}</span>}
+                                {k.grade && <span className="text-brown-400"> · Grade {k.grade}</span>}
+                                {k.gender && <span className="text-brown-400"> · {k.gender}</span>}
+                              </p>
+                              {k.groups && k.groups.length > 0 && (
+                                <div className="flex flex-wrap gap-1 mt-0.5">
+                                  {k.groups.map((g) => (
+                                    <span key={g} className="rounded-full px-2 py-0.5 text-[10px] font-medium bg-mesa-accent/20 text-mesa-accent">
+                                      {CANONICAL_GROUPS.find((cg) => cg.id === g)?.label || g}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
                           ))}
                         </div>
                       </div>
@@ -2068,6 +2144,93 @@ export default function AdminPage() {
             </>
           );
         })()}
+
+        {/* Groups */}
+        {tab === "groups" && authCtx?.role === "admin" && (
+          <div className="space-y-6">
+            {[...CANONICAL_GROUPS, { id: "all-else" as const, label: "All Else" }].map((g) => {
+              const rows = groupBuckets[g.id];
+              return (
+                <div key={g.id}>
+                  <h3 className="text-xs font-semibold uppercase tracking-widest text-mesa-accent mb-2">
+                    {g.label} <span className="text-brown-500 normal-case">({rows.length})</span>
+                  </h3>
+                  {rows.length === 0 ? (
+                    <p className="text-sm text-brown-500">No athletes.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {rows.map(({ email, parentName, athlete }) => {
+                        const rowKey = `${email}|${athlete.id}`;
+                        const isExpanded = expandedGroupAthlete === rowKey;
+                        const otherKids = (profilesMap[email]?.kids || []).filter((k) => k.id !== athlete.id);
+                        return (
+                          <div key={rowKey} className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-3">
+                            <button
+                              type="button"
+                              onClick={() => setExpandedGroupAthlete(isExpanded ? null : rowKey)}
+                              className="w-full text-left flex items-center justify-between gap-3"
+                            >
+                              <div className="min-w-0">
+                                <span className="font-medium text-sm text-white">{athlete.name}</span>
+                                <span className="text-brown-400 text-xs ml-2">
+                                  {athlete.grade ? `Grade ${athlete.grade}` : ""}{athlete.grade && athlete.gender ? " · " : ""}{athlete.gender || ""}
+                                </span>
+                              </div>
+                              <span className="text-brown-500 text-xs shrink-0">{isExpanded ? "▲" : "▼"}</span>
+                            </button>
+                            {isExpanded && (
+                              <div className="mt-3 pt-3 border-t border-brown-700 space-y-3">
+                                <div className="text-sm">
+                                  <p className="text-white font-medium">{parentName || "—"}</p>
+                                  <p className="text-brown-400 text-xs break-all">{email}</p>
+                                </div>
+                                {otherKids.length > 0 && (
+                                  <div>
+                                    <p className="text-brown-500 uppercase tracking-wider text-[10px] mb-1">Other Athletes</p>
+                                    <div className="space-y-0.5">
+                                      {otherKids.map((k) => (
+                                        <p key={k.id} className="text-xs text-brown-300">
+                                          {k.name}{k.grade ? ` · Grade ${k.grade}` : ""}{k.gender ? ` · ${k.gender}` : ""}
+                                        </p>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                                <div>
+                                  <p className="text-brown-500 uppercase tracking-wider text-[10px] mb-1">Groups</p>
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {CANONICAL_GROUPS.map((cg) => {
+                                      const assigned = (athlete.groups || []).includes(cg.id);
+                                      const actionKey = `${email}|${athlete.id}|${cg.id}`;
+                                      const pending = groupActionPending === actionKey;
+                                      return (
+                                        <button
+                                          key={cg.id}
+                                          type="button"
+                                          disabled={pending || !athlete.id}
+                                          onClick={() => athlete.id && setAthleteGroup(email, athlete.id, cg.id, assigned ? "remove" : "add")}
+                                          className={`rounded-full px-2.5 py-1 text-xs font-medium transition disabled:opacity-50 ${
+                                            assigned ? "bg-mesa-accent text-white" : "bg-brown-800 text-brown-400 hover:text-white"
+                                          }`}
+                                        >
+                                          {assigned ? "✓ " : "+ "}{cg.label}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
 
       </div>
       </div>

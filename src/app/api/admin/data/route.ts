@@ -57,7 +57,7 @@ export async function GET(req: NextRequest) {
 
   const [{ data: registrations }, { data: profilesRaw }, { data: referralCreditsRaw }, { data: packages }, { data: accountCreditsRaw }, { data: lateFeeEventsRaw }] = await Promise.all([
     registrationsQuery,
-    supabase.from("profiles").select("email, phone, kids, video_consent"),
+    supabase.from("profiles").select("email, phone, parent_name, kids, video_consent"),
     supabase.from("referral_credits").select("email, credits, total_referrals"),
     // Deliberately NOT trainer-scoped, unlike everything else below — an
     // "Any Available Trainer" package floats across whichever substitute has

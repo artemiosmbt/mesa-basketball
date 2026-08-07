@@ -7,6 +7,8 @@ import LandingNav from "@/app/LandingNav";
 import { REFERRAL_PROGRAM_ENABLED, NEW_CLIENT_DISCOUNT_ENABLED, ARTEMIOS_PACKAGES_AVAILABLE } from "@/lib/feature-flags";
 import { getTrainerBioSlug, getTrainerTier, normalizeTrainerTier, formatTrainerForDisplay, type TrainerTier } from "@/lib/trainers";
 import { calcServiceFee, serviceFeeLabel, serviceFeeItemName, isPercentServiceFee, SERVICE_FEE_PERCENT_TEXT, packagePrice, PRIVATE_RATE_BY_TIER, GROUP_PRIVATE_RATE_BY_TIER, calcPrivatePrice as getPrivatePrice } from "@/lib/pricing";
+import { ALL_GRADES, normalizedAthleteName } from "@/lib/athletes";
+import { getSessionGender, getGradesForGroup } from "@/lib/group-matching";
 
 const OWNER_TRAINER_NAME = "Artemios Gavalas";
 const SUBSTITUTE_TRAINER_LABEL = "Any Available Trainer";
@@ -413,15 +415,6 @@ interface BookingModal {
   weeklySavings?: number;
 }
 
-function getSessionGender(groupName: string): "boys" | "girls" | null {
-  const name = groupName.toLowerCase();
-  const hasBoys = name.includes("boys");
-  const hasGirls = name.includes("girls");
-  if (hasBoys && !hasGirls) return "boys";
-  if (hasGirls && !hasBoys) return "girls";
-  return null;
-}
-
 // Group weekly sessions by group name
 function groupByGroup(sessions: WeeklySession[]) {
   const groups: Record<string, WeeklySession[]> = {};
@@ -780,7 +773,16 @@ export default function Home() {
   const [phone, setPhone] = useState("");
   const [smsConsent, setSmsConsent] = useState(false);
   const [isReturningClient, setIsReturningClient] = useState(false);
-  const [kids, setKids] = useState([{ name: "", dob: "", grade: "", gender: "" }]);
+  const [kids, setKids] = useState<{ id?: string; name: string; dob: string; grade: string; gender: string }[]>([{ name: "", dob: "", grade: "", gender: "" }]);
+  // The parent's full saved athlete roster (from their profile), independent
+  // of `kids` above which reflects only what's in THIS booking — used to
+  // offer "add a saved athlete" instead of retyping when they're not
+  // already part of the current booking.
+  const [savedAthletes, setSavedAthletes] = useState<{ id?: string; name: string; dob: string; grade: string; gender?: string }[]>([]);
+  // Indices into `kids` that are showing their full edit fields. A picked
+  // saved athlete starts collapsed (already valid); a brand-new blank entry
+  // starts expanded (needs input) — see addKid/addSavedAthlete below.
+  const [expandedKids, setExpandedKids] = useState<Set<number>>(new Set([0]));
   const [showGenderWarning, setShowGenderWarning] = useState(false);
   // Set when the client has an active package this month, but for a
   // DIFFERENT trainer tier than the one they're about to book with — e.g.
@@ -1011,19 +1013,25 @@ export default function Home() {
     setAuthPrompt(true);
   }
 
-  async function saveProfile() {
+  // Merges only the athletes present in THIS booking into the parent's
+  // saved roster — never overwrites the whole array, so removing a kid from
+  // view for one booking (e.g. only booking the daughter this time) can't
+  // wipe a sibling's saved data. bookedGroupLabels, when given, auto-adds
+  // those canonical groups to every booked athlete's persisted assignment
+  // (an array since one weekly booking can span multiple distinct groups).
+  async function saveProfile(bookedGroupLabels?: string[]) {
     if (typeof window !== "undefined" && email.trim()) {
       localStorage.setItem("mesa_parent_email", email.toLowerCase().trim());
     }
     const { data: { session } } = await authClient.auth.getSession();
     if (!session) return;
-    fetch("/api/profile", {
+    fetch("/api/profile/athletes", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${session.access_token}`,
       },
-      body: JSON.stringify({ parentName, phone, kids }),
+      body: JSON.stringify({ parentName, phone, bookedGroupLabels, athletes: kids }),
     });
   }
 
@@ -1043,9 +1051,16 @@ export default function Home() {
           if (profile.email) setEmail(profile.email);
           if (profile.phone) setPhone(profile.phone);
           const normalizedKids = profile.kids?.length
-            ? profile.kids.map((k: { name: string; dob: string; grade: string; gender?: string }) => ({ gender: "", ...k, dob: normalizeDob(k.dob) }))
+            ? profile.kids.map((k: { id?: string; name: string; dob: string; grade: string; gender?: string; groups?: string[] }) => ({ gender: "", ...k, dob: normalizeDob(k.dob) }))
             : [{ name: "", dob: "", grade: "", gender: "" }];
-          if (profile.kids?.length) setKids(normalizedKids);
+          if (profile.kids?.length) {
+            setKids(normalizedKids);
+            setSavedAthletes(normalizedKids);
+            // Every prefilled row already has valid saved data — collapse
+            // all of them rather than defaulting to the single-blank-row
+            // expanded state set at mount.
+            setExpandedKids(new Set());
+          }
           if (profile.sms_consent) setSmsConsent(true);
           if (profile.is_returning_client) setIsReturningClient(true);
           profileRef.current = {
@@ -1255,11 +1270,49 @@ export default function Home() {
   }
 
   function addKid() {
-    setKids((k) => [...k, { name: "", dob: "", grade: "", gender: "" }]);
+    setKids((k) => {
+      setExpandedKids((s) => new Set(s).add(k.length));
+      return [...k, { name: "", dob: "", grade: "", gender: "" }];
+    });
+  }
+
+  // Saved athletes not already part of this booking — offered as a
+  // pick-instead-of-retype option next to "add another player".
+  const availableSavedAthletes = useMemo(() => {
+    return savedAthletes.filter((sa) => !kids.some((k) =>
+      (sa.id && k.id === sa.id) || normalizedAthleteName(k.name) === normalizedAthleteName(sa.name)
+    ));
+  }, [savedAthletes, kids]);
+
+  // Adds a previously-saved athlete to this booking, pre-filled and
+  // collapsed (their info is already known/valid). No-op if they're
+  // somehow already in the current booking.
+  function addSavedAthlete(sa: { id?: string; name: string; dob: string; grade: string; gender?: string }) {
+    setKids((k) => {
+      if (sa.id && k.some((kid) => kid.id === sa.id)) return k;
+      return [...k, { id: sa.id, name: sa.name, dob: normalizeDob(sa.dob), grade: sa.grade, gender: sa.gender || "" }];
+    });
   }
 
   function removeKid(i: number) {
     setKids((k) => k.filter((_, idx) => idx !== i));
+    setExpandedKids((s) => {
+      const next = new Set<number>();
+      s.forEach((idx) => {
+        if (idx < i) next.add(idx);
+        else if (idx > i) next.add(idx - 1);
+      });
+      return next;
+    });
+  }
+
+  function toggleKidExpanded(i: number) {
+    setExpandedKids((s) => {
+      const next = new Set(s);
+      if (next.has(i)) next.delete(i);
+      else next.add(i);
+      return next;
+    });
   }
 
   function updateKid(i: number, field: "name" | "dob" | "grade" | "gender", value: string) {
@@ -1358,7 +1411,7 @@ export default function Home() {
           success: true,
           message: `${modal.selectedGroupSessions.length} sessions booked! A confirmation email has been sent to ${email}.${referralNote(!!result.referralApplied)}`,
         });
-        saveProfile();
+        saveProfile(Array.from(new Set((modal.selectedGroupSessions || []).map((s) => s.group))));
         // Clear selections
         setSelectedGroupKeys(new Set());
         const fresh = await fetch("/api/schedule").then((r) => r.json());
@@ -1871,42 +1924,6 @@ export default function Home() {
   const DAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
   // --- Group session helpers ---
-  const ALL_GRADES = [
-    { value: "K", label: "Kindergarten" },
-    { value: "1", label: "1st Grade" }, { value: "2", label: "2nd Grade" },
-    { value: "3", label: "3rd Grade" }, { value: "4", label: "4th Grade" },
-    { value: "5", label: "5th Grade" }, { value: "6", label: "6th Grade" },
-    { value: "7", label: "7th Grade" }, { value: "8", label: "8th Grade" },
-    { value: "9", label: "9th Grade" }, { value: "10", label: "10th Grade" },
-    { value: "11", label: "11th Grade" }, { value: "12", label: "12th Grade" },
-    { value: "College +", label: "College / Pro" },
-    { value: "Adult", label: "Adult" },
-  ];
-  const GRADE_ORDER = ["K","1","2","3","4","5","6","7","8","9","10","11","12","College +","Adult"];
-
-  function getGradesForGroup(groupName: string) {
-    // "Grade 5 & Below" → K through that grade
-    const belowMatch = groupName.match(/Grade\s+(\d+)\s*&\s*Below/i);
-    if (belowMatch) {
-      const ei = GRADE_ORDER.indexOf(belowMatch[1]);
-      if (ei !== -1) {
-        const filtered = ALL_GRADES.filter((g) => GRADE_ORDER.indexOf(g.value) <= ei);
-        return [...filtered, { value: "Other", label: "Other" }];
-      }
-    }
-    // "Grades X-Y" range
-    const match = groupName.match(/Grades?\s+(K|\d+)[–\-](\d+|College\s*\+?)/i);
-    if (!match) return ALL_GRADES;
-    const start = match[1].toUpperCase();
-    const end = match[2].replace(/\s+/g, " ").trim();
-    const endVal = end.toLowerCase().startsWith("college") ? "College +" : end;
-    const si = GRADE_ORDER.indexOf(start);
-    const ei = GRADE_ORDER.indexOf(endVal);
-    if (si === -1 || ei === -1) return ALL_GRADES;
-    const allowed = new Set(GRADE_ORDER.slice(si, ei + 1));
-    const filtered = ALL_GRADES.filter((g) => allowed.has(g.value));
-    return [...filtered, { value: "Other", label: "Other" }];
-  }
 
   function getGroupSessionKey(s: WeeklySession): string {
     return `${s.group}|${s.date}|${s.startTime}|${s.trainer || "Artemios Gavalas"}`;
@@ -3526,72 +3543,115 @@ export default function Home() {
                       <div className="mb-2 flex items-center justify-between">
                         <label className="text-sm font-medium text-brown-300">Player(s)</label>
                         {kids.length < campMaxKids ? (
-                          <button type="button" onClick={addKid} className="text-sm text-mesa-accent hover:text-yellow-300">
-                            + Add another player
-                          </button>
+                          availableSavedAthletes.length > 0 ? (
+                            <select
+                              value=""
+                              onChange={(e) => {
+                                if (e.target.value === "__new__") addKid();
+                                else {
+                                  const sa = availableSavedAthletes.find((a) => a.id === e.target.value);
+                                  if (sa) addSavedAthlete(sa);
+                                }
+                              }}
+                              className="text-sm rounded border border-brown-700 bg-brown-800 text-mesa-accent px-2 py-1 focus:border-mesa-accent focus:outline-none"
+                            >
+                              <option value="" disabled>+ Add athlete...</option>
+                              {availableSavedAthletes.map((a) => (
+                                <option key={a.id || a.name} value={a.id}>{a.name}</option>
+                              ))}
+                              <option value="__new__">+ New athlete</option>
+                            </select>
+                          ) : (
+                            <button type="button" onClick={addKid} className="text-sm text-mesa-accent hover:text-yellow-300">
+                              + Add another player
+                            </button>
+                          )
                         ) : (
                           <span className="text-xs text-yellow-500">Max {campMaxKids} athlete{campMaxKids !== 1 ? "s" : ""} (spots available)</span>
                         )}
                       </div>
                     );
                   })()}
-                  {kids.map((kid, i) => (
+                  {kids.map((kid, i) => {
+                    const isExpanded = expandedKids.has(i) || !kid.name;
+                    return (
                     <div key={i} className={`flex flex-col gap-2 pb-3 ${i > 0 ? "border-t border-brown-700 pt-3" : ""}`}>
-                      <div className="flex gap-2 items-center">
-                        <input
-                          type="text"
-                          placeholder="Player's Name"
-                          required
-                          value={kid.name}
-                          onChange={(e) => updateKid(i, "name", e.target.value)}
-                          className="flex-1 rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
-                        />
-                        {kids.length > 1 && (
-                          <button type="button" onClick={() => removeKid(i)} className="text-brown-500 hover:text-red-400 text-xl leading-none">
-                            &times;
+                      {isExpanded ? (
+                        <>
+                          <div className="flex gap-2 items-center">
+                            <input
+                              type="text"
+                              placeholder="Player's Name"
+                              required
+                              value={kid.name}
+                              onChange={(e) => updateKid(i, "name", e.target.value)}
+                              className="flex-1 rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
+                            />
+                            {kid.name && (
+                              <button type="button" onClick={() => toggleKidExpanded(i)} className="text-brown-500 hover:text-mesa-accent text-xs px-1" aria-label="Collapse">
+                                Done
+                              </button>
+                            )}
+                            {kids.length > 1 && (
+                              <button type="button" onClick={() => removeKid(i)} className="text-brown-500 hover:text-red-400 text-xl leading-none">
+                                &times;
+                              </button>
+                            )}
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-xs text-brown-300">Date of Birth</label>
+                            <DobInput value={kid.dob} onChange={(v) => updateKid(i, "dob", v)} required />
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="mb-1 block text-xs text-brown-300">Grade</label>
+                              <select
+                                required
+                                value={kid.grade}
+                                onChange={(e) => updateKid(i, "grade", e.target.value)}
+                                className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white text-sm focus:border-mesa-accent focus:outline-none"
+                              >
+                                <option value="">Select grade...</option>
+                                {(modal.type === "weekly"
+                                  ? getGradesForGroup(modal.sessionDetails.replace(/ — \d+ sessions?$/, ""))
+                                  : modal.type === "camp" && camps[modal.sessionIndex]?.gradeGroup
+                                  ? getGradesForGroup(camps[modal.sessionIndex].gradeGroup)
+                                  : ALL_GRADES
+                                ).map((g) => (
+                                  <option key={g.value} value={g.value}>{g.label}</option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="mb-1 block text-xs text-brown-300">Gender</label>
+                              <select
+                                required
+                                value={kid.gender}
+                                onChange={(e) => updateKid(i, "gender", e.target.value)}
+                                className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white text-sm focus:border-mesa-accent focus:outline-none"
+                              >
+                                <option value="">Select...</option>
+                                <option value="male">Male</option>
+                                <option value="female">Female</option>
+                              </select>
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="flex gap-2 items-center justify-between">
+                          <button type="button" onClick={() => toggleKidExpanded(i)} className="flex-1 text-left text-white hover:text-mesa-accent">
+                            {kid.name} <span className="text-brown-400 text-xs">— Edit</span>
                           </button>
-                        )}
-                      </div>
-                      <div>
-                        <label className="mb-1 block text-xs text-brown-300">Date of Birth</label>
-                        <DobInput value={kid.dob} onChange={(v) => updateKid(i, "dob", v)} required />
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div>
-                          <label className="mb-1 block text-xs text-brown-300">Grade</label>
-                          <select
-                            required
-                            value={kid.grade}
-                            onChange={(e) => updateKid(i, "grade", e.target.value)}
-                            className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white text-sm focus:border-mesa-accent focus:outline-none"
-                          >
-                            <option value="">Select grade...</option>
-                            {(modal.type === "weekly"
-                              ? getGradesForGroup(modal.sessionDetails.replace(/ — \d+ sessions?$/, ""))
-                              : modal.type === "camp" && camps[modal.sessionIndex]?.gradeGroup
-                              ? getGradesForGroup(camps[modal.sessionIndex].gradeGroup)
-                              : ALL_GRADES
-                            ).map((g) => (
-                              <option key={g.value} value={g.value}>{g.label}</option>
-                            ))}
-                          </select>
+                          {kids.length > 1 && (
+                            <button type="button" onClick={() => removeKid(i)} className="text-brown-500 hover:text-red-400 text-xl leading-none">
+                              &times;
+                            </button>
+                          )}
                         </div>
-                        <div>
-                          <label className="mb-1 block text-xs text-brown-300">Gender</label>
-                          <select
-                            required
-                            value={kid.gender}
-                            onChange={(e) => updateKid(i, "gender", e.target.value)}
-                            className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white text-sm focus:border-mesa-accent focus:outline-none"
-                          >
-                            <option value="">Select...</option>
-                            <option value="male">Male</option>
-                            <option value="female">Female</option>
-                          </select>
-                        </div>
-                      </div>
+                      )}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
 
                 {/* Referral Code — only shown to first-time clients */}
@@ -4091,60 +4151,101 @@ export default function Home() {
                       <div className="mb-2 flex items-center justify-between">
                         <label className="text-sm font-medium text-brown-300">Player(s)</label>
                         {kids.length < groupMaxSpots ? (
-                          <button type="button" onClick={addKid} className="text-sm text-mesa-accent hover:text-yellow-300">+ Add another player</button>
+                          availableSavedAthletes.length > 0 ? (
+                            <select
+                              value=""
+                              onChange={(e) => {
+                                if (e.target.value === "__new__") addKid();
+                                else {
+                                  const sa = availableSavedAthletes.find((a) => a.id === e.target.value);
+                                  if (sa) addSavedAthlete(sa);
+                                }
+                              }}
+                              className="text-sm rounded border border-brown-700 bg-brown-800 text-mesa-accent px-2 py-1 focus:border-mesa-accent focus:outline-none"
+                            >
+                              <option value="" disabled>+ Add athlete...</option>
+                              {availableSavedAthletes.map((a) => (
+                                <option key={a.id || a.name} value={a.id}>{a.name}</option>
+                              ))}
+                              <option value="__new__">+ New athlete</option>
+                            </select>
+                          ) : (
+                            <button type="button" onClick={addKid} className="text-sm text-mesa-accent hover:text-yellow-300">+ Add another player</button>
+                          )
                         ) : (
                           <span className="text-xs text-yellow-500">Max {groupMaxSpots} athletes per session</span>
                         )}
                       </div>
                     );
                   })()}
-                  {kids.map((kid, i) => (
+                  {kids.map((kid, i) => {
+                    const isExpanded = expandedKids.has(i) || !kid.name;
+                    return (
                     <div key={i} className={`flex flex-col gap-2 pb-3 ${i > 0 ? "border-t border-brown-700 pt-3" : ""}`}>
-                      <div className="flex gap-2 items-center">
-                        <input
-                          type="text"
-                          placeholder="Player's Name"
-                          required
-                          value={kid.name}
-                          onChange={(e) => updateKid(i, "name", e.target.value)}
-                          className="flex-1 rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
-                        />
-                        {kids.length > 1 && (
-                          <button type="button" onClick={() => removeKid(i)} className="text-brown-500 hover:text-red-400 text-xl leading-none">&times;</button>
-                        )}
-                      </div>
-                      <div>
-                        <label className="mb-1 block text-xs text-brown-300">Date of Birth</label>
-                        <DobInput value={kid.dob} onChange={(v) => updateKid(i, "dob", v)} required />
-                      </div>
-                      <div>
-                        <label className="mb-1 block text-xs text-brown-300">Grade</label>
-                        <select
-                          required
-                          value={kid.grade}
-                          onChange={(e) => updateKid(i, "grade", e.target.value)}
-                          className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white text-sm focus:border-mesa-accent focus:outline-none"
-                        >
-                          <option value="">Select grade...</option>
-                          <option value="K">Kindergarten</option>
-                          <option value="1">1st Grade</option>
-                          <option value="2">2nd Grade</option>
-                          <option value="3">3rd Grade</option>
-                          <option value="4">4th Grade</option>
-                          <option value="5">5th Grade</option>
-                          <option value="6">6th Grade</option>
-                          <option value="7">7th Grade</option>
-                          <option value="8">8th Grade</option>
-                          <option value="9">9th Grade</option>
-                          <option value="10">10th Grade</option>
-                          <option value="11">11th Grade</option>
-                          <option value="12">12th Grade</option>
-                          <option value="College +">College / Pro</option>
-                          <option value="Adult">Adult</option>
-                        </select>
-                      </div>
+                      {isExpanded ? (
+                        <>
+                          <div className="flex gap-2 items-center">
+                            <input
+                              type="text"
+                              placeholder="Player's Name"
+                              required
+                              value={kid.name}
+                              onChange={(e) => updateKid(i, "name", e.target.value)}
+                              className="flex-1 rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
+                            />
+                            {kid.name && (
+                              <button type="button" onClick={() => toggleKidExpanded(i)} className="text-brown-500 hover:text-mesa-accent text-xs px-1" aria-label="Collapse">
+                                Done
+                              </button>
+                            )}
+                            {kids.length > 1 && (
+                              <button type="button" onClick={() => removeKid(i)} className="text-brown-500 hover:text-red-400 text-xl leading-none">&times;</button>
+                            )}
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-xs text-brown-300">Date of Birth</label>
+                            <DobInput value={kid.dob} onChange={(v) => updateKid(i, "dob", v)} required />
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-xs text-brown-300">Grade</label>
+                            <select
+                              required
+                              value={kid.grade}
+                              onChange={(e) => updateKid(i, "grade", e.target.value)}
+                              className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white text-sm focus:border-mesa-accent focus:outline-none"
+                            >
+                              <option value="">Select grade...</option>
+                              <option value="K">Kindergarten</option>
+                              <option value="1">1st Grade</option>
+                              <option value="2">2nd Grade</option>
+                              <option value="3">3rd Grade</option>
+                              <option value="4">4th Grade</option>
+                              <option value="5">5th Grade</option>
+                              <option value="6">6th Grade</option>
+                              <option value="7">7th Grade</option>
+                              <option value="8">8th Grade</option>
+                              <option value="9">9th Grade</option>
+                              <option value="10">10th Grade</option>
+                              <option value="11">11th Grade</option>
+                              <option value="12">12th Grade</option>
+                              <option value="College +">College / Pro</option>
+                              <option value="Adult">Adult</option>
+                            </select>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="flex gap-2 items-center justify-between">
+                          <button type="button" onClick={() => toggleKidExpanded(i)} className="flex-1 text-left text-white hover:text-mesa-accent">
+                            {kid.name} <span className="text-brown-400 text-xs">— Edit</span>
+                          </button>
+                          {kids.length > 1 && (
+                            <button type="button" onClick={() => removeKid(i)} className="text-brown-500 hover:text-red-400 text-xl leading-none">&times;</button>
+                          )}
+                        </div>
+                      )}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
                 {pkgResult && !pkgResult.success && (
                   <p className="text-sm text-red-400">{pkgResult.message}</p>
