@@ -247,11 +247,11 @@ function DobInput({ value, onChange, required }: { value: string; onChange: (v: 
         onChange={e => { const v = e.target.value.replace(/\D/g, "").slice(0, 2); onChange(buildDob(v, dd, yyyy)); if (v.length === 2) ddRef.current?.focus(); }}
         className="w-10 bg-transparent pr-1 py-2 text-center placeholder-brown-600 focus:outline-none" />
       <span className="text-brown-500 select-none">/</span>
-      <input ref={ddRef} type="text" inputMode="numeric" maxLength={2} placeholder="DD" value={dd}
+      <input ref={ddRef} type="text" inputMode="numeric" maxLength={2} placeholder="DD" value={dd} required={required}
         onChange={e => { const v = e.target.value.replace(/\D/g, "").slice(0, 2); onChange(buildDob(mm, v, yyyy)); if (v.length === 2) yyyyRef.current?.focus(); }}
         className="w-10 bg-transparent px-1 py-2 text-center placeholder-brown-600 focus:outline-none" />
       <span className="text-brown-500 select-none">/</span>
-      <input ref={yyyyRef} type="text" inputMode="numeric" maxLength={4} placeholder="YYYY" value={yyyy}
+      <input ref={yyyyRef} type="text" inputMode="numeric" maxLength={4} placeholder="YYYY" value={yyyy} required={required}
         onChange={e => { const v = e.target.value.replace(/\D/g, "").slice(0, 4); onChange(buildDob(mm, dd, v)); }}
         className="w-16 bg-transparent px-1 py-2 text-center placeholder-brown-600 focus:outline-none" />
     </div>
@@ -773,7 +773,7 @@ export default function Home() {
   const [phone, setPhone] = useState("");
   const [smsConsent, setSmsConsent] = useState(false);
   const [isReturningClient, setIsReturningClient] = useState(false);
-  const [kids, setKids] = useState<{ id?: string; name: string; dob: string; grade: string; gender: string }[]>([{ name: "", dob: "", grade: "", gender: "" }]);
+  const [kids, setKids] = useState<{ id?: string; name: string; firstName?: string; lastName?: string; dob: string; grade: string; gender: string }[]>([{ name: "", firstName: "", lastName: "", dob: "", grade: "", gender: "" }]);
   // The parent's full saved athlete roster (from their profile), independent
   // of `kids` above which reflects only what's in THIS booking — used to
   // offer "add a saved athlete" instead of retyping when they're not
@@ -1051,8 +1051,11 @@ export default function Home() {
           if (profile.email) setEmail(profile.email);
           if (profile.phone) setPhone(profile.phone);
           const normalizedKids = profile.kids?.length
-            ? profile.kids.map((k: { id?: string; name: string; dob: string; grade: string; gender?: string; groups?: string[] }) => ({ gender: "", ...k, dob: normalizeDob(k.dob) }))
-            : [{ name: "", dob: "", grade: "", gender: "" }];
+            ? profile.kids.map((k: { id?: string; name: string; dob: string; grade: string; gender?: string; groups?: string[] }) => {
+                const split = splitName(k.name || "");
+                return { gender: "", ...k, firstName: split.first, lastName: split.last, dob: normalizeDob(k.dob) };
+              })
+            : [{ name: "", firstName: "", lastName: "", dob: "", grade: "", gender: "" }];
           if (profile.kids?.length) {
             setKids(normalizedKids);
             setSavedAthletes(normalizedKids);
@@ -1272,7 +1275,7 @@ export default function Home() {
   function addKid() {
     setKids((k) => {
       setExpandedKids((s) => new Set(s).add(k.length));
-      return [...k, { name: "", dob: "", grade: "", gender: "" }];
+      return [...k, { name: "", firstName: "", lastName: "", dob: "", grade: "", gender: "" }];
     });
   }
 
@@ -1290,7 +1293,8 @@ export default function Home() {
   function addSavedAthlete(sa: { id?: string; name: string; dob: string; grade: string; gender?: string }) {
     setKids((k) => {
       if (sa.id && k.some((kid) => kid.id === sa.id)) return k;
-      return [...k, { id: sa.id, name: sa.name, dob: normalizeDob(sa.dob), grade: sa.grade, gender: sa.gender || "" }];
+      const split = splitName(sa.name || "");
+      return [...k, { id: sa.id, name: sa.name, firstName: split.first, lastName: split.last, dob: normalizeDob(sa.dob), grade: sa.grade, gender: sa.gender || "" }];
     });
   }
 
@@ -1317,6 +1321,18 @@ export default function Home() {
 
   function updateKid(i: number, field: "name" | "dob" | "grade" | "gender", value: string) {
     setKids((k) => k.map((kid, idx) => (idx === i ? { ...kid, [field]: value } : kid)));
+  }
+
+  // Keeps the combined `name` (what actually gets saved/matched) in sync
+  // with the two required First/Last inputs — same first+last join
+  // convention already used for the parent's own name.
+  function updateKidName(i: number, part: "first" | "last", value: string) {
+    setKids((k) => k.map((kid, idx) => {
+      if (idx !== i) return kid;
+      const firstName = part === "first" ? value : kid.firstName;
+      const lastName = part === "last" ? value : kid.lastName;
+      return { ...kid, firstName, lastName, name: [firstName?.trim(), lastName?.trim()].filter(Boolean).join(" ") };
+    }));
   }
 
   function getModalSessionGender(): "boys" | "girls" | null {
@@ -1645,7 +1661,7 @@ export default function Home() {
     for (let i = 0; i < kids.length; i++) {
       const k = kids[i];
       const label = kids.length > 1 ? ` for Athlete ${i + 1}` : "";
-      if (!k.name.trim()) { setSubmitResult({ success: false, message: `Please enter the player's name${label}.` }); return; }
+      if (!k.firstName?.trim() || !k.lastName?.trim()) { setSubmitResult({ success: false, message: `Please enter the player's first and last name${label}.` }); return; }
       if (!k.dob || k.dob.replace(/\D/g, "").length < 8) { setSubmitResult({ success: false, message: `Please enter a valid date of birth${label}.` }); return; }
       if (!k.grade) { setSubmitResult({ success: false, message: `Please select a grade${label}.` }); return; }
       if (!k.gender) { setSubmitResult({ success: false, message: `Please select a gender${label}.` }); return; }
@@ -3486,8 +3502,8 @@ export default function Home() {
             ) : (
               <form onSubmit={handleSubmit} className="mt-4 space-y-4">
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-brown-300">Parent / Guardian Name</label>
-                  <div className="grid grid-cols-2 gap-2">
+                  <label className="mb-1 block text-sm font-medium text-brown-300">Parent / Guardian Name <span className="text-red-500">*</span></label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <input
                       type="text"
                       required
@@ -3507,7 +3523,7 @@ export default function Home() {
                   </div>
                 </div>
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-brown-300">Email</label>
+                  <label className="mb-1 block text-sm font-medium text-brown-300">Email <span className="text-red-500">*</span></label>
                   <input
                     type="email"
                     required
@@ -3517,7 +3533,7 @@ export default function Home() {
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-brown-300">Phone</label>
+                  <label className="mb-1 block text-sm font-medium text-brown-300">Phone <span className="text-red-500">*</span></label>
                   <input
                     type="tel"
                     required
@@ -3541,7 +3557,7 @@ export default function Home() {
                       : 8;
                     return (
                       <div className="mb-2 flex items-center justify-between">
-                        <label className="text-sm font-medium text-brown-300">Player(s)</label>
+                        <label className="text-sm font-medium text-brown-300">Player(s) <span className="text-red-500">*</span></label>
                         {kids.length < campMaxKids ? (
                           availableSavedAthletes.length > 0 ? (
                             <select
@@ -3573,20 +3589,36 @@ export default function Home() {
                     );
                   })()}
                   {kids.map((kid, i) => {
-                    const isExpanded = expandedKids.has(i) || !kid.name;
+                    const isExpanded = expandedKids.has(i) || !kid.firstName?.trim() || !kid.lastName?.trim() || !kid.dob || !kid.grade || !kid.gender;
                     return (
                     <div key={i} className="flex flex-col gap-2 pb-2">
                       {isExpanded ? (
                         <>
-                          <div className="flex gap-2 items-center">
-                            <input
-                              type="text"
-                              placeholder="Player's Name"
-                              required
-                              value={kid.name}
-                              onChange={(e) => updateKid(i, "name", e.target.value)}
-                              className="flex-1 rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
-                            />
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <div>
+                              <label className="mb-1 block text-xs text-brown-300">First Name <span className="text-red-500">*</span></label>
+                              <input
+                                type="text"
+                                placeholder="First name"
+                                required
+                                value={kid.firstName || ""}
+                                onChange={(e) => updateKidName(i, "first", e.target.value)}
+                                className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
+                              />
+                            </div>
+                            <div>
+                              <label className="mb-1 block text-xs text-brown-300">Last Name <span className="text-red-500">*</span></label>
+                              <input
+                                type="text"
+                                placeholder="Last name"
+                                required
+                                value={kid.lastName || ""}
+                                onChange={(e) => updateKidName(i, "last", e.target.value)}
+                                className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
+                              />
+                            </div>
+                          </div>
+                          <div className="flex justify-end gap-3">
                             {kid.name && (
                               <button type="button" onClick={() => toggleKidExpanded(i)} className="text-brown-500 hover:text-mesa-accent text-xs px-1" aria-label="Collapse">
                                 Done
@@ -3599,12 +3631,12 @@ export default function Home() {
                             )}
                           </div>
                           <div>
-                            <label className="mb-1 block text-xs text-brown-300">Date of Birth</label>
+                            <label className="mb-1 block text-xs text-brown-300">Date of Birth <span className="text-red-500">*</span></label>
                             <DobInput value={kid.dob} onChange={(v) => updateKid(i, "dob", v)} required />
                           </div>
-                          <div className="grid grid-cols-2 gap-2">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                             <div>
-                              <label className="mb-1 block text-xs text-brown-300">Grade</label>
+                              <label className="mb-1 block text-xs text-brown-300">Grade <span className="text-red-500">*</span></label>
                               <select
                                 required
                                 value={kid.grade}
@@ -3623,7 +3655,7 @@ export default function Home() {
                               </select>
                             </div>
                             <div>
-                              <label className="mb-1 block text-xs text-brown-300">Gender</label>
+                              <label className="mb-1 block text-xs text-brown-300">Gender <span className="text-red-500">*</span></label>
                               <select
                                 required
                                 value={kid.gender}
@@ -4113,22 +4145,22 @@ export default function Home() {
             ) : (
               <form onSubmit={handlePackageSubmit} className="mt-4 space-y-4">
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-brown-300">Your Name</label>
-                  <div className="grid grid-cols-2 gap-2">
+                  <label className="mb-1 block text-sm font-medium text-brown-300">Your Name <span className="text-red-500">*</span></label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <input type="text" required placeholder="First name" value={pkgFirstName} onChange={e => setPkgFirstName(e.target.value)} className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none" />
                     <input type="text" required placeholder="Last name" value={pkgLastName} onChange={e => setPkgLastName(e.target.value)} className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none" />
                   </div>
                 </div>
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-brown-300">Email</label>
+                  <label className="mb-1 block text-sm font-medium text-brown-300">Email <span className="text-red-500">*</span></label>
                   <input type="email" required value={pkgEmail} onChange={e => setPkgEmail(e.target.value)} className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none" />
                 </div>
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-brown-300">Phone</label>
+                  <label className="mb-1 block text-sm font-medium text-brown-300">Phone <span className="text-red-500">*</span></label>
                   <input type="tel" required value={pkgPhone} onChange={e => setPkgPhone(e.target.value)} className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none" />
                 </div>
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-brown-300">Month</label>
+                  <label className="mb-1 block text-sm font-medium text-brown-300">Month <span className="text-red-500">*</span></label>
                   <select required value={pkgMonth} onChange={e => setPkgMonth(e.target.value)} className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white focus:border-mesa-accent focus:outline-none">
                     {pkgMonthOptions.map(opt => (
                       <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -4161,7 +4193,7 @@ export default function Home() {
                     const groupMaxSpots = modal.selectedGroupSessions?.[0]?.maxSpots ?? 8;
                     return (
                       <div className="mb-2 flex items-center justify-between">
-                        <label className="text-sm font-medium text-brown-300">Player(s)</label>
+                        <label className="text-sm font-medium text-brown-300">Player(s) <span className="text-red-500">*</span></label>
                         {kids.length < groupMaxSpots ? (
                           availableSavedAthletes.length > 0 ? (
                             <select
@@ -4191,20 +4223,36 @@ export default function Home() {
                     );
                   })()}
                   {kids.map((kid, i) => {
-                    const isExpanded = expandedKids.has(i) || !kid.name;
+                    const isExpanded = expandedKids.has(i) || !kid.firstName?.trim() || !kid.lastName?.trim() || !kid.dob || !kid.grade;
                     return (
                     <div key={i} className="flex flex-col gap-2 pb-2">
                       {isExpanded ? (
                         <>
-                          <div className="flex gap-2 items-center">
-                            <input
-                              type="text"
-                              placeholder="Player's Name"
-                              required
-                              value={kid.name}
-                              onChange={(e) => updateKid(i, "name", e.target.value)}
-                              className="flex-1 rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
-                            />
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <div>
+                              <label className="mb-1 block text-xs text-brown-300">First Name <span className="text-red-500">*</span></label>
+                              <input
+                                type="text"
+                                placeholder="First name"
+                                required
+                                value={kid.firstName || ""}
+                                onChange={(e) => updateKidName(i, "first", e.target.value)}
+                                className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
+                              />
+                            </div>
+                            <div>
+                              <label className="mb-1 block text-xs text-brown-300">Last Name <span className="text-red-500">*</span></label>
+                              <input
+                                type="text"
+                                placeholder="Last name"
+                                required
+                                value={kid.lastName || ""}
+                                onChange={(e) => updateKidName(i, "last", e.target.value)}
+                                className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
+                              />
+                            </div>
+                          </div>
+                          <div className="flex justify-end gap-3">
                             {kid.name && (
                               <button type="button" onClick={() => toggleKidExpanded(i)} className="text-brown-500 hover:text-mesa-accent text-xs px-1" aria-label="Collapse">
                                 Done
@@ -4215,11 +4263,11 @@ export default function Home() {
                             )}
                           </div>
                           <div>
-                            <label className="mb-1 block text-xs text-brown-300">Date of Birth</label>
+                            <label className="mb-1 block text-xs text-brown-300">Date of Birth <span className="text-red-500">*</span></label>
                             <DobInput value={kid.dob} onChange={(v) => updateKid(i, "dob", v)} required />
                           </div>
                           <div>
-                            <label className="mb-1 block text-xs text-brown-300">Grade</label>
+                            <label className="mb-1 block text-xs text-brown-300">Grade <span className="text-red-500">*</span></label>
                             <select
                               required
                               value={kid.grade}

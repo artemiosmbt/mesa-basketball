@@ -33,11 +33,11 @@ function DobInput({ value, onChange, required, inputClass }: {
         onChange={e => { const v = e.target.value.replace(/\D/g, "").slice(0, 2); onChange(buildDob(v, dd, yyyy)); if (v.length === 2) ddRef.current?.focus(); }}
         className="w-10 bg-transparent pr-1 py-2 text-white text-center placeholder-brown-500 focus:outline-none" />
       <span className="text-brown-500 select-none">/</span>
-      <input ref={ddRef} type="text" inputMode="numeric" maxLength={2} placeholder="DD" value={dd}
+      <input ref={ddRef} type="text" inputMode="numeric" maxLength={2} placeholder="DD" value={dd} required={required}
         onChange={e => { const v = e.target.value.replace(/\D/g, "").slice(0, 2); onChange(buildDob(mm, v, yyyy)); if (v.length === 2) yyyyRef.current?.focus(); }}
         className="w-10 bg-transparent px-1 py-2 text-white text-center placeholder-brown-500 focus:outline-none" />
       <span className="text-brown-500 select-none">/</span>
-      <input ref={yyyyRef} type="text" inputMode="numeric" maxLength={4} placeholder="YYYY" value={yyyy}
+      <input ref={yyyyRef} type="text" inputMode="numeric" maxLength={4} placeholder="YYYY" value={yyyy} required={required}
         onChange={e => { const v = e.target.value.replace(/\D/g, "").slice(0, 4); onChange(buildDob(mm, dd, v)); }}
         className="w-16 bg-transparent px-1 py-2 text-white text-center placeholder-brown-500 focus:outline-none" />
     </div>
@@ -64,7 +64,7 @@ export default function SignupPage() {
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [kids, setKids] = useState([{ name: "", dob: "", grade: "", gender: "" }]);
+  const [kids, setKids] = useState([{ firstName: "", lastName: "", name: "", dob: "", grade: "", gender: "" }]);
   const [smsConsent, setSmsConsent] = useState(false);
   const [marketingEmails, setMarketingEmails] = useState(true);
   const [videoConsent, setVideoConsent] = useState(true);
@@ -75,7 +75,7 @@ export default function SignupPage() {
   const router = useRouter();
 
   function addKid() {
-    setKids((prev) => [...prev, { name: "", dob: "", grade: "", gender: "" }]);
+    setKids((prev) => [...prev, { firstName: "", lastName: "", name: "", dob: "", grade: "", gender: "" }]);
   }
 
   function removeKid(i: number) {
@@ -84,6 +84,18 @@ export default function SignupPage() {
 
   function updateKid(i: number, field: string, value: string) {
     setKids((prev) => prev.map((k, idx) => idx === i ? { ...k, [field]: value } : k));
+  }
+
+  // Keeps the combined `name` (what actually gets saved) in sync with the
+  // two required First/Last inputs — same first+last join convention used
+  // for the parent's own name above.
+  function updateKidName(i: number, part: "first" | "last", value: string) {
+    setKids((prev) => prev.map((k, idx) => {
+      if (idx !== i) return k;
+      const firstName = part === "first" ? value : k.firstName;
+      const lastName = part === "last" ? value : k.lastName;
+      return { ...k, firstName, lastName, name: [firstName.trim(), lastName.trim()].filter(Boolean).join(" ") };
+    }));
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -112,6 +124,10 @@ export default function SignupPage() {
       return;
     }
 
+    // Persisted shape stays { name, dob, grade, gender } — firstName/lastName
+    // are UI-only fields used to enforce the split entry, not stored.
+    const kidsToSave = kids.map(({ name, dob, grade, gender }) => ({ name, dob, grade, gender }));
+
     // Save profile right away using the session
     const session = data.session;
     if (session) {
@@ -121,7 +137,7 @@ export default function SignupPage() {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ parentName, phone, kids, smsConsent, marketingEmails, videoConsent }),
+        body: JSON.stringify({ parentName, phone, kids: kidsToSave, smsConsent, marketingEmails, videoConsent }),
       });
       const next = new URLSearchParams(window.location.search).get("next");
       router.push(safeRedirectPath(next));
@@ -132,7 +148,7 @@ export default function SignupPage() {
       // else logging into their own unrelated existing account before this
       // signup is confirmed must never have this data silently applied to
       // their profile instead.
-      localStorage.setItem("mesa_pending_profile", JSON.stringify({ email: email.toLowerCase().trim(), parentName, phone, kids, smsConsent, marketingEmails, videoConsent }));
+      localStorage.setItem("mesa_pending_profile", JSON.stringify({ email: email.toLowerCase().trim(), parentName, phone, kids: kidsToSave, smsConsent, marketingEmails, videoConsent }));
       setConfirmed(true);
       setLoading(false);
     }
@@ -197,7 +213,7 @@ export default function SignupPage() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-widest text-brown-400 mb-1.5">First Name</label>
+              <label className="block text-xs font-semibold uppercase tracking-widest text-brown-400 mb-1.5">First Name <span className="text-red-500">*</span></label>
               <input
                 type="text"
                 value={firstName}
@@ -208,7 +224,7 @@ export default function SignupPage() {
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-widest text-brown-400 mb-1.5">Last Name</label>
+              <label className="block text-xs font-semibold uppercase tracking-widest text-brown-400 mb-1.5">Last Name <span className="text-red-500">*</span></label>
               <input
                 type="text"
                 value={lastName}
@@ -219,7 +235,7 @@ export default function SignupPage() {
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-widest text-brown-400 mb-1.5">Email</label>
+              <label className="block text-xs font-semibold uppercase tracking-widest text-brown-400 mb-1.5">Email <span className="text-red-500">*</span></label>
               <input
                 type="email"
                 value={email}
@@ -230,7 +246,7 @@ export default function SignupPage() {
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-widest text-brown-400 mb-1.5">Phone</label>
+              <label className="block text-xs font-semibold uppercase tracking-widest text-brown-400 mb-1.5">Phone <span className="text-red-500">*</span></label>
               <input
                 type="tel"
                 value={phone}
@@ -241,7 +257,7 @@ export default function SignupPage() {
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-widest text-brown-400 mb-1.5">Password</label>
+              <label className="block text-xs font-semibold uppercase tracking-widest text-brown-400 mb-1.5">Password <span className="text-red-500">*</span></label>
               <input
                 type="password"
                 value={password}
@@ -252,7 +268,7 @@ export default function SignupPage() {
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-widest text-brown-400 mb-1.5">Confirm Password</label>
+              <label className="block text-xs font-semibold uppercase tracking-widest text-brown-400 mb-1.5">Confirm Password <span className="text-red-500">*</span></label>
               <input
                 type="password"
                 value={confirmPassword}
@@ -265,7 +281,7 @@ export default function SignupPage() {
           </div>
 
           <div>
-            <p className="text-xs font-semibold uppercase tracking-widest text-brown-400 mb-3">Athletes</p>
+            <p className="text-xs font-semibold uppercase tracking-widest text-brown-400 mb-3">Athletes <span className="text-red-500">*</span></p>
             <div className="divide-y divide-brown-700 rounded-lg border border-brown-700 overflow-hidden">
               {kids.map((kid, i) => (
                 <div key={i} className="bg-brown-800/30 px-4 py-3 space-y-2">
@@ -277,24 +293,37 @@ export default function SignupPage() {
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <div>
-                      <label className="mb-1 block text-xs text-brown-400">Name</label>
+                      <label className="mb-1 block text-xs text-brown-400">First Name <span className="text-red-500">*</span></label>
                       <input
                         type="text"
-                        value={kid.name}
-                        onChange={(e) => updateKid(i, "name", e.target.value)}
-                        placeholder="Player's full name"
+                        value={kid.firstName}
+                        onChange={(e) => updateKidName(i, "first", e.target.value)}
+                        required
+                        placeholder="Player's first name"
                         className="w-full rounded-lg border border-brown-700 bg-brown-800/60 px-3 py-2 text-sm text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
                       />
                     </div>
                     <div>
-                      <label className="mb-1 block text-xs text-brown-400">Date of Birth</label>
-                      <DobInput value={kid.dob} onChange={(v) => updateKid(i, "dob", v)} />
+                      <label className="mb-1 block text-xs text-brown-400">Last Name <span className="text-red-500">*</span></label>
+                      <input
+                        type="text"
+                        value={kid.lastName}
+                        onChange={(e) => updateKidName(i, "last", e.target.value)}
+                        required
+                        placeholder="Player's last name"
+                        className="w-full rounded-lg border border-brown-700 bg-brown-800/60 px-3 py-2 text-sm text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
+                      />
                     </div>
                     <div>
-                      <label className="mb-1 block text-xs text-brown-400">Grade</label>
+                      <label className="mb-1 block text-xs text-brown-400">Date of Birth <span className="text-red-500">*</span></label>
+                      <DobInput value={kid.dob} onChange={(v) => updateKid(i, "dob", v)} required />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs text-brown-400">Grade <span className="text-red-500">*</span></label>
                       <select
                         value={kid.grade}
                         onChange={(e) => updateKid(i, "grade", e.target.value)}
+                        required
                         className="w-full rounded-lg border border-brown-700 bg-brown-800/60 px-3 py-2 text-sm text-white focus:border-mesa-accent focus:outline-none"
                       >
                         <option value="">Select grade...</option>
@@ -304,10 +333,11 @@ export default function SignupPage() {
                       </select>
                     </div>
                     <div>
-                      <label className="mb-1 block text-xs text-brown-400">Gender</label>
+                      <label className="mb-1 block text-xs text-brown-400">Gender <span className="text-red-500">*</span></label>
                       <select
                         value={kid.gender}
                         onChange={(e) => updateKid(i, "gender", e.target.value)}
+                        required
                         className="w-full rounded-lg border border-brown-700 bg-brown-800/60 px-3 py-2 text-sm text-white focus:border-mesa-accent focus:outline-none"
                       >
                         <option value="">Select gender...</option>
