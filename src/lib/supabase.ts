@@ -2,6 +2,7 @@ import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { sendAdminSMS } from "@/lib/sms";
 import { REFERRAL_PROGRAM_ENABLED } from "@/lib/feature-flags";
 import { trainerNamesMatch } from "@/lib/trainers";
+import type { Athlete } from "@/lib/athletes";
 
 let _supabase: SupabaseClient | null = null;
 
@@ -732,6 +733,20 @@ export function generateReferralCode(parentName: string): string {
   const parts = parentName.trim().split(/\s+/);
   const lastName = parts[parts.length - 1].toUpperCase().replace(/[^A-Z]/g, "");
   return `${lastName}-MESA`;
+}
+
+/** Get the saved athlete roster for a profile, by email — used to offer a
+ * "pick a saved athlete instead of retyping" option wherever the caller has
+ * already verified the email server-side (e.g. via a booking manage token),
+ * never from a client-supplied email directly. Empty array if no profile. */
+export async function getSavedAthletesByEmail(email: string): Promise<Athlete[]> {
+  const supabase = getSupabase();
+  const { data } = await supabase
+    .from("profiles")
+    .select("kids")
+    .eq("email", email.toLowerCase().trim())
+    .maybeSingle();
+  return Array.isArray(data?.kids) ? data.kids : [];
 }
 
 /** Get the referral code stored in a user's profile, if any */

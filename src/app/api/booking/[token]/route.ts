@@ -18,6 +18,7 @@ import {
   recordCampDayRefund,
   hasConflictingPrivateBooking,
   checkGroupSessionCapacity,
+  getSavedAthletesByEmail,
 } from "@/lib/supabase";
 import { issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome, isLateAction, parseSessionDateTimeET, computeLateFeeAmounts, settleOldBookingForReschedule } from "@/lib/booking-finalize";
 import { getStripe } from "@/lib/stripe";
@@ -68,6 +69,12 @@ export async function GET(
     }));
   }
 
+  // Looked up server-side from the booking's own (verified) email — never
+  // from a client-supplied one — so the manage token itself is what proves
+  // the right to see this parent's saved roster, same trust level the token
+  // already carries for reschedule/cancel/edit-players.
+  const savedAthletes = reg.email ? await getSavedAthletesByEmail(reg.email).catch(() => []) : [];
+
   return NextResponse.json({
     id: reg.id,
     parentName: reg.parent_name,
@@ -90,6 +97,7 @@ export async function GET(
     totalParticipants: reg.total_participants,
     campGroupDays,
     isPackageBooking: !!reg.package_id,
+    savedAthletes,
   });
 }
 

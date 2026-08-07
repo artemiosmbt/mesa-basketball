@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo, use, useRef } from "react";
 import { PRIVATE_RATE_BY_TIER, GROUP_PRIVATE_RATE_BY_TIER, calcPrivatePrice as getPrivatePrice, getTrainerTier } from "@/lib/pricing";
 import { formatTrainerForDisplay } from "@/lib/trainers";
+import { normalizedAthleteName, type Athlete } from "@/lib/athletes";
 
 const LOCATION_LINKS: Record<string, { name: string; url: string }> = {
   "St. Pauls": { name: "St. Paul's Cathedral", url: "https://share.google/kVGkfSgr6SaShDWF7" },
@@ -100,6 +101,12 @@ function parseKids(kidsStr: string): string[] {
 function playerName(playerStr: string): string {
   const idx = playerStr.indexOf(" (");
   return idx > -1 ? playerStr.substring(0, idx).trim() : playerStr.trim();
+}
+
+function normalizeDob(dob: string): string {
+  const iso = dob.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) return `${iso[2]}/${iso[3]}/${iso[1]}`;
+  return dob;
 }
 
 function parsePlayerStr(str: string): { name: string; dob: string; grade: string; gender: string } {
@@ -221,6 +228,10 @@ export default function ManageBooking({
   // Player editing state
   const [showEditPlayers, setShowEditPlayers] = useState(false);
   const [editedPlayers, setEditedPlayers] = useState<string[]>([]);
+  // The parent's saved athlete roster (from their profile, if they have
+  // one), looked up server-side by the booking's own email — offered as a
+  // "pick instead of retype" option when adding a player to this booking.
+  const [savedAthletes, setSavedAthletes] = useState<Athlete[]>([]);
   const [showAddPlayer, setShowAddPlayer] = useState(false);
   const [newPlayerName, setNewPlayerName] = useState("");
   const [newPlayerDob, setNewPlayerDob] = useState("");
@@ -310,7 +321,10 @@ export default function ManageBooking({
       .then((r) => r.json())
       .then((data) => {
         if (data.error) setError(data.error);
-        else setBooking(data);
+        else {
+          setBooking(data);
+          setSavedAthletes(Array.isArray(data.savedAthletes) ? data.savedAthletes : []);
+        }
       })
       .catch(() => setError("Failed to load booking"))
       .finally(() => setLoading(false));
@@ -974,13 +988,41 @@ export default function ManageBooking({
                           <p className="mt-2 text-xs text-brown-500">Add another player before you can remove the last one.</p>
                         )}
 
+                        {/* Saved athletes — pick instead of retyping */}
+                        {(() => {
+                          const availableSavedAthletes = savedAthletes.filter((sa) =>
+                            sa.name && !editedPlayers.some((p) => normalizedAthleteName(playerName(p)) === normalizedAthleteName(sa.name))
+                          );
+                          if (availableSavedAthletes.length === 0) return null;
+                          return (
+                            <div className="mt-3">
+                              <p className="mb-1.5 text-xs text-brown-400">From your account:</p>
+                              <div className="flex flex-wrap gap-2">
+                                {availableSavedAthletes.map((sa) => (
+                                  <button
+                                    key={sa.id || sa.name}
+                                    type="button"
+                                    onClick={() => {
+                                      const genderLabel = sa.gender === "male" ? "Male" : sa.gender === "female" ? "Female" : "";
+                                      setEditedPlayers((prev) => [...prev, buildPlayerString(sa.name, normalizeDob(sa.dob), sa.grade, genderLabel)]);
+                                    }}
+                                    className="rounded-full border border-mesa-accent px-3 py-1.5 text-xs text-mesa-accent hover:bg-mesa-accent hover:text-white transition"
+                                  >
+                                    + {sa.name}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })()}
+
                         {/* Add player form */}
                         {!showAddPlayer ? (
                           <button
                             onClick={() => setShowAddPlayer(true)}
                             className="mt-3 text-sm text-mesa-accent hover:text-yellow-300"
                           >
-                            + Add a player
+                            + Add a player manually
                           </button>
                         ) : (
                           <div className="mt-3 space-y-3 rounded-lg border border-brown-700 bg-brown-800/50 p-4">
