@@ -182,7 +182,12 @@ export default function MyBookings() {
 
             {/* Sidebar — referrals + package + credit (credit card always shows, even at $0) */}
             <div className="md:col-span-1 space-y-5 mb-8 md:mb-0">
-                {rewards && (
+                {/* Referrals are paused — quietly hidden for anyone with nothing
+                    left to spend, so it doesn't advertise a paused feature.
+                    Still shown for someone who already has leftover credits,
+                    so they know it's there (and know it's currently unusable —
+                    the copy inside already explains that). */}
+                {rewards && rewards.referralCredits > 0 && (
                   <div className="rounded-2xl bg-brown-900 p-5 space-y-4">
                     <div>
                       <h2 className="text-sm font-bold uppercase tracking-widest text-mesa-accent mb-3">Referrals</h2>

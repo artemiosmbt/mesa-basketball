@@ -2,6 +2,7 @@ import { Resend } from "resend";
 import { calcServiceFee, fmtMoney, PRIVATE_RATE_BY_TIER, GROUP_PRIVATE_RATE_BY_TIER, getTrainerTier } from "./pricing";
 import { formatTrainerForDisplay } from "./trainers";
 import { formatMonthYear } from "./sms";
+import { REFERRAL_PROGRAM_ENABLED } from "./feature-flags";
 
 const ARTEMI_EMAIL = "artemios@mesabasketballtraining.com";
 const FROM_EMAIL = "Mesa Basketball <noreply@mesabasketballtraining.com>";
@@ -324,7 +325,11 @@ export async function sendRegistrationNotification(data: {
     return { filename: "mesa-basketball.ics", content: Buffer.from(content) };
   })();
 
-  const referralSection = data.referralCode
+  // Referrals are paused — don't invite people to share/earn on something
+  // that currently doesn't do anything. Gated on the same flag as
+  // everywhere else, not deleted, so this comes back automatically
+  // whenever REFERRAL_PROGRAM_ENABLED flips back on.
+  const referralSection = REFERRAL_PROGRAM_ENABLED && data.referralCode
     ? `<p style="background: #162d5a; padding: 12px; border-radius: 8px; margin-top: 12px; color: #ffffff;"><strong style="color: #d4af37;">Your referral code: ${data.referralCode}</strong><br/><span style="font-size: 13px; color: #93c5fd;">Share this code with friends and family — when they book their first session using your code, you'll receive 50% off a private session.</span></p>`
     : "";
 
