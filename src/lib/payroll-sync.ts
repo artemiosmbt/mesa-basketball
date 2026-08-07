@@ -45,6 +45,16 @@ const TRAINERS = [
   "Zain Amjad",
 ] as const;
 
+/** Case/whitespace-insensitive match, since the trainer name that ends up on
+ * a booking is whatever gets typed into the schedule spreadsheet's Trainer
+ * column by hand — a stray capitalization or double space shouldn't cause a
+ * real trainer's sessions to silently fall into "unknown trainer". Maps a
+ * normalized form back to the sheet's canonical tab-name spelling. */
+function normalizeTrainerName(name: string): string {
+  return name.trim().toLowerCase().replace(/\s+/g, " ");
+}
+const TRAINER_BY_NORMALIZED = new Map(TRAINERS.map((t) => [normalizeTrainerName(t), t]));
+
 const TRAINER_FIRST_ROW = 4; // fixed forever — never changes as rows are added
 const TRAINER_NUM_COLS = 27; // A:AA
 
@@ -370,7 +380,6 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
   await ensureSyncLogTab(spreadsheetId);
   const log = await readSyncLog(spreadsheetId);
   const nextRow = maxRowPerTab(log);
-  const trainerSet = new Set<string>(TRAINERS);
   let writesThisRun = 0;
 
   // ---- sessions: registrations -> trainer tabs ----
@@ -432,8 +441,8 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
   for (const reg of registrations) {
     if (writesThisRun >= MAX_WRITES_PER_RUN) break;
 
-    const trainer = (reg.booked_trainer || "").trim();
-    if (!trainerSet.has(trainer)) {
+    const trainer = TRAINER_BY_NORMALIZED.get(normalizeTrainerName(reg.booked_trainer || ""));
+    if (!trainer) {
       result.sessionsSkippedUnknownTrainer++;
       continue;
     }
