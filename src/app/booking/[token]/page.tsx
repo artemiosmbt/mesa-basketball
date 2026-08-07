@@ -242,6 +242,24 @@ export default function ManageBooking({
   const [playerSaveError, setPlayerSaveError] = useState("");
   const [playerSaveSuccess, setPlayerSaveSuccess] = useState(false);
   const [playerLateResult, setPlayerLateResult] = useState<{ isLate: boolean; lateFeeDue?: number } | null>(null);
+  // What the current editedPlayers list would actually cost — fetched from
+  // the same pricing function the real save uses, so the number shown here
+  // can never drift from what Stripe actually charges a moment later.
+  const [playerPreview, setPlayerPreview] = useState<{
+    paymentRequired: boolean;
+    addedPlayers: string[];
+    removedPlayers: string[];
+    oldAmount: number;
+    newAmount: number;
+    priceDelta: number;
+    isLate: boolean;
+    lateFeeDue?: number;
+    amountOwed: number;
+    serviceFee: number;
+    totalCharge: number;
+    creditGranted: number;
+  } | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   // Schedule data for rescheduling
   const [privateSlots, setPrivateSlots] = useState<
@@ -517,7 +535,33 @@ export default function ManageBooking({
     setPlayerSaveSuccess(false);
     setShowPlayerConfirm(false);
     setPlayerLateResult(null);
+    setPlayerPreview(null);
   }
+
+  // Re-previews the cost of the pending player-list change every time it
+  // changes, using the same pricing function the real save uses — so the
+  // "Continue to Payment" button and its breakdown always reflect exactly
+  // what Stripe would charge, before the parent commits to anything.
+  useEffect(() => {
+    if (!showEditPlayers || !booking) { setPlayerPreview(null); return; }
+    const originalPlayers = parseKids(booking.kids);
+    if (JSON.stringify(editedPlayers) === JSON.stringify(originalPlayers)) {
+      setPlayerPreview(null);
+      return;
+    }
+    let cancelled = false;
+    setPreviewLoading(true);
+    fetch(`/api/booking/${token}/preview-players`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ players: editedPlayers }),
+    })
+      .then((r) => r.json())
+      .then((data) => { if (!cancelled && !data.error) setPlayerPreview(data); })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setPreviewLoading(false); });
+    return () => { cancelled = true; };
+  }, [showEditPlayers, editedPlayers, booking, token]);
 
   async function handleSavePlayers() {
     setSavingPlayers(true);
@@ -1108,10 +1152,10 @@ export default function ManageBooking({
                         <div className="mt-4 flex gap-3">
                           <button
                             onClick={() => setShowPlayerConfirm(true)}
-                            disabled={!hasChanges || savingPlayers}
+                            disabled={!hasChanges || savingPlayers || previewLoading}
                             className="rounded bg-mesa-accent px-4 py-2 text-sm font-semibold text-white hover:bg-yellow-600 disabled:opacity-50"
                           >
-                            Save Changes
+                            {previewLoading ? "Checking price..." : playerPreview?.paymentRequired ? "Continue to Payment" : "Save Changes"}
                           </button>
                           <button
                             onClick={() => { setShowEditPlayers(false); setShowAddPlayer(false); }}
@@ -1123,20 +1167,54 @@ export default function ManageBooking({
 
                         {showPlayerConfirm && (
                           <div className="mt-4 rounded-lg border border-brown-700 bg-brown-800/50 p-4">
-                            <p className="text-sm text-brown-300">
-                              {removed.length > 0
-                                ? `Remove ${removed.join(", ")} from this booking?`
-                                : "Save changes to your player list?"}
-                              {within24Hours && !withinGracePeriod && removed.length > 0
-                                ? " A late cancellation fee will apply." : ""}
-                            </p>
+                            {playerPreview?.paymentRequired ? (
+                              <div className="space-y-2 text-sm text-brown-300">
+                                <p>
+                                  {playerPreview.addedPlayers.length > 0 && playerPreview.removedPlayers.length > 0
+                                    ? `Adding ${playerPreview.addedPlayers.join(", ")} and removing ${playerPreview.removedPlayers.join(", ")} `
+                                    : playerPreview.addedPlayers.length > 0
+                                    ? `Adding ${playerPreview.addedPlayers.join(", ")} `
+                                    : `Removing ${playerPreview.removedPlayers.join(", ")} `}
+                                  changes this session&apos;s price from <span className="text-white font-medium">{formatPrice(playerPreview.oldAmount)}</span> to <span className="text-white font-medium">{formatPrice(playerPreview.newAmount)}</span>.
+                                  {playerPreview.isLate && playerPreview.lateFeeDue ? " A late-change fee also applies since this session is within 24 hours." : ""}
+                                </p>
+                                <div className="rounded-lg bg-brown-900/60 border border-brown-700 p-3 space-y-1">
+                                  <div className="flex justify-between">
+                                    <span>Amount due</span>
+                                    <span className="text-white">{formatPrice(playerPreview.amountOwed)}</span>
+                                  </div>
+                                  <div className="flex justify-between text-brown-400">
+                                    <span>Card processing fee</span>
+                                    <span>{formatPrice(playerPreview.serviceFee)}</span>
+                                  </div>
+                                  <div className="flex justify-between border-t border-brown-700 pt-1 font-semibold">
+                                    <span className="text-white">Total charge</span>
+                                    <span className="text-white">{formatPrice(playerPreview.totalCharge)}</span>
+                                  </div>
+                                </div>
+                                <p className="text-xs text-brown-500">
+                                  A card processing fee applies to any card payment and is disclosed here before you&apos;re charged, as required. You&apos;ll be taken to a secure checkout to complete payment — nothing is charged until then.
+                                </p>
+                              </div>
+                            ) : (
+                              <p className="text-sm text-brown-300">
+                                {removed.length > 0
+                                  ? `Remove ${removed.join(", ")} from this booking?`
+                                  : "Save changes to your player list?"}
+                                {within24Hours && !withinGracePeriod && removed.length > 0
+                                  ? " A late cancellation fee will apply." : ""}
+                                {playerPreview && playerPreview.creditGranted > 0
+                                  ? ` You'll receive a ${formatPrice(playerPreview.creditGranted)} credit toward your next booking.`
+                                  : ""}
+                              </p>
+                            )}
                             <div className="mt-3 flex gap-3">
                               <button
                                 onClick={handleSavePlayers}
                                 disabled={savingPlayers}
                                 className="rounded bg-mesa-accent px-4 py-2 text-sm font-semibold text-white hover:bg-yellow-600 disabled:opacity-50"
                               >
-                                {savingPlayers ? "Saving..." : "Confirm"}
+                                {savingPlayers ? "Saving..." : playerPreview?.paymentRequired ? "Continue to Payment" : "Confirm"}
                               </button>
                               <button
                                 onClick={() => setShowPlayerConfirm(false)}

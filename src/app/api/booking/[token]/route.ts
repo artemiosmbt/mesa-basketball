@@ -20,7 +20,7 @@ import {
   checkGroupSessionCapacity,
   getSavedAthletesByEmail,
 } from "@/lib/supabase";
-import { issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome, isLateAction, parseSessionDateTimeET, computeLateFeeAmounts, settleOldBookingForReschedule } from "@/lib/booking-finalize";
+import { issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome, isLateAction, parseSessionDateTimeET, computeLateFeeAmounts, settleOldBookingForReschedule, computePlayerEditPricing, parseKidsList } from "@/lib/booking-finalize";
 import { getStripe } from "@/lib/stripe";
 import { calcServiceFee, serviceFeeItemName, fmtMoney, calcPrivatePrice, getTrainerTier, normalizeTrainerTier } from "@/lib/pricing";
 import {
@@ -670,17 +670,10 @@ export async function DELETE(
   return NextResponse.json({ success: true, isLateCancel, packageSessionForfeited, fullForfeitNoRefund });
 }
 
-// Helpers for PATCH
-function parseKidsList(kidsStr: string): string[] {
-  if (!kidsStr.trim()) return [];
-  if (kidsStr.includes("(")) {
-    return kidsStr.split("), ").map((p, i, arr) =>
-      i < arr.length - 1 ? p + ")" : p
-    ).filter((s) => s.trim());
-  }
-  return kidsStr.split(",").map((s) => s.trim()).filter(Boolean);
-}
-
+// Helper for PATCH — kept local since it's only used for the reschedule
+// (PUT) handler's own duration math now that the player-edit pricing block
+// below moved into computePlayerEditPricing (booking-finalize.ts), which
+// uses sheets.ts's parseTimeToMins for the same job.
 function parseMins(t: string): number {
   const m = t.match(/(\d+):(\d+)\s*(AM|PM)/i);
   if (!m) return 0;
@@ -690,11 +683,6 @@ function parseMins(t: string): number {
   if (period === "PM" && h !== 12) h += 12;
   if (period === "AM" && h === 12) h = 0;
   return h * 60 + min;
-}
-
-function playerLabel(playerStr: string): string {
-  const idx = playerStr.indexOf(" (");
-  return idx > -1 ? playerStr.substring(0, idx).trim() : playerStr.trim();
 }
 
 // PATCH — update player list
@@ -715,83 +703,11 @@ export async function PATCH(
     return NextResponse.json({ error: "At least one player is required" }, { status: 400 });
   }
 
-  const newPlayers = players.filter((p) => p.trim());
-  const oldPlayers = parseKidsList(reg.kids);
-  const newKidsStr = newPlayers.join(", ");
-  const newCount = newPlayers.length;
-  const oldCount = oldPlayers.length;
-
-  const removedPlayers = oldPlayers.filter((op) => !newPlayers.includes(op)).map(playerLabel);
-  const addedPlayers = newPlayers.filter((np) => !oldPlayers.includes(np)).map(playerLabel);
-
-  const isLate = !!(reg.booked_date && reg.booked_start_time &&
-    isLateAction(reg.booked_date, reg.booked_start_time, reg.created_at, reg.admin_change_at));
-
-  // Price calculation
-  let newPrice: number | null = reg.session_price;
-  let lateFeeDue: number | undefined;
-  let priceChanged = false;
-  // A late weekly removal owes this as a SEPARATE fee on top of whatever the
-  // roster-size price change works out to (unlike private, where the late
-  // penalty is already baked directly into newPrice via the blended tier
-  // price below) — this is what actually gets collected via Stripe for it.
-  let additionalLateFee = 0;
-  const isPrivate = reg.type === "private" || reg.type === "group-private";
-
-  if (isPrivate && reg.booked_start_time && reg.booked_end_time) {
-    const duration = Math.max(60, parseMins(reg.booked_end_time) - parseMins(reg.booked_start_time));
-    const oldTierHigh = oldCount >= 4;
-    const newTierHigh = newCount >= 4;
-    if (oldTierHigh !== newTierHigh) {
-      const trainerTier = getTrainerTier(reg.booked_trainer);
-      const lowPrice = calcPrivatePrice(duration, 1, trainerTier);
-      const highPrice = calcPrivatePrice(duration, 4, trainerTier);
-      if (!newTierHigh) {
-        // 4+ → 1-3: dropping tier
-        newPrice = isLate ? Math.round((lowPrice + highPrice) * 100 / 2) / 100 : lowPrice;
-        if (isLate) lateFeeDue = Math.round((newPrice - lowPrice) * 100) / 100;
-      } else {
-        // 1-3 → 4+: gaining tier (no fee)
-        newPrice = highPrice;
-      }
-      priceChanged = true;
-    }
-  } else if (reg.type === "weekly" && reg.booked_group && reg.booked_date && reg.booked_start_time) {
-    // Live per-player price for THIS one session, looked up from the sheet
-    // — a flat $50/head estimate ignored the group's actual rate (e.g. a $30
-    // Pickup slot), the same bug class already fixed for reschedule. No
-    // volume-discount tier applies here — that discount is for booking
-    // several DIFFERENT sessions together in one order, not for how many
-    // players attend this one single session.
-    try {
-      const liveSessions = await getWeeklySchedule({ noCache: true });
-      const liveMatch = liveSessions.find((s) => s.group === reg.booked_group && s.date === reg.booked_date && s.startTime === reg.booked_start_time);
-      if (liveMatch) {
-        const newGroupPrice = Math.round(liveMatch.price * newCount * 100) / 100;
-        if (newGroupPrice !== reg.session_price) {
-          newPrice = newGroupPrice;
-          priceChanged = true;
-        }
-        if (isLate && removedPlayers.length > 0) {
-          lateFeeDue = removedPlayers.length * 25;
-          additionalLateFee = lateFeeDue;
-        }
-      } else {
-        console.error(`Player edit: couldn't find "${reg.booked_group}" on ${reg.booked_date} ${reg.booked_start_time} in the live sheet — price left unchanged. Verify manually.`);
-      }
-    } catch (err) {
-      console.error("Player edit: live price lookup failed — price left unchanged.", err);
-    }
-  }
-
-  const wasPaid = !!reg.is_paid || !!reg.stripe_payment_intent_id;
-  const appliedCredit = reg.applied_account_credit || 0;
-  const oldAmount = Math.max(0, (reg.is_free ? Math.round((reg.session_price ?? 0) * 0.5 * 100) / 100 : (reg.session_price ?? 0)) - appliedCredit);
-  const newAmount = priceChanged
-    ? Math.max(0, (reg.is_free && isPrivate ? Math.round((newPrice ?? 0) * 0.5 * 100) / 100 : (newPrice ?? 0)) - appliedCredit)
-    : oldAmount;
-  const priceDelta = priceChanged ? Math.round((newAmount - oldAmount) * 100) / 100 : 0;
-  const totalOwedViaCheckout = Math.round((Math.max(0, priceDelta) + additionalLateFee) * 100) / 100;
+  const pricing = await computePlayerEditPricing(reg, players);
+  const {
+    newKidsStr, newCount, removedPlayers, addedPlayers, isLate, newPrice,
+    lateFeeDue, wasPaid, priceDelta, priceChanged, totalOwedViaCheckout,
+  } = pricing;
 
   // Money owed: send the client to a real Stripe Checkout for it, same as a
   // reschedule topup — never an off-session charge, since there's no admin

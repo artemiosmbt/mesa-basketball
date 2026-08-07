@@ -3,9 +3,10 @@ import { sendRegistrationNotification, sendReferralCreditNotification, sendResch
 import { addPrivateSessionToCalendar, deletePrivateSessionFromCalendar, upsertGroupSessionCalendarEvent } from "@/lib/calendar";
 import { sendSMS, sendAdminSMS, formatDateWithDay, formatMonthYear, resolveLocationName } from "@/lib/sms";
 import { getStripe } from "@/lib/stripe";
-import { calcServiceFee, fmtMoney, packagePrice, fullPriceForType, getTrainerTier, normalizeTrainerTier } from "@/lib/pricing";
+import { calcServiceFee, fmtMoney, packagePrice, fullPriceForType, calcPrivatePrice, getTrainerTier, normalizeTrainerTier } from "@/lib/pricing";
 import { notifyTrainerOfNewBooking, notifyTrainerOfCancellation } from "@/lib/trainer-notify";
 import { trainerNamesMatch, formatTrainerForDisplay } from "@/lib/trainers";
+import { getWeeklySchedule, parseTimeToMins } from "@/lib/sheets";
 import {
   addReferralCredit,
   awardReferralCreditOnce,
@@ -1051,6 +1052,138 @@ export async function expireAbandonedCheckoutSession(session: Stripe.Checkout.Se
     return;
   }
   await expireAbandonedBookingBatch(referenceId, session.metadata?.purpose === "reschedule_topup");
+}
+
+export function parseKidsList(kidsStr: string): string[] {
+  if (!kidsStr.trim()) return [];
+  if (kidsStr.includes("(")) {
+    return kidsStr.split("), ").map((p, i, arr) =>
+      i < arr.length - 1 ? p + ")" : p
+    ).filter((s) => s.trim());
+  }
+  return kidsStr.split(",").map((s) => s.trim()).filter(Boolean);
+}
+
+export function playerLabel(playerStr: string): string {
+  const idx = playerStr.indexOf(" (");
+  return idx > -1 ? playerStr.substring(0, idx).trim() : playerStr.trim();
+}
+
+export interface PlayerEditPricing {
+  newPlayers: string[];
+  oldPlayers: string[];
+  newKidsStr: string;
+  newCount: number;
+  oldCount: number;
+  removedPlayers: string[];
+  addedPlayers: string[];
+  isLate: boolean;
+  newPrice: number | null;
+  lateFeeDue?: number;
+  priceChanged: boolean;
+  additionalLateFee: number;
+  wasPaid: boolean;
+  oldAmount: number;
+  newAmount: number;
+  // Positive = client owes more; negative = a credit is due back.
+  priceDelta: number;
+  // What a Stripe Checkout would actually charge for this change — the
+  // late fee is added on top rather than netted against a price decrease,
+  // since forgiving one against the other would understate what's owed.
+  totalOwedViaCheckout: number;
+}
+
+// Computes exactly what a roster change to `reg` would cost, WITHOUT
+// mutating anything — shared between a client-facing preview (so the
+// parent sees the real number before agreeing to pay) and the actual
+// PATCH handler that charges it. Using the same function for both is what
+// guarantees the preview can never quote a different amount than what
+// Stripe actually charges a moment later.
+export async function computePlayerEditPricing(
+  reg: Registration,
+  players: string[]
+): Promise<PlayerEditPricing> {
+  const newPlayers = players.filter((p) => p.trim());
+  const oldPlayers = parseKidsList(reg.kids);
+  const newKidsStr = newPlayers.join(", ");
+  const newCount = newPlayers.length;
+  const oldCount = oldPlayers.length;
+
+  const removedPlayers = oldPlayers.filter((op) => !newPlayers.includes(op)).map(playerLabel);
+  const addedPlayers = newPlayers.filter((np) => !oldPlayers.includes(np)).map(playerLabel);
+
+  const isLate = !!(reg.booked_date && reg.booked_start_time &&
+    isLateAction(reg.booked_date, reg.booked_start_time, reg.created_at, reg.admin_change_at));
+
+  let newPrice: number | null = reg.session_price;
+  let lateFeeDue: number | undefined;
+  let priceChanged = false;
+  // A late weekly removal owes this as a SEPARATE fee on top of whatever the
+  // roster-size price change works out to (unlike private, where the late
+  // penalty is already baked directly into newPrice via the blended tier
+  // price below) — this is what actually gets collected via Stripe for it.
+  let additionalLateFee = 0;
+  const isPrivate = reg.type === "private" || reg.type === "group-private";
+
+  if (isPrivate && reg.booked_start_time && reg.booked_end_time) {
+    const duration = Math.max(60, parseTimeToMins(reg.booked_end_time) - parseTimeToMins(reg.booked_start_time));
+    const oldTierHigh = oldCount >= 4;
+    const newTierHigh = newCount >= 4;
+    if (oldTierHigh !== newTierHigh) {
+      const trainerTier = getTrainerTier(reg.booked_trainer);
+      const lowPrice = calcPrivatePrice(duration, 1, trainerTier);
+      const highPrice = calcPrivatePrice(duration, 4, trainerTier);
+      if (!newTierHigh) {
+        // 4+ → 1-3: dropping tier
+        newPrice = isLate ? Math.round((lowPrice + highPrice) * 100 / 2) / 100 : lowPrice;
+        if (isLate) lateFeeDue = Math.round((newPrice - lowPrice) * 100) / 100;
+      } else {
+        // 1-3 → 4+: gaining tier (no fee)
+        newPrice = highPrice;
+      }
+      priceChanged = true;
+    }
+  } else if (reg.type === "weekly" && reg.booked_group && reg.booked_date && reg.booked_start_time) {
+    // Live per-player price for THIS one session, looked up from the sheet
+    // — a flat $50/head estimate ignored the group's actual rate (e.g. a $30
+    // Pickup slot). No volume-discount tier applies here — that discount is
+    // for booking several DIFFERENT sessions together, not for how many
+    // players attend this one single session.
+    try {
+      const liveSessions = await getWeeklySchedule({ noCache: true });
+      const liveMatch = liveSessions.find((s) => s.group === reg.booked_group && s.date === reg.booked_date && s.startTime === reg.booked_start_time);
+      if (liveMatch) {
+        const newGroupPrice = Math.round(liveMatch.price * newCount * 100) / 100;
+        if (newGroupPrice !== reg.session_price) {
+          newPrice = newGroupPrice;
+          priceChanged = true;
+        }
+        if (isLate && removedPlayers.length > 0) {
+          lateFeeDue = removedPlayers.length * 25;
+          additionalLateFee = lateFeeDue;
+        }
+      } else {
+        console.error(`Player edit pricing: couldn't find "${reg.booked_group}" on ${reg.booked_date} ${reg.booked_start_time} in the live sheet — price left unchanged. Verify manually.`);
+      }
+    } catch (err) {
+      console.error("Player edit pricing: live price lookup failed — price left unchanged.", err);
+    }
+  }
+
+  const wasPaid = !!reg.is_paid || !!reg.stripe_payment_intent_id;
+  const appliedCredit = reg.applied_account_credit || 0;
+  const oldAmount = Math.max(0, (reg.is_free ? Math.round((reg.session_price ?? 0) * 0.5 * 100) / 100 : (reg.session_price ?? 0)) - appliedCredit);
+  const newAmount = priceChanged
+    ? Math.max(0, (reg.is_free && isPrivate ? Math.round((newPrice ?? 0) * 0.5 * 100) / 100 : (newPrice ?? 0)) - appliedCredit)
+    : oldAmount;
+  const priceDelta = priceChanged ? Math.round((newAmount - oldAmount) * 100) / 100 : 0;
+  const totalOwedViaCheckout = Math.round((Math.max(0, priceDelta) + additionalLateFee) * 100) / 100;
+
+  return {
+    newPlayers, oldPlayers, newKidsStr, newCount, oldCount,
+    removedPlayers, addedPlayers, isLate, newPrice, lateFeeDue, priceChanged,
+    additionalLateFee, wasPaid, oldAmount, newAmount, priceDelta, totalOwedViaCheckout,
+  };
 }
 
 // Pure math, no DB calls — how much of a late reschedule's 50% forfeiture
