@@ -242,7 +242,7 @@ function DobInput({ value, onChange, required }: { value: string; onChange: (v: 
   const ddRef = useRef<HTMLInputElement>(null);
   const yyyyRef = useRef<HTMLInputElement>(null);
   return (
-    <div className="flex items-center w-full rounded-lg border border-brown-700 bg-brown-800 text-sm text-white focus-within:border-mesa-accent pl-3">
+    <div className="flex items-center w-full rounded-lg border border-mesa-accent/40 bg-brown-800 text-sm text-white focus-within:border-mesa-accent pl-3">
       <input type="text" inputMode="numeric" maxLength={2} placeholder="MM" value={mm} required={required}
         onChange={e => { const v = e.target.value.replace(/\D/g, "").slice(0, 2); onChange(buildDob(v, dd, yyyy)); if (v.length === 2) ddRef.current?.focus(); }}
         className="w-10 bg-transparent pr-1 py-2 text-center placeholder-brown-600 focus:outline-none" />
@@ -3624,8 +3624,8 @@ export default function Home() {
                               </button>
                             </div>
                           )}
-                          <div className="space-y-2 cursor-auto" onClick={(e) => e.stopPropagation()}>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <div className="space-y-2">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2" onClick={(e) => e.stopPropagation()}>
                               <div>
                                 <label className="mb-1 block text-xs text-brown-300">First Name <span className="text-red-500">*</span></label>
                                 <input
@@ -3634,7 +3634,7 @@ export default function Home() {
                                   required
                                   value={kid.firstName || ""}
                                   onChange={(e) => updateKidName(i, "first", e.target.value)}
-                                  className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
+                                  className="w-full rounded-lg border border-mesa-accent/40 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
                                 />
                               </div>
                               <div>
@@ -3645,22 +3645,22 @@ export default function Home() {
                                   required
                                   value={kid.lastName || ""}
                                   onChange={(e) => updateKidName(i, "last", e.target.value)}
-                                  className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
+                                  className="w-full rounded-lg border border-mesa-accent/40 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
                                 />
                               </div>
                             </div>
-                            <div>
+                            <div onClick={(e) => e.stopPropagation()}>
                               <label className="mb-1 block text-xs text-brown-300">Date of Birth <span className="text-red-500">*</span></label>
                               <DobInput value={kid.dob} onChange={(v) => updateKid(i, "dob", v)} required />
                             </div>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2" onClick={(e) => e.stopPropagation()}>
                               <div>
                                 <label className="mb-1 block text-xs text-brown-300">Grade <span className="text-red-500">*</span></label>
                                 <select
                                   required
                                   value={kid.grade}
                                   onChange={(e) => updateKid(i, "grade", e.target.value)}
-                                  className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white text-sm focus:border-mesa-accent focus:outline-none"
+                                  className="w-full rounded-lg border border-mesa-accent/40 bg-brown-800 px-3 py-2 text-white text-sm focus:border-mesa-accent focus:outline-none"
                                 >
                                   <option value="">Select grade...</option>
                                   {(modal.type === "weekly"
@@ -3679,7 +3679,7 @@ export default function Home() {
                                   required
                                   value={kid.gender}
                                   onChange={(e) => updateKid(i, "gender", e.target.value)}
-                                  className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white text-sm focus:border-mesa-accent focus:outline-none"
+                                  className="w-full rounded-lg border border-mesa-accent/40 bg-brown-800 px-3 py-2 text-white text-sm focus:border-mesa-accent focus:outline-none"
                                 >
                                   <option value="">Select...</option>
                                   <option value="male">Male</option>
@@ -3689,7 +3689,7 @@ export default function Home() {
                             </div>
                           </div>
                           {kid.name && (
-                            <div className="flex justify-end pt-1">
+                            <div className="flex justify-end pt-1" onClick={(e) => e.stopPropagation()}>
                               <button
                                 type="button"
                                 onClick={() => toggleKidExpanded(i)}
@@ -4296,8 +4296,8 @@ export default function Home() {
                               </button>
                             </div>
                           )}
-                          <div className="space-y-2 cursor-auto" onClick={(e) => e.stopPropagation()}>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <div className="space-y-2">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2" onClick={(e) => e.stopPropagation()}>
                               <div>
                                 <label className="mb-1 block text-xs text-brown-300">First Name <span className="text-red-500">*</span></label>
                                 <input
@@ -4306,7 +4306,7 @@ export default function Home() {
                                   required
                                   value={kid.firstName || ""}
                                   onChange={(e) => updateKidName(i, "first", e.target.value)}
-                                  className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
+                                  className="w-full rounded-lg border border-mesa-accent/40 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
                                 />
                               </div>
                               <div>
@@ -4317,21 +4317,21 @@ export default function Home() {
                                   required
                                   value={kid.lastName || ""}
                                   onChange={(e) => updateKidName(i, "last", e.target.value)}
-                                  className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
+                                  className="w-full rounded-lg border border-mesa-accent/40 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
                                 />
                               </div>
                             </div>
-                            <div>
+                            <div onClick={(e) => e.stopPropagation()}>
                               <label className="mb-1 block text-xs text-brown-300">Date of Birth <span className="text-red-500">*</span></label>
                               <DobInput value={kid.dob} onChange={(v) => updateKid(i, "dob", v)} required />
                             </div>
-                            <div>
+                            <div onClick={(e) => e.stopPropagation()}>
                               <label className="mb-1 block text-xs text-brown-300">Grade <span className="text-red-500">*</span></label>
                               <select
                                 required
                                 value={kid.grade}
                                 onChange={(e) => updateKid(i, "grade", e.target.value)}
-                                className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white text-sm focus:border-mesa-accent focus:outline-none"
+                                className="w-full rounded-lg border border-mesa-accent/40 bg-brown-800 px-3 py-2 text-white text-sm focus:border-mesa-accent focus:outline-none"
                               >
                                 <option value="">Select grade...</option>
                                 <option value="K">Kindergarten</option>
@@ -4353,7 +4353,7 @@ export default function Home() {
                             </div>
                           </div>
                           {kid.name && (
-                            <div className="flex justify-end pt-1">
+                            <div className="flex justify-end pt-1" onClick={(e) => e.stopPropagation()}>
                               <button
                                 type="button"
                                 onClick={() => toggleKidExpanded(i)}

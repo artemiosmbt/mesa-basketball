@@ -43,7 +43,7 @@ function DobInput({ value, onChange }: { value: string; onChange: (v: string) =>
   const ddRef = useRef<HTMLInputElement>(null);
   const yyyyRef = useRef<HTMLInputElement>(null);
   return (
-    <div className="flex items-center w-full rounded-lg border border-brown-700 bg-brown-800/60 text-sm text-white focus-within:border-mesa-accent pl-3">
+    <div className="flex items-center w-full rounded-lg border border-mesa-accent/40 bg-brown-800/60 text-sm text-white focus-within:border-mesa-accent pl-3">
       <input type="text" inputMode="numeric" maxLength={2} placeholder="MM" value={mm}
         onChange={e => { const v = e.target.value.replace(/\D/g, "").slice(0, 2); onChange(buildDob(v, dd, yyyy)); if (v.length === 2) ddRef.current?.focus(); }}
         className="w-10 bg-transparent pr-1 py-2 text-center placeholder-brown-500 focus:outline-none" />
@@ -371,27 +371,27 @@ export default function SettingsPage() {
                             </button>
                           </div>
                         )}
-                        <div className="space-y-2 cursor-auto" onClick={(e) => e.stopPropagation()}>
-                          <div>
+                        <div className="space-y-2">
+                          <div onClick={(e) => e.stopPropagation()}>
                             <label className="mb-1 block text-xs text-brown-400">Name</label>
                             <input
                               type="text"
                               value={kid.name}
                               onChange={(e) => updateKid(i, "name", e.target.value)}
                               placeholder="Player's full name"
-                              className="w-full rounded-lg border border-brown-700 bg-brown-800/60 px-3 py-2 text-sm text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
+                              className="w-full rounded-lg border border-mesa-accent/40 bg-brown-800/60 px-3 py-2 text-sm text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
                             />
                           </div>
-                          <div>
+                          <div onClick={(e) => e.stopPropagation()}>
                             <label className="mb-1 block text-xs text-brown-400">Date of Birth</label>
                             <DobInput value={kid.dob} onChange={(v) => updateKid(i, "dob", v)} />
                           </div>
-                          <div>
+                          <div onClick={(e) => e.stopPropagation()}>
                             <label className="mb-1 block text-xs text-brown-400">Grade</label>
                             <select
                               value={kid.grade}
                               onChange={(e) => updateKid(i, "grade", e.target.value)}
-                              className="w-full rounded-lg border border-brown-700 bg-brown-800/60 px-3 py-2 text-sm text-white focus:border-mesa-accent focus:outline-none"
+                              className="w-full rounded-lg border border-mesa-accent/40 bg-brown-800/60 px-3 py-2 text-sm text-white focus:border-mesa-accent focus:outline-none"
                             >
                               <option value="">Select grade...</option>
                               {ALL_GRADES.map((g) => (
@@ -399,12 +399,12 @@ export default function SettingsPage() {
                               ))}
                             </select>
                           </div>
-                          <div>
+                          <div onClick={(e) => e.stopPropagation()}>
                             <label className="mb-1 block text-xs text-brown-400">Gender</label>
                             <select
                               value={kid.gender || ""}
                               onChange={(e) => updateKid(i, "gender", e.target.value)}
-                              className="w-full rounded-lg border border-brown-700 bg-brown-800/60 px-3 py-2 text-sm text-white focus:border-mesa-accent focus:outline-none"
+                              className="w-full rounded-lg border border-mesa-accent/40 bg-brown-800/60 px-3 py-2 text-sm text-white focus:border-mesa-accent focus:outline-none"
                             >
                               <option value="">Select gender...</option>
                               <option value="male">Male</option>
@@ -413,7 +413,7 @@ export default function SettingsPage() {
                           </div>
                         </div>
                         {kid.name && (
-                          <div className="flex justify-end pt-1">
+                          <div className="flex justify-end pt-1" onClick={(e) => e.stopPropagation()}>
                             <button
                               type="button"
                               onClick={() => toggleKidExpanded(i)}

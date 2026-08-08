@@ -144,7 +144,7 @@ function DobInput({ value, onChange, required }: { value: string; onChange: (v: 
   const ddRef = useRef<HTMLInputElement>(null);
   const yyyyRef = useRef<HTMLInputElement>(null);
   return (
-    <div className="flex items-center w-full rounded border border-brown-700 bg-brown-900 text-sm text-white focus-within:border-mesa-accent pl-3">
+    <div className="flex items-center w-full rounded border border-mesa-accent/40 bg-brown-900 text-sm text-white focus-within:border-mesa-accent pl-3">
       <input type="text" inputMode="numeric" maxLength={2} placeholder="MM" value={mm} required={required}
         onChange={e => { const v = e.target.value.replace(/\D/g, "").slice(0, 2); onChange(buildDob(v, dd, yyyy)); if (v.length === 2) ddRef.current?.focus(); }}
         className="w-10 bg-transparent pr-1 py-2 text-center placeholder-brown-600 focus:outline-none" />
@@ -1521,8 +1521,8 @@ export default function ManageBooking({
                               </button>
                             </div>
                           )}
-                          <div className="space-y-2 cursor-auto" onClick={(e) => e.stopPropagation()}>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <div className="space-y-2">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2" onClick={(e) => e.stopPropagation()}>
                               <div>
                                 <label className="mb-1 block text-xs text-brown-300">First Name <span className="text-red-500">*</span></label>
                                 <input
@@ -1531,7 +1531,7 @@ export default function ManageBooking({
                                   required
                                   value={player.firstName}
                                   onChange={e => updateReschedulePlayerName(i, "first", e.target.value)}
-                                  className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
+                                  className="w-full rounded-lg border border-mesa-accent/40 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
                                 />
                               </div>
                               <div>
@@ -1542,18 +1542,18 @@ export default function ManageBooking({
                                   required
                                   value={player.lastName}
                                   onChange={e => updateReschedulePlayerName(i, "last", e.target.value)}
-                                  className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
+                                  className="w-full rounded-lg border border-mesa-accent/40 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
                                 />
                               </div>
                             </div>
-                            <div>
+                            <div onClick={(e) => e.stopPropagation()}>
                               <label className="mb-1 block text-xs text-brown-300">Date of Birth <span className="text-red-500">*</span></label>
                               <DobInput value={player.dob} onChange={v => setReschedulePlayers(prev => prev.map((p, j) => j === i ? { ...p, dob: v } : p))} required />
                             </div>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2" onClick={(e) => e.stopPropagation()}>
                               <div>
                                 <label className="mb-1 block text-xs text-brown-300">Grade <span className="text-red-500">*</span></label>
-                                <select required value={player.grade} onChange={e => setReschedulePlayers(prev => prev.map((p, j) => j === i ? { ...p, grade: e.target.value } : p))} className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white text-sm focus:border-mesa-accent focus:outline-none">
+                                <select required value={player.grade} onChange={e => setReschedulePlayers(prev => prev.map((p, j) => j === i ? { ...p, grade: e.target.value } : p))} className="w-full rounded-lg border border-mesa-accent/40 bg-brown-800 px-3 py-2 text-white text-sm focus:border-mesa-accent focus:outline-none">
                                   <option value="">Select grade...</option>
                                   <option value="K">Kindergarten</option>
                                   <option value="1">1st Grade</option><option value="2">2nd Grade</option><option value="3">3rd Grade</option><option value="4">4th Grade</option><option value="5">5th Grade</option><option value="6">6th Grade</option><option value="7">7th Grade</option><option value="8">8th Grade</option><option value="9">9th Grade</option><option value="10">10th Grade</option><option value="11">11th Grade</option><option value="12">12th Grade</option>
@@ -1563,7 +1563,7 @@ export default function ManageBooking({
                               </div>
                               <div>
                                 <label className="mb-1 block text-xs text-brown-300">Gender <span className="text-red-500">*</span></label>
-                                <select required value={player.gender} onChange={e => setReschedulePlayers(prev => prev.map((p, j) => j === i ? { ...p, gender: e.target.value } : p))} className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white text-sm focus:border-mesa-accent focus:outline-none">
+                                <select required value={player.gender} onChange={e => setReschedulePlayers(prev => prev.map((p, j) => j === i ? { ...p, gender: e.target.value } : p))} className="w-full rounded-lg border border-mesa-accent/40 bg-brown-800 px-3 py-2 text-white text-sm focus:border-mesa-accent focus:outline-none">
                                   <option value="">Select...</option>
                                   <option value="Male">Male</option>
                                   <option value="Female">Female</option>
@@ -1572,7 +1572,7 @@ export default function ManageBooking({
                             </div>
                           </div>
                           {player.name && (
-                            <div className="flex justify-end pt-1">
+                            <div className="flex justify-end pt-1" onClick={(e) => e.stopPropagation()}>
                               <button
                                 type="button"
                                 onClick={() => toggleReschedulePlayerExpanded(i)}
