@@ -196,6 +196,18 @@ export default function SettingsPage() {
     });
   }
 
+  // Collapses (never re-expands) — used for "click anywhere on an expanded
+  // card to close it" so it stays idempotent even if a click bubbles up
+  // from more than one place at once.
+  function collapseKid(i: number) {
+    setExpandedKids((s) => {
+      if (!s.has(i)) return s;
+      const next = new Set(s);
+      next.delete(i);
+      return next;
+    });
+  }
+
   function updateKid(i: number, field: string, value: string) {
     setKids((prev) => prev.map((k, idx) => idx === i ? { ...k, [field]: value } : k));
   }
@@ -273,7 +285,7 @@ export default function SettingsPage() {
         <form onSubmit={handleSave} className="space-y-8">
 
           {/* Contact Info */}
-          <div className="bg-brown-900/40 border border-brown-700 rounded-xl px-4 sm:px-6 py-6 space-y-4">
+          <div className="bg-brown-900/40 border-2 border-brown-600 rounded-xl shadow-lg shadow-black/30 px-4 sm:px-6 py-6 space-y-4">
             <h2 className="text-xs font-semibold uppercase tracking-widest text-mesa-accent">Contact Info</h2>
 
             <div>
@@ -313,16 +325,16 @@ export default function SettingsPage() {
           </div>
 
           {/* Athletes */}
-          <div className="bg-brown-900/40 border border-brown-700 rounded-xl px-4 sm:px-6 py-6 space-y-4">
+          <div className="bg-brown-900/40 border-2 border-brown-600 rounded-xl shadow-lg shadow-black/30 px-4 sm:px-6 py-6 space-y-4">
             <h2 className="text-xs font-semibold uppercase tracking-widest text-mesa-accent">Athletes</h2>
             <div className="space-y-3">
               {kids.map((kid, i) => {
                 const isExpanded = expandedKids.has(i) || !kid.name;
                 const isConfirmingDelete = confirmDeleteIndex === i;
                 return (
-                  <div key={i} className="rounded-lg border border-brown-600 bg-brown-800/30 p-3 shadow-md shadow-black/20">
+                  <div key={i} className="flex flex-col gap-2">
                     {isConfirmingDelete ? (
-                      <div className="space-y-2.5">
+                      <div className="rounded-lg border-2 border-red-700/60 bg-red-900/10 p-3 shadow-lg shadow-black/30 space-y-2.5">
                         <p className="text-sm text-brown-200">
                           Delete <span className="font-semibold text-white">{kid.name || "this athlete"}</span>? This can&apos;t be undone.
                         </p>
@@ -344,61 +356,73 @@ export default function SettingsPage() {
                         </div>
                       </div>
                     ) : isExpanded ? (
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs text-brown-400 font-medium">Athlete {i + 1}</span>
-                          <div className="flex items-center gap-3">
-                            {kid.name && (
-                              <button type="button" onClick={() => toggleKidExpanded(i)} className="text-xs text-mesa-accent hover:text-yellow-300">
-                                Done
-                              </button>
-                            )}
-                            {kids.length > 1 && (
-                              <button type="button" onClick={() => setConfirmDeleteIndex(i)} className="text-xs text-red-400 hover:text-red-300">
-                                Remove
-                              </button>
-                            )}
+                      <div
+                        onClick={() => collapseKid(i)}
+                        className="rounded-lg border-2 border-mesa-accent bg-brown-800 p-3 shadow-lg shadow-black/30 space-y-2 cursor-pointer"
+                      >
+                        {kids.length > 1 && (
+                          <div className="flex justify-end -mt-1 -mr-1" onClick={(e) => e.stopPropagation()}>
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDeleteIndex(i)}
+                              className="flex h-7 w-7 items-center justify-center rounded-full text-brown-300 hover:bg-brown-900 hover:text-red-400 text-xl leading-none"
+                            >
+                              &times;
+                            </button>
+                          </div>
+                        )}
+                        <div className="space-y-2 cursor-auto" onClick={(e) => e.stopPropagation()}>
+                          <div>
+                            <label className="mb-1 block text-xs text-brown-400">Name</label>
+                            <input
+                              type="text"
+                              value={kid.name}
+                              onChange={(e) => updateKid(i, "name", e.target.value)}
+                              placeholder="Player's full name"
+                              className="w-full rounded-lg border border-brown-700 bg-brown-800/60 px-3 py-2 text-sm text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
+                            />
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-xs text-brown-400">Date of Birth</label>
+                            <DobInput value={kid.dob} onChange={(v) => updateKid(i, "dob", v)} />
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-xs text-brown-400">Grade</label>
+                            <select
+                              value={kid.grade}
+                              onChange={(e) => updateKid(i, "grade", e.target.value)}
+                              className="w-full rounded-lg border border-brown-700 bg-brown-800/60 px-3 py-2 text-sm text-white focus:border-mesa-accent focus:outline-none"
+                            >
+                              <option value="">Select grade...</option>
+                              {ALL_GRADES.map((g) => (
+                                <option key={g.value} value={g.value}>{g.label}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-xs text-brown-400">Gender</label>
+                            <select
+                              value={kid.gender || ""}
+                              onChange={(e) => updateKid(i, "gender", e.target.value)}
+                              className="w-full rounded-lg border border-brown-700 bg-brown-800/60 px-3 py-2 text-sm text-white focus:border-mesa-accent focus:outline-none"
+                            >
+                              <option value="">Select gender...</option>
+                              <option value="male">Male</option>
+                              <option value="female">Female</option>
+                            </select>
                           </div>
                         </div>
-                        <div>
-                          <label className="mb-1 block text-xs text-brown-400">Name</label>
-                          <input
-                            type="text"
-                            value={kid.name}
-                            onChange={(e) => updateKid(i, "name", e.target.value)}
-                            placeholder="Player's full name"
-                            className="w-full rounded-lg border border-brown-700 bg-brown-800/60 px-3 py-2 text-sm text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
-                          />
-                        </div>
-                        <div>
-                          <label className="mb-1 block text-xs text-brown-400">Date of Birth</label>
-                          <DobInput value={kid.dob} onChange={(v) => updateKid(i, "dob", v)} />
-                        </div>
-                        <div>
-                          <label className="mb-1 block text-xs text-brown-400">Grade</label>
-                          <select
-                            value={kid.grade}
-                            onChange={(e) => updateKid(i, "grade", e.target.value)}
-                            className="w-full rounded-lg border border-brown-700 bg-brown-800/60 px-3 py-2 text-sm text-white focus:border-mesa-accent focus:outline-none"
-                          >
-                            <option value="">Select grade...</option>
-                            {ALL_GRADES.map((g) => (
-                              <option key={g.value} value={g.value}>{g.label}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div>
-                          <label className="mb-1 block text-xs text-brown-400">Gender</label>
-                          <select
-                            value={kid.gender || ""}
-                            onChange={(e) => updateKid(i, "gender", e.target.value)}
-                            className="w-full rounded-lg border border-brown-700 bg-brown-800/60 px-3 py-2 text-sm text-white focus:border-mesa-accent focus:outline-none"
-                          >
-                            <option value="">Select gender...</option>
-                            <option value="male">Male</option>
-                            <option value="female">Female</option>
-                          </select>
-                        </div>
+                        {kid.name && (
+                          <div className="flex justify-end pt-1">
+                            <button
+                              type="button"
+                              onClick={() => toggleKidExpanded(i)}
+                              className="rounded bg-mesa-accent px-4 py-1.5 text-xs font-semibold text-white hover:bg-yellow-600 transition"
+                            >
+                              Save Changes
+                            </button>
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <div className="flex items-center justify-between gap-3">
@@ -439,7 +463,7 @@ export default function SettingsPage() {
 
           {/* Referral Code — admin only */}
           {userEmail === "artemios@mesabasketballtraining.com" && (
-            <div className="bg-brown-900/40 border border-brown-700 rounded-xl px-4 sm:px-6 py-6 space-y-3">
+            <div className="bg-brown-900/40 border-2 border-brown-600 rounded-xl shadow-lg shadow-black/30 px-4 sm:px-6 py-6 space-y-3">
               <h2 className="text-xs font-semibold uppercase tracking-widest text-mesa-accent">Referral Code</h2>
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-widest text-brown-400 mb-1.5">Your Code</label>
@@ -457,7 +481,7 @@ export default function SettingsPage() {
           )}
 
           {/* Preferences */}
-          <div className="bg-brown-900/40 border border-brown-700 rounded-xl px-4 sm:px-6 py-6 space-y-4">
+          <div className="bg-brown-900/40 border-2 border-brown-600 rounded-xl shadow-lg shadow-black/30 px-4 sm:px-6 py-6 space-y-4">
             <h2 className="text-xs font-semibold uppercase tracking-widest text-mesa-accent">Preferences</h2>
 
             <label className="flex items-start gap-3 cursor-pointer">
