@@ -263,7 +263,16 @@ function deriveSession(reg: RegRow, isLateCancel: boolean, lateFeeAmountKept: nu
   const kidsLabel = kids.join(", ") || reg.parent_name || reg.email || "Unknown";
   const isCamp = reg.type === "camp";
   const isGroupColumn = reg.type === "weekly" || isCamp;
-  const amountText = isPackage ? "(Package — already paid)" : `$${price.toFixed(2)}`;
+  // Show what was actually kept, not the nominal session price — a late
+  // cancel/reschedule only keeps part (sometimes none, sometimes all) of
+  // the original price, and a label reading "$150.00" next to a day whose
+  // total only reflects $75 of it would be a real audit-trail mismatch,
+  // exactly the kind of discrepancy this tracker exists to avoid.
+  const amountText = isPackage
+    ? "(Package — already paid)"
+    : isLoggableLate
+      ? `$${grossRevenue.toFixed(2)} (late cancel/reschedule — kept)`
+      : `$${price.toFixed(2)}`;
   const label = isCamp
     ? `[Camp] ${reg.booked_group || "Camp"} (${kidsLabel}) ${amountText}`
     : isGroupColumn
