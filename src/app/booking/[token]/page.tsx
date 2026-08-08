@@ -1494,7 +1494,7 @@ export default function ManageBooking({
                     return (
                     <div key={i} className="flex flex-col gap-2 pb-2">
                       {isExpanded ? (
-                        <>
+                        <div className="rounded-lg border border-brown-700 bg-brown-800/50 p-3 space-y-2">
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                             <div>
                               <label className="mb-1 block text-xs text-brown-300">First Name <span className="text-red-500">*</span></label>
@@ -1555,7 +1555,7 @@ export default function ManageBooking({
                               </select>
                             </div>
                           </div>
-                        </>
+                        </div>
                       ) : (
                         <div className="flex items-center justify-between gap-3 rounded-full border-2 border-mesa-accent bg-brown-800 py-1.5 pl-4 pr-2 shadow-lg shadow-black/30 hover:bg-brown-700 transition min-w-[180px]">
                           <button
