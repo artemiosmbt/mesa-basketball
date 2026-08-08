@@ -69,9 +69,22 @@ const STRIPE_FIXED = 0.3;
 
 interface LocationSeed { name: string; monthlyRent: number }
 const KNOWN_LOCATIONS: LocationSeed[] = [
-  { name: "St. Paul's Cathedral", monthlyRent: 900 },
+  { name: "St. Paul's", monthlyRent: 900 },
   { name: "Cherry Valley Sports", monthlyRent: 300 },
 ];
+
+// booked_location is free text typed into the live schedule, not a fixed
+// enum — a live spot-check caught it stored as "St. Paul's", not the fuller
+// "St. Paul's Cathedral" this was first written with, silently dumping all
+// of that month's revenue into the "Other/Unlisted" catch-all instead.
+// Fuzzy-matching (rather than requiring an exact string) means a small
+// future variant of the same name doesn't reintroduce that silently.
+function locationMatches(rawLocation: string, knownName: string): boolean {
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const a = norm(rawLocation), b = norm(knownName);
+  if (!a || !b) return false;
+  return a.includes(b) || b.includes(a);
+}
 
 // ---------------------------------------------------------------------------
 // Supabase
@@ -559,7 +572,11 @@ async function buildMonthTab(year: number, month1: number, sessions: DerivedSess
     const existingRent = await readExistingRent(tabName, row0 + 1); // 1-indexed row for getValues
     const rent = existingRent ?? loc.monthlyRent;
     monthRentTotal += rent;
-    const revenue = round2(revenueByLocation.get(loc.name) || 0);
+    let revenue = 0;
+    for (const [rawLoc, amt] of revenueByLocation) {
+      if (locationMatches(rawLoc, loc.name)) revenue += amt;
+    }
+    revenue = round2(revenue);
     namedLocationRevenue += revenue;
     requests.push({
       updateCells: {
