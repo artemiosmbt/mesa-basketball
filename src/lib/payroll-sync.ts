@@ -38,25 +38,13 @@ import {
 // site's own pricing constants (src/lib/pricing.ts, "other" tier).
 // ---------------------------------------------------------------------------
 
-// Exported so company-overview-setup.ts's one-time tab setup can target the
-// exact same tab names without keeping a second, driftable copy of this list.
-export const TRAINERS = [
+const TRAINERS = [
   "Joseph Owens",
   "Zhaneia Thybulle",
   "Steven Papadimitropoulos",
   "Tristan Wissemann",
   "Zain Amjad",
 ] as const;
-
-// The owner's own sessions and all camp bookings get their own tabs,
-// cloned from the same row-4 template as the 5 sub-trainer tabs (see
-// setupCompanyOverview in company-overview-setup.ts) so they reuse the
-// exact same verified Gross/Net Revenue formula chain. Unlike the 5
-// sub-trainer tabs, rows written to these two use rawPriceMode — see
-// deriveRow.
-export const OWNER_TAB = "Artemios Gavalas";
-export const CAMP_TAB = "Camps";
-const OWNER_NAME = "Artemios Gavalas";
 
 /** Case/whitespace-insensitive match, since the trainer name that ends up on
  * a booking is whatever gets typed into the schedule spreadsheet's Trainer
@@ -108,7 +96,6 @@ interface RegistrationRow {
   booked_date: string | null;
   booked_start_time: string | null;
   booked_end_time: string | null;
-  booked_location: string | null;
   booked_trainer: string | null;
   status: string;
   session_price: number | null;
@@ -212,13 +199,6 @@ function deriveRowFingerprint(r: DerivedRow): string {
   return JSON.stringify([
     r.cancellationFlag, r.participants, r.startTime, r.endTime,
     r.paymentType, r.packageSize, r.discount, r.creditApplied,
-    // location/rawPrice aren't covered by any of the fields above (unlike
-    // sub-trainer rows, where a price change always shows up indirectly via
-    // participants/times/discount feeding the sheet's own formula) — an
-    // owner/camp row's price is written literally, so it needs its own
-    // explicit place in the fingerprint or a later price-only correction
-    // would never be detected as a change.
-    r.location, r.rawPrice,
   ]);
 }
 
@@ -288,7 +268,7 @@ function deriveCancellationFlag(
 
 interface DerivedRow {
   date: string;
-  sessionType: "Group" | "Private" | "Camp";
+  sessionType: "Group" | "Private";
   participants: number;
   startTime: string;
   endTime: string;
@@ -298,39 +278,18 @@ interface DerivedRow {
   creditApplied: number;
   cancellationFlag: CancellationFlag;
   notes: string;
-  location: string;
-  // Non-null only for OWNER_TAB/CAMP_TAB rows (see rawPriceMode below) — the
-  // actual dollar amount to write literally into column L, overwriting
-  // whatever formula got cloned into that cell there. The 5 real
-  // sub-trainer tabs leave this null and keep computing L via their own
-  // already-verified rate*hours formula, untouched. Owner/camp sessions
-  // can't safely reuse that formula: it references flat, sub-trainer-tier
-  // rate named ranges (e.g. PrivateRate13Client), so it would silently
-  // understate an owner-tier private session's real price, and camps
-  // aren't rate*hours priced at all (L4's formula has no branch for them —
-  // its Session Type IF/IF chain only recognizes "Group"/"Private" and
-  // falls through to a blank string for anything else, which would break
-  // every downstream formula that chains off it: N (Discounted Session
-  // Price) -> R (Gross Revenue to Mesa) -> T (Net Revenue to Mesa)).
-  // Writing the real session_price directly sidesteps both problems by
-  // using the actual charged amount as ground truth instead of
-  // re-deriving it from a rate table that was never built to cover these
-  // two tabs.
-  rawPrice: number | null;
 }
 
 function deriveRow(
   reg: RegistrationRow,
   lateFeeAction: "cancel" | "reschedule" | undefined,
-  packageType: number | null,
-  rawPriceMode: boolean
+  packageType: number | null
 ): DerivedRow | null {
   const cancellationFlag = deriveCancellationFlag(reg, lateFeeAction);
   if (!cancellationFlag) return null;
   if (!reg.booked_date || !reg.booked_start_time || !reg.booked_end_time) return null;
 
-  const sessionType: DerivedRow["sessionType"] =
-    reg.type === "camp" ? "Camp" : reg.type === "weekly" ? "Group" : "Private";
+  const sessionType: "Group" | "Private" = reg.type === "weekly" ? "Group" : "Private";
   const participants = reg.total_participants || 1;
   const hours = hoursBetween(reg.booked_start_time, reg.booked_end_time) ?? 0;
   const credit = reg.applied_account_credit || 0;
@@ -348,11 +307,8 @@ function deriveRow(
   // Discount only applies to non-package Group (pay-as-you-go weekly) rows —
   // inferred by comparing the sheet's own pre-discount formula against what
   // was actually charged, since the live discount % isn't stored anywhere.
-  // Skipped entirely in rawPriceMode: L is the real charged price already
-  // (post-discount), not a rate-table "before discount" figure to compare
-  // against, so there's nothing to infer a percentage from.
   let discount = 0;
-  if (!rawPriceMode && sessionType === "Group" && paymentType !== "Package (Prepaid)" && hours > 0) {
+  if (sessionType === "Group" && paymentType !== "Package (Prepaid)" && hours > 0) {
     const undiscounted = GROUP_CLIENT_RATE * participants * hours;
     if (undiscounted > 0) {
       const impliedPct = 1 - price / undiscounted;
@@ -377,18 +333,13 @@ function deriveRow(
     creditApplied: credit,
     cancellationFlag,
     notes: `Auto-synced: ${reg.parent_name || reg.email || ""}`.trim(),
-    location: reg.booked_location || "",
-    rawPrice: rawPriceMode ? price : null,
   };
 }
 
-/** The raw input columns, in sheet order (skipping formula columns). L
- * (rawPrice) is only included for owner/camp rows — see DerivedRow.rawPrice.
- * Y (location) is written for every row, sub-trainer tabs included. */
+/** The 10 input-column values, in A,C,D,E,F,J,K,M,O,V,X sheet order (skipping formula columns). */
 function rowToInputValues(r: DerivedRow): { range: string; values: unknown[] }[] {
   return [
     { range: "A", values: [r.date] },
-    ...(r.rawPrice !== null ? [{ range: "L", values: [r.rawPrice] }] : []),
     { range: "C", values: [r.sessionType] },
     { range: "D", values: [r.participants] },
     { range: "E", values: [r.startTime] },
@@ -399,7 +350,6 @@ function rowToInputValues(r: DerivedRow): { range: string; values: unknown[] }[]
     { range: "O", values: [r.creditApplied] },
     { range: "V", values: [r.cancellationFlag] },
     { range: "X", values: [r.notes] },
-    { range: "Y", values: [r.location] },
   ];
 }
 
@@ -410,10 +360,8 @@ async function writeTrainerRow(
   r: DerivedRow
 ): Promise<void> {
   // One batched request instead of one values.update per column — Sheets'
-  // write-request quota is spent per HTTP call, not per cell, so this is
-  // ~12 quota units down to 1 for every row (see sheets-write.ts's
-  // batchUpdateValues comment — this is what actually hit the 429 wall on
-  // the first real backfill).
+  // write-request quota is spent per HTTP call regardless of how many
+  // cells it touches, so this is ~11 quota units down to 1 for every row.
   await batchUpdateValues(
     spreadsheetId,
     rowToInputValues(r).map(({ range, values }) => ({
@@ -463,22 +411,15 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
   const nextRow = maxRowPerTab(log);
   let writesThisRun = 0;
 
-  // ---- sessions: registrations -> trainer/owner/camp tabs ----
-  // Camps never carry a booked_trainer (see api/register/route.ts's camp
-  // insert block — no trainer field is ever passed for a camp-day row), so
-  // the old `.not("booked_trainer", "is", null)` filter has to go; a camp
-  // row is instead routed purely by type === "camp" in the loop below,
-  // regardless of trainer. Every other (non-camp) row still needs a real
-  // trainer name to be logged anywhere — that's enforced in the loop, not
-  // here, so the "unknown trainer" skip counter still means what it always
-  // has for weekly/private/group-private rows.
+  // ---- sessions: registrations -> trainer tabs ----
   const { data: regs, error: regErr } = await supabase
     .from("registrations")
     .select(
-      "id, parent_name, email, type, total_participants, booked_date, booked_start_time, booked_end_time, booked_location, booked_trainer, status, session_price, applied_account_credit, package_id"
+      "id, parent_name, email, type, total_participants, booked_date, booked_start_time, booked_end_time, booked_trainer, status, session_price, applied_account_credit, package_id"
     )
-    .in("type", ["weekly", "private", "group-private", "camp"])
-    .in("status", ["confirmed", "cancelled", "no_show"]);
+    .in("type", ["weekly", "private", "group-private"])
+    .in("status", ["confirmed", "cancelled", "no_show"])
+    .not("booked_trainer", "is", null);
   if (regErr) {
     result.errors.push(`registrations query: ${regErr.message}`);
   }
@@ -529,31 +470,10 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
   for (const reg of registrations) {
     if (writesThisRun >= MAX_WRITES_PER_RUN) break;
 
-    // Camps route by type alone (never by trainer — see the query comment
-    // above). Everything else routes by trainer name: the owner's own
-    // sessions get their own tab (rawPriceMode, since the sub-trainer rate
-    // formulas don't apply to him), the 5 sub-trainers keep their existing
-    // formula-driven tabs exactly as before, and anyone else unrecognized
-    // is still skipped as "unknown trainer" — unchanged behavior for every
-    // non-camp, non-owner row.
-    let tab: string;
-    let rawPriceMode: boolean;
-    if (reg.type === "camp") {
-      tab = CAMP_TAB;
-      rawPriceMode = true;
-    } else {
-      const normalizedTrainer = normalizeTrainerName(reg.booked_trainer || "");
-      const subTrainer = TRAINER_BY_NORMALIZED.get(normalizedTrainer);
-      if (subTrainer) {
-        tab = subTrainer;
-        rawPriceMode = false;
-      } else if (normalizedTrainer === normalizeTrainerName(OWNER_NAME)) {
-        tab = OWNER_TAB;
-        rawPriceMode = true;
-      } else {
-        result.sessionsSkippedUnknownTrainer++;
-        continue;
-      }
+    const trainer = TRAINER_BY_NORMALIZED.get(normalizeTrainerName(reg.booked_trainer || ""));
+    if (!trainer) {
+      result.sessionsSkippedUnknownTrainer++;
+      continue;
     }
     if (reg.status === "cancelled" && !isLateCancelById.get(reg.id)) {
       // Non-late cancellation — no compensable work, spec says don't log it.
@@ -564,8 +484,7 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
     const derived = deriveRow(
       reg,
       lateFeeByReg.get(reg.id),
-      reg.package_id ? packageTypeById.get(reg.package_id) ?? null : null,
-      rawPriceMode
+      reg.package_id ? packageTypeById.get(reg.package_id) ?? null : null
     );
     if (!derived) {
       result.sessionsSkippedNoLoggableStatus++;
@@ -577,26 +496,26 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
       const existing = log.get(reg.id);
       if (existing) {
         if (existing.status === fingerprint) continue; // already synced, unchanged
-        await writeTrainerRow(spreadsheetId, tab, existing.row, derived);
+        await writeTrainerRow(spreadsheetId, trainer, existing.row, derived);
         existing.status = fingerprint;
         await appendValues(spreadsheetId, `${a1Quote(SYNC_LOG_TAB)}!A:D`, [
-          [reg.id, tab, existing.row, fingerprint],
+          [reg.id, trainer, existing.row, fingerprint],
         ]);
         result.sessionsUpdated++;
       } else {
-        const row = Math.max(nextRow.get(tab) ?? TRAINER_FIRST_ROW - 1, TRAINER_FIRST_ROW - 1) + 1;
+        const row = Math.max(nextRow.get(trainer) ?? TRAINER_FIRST_ROW - 1, TRAINER_FIRST_ROW - 1) + 1;
         await copyRow(
           spreadsheetId,
-          await sheetIdFor(spreadsheetId, tab),
+          await sheetIdFor(spreadsheetId, trainer),
           TRAINER_FIRST_ROW,
           row,
           TRAINER_NUM_COLS
         );
-        await writeTrainerRow(spreadsheetId, tab, row, derived);
-        nextRow.set(tab, row);
-        log.set(reg.id, { key: reg.id, tab, row, status: fingerprint });
+        await writeTrainerRow(spreadsheetId, trainer, row, derived);
+        nextRow.set(trainer, row);
+        log.set(reg.id, { key: reg.id, tab: trainer, row, status: fingerprint });
         await appendValues(spreadsheetId, `${a1Quote(SYNC_LOG_TAB)}!A:D`, [
-          [reg.id, tab, row, fingerprint],
+          [reg.id, trainer, row, fingerprint],
         ]);
         result.sessionsWritten++;
       }
@@ -616,11 +535,9 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
 
   for (const pkg of (pkgSales || []) as MonthlyPackageRow[]) {
     if (writesThisRun >= MAX_WRITES_PER_RUN) break;
-    // Both tiers are logged now — packages for the owner's own sessions are
-    // a real revenue event even though they're not a sub-trainer payroll
-    // line item, and this log has no trainer-compensation column at all
-    // (Package Sales Log is purely revenue/fee accounting), so there's
-    // nothing tier-specific it would misrepresent by including them.
+    // Only the 5 sub-trainers' packages ("other" tier) belong in this payroll
+    // sheet — packages for the owner's own sessions aren't a payroll line item.
+    if ((pkg.trainer_tier || "artemios") !== "other") continue;
 
     const key = `pkg:${pkg.id}`;
     try {
@@ -631,24 +548,12 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
       const packageSize = pkg.package_type === 8 ? "8-Pack" : "4-Pack";
       // One batched request instead of one values.update per column — same
       // quota reasoning as writeTrainerRow above.
-      const pslWrites: { range: string; values: unknown[][] }[] = [
+      await batchUpdateValues(spreadsheetId, [
         { range: `${a1Quote(PSL_TAB)}!A${row}`, values: [[dateStr]] },
         { range: `${a1Quote(PSL_TAB)}!B${row}`, values: [[packageSize]] },
         { range: `${a1Quote(PSL_TAB)}!D${row}`, values: [["Credit Card"]] },
         { range: `${a1Quote(PSL_TAB)}!I${row}`, values: [[`Auto-synced package purchase`]] },
-      ];
-      // List Price (C) is normally a formula keyed only off package size,
-      // deliberately left alone (see writeTrainerRow's "raw input columns
-      // only" rule) — but that formula's Package4Price/Package8Price named
-      // ranges hold the sub-trainer ("other" tier) prices only. An
-      // owner-tier package is $475/$900, not $440/$850, so for those rows
-      // only, overwrite the cloned formula with the real total_price —
-      // same reasoning as DerivedRow.rawPrice above. "other"-tier rows are
-      // untouched and keep relying on the formula exactly as before.
-      if (pkg.trainer_tier === "artemios") {
-        pslWrites.push({ range: `${a1Quote(PSL_TAB)}!C${row}`, values: [[pkg.total_price ?? 0]] });
-      }
-      await batchUpdateValues(spreadsheetId, pslWrites);
+      ]);
       nextRow.set(PSL_TAB, row);
       log.set(key, { key, tab: PSL_TAB, row, status: "purchased" });
       await appendValues(spreadsheetId, `${a1Quote(SYNC_LOG_TAB)}!A:D`, [[key, PSL_TAB, row, "purchased"]]);
