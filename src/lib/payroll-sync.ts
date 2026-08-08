@@ -26,6 +26,7 @@ import {
   a1Quote,
   appendValues,
   batchUpdate,
+  batchUpdateValues,
   copyRow,
   getSheetMeta,
   getValues,
@@ -408,9 +409,18 @@ async function writeTrainerRow(
   row: number,
   r: DerivedRow
 ): Promise<void> {
-  for (const { range, values } of rowToInputValues(r)) {
-    await updateValues(spreadsheetId, `${a1Quote(tab)}!${range}${row}`, [values]);
-  }
+  // One batched request instead of one values.update per column — Sheets'
+  // write-request quota is spent per HTTP call, not per cell, so this is
+  // ~12 quota units down to 1 for every row (see sheets-write.ts's
+  // batchUpdateValues comment — this is what actually hit the 429 wall on
+  // the first real backfill).
+  await batchUpdateValues(
+    spreadsheetId,
+    rowToInputValues(r).map(({ range, values }) => ({
+      range: `${a1Quote(tab)}!${range}${row}`,
+      values: [values],
+    }))
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -619,8 +629,14 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
       await copyRow(spreadsheetId, await sheetIdFor(spreadsheetId, PSL_TAB), PSL_FIRST_ROW, row, PSL_NUM_COLS);
       const dateStr = pkg.created_at ? pkg.created_at.slice(0, 10) : "";
       const packageSize = pkg.package_type === 8 ? "8-Pack" : "4-Pack";
-      await updateValues(spreadsheetId, `${a1Quote(PSL_TAB)}!A${row}`, [[dateStr]]);
-      await updateValues(spreadsheetId, `${a1Quote(PSL_TAB)}!B${row}`, [[packageSize]]);
+      // One batched request instead of one values.update per column — same
+      // quota reasoning as writeTrainerRow above.
+      const pslWrites: { range: string; values: unknown[][] }[] = [
+        { range: `${a1Quote(PSL_TAB)}!A${row}`, values: [[dateStr]] },
+        { range: `${a1Quote(PSL_TAB)}!B${row}`, values: [[packageSize]] },
+        { range: `${a1Quote(PSL_TAB)}!D${row}`, values: [["Credit Card"]] },
+        { range: `${a1Quote(PSL_TAB)}!I${row}`, values: [[`Auto-synced package purchase`]] },
+      ];
       // List Price (C) is normally a formula keyed only off package size,
       // deliberately left alone (see writeTrainerRow's "raw input columns
       // only" rule) — but that formula's Package4Price/Package8Price named
@@ -630,10 +646,9 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
       // same reasoning as DerivedRow.rawPrice above. "other"-tier rows are
       // untouched and keep relying on the formula exactly as before.
       if (pkg.trainer_tier === "artemios") {
-        await updateValues(spreadsheetId, `${a1Quote(PSL_TAB)}!C${row}`, [[pkg.total_price ?? 0]]);
+        pslWrites.push({ range: `${a1Quote(PSL_TAB)}!C${row}`, values: [[pkg.total_price ?? 0]] });
       }
-      await updateValues(spreadsheetId, `${a1Quote(PSL_TAB)}!D${row}`, [["Credit Card"]]);
-      await updateValues(spreadsheetId, `${a1Quote(PSL_TAB)}!I${row}`, [[`Auto-synced package purchase`]]);
+      await batchUpdateValues(spreadsheetId, pslWrites);
       nextRow.set(PSL_TAB, row);
       log.set(key, { key, tab: PSL_TAB, row, status: "purchased" });
       await appendValues(spreadsheetId, `${a1Quote(SYNC_LOG_TAB)}!A:D`, [[key, PSL_TAB, row, "purchased"]]);

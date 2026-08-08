@@ -109,16 +109,43 @@ export function a1Quote(sheetName: string): string {
   return `'${sheetName.replace(/'/g, "''")}'`;
 }
 
+// Google's Sheets API enforces a shared "write requests per minute per
+// user" quota (60/min as of this writing) across every mutating call —
+// values.update, values.append, and batchUpdate (including copyPaste) all
+// draw from the same bucket. A sync run touching dozens of rows can burn
+// through that in seconds if each row makes several separate calls (this
+// is exactly what happened on the first real backfill: 13 rows needing
+// ~12 calls each hit the wall almost immediately). Retrying a 429 with
+// backoff turns a batch of transient rate-limit failures into a short
+// pause instead of a permanent per-row error — safe to wrap every mutating
+// call in, since retrying an idempotent overwrite (values.update to a
+// specific cell/row) or a well-formed batchUpdate is not harmful.
+async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
+  const maxAttempts = 6;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const is429 = err instanceof Error && err.message.includes("(429)");
+      if (!is429 || attempt >= maxAttempts) throw err;
+      const delayMs = Math.min(1000 * 2 ** (attempt - 1), 20000) + Math.random() * 300;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+}
+
 /** Read a range of values. Returns [] if the range is entirely empty. */
 export async function getValues(spreadsheetId: string, range: string): Promise<unknown[][]> {
-  const token = await getToken();
-  const url = `${SHEETS_BASE}/${spreadsheetId}/values/${encodeURIComponent(range)}?valueRenderOption=UNFORMATTED_VALUE`;
-  const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-  if (!resp.ok) {
-    throw new Error(`Sheets values.get failed (${resp.status}): ${await resp.text().catch(() => "")}`);
-  }
-  const json = await resp.json();
-  return json.values || [];
+  return withRetry(async () => {
+    const token = await getToken();
+    const url = `${SHEETS_BASE}/${spreadsheetId}/values/${encodeURIComponent(range)}?valueRenderOption=UNFORMATTED_VALUE`;
+    const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!resp.ok) {
+      throw new Error(`Sheets values.get failed (${resp.status}): ${await resp.text().catch(() => "")}`);
+    }
+    const json = await resp.json();
+    return json.values || [];
+  });
 }
 
 /** Overwrite a range with the given 2D array of values (row-major). */
@@ -127,16 +154,45 @@ export async function updateValues(
   range: string,
   values: unknown[][]
 ): Promise<void> {
-  const token = await getToken();
-  const url = `${SHEETS_BASE}/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`;
-  const resp = await fetch(url, {
-    method: "PUT",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ range, majorDimension: "ROWS", values }),
+  return withRetry(async () => {
+    const token = await getToken();
+    const url = `${SHEETS_BASE}/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`;
+    const resp = await fetch(url, {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ range, majorDimension: "ROWS", values }),
+    });
+    if (!resp.ok) {
+      throw new Error(`Sheets values.update failed (${resp.status}): ${await resp.text().catch(() => "")}`);
+    }
   });
-  if (!resp.ok) {
-    throw new Error(`Sheets values.update failed (${resp.status}): ${await resp.text().catch(() => "")}`);
-  }
+}
+
+/** Overwrite several (possibly non-adjacent) ranges in ONE request instead
+ * of one values.update call per range — the same shared write-request
+ * quota is spent per HTTP call regardless of how many cells it touches, so
+ * this is the difference between ~12 quota-consuming calls and 1 for a
+ * single row write (see withRetry's comment above). */
+export async function batchUpdateValues(
+  spreadsheetId: string,
+  data: { range: string; values: unknown[][] }[]
+): Promise<void> {
+  if (data.length === 0) return;
+  return withRetry(async () => {
+    const token = await getToken();
+    const url = `${SHEETS_BASE}/${spreadsheetId}/values:batchUpdate`;
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        valueInputOption: "USER_ENTERED",
+        data: data.map((d) => ({ range: d.range, majorDimension: "ROWS", values: d.values })),
+      }),
+    });
+    if (!resp.ok) {
+      throw new Error(`Sheets values.batchUpdate failed (${resp.status}): ${await resp.text().catch(() => "")}`);
+    }
+  });
 }
 
 /** Append rows after the last row of a table (used only for the hidden _SyncLog tab). */
@@ -145,16 +201,18 @@ export async function appendValues(
   range: string,
   values: unknown[][]
 ): Promise<void> {
-  const token = await getToken();
-  const url = `${SHEETS_BASE}/${spreadsheetId}/values/${encodeURIComponent(range)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
-  const resp = await fetch(url, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ range, majorDimension: "ROWS", values }),
+  return withRetry(async () => {
+    const token = await getToken();
+    const url = `${SHEETS_BASE}/${spreadsheetId}/values/${encodeURIComponent(range)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`;
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ range, majorDimension: "ROWS", values }),
+    });
+    if (!resp.ok) {
+      throw new Error(`Sheets values.append failed (${resp.status}): ${await resp.text().catch(() => "")}`);
+    }
   });
-  if (!resp.ok) {
-    throw new Error(`Sheets values.append failed (${resp.status}): ${await resp.text().catch(() => "")}`);
-  }
 }
 
 interface SheetMeta {
@@ -164,28 +222,32 @@ interface SheetMeta {
 
 /** List every tab's sheetId + title — needed because copyPaste requests address tabs by numeric sheetId, not name. */
 export async function getSheetMeta(spreadsheetId: string): Promise<SheetMeta[]> {
-  const token = await getToken();
-  const url = `${SHEETS_BASE}/${spreadsheetId}?fields=sheets.properties.sheetId,sheets.properties.title`;
-  const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-  if (!resp.ok) {
-    throw new Error(`Sheets get (metadata) failed (${resp.status}): ${await resp.text().catch(() => "")}`);
-  }
-  const json = await resp.json();
-  return (json.sheets || []).map((s: { properties: SheetMeta }) => s.properties);
+  return withRetry(async () => {
+    const token = await getToken();
+    const url = `${SHEETS_BASE}/${spreadsheetId}?fields=sheets.properties.sheetId,sheets.properties.title`;
+    const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!resp.ok) {
+      throw new Error(`Sheets get (metadata) failed (${resp.status}): ${await resp.text().catch(() => "")}`);
+    }
+    const json = await resp.json();
+    return (json.sheets || []).map((s: { properties: SheetMeta }) => s.properties);
+  });
 }
 
 /** Run an arbitrary batchUpdate — used for copyPaste (row cloning) and addSheet (creating _SyncLog). */
 export async function batchUpdate(spreadsheetId: string, requests: object[]): Promise<void> {
-  const token = await getToken();
-  const url = `${SHEETS_BASE}/${spreadsheetId}:batchUpdate`;
-  const resp = await fetch(url, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ requests }),
+  return withRetry(async () => {
+    const token = await getToken();
+    const url = `${SHEETS_BASE}/${spreadsheetId}:batchUpdate`;
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ requests }),
+    });
+    if (!resp.ok) {
+      throw new Error(`Sheets batchUpdate failed (${resp.status}): ${await resp.text().catch(() => "")}`);
+    }
   });
-  if (!resp.ok) {
-    throw new Error(`Sheets batchUpdate failed (${resp.status}): ${await resp.text().catch(() => "")}`);
-  }
 }
 
 /**
