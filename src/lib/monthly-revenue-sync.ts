@@ -394,8 +394,13 @@ async function buildMonthTab(year: number, month1: number, sessions: DerivedSess
     const places = new Set<string>();
     let gGross = 0, gProcessing = 0, gStripe = 0;
 
-    daySessions.forEach((s, i) => {
-      const seg: TextSegment = { text: `${i + 1}. ${s.label}`, color: s.isCamp ? CAMP_COLOR : TRAINER_COLOR[s.trainer] || CAMP_COLOR };
+    daySessions.forEach((s) => {
+      // Numbered within its own column (Private vs Group), not across the
+      // combined day list — otherwise a day with 2 group sessions before 1
+      // private session mislabels the lone private entry "3." instead of
+      // "1.", which is exactly what a spot-check on 2026-08-07 caught.
+      const n = (s.isGroupColumn ? groupSegs.length : privateSegs.length) + 1;
+      const seg: TextSegment = { text: `${n}. ${s.label}`, color: s.isCamp ? CAMP_COLOR : TRAINER_COLOR[s.trainer] || CAMP_COLOR };
       if (s.isGroupColumn) groupSegs.push(seg); else privateSegs.push(seg);
       if (s.location) places.add(s.location);
       gGross += s.grossRevenue;
@@ -417,6 +422,12 @@ async function buildMonthTab(year: number, month1: number, sessions: DerivedSess
     monthGross += gGross; monthProcessing += gProcessing; monthStripe += gStripe; monthNet += gNet;
 
     const rowIndex0 = 8 + (d - 1); // header is row index 7 (row 8, 1-indexed)
+    const privateCell = privateSegs.length > 0 ? richTextCellData(privateSegs) : null;
+    const groupCell = groupSegs.length > 0 ? richTextCellData(groupSegs) : null;
+    // WRAP explicitly — otherwise Sheets' default wrap strategy only
+    // auto-expands row height inconsistently (observed live: a day with 9
+    // combined lines expanded fine, one with only 2-3 got clipped).
+    const wrapFormat = { wrapStrategy: "WRAP" };
     dayRowRequests.push({
       updateCells: {
         rows: [
@@ -424,8 +435,12 @@ async function buildMonthTab(year: number, month1: number, sessions: DerivedSess
             values: [
               { userEnteredValue: { stringValue: dateStr } },
               { userEnteredValue: { stringValue: dayName } },
-              privateSegs.length > 0 ? { userEnteredValue: { stringValue: richTextCellData(privateSegs).stringValue }, textFormatRuns: richTextCellData(privateSegs).textFormatRuns } : { userEnteredValue: { stringValue: "" } },
-              groupSegs.length > 0 ? { userEnteredValue: { stringValue: richTextCellData(groupSegs).stringValue }, textFormatRuns: richTextCellData(groupSegs).textFormatRuns } : { userEnteredValue: { stringValue: "" } },
+              privateCell
+                ? { userEnteredValue: { stringValue: privateCell.stringValue }, textFormatRuns: privateCell.textFormatRuns, userEnteredFormat: wrapFormat }
+                : { userEnteredValue: { stringValue: "" } },
+              groupCell
+                ? { userEnteredValue: { stringValue: groupCell.stringValue }, textFormatRuns: groupCell.textFormatRuns, userEnteredFormat: wrapFormat }
+                : { userEnteredValue: { stringValue: "" } },
               { userEnteredValue: { stringValue: Array.from(places).join(" / ") } },
               { userEnteredValue: { numberValue: gGross }, userEnteredFormat: { numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } } },
               { userEnteredValue: { numberValue: gProcessing }, userEnteredFormat: { numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } } },
