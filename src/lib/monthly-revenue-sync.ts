@@ -175,6 +175,7 @@ function parseKidNames(kidsStr: string | null): string[] {
 
 interface DerivedSession {
   date: string;
+  startHours: number; // decimal hours since midnight, for within-day chronological ordering
   trainer: string;
   isCamp: boolean;
   isGroupColumn: boolean; // Group Sessions column vs Private/Solo column
@@ -246,6 +247,7 @@ function deriveSession(reg: RegRow, isLateCancel: boolean): DerivedSession | nul
 
   return {
     date,
+    startHours: timeToDecimalHours(reg.booked_start_time) ?? 0,
     trainer: reg.booked_trainer || OWNER_NAME,
     isCamp,
     isGroupColumn,
@@ -400,7 +402,10 @@ async function buildMonthTab(year: number, month1: number, sessions: DerivedSess
   for (let d = 1; d <= nDays; d++) {
     const dateStr = `${monthPrefix}-${String(d).padStart(2, "0")}`;
     const dayName = new Date(dateStr + "T12:00:00").toLocaleDateString("en-US", { weekday: "long" });
-    const daySessions = sessionsByDate.get(dateStr) || [];
+    // Chronological within the day, not insertion order — ties (two
+    // trainers running sessions at the same start time) keep whatever
+    // relative order they arrived in, which is fine per instruction.
+    const daySessions = (sessionsByDate.get(dateStr) || []).slice().sort((a, b) => a.startHours - b.startHours);
 
     const privateSegs: TextSegment[] = [];
     const groupSegs: TextSegment[] = [];
