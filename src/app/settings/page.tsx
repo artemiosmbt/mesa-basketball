@@ -43,20 +43,20 @@ function DobInput({ value, onChange }: { value: string; onChange: (v: string) =>
   const ddRef = useRef<HTMLInputElement>(null);
   const yyyyRef = useRef<HTMLInputElement>(null);
   return (
-    <div
-      onClick={(e) => e.stopPropagation()}
-      className="flex items-center w-full rounded-lg border border-mesa-accent/40 bg-brown-800/60 text-sm text-white focus-within:border-mesa-accent pl-3"
-    >
+    <div className="flex items-center w-full rounded-lg border border-mesa-accent/40 bg-brown-800/60 text-sm text-white focus-within:border-mesa-accent pl-3">
       <input type="text" inputMode="numeric" maxLength={2} placeholder="MM" value={mm}
         onChange={e => { const v = e.target.value.replace(/\D/g, "").slice(0, 2); onChange(buildDob(v, dd, yyyy)); if (v.length === 2) ddRef.current?.focus(); }}
+        onClick={(e) => e.stopPropagation()}
         className="w-10 bg-transparent pr-1 py-2 text-center placeholder-brown-500 focus:outline-none" />
       <span className="text-brown-500 select-none">/</span>
       <input ref={ddRef} type="text" inputMode="numeric" maxLength={2} placeholder="DD" value={dd}
         onChange={e => { const v = e.target.value.replace(/\D/g, "").slice(0, 2); onChange(buildDob(mm, v, yyyy)); if (v.length === 2) yyyyRef.current?.focus(); }}
+        onClick={(e) => e.stopPropagation()}
         className="w-10 bg-transparent px-1 py-2 text-center placeholder-brown-500 focus:outline-none" />
       <span className="text-brown-500 select-none">/</span>
       <input ref={yyyyRef} type="text" inputMode="numeric" maxLength={4} placeholder="YYYY" value={yyyy}
         onChange={e => { const v = e.target.value.replace(/\D/g, "").slice(0, 4); onChange(buildDob(mm, dd, v)); }}
+        onClick={(e) => e.stopPropagation()}
         className="w-16 bg-transparent px-1 py-2 text-center placeholder-brown-500 focus:outline-none" />
     </div>
   );
