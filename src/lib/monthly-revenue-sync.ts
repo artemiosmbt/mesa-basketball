@@ -114,6 +114,7 @@ interface RegRow {
   session_price: number | null;
   applied_account_credit: number | null;
   package_id: string | null;
+  stripe_checkout_session_id: string | null;
 }
 
 interface PackageRow {
@@ -123,6 +124,7 @@ interface PackageRow {
   status: string;
   total_price: number | null;
   trainer_tier: string | null;
+  parent_name: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -181,13 +183,22 @@ interface DerivedSession {
   isGroupColumn: boolean; // Group Sessions column vs Private/Solo column
   label: string;
   grossRevenue: number;
-  processingFee: number;
-  stripeFee: number;
+  // The real amount actually run through Stripe for this row (post-credit,
+  // $0 for package-covered/credit-only rows) — NOT yet a fee. Fees are
+  // computed in a separate pass in runMonthlyRevenueSync, grouped by
+  // checkoutSessionId, since a single checkout can cover several rows and
+  // the service/Stripe fee is only charged once per checkout, not once per
+  // row (confirmed live: someone booking 2 sessions in one checkout is
+  // only charged the $4.50-ish fee once).
+  stripePortion: number;
+  checkoutSessionId: string | null;
+  processingFee: number; // filled in by the post-pass; 0 until then
+  stripeFee: number; // filled in by the post-pass; 0 until then
   trainerPay: number;
   location: string;
 }
 
-function deriveSession(reg: RegRow, isLateCancel: boolean): DerivedSession | null {
+function deriveSession(reg: RegRow, isLateCancel: boolean, lateFeeAmountKept: number): DerivedSession | null {
   if (!reg.booked_date || !reg.booked_start_time || !reg.booked_end_time) return null;
   // booked_date is stored as whatever raw format the sheet's date column
   // happened to export at booking time (e.g. "4/25/2026"), never normalized
@@ -219,9 +230,22 @@ function deriveSession(reg: RegRow, isLateCancel: boolean): DerivedSession | nul
   const isPackage = !!reg.package_id;
 
   const stripePortion = isPackage || (credit > 0 && credit >= price) ? 0 : Math.max(price - credit, 0);
-  const processingFee = stripePortion > 0 ? calcServiceFee(stripePortion) : 0;
-  const stripeFee = stripePortion > 0 ? round2(stripePortion * STRIPE_PCT_CC + STRIPE_FIXED) : 0;
-  const grossRevenue = isLoggableLate ? round2(price * 0.5) : price;
+  // Package-covered sessions recognize $0 incremental revenue here — the
+  // full package price was already counted as revenue on the day it was
+  // purchased (see derivePackage/buildMonthTab), so counting session_price
+  // again on every date the client uses a session would double-count real
+  // cash that only came in once. Confirmed with the owner this is the
+  // wanted behavior over the previous (wrong) per-session face-value count.
+  //
+  // Late-cancel/reschedule revenue is NOT a flat 50% of price — the real
+  // "amount kept" varies by case (bulk-discounted weekly bookings are full
+  // forfeiture — 0% credited back; a multi-day full-camp row's session_price
+  // is the WHOLE camp total, not that one day's share) and is already
+  // computed correctly, once, at the moment of cancellation by
+  // booking-finalize.ts/the cancel & reschedule routes — logged straight to
+  // late_fee_events.amount_kept. Reusing that stored figure here instead of
+  // re-deriving a generic 50% avoids silently mismatching real policy.
+  const grossRevenue = isPackage ? 0 : isLoggableLate ? round2(lateFeeAmountKept) : price;
 
   const trainerNorm = normalizeTrainerName(reg.booked_trainer);
   const isSubTrainer = SUB_TRAINERS.some((t) => normalizeTrainerName(t) === trainerNorm);
@@ -239,11 +263,12 @@ function deriveSession(reg: RegRow, isLateCancel: boolean): DerivedSession | nul
   const kidsLabel = kids.join(", ") || reg.parent_name || reg.email || "Unknown";
   const isCamp = reg.type === "camp";
   const isGroupColumn = reg.type === "weekly" || isCamp;
+  const amountText = isPackage ? "(Package — already paid)" : `$${price.toFixed(2)}`;
   const label = isCamp
-    ? `[Camp] ${reg.booked_group || "Camp"} (${kidsLabel}) $${price.toFixed(2)}`
+    ? `[Camp] ${reg.booked_group || "Camp"} (${kidsLabel}) ${amountText}`
     : isGroupColumn
-      ? `${reg.booked_group || "Group"} (${kidsLabel}) $${price.toFixed(2)}`
-      : `${kidsLabel}${reg.type === "group-private" ? " (Group Private)" : ""} $${price.toFixed(2)}`;
+      ? `${reg.booked_group || "Group"} (${kidsLabel}) ${amountText}`
+      : `${kidsLabel}${reg.type === "group-private" ? " (Group Private)" : ""} ${amountText}`;
 
   return {
     date,
@@ -253,8 +278,10 @@ function deriveSession(reg: RegRow, isLateCancel: boolean): DerivedSession | nul
     isGroupColumn,
     label,
     grossRevenue,
-    processingFee,
-    stripeFee,
+    stripePortion,
+    checkoutSessionId: reg.stripe_checkout_session_id,
+    processingFee: 0,
+    stripeFee: 0,
     trainerPay,
     location: reg.booked_location || "",
   };
@@ -263,6 +290,7 @@ function deriveSession(reg: RegRow, isLateCancel: boolean): DerivedSession | nul
 interface DerivedPackage {
   date: string;
   label: string;
+  totalPrice: number; // counted as real Gross Revenue on this date — see deriveSession's grossRevenue=0 for package-covered sessions for why this can't also be counted again per-session later
   processingFee: number;
   stripeFee: number;
 }
@@ -274,7 +302,8 @@ function derivePackage(pkg: PackageRow): DerivedPackage | null {
   const processingFee = price > 0 ? calcServiceFee(price) : 0;
   const stripeFee = price > 0 ? round2(price * STRIPE_PCT_CC + STRIPE_FIXED) : 0;
   const size = pkg.package_type === 8 ? "8-Pack" : "4-Pack";
-  return { date, label: `${size} — $${price.toFixed(2)}`, processingFee, stripeFee };
+  const buyer = pkg.parent_name || "Unknown";
+  return { date, label: `${buyer} — ${size} $${price.toFixed(2)}`, totalPrice: price, processingFee, stripeFee };
 }
 
 // ---------------------------------------------------------------------------
@@ -393,6 +422,17 @@ async function buildMonthTab(year: number, month1: number, sessions: DerivedSess
     if (!sessionsByDate.has(s.date)) sessionsByDate.set(s.date, []);
     sessionsByDate.get(s.date)!.push(s);
   }
+  // Packages are recognized as revenue on their purchase date (cash-basis —
+  // see deriveSession's comment on why individual package-covered sessions
+  // don't ALSO count) — bucket by date here so buildMonthTab can fold each
+  // day's package total into that day's Gross/Processing/Stripe/Net, not
+  // just show it in the informational month-level label.
+  const packagesByDate = new Map<string, DerivedPackage[]>();
+  for (const p of packages) {
+    if (!p.date.startsWith(monthPrefix)) continue;
+    if (!packagesByDate.has(p.date)) packagesByDate.set(p.date, []);
+    packagesByDate.get(p.date)!.push(p);
+  }
 
   let monthGross = 0, monthProcessing = 0, monthStripe = 0, monthNet = 0;
   const trainerPayByWeek = new Map<string, Map<string, number>>(); // week -> trainer -> pay
@@ -435,6 +475,18 @@ async function buildMonthTab(year: number, month1: number, sessions: DerivedSess
         revenueByLocation.set(s.location, round2((revenueByLocation.get(s.location) || 0) + s.grossRevenue));
       }
     });
+
+    // Package purchases made this day — shown as their own unnumbered line
+    // (not mixed into the numbered session list) and folded straight into
+    // the day's totals. Not attributed to any location (packages aren't
+    // gym-specific), so — like any other unattributed revenue — it lands in
+    // "Other/Unlisted" in the Location Breakdown below, which is correct.
+    for (const p of packagesByDate.get(dateStr) || []) {
+      privateSegs.push({ text: `[Package Purchased] ${p.label}`, color: { red: 0, green: 0, blue: 0 }, bold: true });
+      gGross += p.totalPrice;
+      gProcessing += p.processingFee;
+      gStripe += p.stripeFee;
+    }
 
     const gNet = round2(gGross + gProcessing - gStripe);
     monthGross += gGross; monthProcessing += gProcessing; monthStripe += gStripe; monthNet += gNet;
@@ -705,7 +757,7 @@ export async function runMonthlyRevenueSync(): Promise<MonthlyRevenueSyncResult>
   const { data: regs, error: regErr } = await supabase
     .from("registrations")
     .select(
-      "id, parent_name, email, kids, type, total_participants, booked_date, booked_start_time, booked_end_time, booked_location, booked_group, booked_trainer, status, session_price, applied_account_credit, package_id"
+      "id, parent_name, email, kids, type, total_participants, booked_date, booked_start_time, booked_end_time, booked_location, booked_group, booked_trainer, status, session_price, applied_account_credit, package_id, stripe_checkout_session_id"
     )
     .in("type", ["weekly", "private", "group-private", "camp"])
     .in("status", ["confirmed", "cancelled", "no_show"]);
@@ -714,25 +766,58 @@ export async function runMonthlyRevenueSync(): Promise<MonthlyRevenueSyncResult>
 
   const cancelledIds = registrations.filter((r) => r.status === "cancelled").map((r) => r.id);
   const isLateCancelById = new Map<string, boolean>();
+  // The real dollar amount actually kept (not credited/refunded back) for a
+  // late cancellation or late reschedule — sourced from late_fee_events
+  // instead of re-derived here, since the true policy varies by case (see
+  // deriveSession's comment) and is already computed correctly, once, at
+  // the moment of cancellation.
+  const amountKeptById = new Map<string, number>();
   if (cancelledIds.length > 0) {
-    const { data: lateFlags } = await supabase
-      .from("registrations")
-      .select("id, is_late_cancel")
-      .in("id", cancelledIds);
+    const [{ data: lateFlags }, { data: lateFeeRows }] = await Promise.all([
+      supabase.from("registrations").select("id, is_late_cancel").in("id", cancelledIds),
+      supabase.from("late_fee_events").select("registration_id, amount_kept").in("registration_id", cancelledIds),
+    ]);
     for (const row of (lateFlags || []) as { id: string; is_late_cancel: boolean | null }[]) {
       isLateCancelById.set(row.id, !!row.is_late_cancel);
+    }
+    for (const row of (lateFeeRows || []) as { registration_id: string | null; amount_kept: number | null }[]) {
+      if (!row.registration_id) continue;
+      amountKeptById.set(row.registration_id, round2((amountKeptById.get(row.registration_id) ?? 0) + (row.amount_kept ?? 0)));
     }
   }
 
   const sessions: DerivedSession[] = [];
   for (const reg of registrations) {
-    const derived = deriveSession(reg, isLateCancelById.get(reg.id) ?? false);
+    const derived = deriveSession(reg, isLateCancelById.get(reg.id) ?? false, amountKeptById.get(reg.id) ?? 0);
     if (derived) sessions.push(derived);
+  }
+
+  // A single Stripe Checkout can cover several session rows (e.g. booking 2
+  // sessions at once) — the ~$4.50/3.2% service fee and the real Stripe cost
+  // are charged/incurred ONCE per checkout, not once per row. Group by
+  // checkoutSessionId and assign the fee, computed on the group's combined
+  // charged amount, to a single representative row (the earliest-dated one)
+  // so every other row in the group stays at $0 — otherwise summing each
+  // row's own fee independently overcounts exactly the case flagged live:
+  // "booked 3 group kids... paid the 4.50 fee 3 times" when in reality it
+  // was one checkout, one fee.
+  const checkoutGroups = new Map<string, DerivedSession[]>();
+  for (const s of sessions) {
+    if (!s.checkoutSessionId || s.stripePortion <= 0) continue;
+    if (!checkoutGroups.has(s.checkoutSessionId)) checkoutGroups.set(s.checkoutSessionId, []);
+    checkoutGroups.get(s.checkoutSessionId)!.push(s);
+  }
+  for (const group of checkoutGroups.values()) {
+    const totalCharged = round2(group.reduce((sum, s) => sum + s.stripePortion, 0));
+    if (totalCharged <= 0) continue;
+    const rep = group.slice().sort((a, b) => a.date.localeCompare(b.date) || a.startHours - b.startHours)[0];
+    rep.processingFee = calcServiceFee(totalCharged);
+    rep.stripeFee = round2(totalCharged * STRIPE_PCT_CC + STRIPE_FIXED);
   }
 
   const { data: pkgSales, error: pkgErr } = await supabase
     .from("monthly_packages")
-    .select("id, created_at, package_type, status, total_price, trainer_tier")
+    .select("id, created_at, package_type, status, total_price, trainer_tier, parent_name")
     .in("status", ["active", "cancelled"])
     .gte("created_at", TRACKER_START_DATE);
   if (pkgErr) throw new Error(`monthly_packages query: ${pkgErr.message}`);
