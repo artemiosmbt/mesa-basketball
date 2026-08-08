@@ -26,6 +26,7 @@
  * this is a fully separate document.
  */
 import { createClient } from "@supabase/supabase-js";
+import { normalizeDate } from "./calendar";
 import { calcServiceFee } from "./pricing";
 import { a1Quote, batchUpdate, getSheetMeta, getValues } from "./sheets-write";
 
@@ -173,12 +174,21 @@ interface DerivedSession {
 }
 
 function deriveSession(reg: RegRow, isLateCancel: boolean): DerivedSession | null {
+  if (!reg.booked_date || !reg.booked_start_time || !reg.booked_end_time) return null;
+  // booked_date is stored as whatever raw format the sheet's date column
+  // happened to export at booking time (e.g. "4/25/2026"), never normalized
+  // to ISO at write time — every date comparison below (the tracker-start
+  // cutoff, "is this already over") and the day-bucket lookup key in
+  // buildMonthTab both require a real ISO string, so normalize once here
+  // before anything else touches it. Same underlying bug already found and
+  // fixed in reminder-emails.ts earlier this session.
+  const date = normalizeDate(reg.booked_date);
+
   let isLoggableLate = false;
   if (reg.status === "no_show") {
     // full pay/full revenue, same as Completed
   } else if (reg.status === "confirmed") {
-    if (!reg.booked_date) return null;
-    const end = sessionEndDateTime(reg.booked_date, reg.booked_end_time);
+    const end = sessionEndDateTime(date, reg.booked_end_time);
     if (!end || end.getTime() >= Date.now()) return null; // still upcoming
   } else if (reg.status === "cancelled") {
     if (!isLateCancel) return null; // no compensable work
@@ -186,8 +196,7 @@ function deriveSession(reg: RegRow, isLateCancel: boolean): DerivedSession | nul
   } else {
     return null;
   }
-  if (!reg.booked_date || !reg.booked_start_time || !reg.booked_end_time) return null;
-  if (reg.booked_date < TRACKER_START_DATE) return null;
+  if (date < TRACKER_START_DATE) return null;
 
   const hours = hoursBetween(reg.booked_start_time, reg.booked_end_time);
   const participants = reg.total_participants || 1;
@@ -223,7 +232,7 @@ function deriveSession(reg: RegRow, isLateCancel: boolean): DerivedSession | nul
       : `${kidsLabel}${reg.type === "group-private" ? " (Group Private)" : ""} $${price.toFixed(2)}`;
 
   return {
-    date: reg.booked_date,
+    date,
     trainer: reg.booked_trainer || OWNER_NAME,
     isCamp,
     isGroupColumn,
@@ -650,14 +659,19 @@ export interface MonthlyRevenueSyncResult {
 export async function runMonthlyRevenueSync(): Promise<MonthlyRevenueSyncResult> {
   const supabase = getSupabase();
 
+  // No server-side date filter here on purpose — booked_date isn't reliably
+  // stored in ISO format (same reasoning as reminder-emails.ts and
+  // getRemainingPackageCapacity), so a `.gte` comparison against a raw
+  // string would silently drop legitimately-in-scope rows. Fetch broadly by
+  // type/status instead and apply the real (normalized) date cutoff inside
+  // deriveSession.
   const { data: regs, error: regErr } = await supabase
     .from("registrations")
     .select(
       "id, parent_name, email, kids, type, total_participants, booked_date, booked_start_time, booked_end_time, booked_location, booked_group, booked_trainer, status, session_price, applied_account_credit, package_id"
     )
     .in("type", ["weekly", "private", "group-private", "camp"])
-    .in("status", ["confirmed", "cancelled", "no_show"])
-    .gte("booked_date", TRACKER_START_DATE);
+    .in("status", ["confirmed", "cancelled", "no_show"]);
   if (regErr) throw new Error(`registrations query: ${regErr.message}`);
   const registrations = (regs || []) as RegRow[];
 
