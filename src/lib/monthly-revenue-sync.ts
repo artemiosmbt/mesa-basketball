@@ -10,15 +10,21 @@
  * — this reads the exact same Supabase data but never touches the payroll
  * sheet's tabs/formulas, so nothing here can ever destabilize payroll.
  *
- * Design: unlike payroll-sync.ts's incremental row-diffing (needed there
- * because it's writing into a human-maintained formula sheet), this
- * REBUILDS each month's tab from scratch on every run. Each month is small
- * (~31 day-rows), full rebuild is cheap, and it sidesteps an entire class
- * of incremental-sync bugs (a status change after the fact, a corrected
- * price, etc. just fall out of a fresh rebuild automatically). The one
- * exception is each month's per-location rent cell, which is real manual
- * input (see buildLocationSection) — rebuilds preserve whatever's already
- * there instead of stomping it back to a default.
+ * Design: each month's tab is rebuilt from scratch every run — a status
+ * change after the fact, a corrected price, etc. just fall out of a fresh
+ * rebuild automatically, sidestepping an entire class of incremental-sync
+ * bugs. Two exceptions, both real manual input that must survive a rebuild:
+ * each month's per-location rent cell (see readExistingRent), and any day
+ * row the owner has hand-edited (see the _DayLog tab / dayRowFingerprint
+ * below) — a day is only ever rewritten if its live content still matches
+ * the fingerprint of what THIS sync last wrote there; the moment it
+ * diverges (a manual edit), that day is frozen forever and skipped on every
+ * future run, and Month Totals is computed from its live (edited) values
+ * instead of a freshly recomputed one. This does NOT extend to Trainer Pay
+ * by Week or Location Breakdown below — those still always recompute
+ * straight from the database regardless of any day-row edit, since they
+ * need per-session detail a hand-edited day cell can't reliably provide
+ * (confirmed acceptable with the owner).
  *
  * Trainer pay is computed here in code from the exact rate constants
  * captured live from the payroll sheet's own Settings tab (2026-08-08) —
@@ -28,7 +34,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { normalizeDate } from "./calendar";
 import { calcServiceFee } from "./pricing";
-import { a1Quote, batchUpdate, getSheetMeta, getValues } from "./sheets-write";
+import { a1Quote, appendValues, batchUpdate, batchUpdateValues, getSheetMeta, getValues, updateValues } from "./sheets-write";
 
 export const MONTHLY_REVENUE_SHEET_ID = "1_gSXvi7wXRdLZA2wMuiCwwublyBvUbCMrbJkUnUdaug";
 const TRACKER_START_DATE = "2026-08-01";
@@ -380,11 +386,73 @@ async function readExistingRent(tabName: string, rowIndex1: number): Promise<num
   return typeof v === "number" ? v : null;
 }
 
-async function buildMonthTab(year: number, month1: number, sessions: DerivedSession[], packages: DerivedPackage[]): Promise<void> {
+// ---------------------------------------------------------------------------
+// Day-row edit protection — lets the owner hand-correct a day's row (e.g. a
+// fee that used old pricing) without it silently reverting on the next
+// daily sync. Hidden tab keyed by "<month tab>|<date>" -> a fingerprint of
+// exactly what THIS sync last wrote for that day's C:I columns. Mirrors
+// payroll-sync.ts's _SyncLog pattern, applied per day-row instead of per
+// registration.
+// ---------------------------------------------------------------------------
+
+const DAY_LOG_TAB = "_DayLog";
+
+interface DayLogEntry {
+  row: number; // 1-indexed row in _DayLog
+  fingerprint: string;
+}
+
+async function ensureDayLogTab(): Promise<void> {
+  const meta = await getSheetMeta(MONTHLY_REVENUE_SHEET_ID);
+  if (meta.some((s) => s.title === DAY_LOG_TAB)) return;
+  await batchUpdate(MONTHLY_REVENUE_SHEET_ID, [
+    { addSheet: { properties: { title: DAY_LOG_TAB, hidden: true } } },
+  ]);
+  await updateValues(MONTHLY_REVENUE_SHEET_ID, `${a1Quote(DAY_LOG_TAB)}!A1:B1`, [["key", "fingerprint"]]);
+}
+
+async function readDayLog(): Promise<Map<string, DayLogEntry>> {
+  const rows = await getValues(MONTHLY_REVENUE_SHEET_ID, `${a1Quote(DAY_LOG_TAB)}!A2:B`);
+  const map = new Map<string, DayLogEntry>();
+  rows.forEach((r, i) => {
+    const [key, fingerprint] = r as [string, string];
+    if (!key) return;
+    map.set(key, { row: i + 2, fingerprint: fingerprint || "" });
+  });
+  return map;
+}
+
+/** Fingerprints exactly the fields a day's row can show — text content plus
+ * the 4 dollar columns. Date/Day (A:B) are never user-editable in practice
+ * so they're deliberately excluded. */
+function dayRowFingerprint(
+  privateText: string,
+  groupText: string,
+  place: string,
+  gross: number,
+  processing: number,
+  stripe: number,
+  net: number
+): string {
+  return JSON.stringify([privateText, groupText, place, gross, processing, stripe, net]);
+}
+
+async function buildMonthTab(
+  year: number,
+  month1: number,
+  sessions: DerivedSession[],
+  packages: DerivedPackage[],
+  dayLog: Map<string, DayLogEntry>,
+  dayLogWrites: Map<string, string>
+): Promise<void> {
   const tabName = monthTabName(year, month1);
   const sheetId = await ensureMonthTab(tabName);
   const nDays = daysInMonth(year, month1);
   const monthPrefix = `${year}-${String(month1).padStart(2, "0")}`;
+  // One batched read of every day-row's live C:I content, so we can detect
+  // a manual edit (live content diverging from what we last wrote) without
+  // one getValues call per day.
+  const liveDayRows = await getValues(MONTHLY_REVENUE_SHEET_ID, `${a1Quote(tabName)}!C9:I${8 + nDays}`);
 
   const requests: object[] = [];
 
@@ -498,40 +566,87 @@ async function buildMonthTab(year: number, month1: number, sessions: DerivedSess
     }
 
     const gNet = round2(gGross + gProcessing - gStripe);
-    monthGross += gGross; monthProcessing += gProcessing; monthStripe += gStripe; monthNet += gNet;
 
     const rowIndex0 = 8 + (d - 1); // header is row index 7 (row 8, 1-indexed)
     const privateCell = privateSegs.length > 0 ? richTextCellData(privateSegs) : null;
     const groupCell = groupSegs.length > 0 ? richTextCellData(groupSegs) : null;
-    // WRAP explicitly — otherwise Sheets' default wrap strategy only
-    // auto-expands row height inconsistently (observed live: a day with 9
-    // combined lines expanded fine, one with only 2-3 got clipped).
-    const wrapFormat = { wrapStrategy: "WRAP" };
-    dayRowRequests.push({
-      updateCells: {
-        rows: [
-          {
-            values: [
-              { userEnteredValue: { stringValue: dateStr } },
-              { userEnteredValue: { stringValue: dayName } },
-              privateCell
-                ? { userEnteredValue: { stringValue: privateCell.stringValue }, textFormatRuns: privateCell.textFormatRuns, userEnteredFormat: wrapFormat }
-                : { userEnteredValue: { stringValue: "" } },
-              groupCell
-                ? { userEnteredValue: { stringValue: groupCell.stringValue }, textFormatRuns: groupCell.textFormatRuns, userEnteredFormat: wrapFormat }
-                : { userEnteredValue: { stringValue: "" } },
-              { userEnteredValue: { stringValue: Array.from(places).join(" / ") } },
-              { userEnteredValue: { numberValue: gGross }, userEnteredFormat: { numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } } },
-              { userEnteredValue: { numberValue: gProcessing }, userEnteredFormat: { numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } } },
-              { userEnteredValue: { numberValue: gStripe }, userEnteredFormat: { numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } } },
-              { userEnteredValue: { numberValue: gNet }, userEnteredFormat: { numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } } },
-            ],
-          },
-        ],
-        fields: "userEnteredValue,userEnteredFormat,textFormatRuns",
-        start: { sheetId, rowIndex: rowIndex0, columnIndex: 0 },
-      },
-    });
+    const placesStr = Array.from(places).join(" / ");
+
+    // Locked = this day's live content no longer matches what THIS sync
+    // last wrote there — i.e. the owner hand-edited it since. A never-
+    // logged day (dayLog has no entry) is treated as unlocked: either it's
+    // brand new, or it's an already-existing day from before this
+    // protection existed, which gets one final overwrite here and is
+    // logged/protected from then on.
+    const logKey = `${tabName}|${dateStr}`;
+    const stored = dayLog.get(logKey);
+    const freshFingerprint = dayRowFingerprint(
+      privateCell?.stringValue ?? "",
+      groupCell?.stringValue ?? "",
+      placesStr,
+      gGross,
+      gProcessing,
+      gStripe,
+      gNet
+    );
+    let locked = false;
+    if (stored) {
+      const liveRow = liveDayRows[d - 1] || [];
+      const liveFingerprint = dayRowFingerprint(
+        String(liveRow[0] ?? ""),
+        String(liveRow[1] ?? ""),
+        String(liveRow[2] ?? ""),
+        Number(liveRow[3]) || 0,
+        Number(liveRow[4]) || 0,
+        Number(liveRow[5]) || 0,
+        Number(liveRow[6]) || 0
+      );
+      locked = liveFingerprint !== stored.fingerprint;
+    }
+
+    // Month Totals must reflect whatever a locked day's live (edited)
+    // dollar figures actually say, not the freshly recomputed ones the
+    // owner just corrected away from.
+    if (locked) {
+      const liveRow = liveDayRows[d - 1] || [];
+      monthGross += Number(liveRow[3]) || 0;
+      monthProcessing += Number(liveRow[4]) || 0;
+      monthStripe += Number(liveRow[5]) || 0;
+      monthNet += Number(liveRow[6]) || 0;
+    } else {
+      monthGross += gGross; monthProcessing += gProcessing; monthStripe += gStripe; monthNet += gNet;
+      dayLogWrites.set(logKey, freshFingerprint);
+
+      // WRAP explicitly — otherwise Sheets' default wrap strategy only
+      // auto-expands row height inconsistently (observed live: a day with 9
+      // combined lines expanded fine, one with only 2-3 got clipped).
+      const wrapFormat = { wrapStrategy: "WRAP" };
+      dayRowRequests.push({
+        updateCells: {
+          rows: [
+            {
+              values: [
+                { userEnteredValue: { stringValue: dateStr } },
+                { userEnteredValue: { stringValue: dayName } },
+                privateCell
+                  ? { userEnteredValue: { stringValue: privateCell.stringValue }, textFormatRuns: privateCell.textFormatRuns, userEnteredFormat: wrapFormat }
+                  : { userEnteredValue: { stringValue: "" } },
+                groupCell
+                  ? { userEnteredValue: { stringValue: groupCell.stringValue }, textFormatRuns: groupCell.textFormatRuns, userEnteredFormat: wrapFormat }
+                  : { userEnteredValue: { stringValue: "" } },
+                { userEnteredValue: { stringValue: placesStr } },
+                { userEnteredValue: { numberValue: gGross }, userEnteredFormat: { numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } } },
+                { userEnteredValue: { numberValue: gProcessing }, userEnteredFormat: { numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } } },
+                { userEnteredValue: { numberValue: gStripe }, userEnteredFormat: { numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } } },
+                { userEnteredValue: { numberValue: gNet }, userEnteredFormat: { numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } } },
+              ],
+            },
+          ],
+          fields: "userEnteredValue,userEnteredFormat,textFormatRuns",
+          start: { sheetId, rowIndex: rowIndex0, columnIndex: 0 },
+        },
+      });
+    }
   }
   requests.push(...dayRowRequests);
 
@@ -836,6 +951,13 @@ export async function runMonthlyRevenueSync(): Promise<MonthlyRevenueSyncResult>
     if (derived) packages.push(derived);
   }
 
+  // Day-row edit protection (see the file header comment and
+  // dayRowFingerprint) — read once, shared across every month built this
+  // run, written back once at the end.
+  await ensureDayLogTab();
+  const dayLog = await readDayLog();
+  const dayLogWrites = new Map<string, string>();
+
   // Every month from TRACKER_START_DATE through the current month (ET).
   const monthsBuilt: string[] = [];
   const todayET = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
@@ -846,12 +968,27 @@ export async function runMonthlyRevenueSync(): Promise<MonthlyRevenueSyncResult>
     const monthPrefix = `${y}-${String(m).padStart(2, "0")}`;
     const monthSessions = sessions.filter((s) => s.date.startsWith(monthPrefix));
     const monthPackages = packages.filter((p) => p.date.startsWith(monthPrefix));
-    await buildMonthTab(y, m, sessions, monthPackages);
+    await buildMonthTab(y, m, sessions, monthPackages, dayLog, dayLogWrites);
     monthsBuilt.push(monthTabName(y, m));
     void monthSessions;
     m += 1;
     if (m > 12) { m = 1; y += 1; }
   }
+
+  // Write back every day that was (re)generated this run — new keys get
+  // appended, previously-logged keys get updated in place.
+  const logUpdates: { range: string; values: unknown[][] }[] = [];
+  const logNewRows: unknown[][] = [];
+  for (const [key, fingerprint] of dayLogWrites) {
+    const existing = dayLog.get(key);
+    if (existing) {
+      logUpdates.push({ range: `${a1Quote(DAY_LOG_TAB)}!B${existing.row}`, values: [[fingerprint]] });
+    } else {
+      logNewRows.push([key, fingerprint]);
+    }
+  }
+  if (logUpdates.length > 0) await batchUpdateValues(MONTHLY_REVENUE_SHEET_ID, logUpdates);
+  if (logNewRows.length > 0) await appendValues(MONTHLY_REVENUE_SHEET_ID, `${a1Quote(DAY_LOG_TAB)}!A:B`, logNewRows);
 
   return { monthsBuilt, sessionsConsidered: sessions.length, packagesConsidered: packages.length };
 }
