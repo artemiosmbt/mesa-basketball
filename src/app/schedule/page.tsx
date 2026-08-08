@@ -1323,6 +1323,18 @@ export default function Home() {
     });
   }
 
+  // Collapses (never re-expands) — used for "click anywhere on an expanded
+  // card to close it" so it stays idempotent even if a click bubbles up
+  // from more than one place at once.
+  function collapseKid(i: number) {
+    setExpandedKids((s) => {
+      if (!s.has(i)) return s;
+      const next = new Set(s);
+      next.delete(i);
+      return next;
+    });
+  }
+
   function updateKid(i: number, field: "name" | "dob" | "grade" | "gender", value: string) {
     setKids((k) => k.map((kid, idx) => (idx === i ? { ...kid, [field]: value } : kid)));
   }
@@ -3597,9 +3609,12 @@ export default function Home() {
                     return (
                     <div key={i} className="flex flex-col gap-2 pb-2">
                       {isExpanded ? (
-                        <div className="rounded-lg border-2 border-mesa-accent bg-brown-800 p-3 shadow-lg shadow-black/30 space-y-2">
+                        <div
+                          onClick={() => collapseKid(i)}
+                          className="rounded-lg border-2 border-mesa-accent bg-brown-800 p-3 shadow-lg shadow-black/30 space-y-2 cursor-pointer"
+                        >
                           {kids.length > 1 && (
-                            <div className="flex justify-end -mt-1 -mr-1">
+                            <div className="flex justify-end -mt-1 -mr-1" onClick={(e) => e.stopPropagation()}>
                               <button
                                 type="button"
                                 onClick={() => removeKid(i)}
@@ -3609,66 +3624,68 @@ export default function Home() {
                               </button>
                             </div>
                           )}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            <div>
-                              <label className="mb-1 block text-xs text-brown-300">First Name <span className="text-red-500">*</span></label>
-                              <input
-                                type="text"
-                                placeholder="First name"
-                                required
-                                value={kid.firstName || ""}
-                                onChange={(e) => updateKidName(i, "first", e.target.value)}
-                                className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
-                              />
+                          <div className="space-y-2 cursor-auto" onClick={(e) => e.stopPropagation()}>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              <div>
+                                <label className="mb-1 block text-xs text-brown-300">First Name <span className="text-red-500">*</span></label>
+                                <input
+                                  type="text"
+                                  placeholder="First name"
+                                  required
+                                  value={kid.firstName || ""}
+                                  onChange={(e) => updateKidName(i, "first", e.target.value)}
+                                  className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
+                                />
+                              </div>
+                              <div>
+                                <label className="mb-1 block text-xs text-brown-300">Last Name <span className="text-red-500">*</span></label>
+                                <input
+                                  type="text"
+                                  placeholder="Last name"
+                                  required
+                                  value={kid.lastName || ""}
+                                  onChange={(e) => updateKidName(i, "last", e.target.value)}
+                                  className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
+                                />
+                              </div>
                             </div>
                             <div>
-                              <label className="mb-1 block text-xs text-brown-300">Last Name <span className="text-red-500">*</span></label>
-                              <input
-                                type="text"
-                                placeholder="Last name"
-                                required
-                                value={kid.lastName || ""}
-                                onChange={(e) => updateKidName(i, "last", e.target.value)}
-                                className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
-                              />
+                              <label className="mb-1 block text-xs text-brown-300">Date of Birth <span className="text-red-500">*</span></label>
+                              <DobInput value={kid.dob} onChange={(v) => updateKid(i, "dob", v)} required />
                             </div>
-                          </div>
-                          <div>
-                            <label className="mb-1 block text-xs text-brown-300">Date of Birth <span className="text-red-500">*</span></label>
-                            <DobInput value={kid.dob} onChange={(v) => updateKid(i, "dob", v)} required />
-                          </div>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            <div>
-                              <label className="mb-1 block text-xs text-brown-300">Grade <span className="text-red-500">*</span></label>
-                              <select
-                                required
-                                value={kid.grade}
-                                onChange={(e) => updateKid(i, "grade", e.target.value)}
-                                className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white text-sm focus:border-mesa-accent focus:outline-none"
-                              >
-                                <option value="">Select grade...</option>
-                                {(modal.type === "weekly"
-                                  ? getGradesForGroup(modal.sessionDetails.replace(/ — \d+ sessions?$/, ""))
-                                  : modal.type === "camp" && camps[modal.sessionIndex]?.gradeGroup
-                                  ? getGradesForGroup(camps[modal.sessionIndex].gradeGroup)
-                                  : ALL_GRADES
-                                ).map((g) => (
-                                  <option key={g.value} value={g.value}>{g.label}</option>
-                                ))}
-                              </select>
-                            </div>
-                            <div>
-                              <label className="mb-1 block text-xs text-brown-300">Gender <span className="text-red-500">*</span></label>
-                              <select
-                                required
-                                value={kid.gender}
-                                onChange={(e) => updateKid(i, "gender", e.target.value)}
-                                className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white text-sm focus:border-mesa-accent focus:outline-none"
-                              >
-                                <option value="">Select...</option>
-                                <option value="male">Male</option>
-                                <option value="female">Female</option>
-                              </select>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              <div>
+                                <label className="mb-1 block text-xs text-brown-300">Grade <span className="text-red-500">*</span></label>
+                                <select
+                                  required
+                                  value={kid.grade}
+                                  onChange={(e) => updateKid(i, "grade", e.target.value)}
+                                  className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white text-sm focus:border-mesa-accent focus:outline-none"
+                                >
+                                  <option value="">Select grade...</option>
+                                  {(modal.type === "weekly"
+                                    ? getGradesForGroup(modal.sessionDetails.replace(/ — \d+ sessions?$/, ""))
+                                    : modal.type === "camp" && camps[modal.sessionIndex]?.gradeGroup
+                                    ? getGradesForGroup(camps[modal.sessionIndex].gradeGroup)
+                                    : ALL_GRADES
+                                  ).map((g) => (
+                                    <option key={g.value} value={g.value}>{g.label}</option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div>
+                                <label className="mb-1 block text-xs text-brown-300">Gender <span className="text-red-500">*</span></label>
+                                <select
+                                  required
+                                  value={kid.gender}
+                                  onChange={(e) => updateKid(i, "gender", e.target.value)}
+                                  className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white text-sm focus:border-mesa-accent focus:outline-none"
+                                >
+                                  <option value="">Select...</option>
+                                  <option value="male">Male</option>
+                                  <option value="female">Female</option>
+                                </select>
+                              </div>
                             </div>
                           </div>
                           {kid.name && (
@@ -3688,7 +3705,7 @@ export default function Home() {
                           <button
                             type="button"
                             onClick={() => toggleKidExpanded(i)}
-                            className="flex h-7 items-center gap-2 text-sm text-white"
+                            className="flex flex-1 h-7 items-center gap-2 text-sm text-white text-left"
                           >
                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-mesa-accent shrink-0">
                               <polyline points="6 9 12 15 18 9" />
@@ -4264,9 +4281,12 @@ export default function Home() {
                     return (
                     <div key={i} className="flex flex-col gap-2 pb-2">
                       {isExpanded ? (
-                        <div className="rounded-lg border-2 border-mesa-accent bg-brown-800 p-3 shadow-lg shadow-black/30 space-y-2">
+                        <div
+                          onClick={() => collapseKid(i)}
+                          className="rounded-lg border-2 border-mesa-accent bg-brown-800 p-3 shadow-lg shadow-black/30 space-y-2 cursor-pointer"
+                        >
                           {kids.length > 1 && (
-                            <div className="flex justify-end -mt-1 -mr-1">
+                            <div className="flex justify-end -mt-1 -mr-1" onClick={(e) => e.stopPropagation()}>
                               <button
                                 type="button"
                                 onClick={() => removeKid(i)}
@@ -4276,59 +4296,61 @@ export default function Home() {
                               </button>
                             </div>
                           )}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            <div>
-                              <label className="mb-1 block text-xs text-brown-300">First Name <span className="text-red-500">*</span></label>
-                              <input
-                                type="text"
-                                placeholder="First name"
-                                required
-                                value={kid.firstName || ""}
-                                onChange={(e) => updateKidName(i, "first", e.target.value)}
-                                className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
-                              />
+                          <div className="space-y-2 cursor-auto" onClick={(e) => e.stopPropagation()}>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              <div>
+                                <label className="mb-1 block text-xs text-brown-300">First Name <span className="text-red-500">*</span></label>
+                                <input
+                                  type="text"
+                                  placeholder="First name"
+                                  required
+                                  value={kid.firstName || ""}
+                                  onChange={(e) => updateKidName(i, "first", e.target.value)}
+                                  className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
+                                />
+                              </div>
+                              <div>
+                                <label className="mb-1 block text-xs text-brown-300">Last Name <span className="text-red-500">*</span></label>
+                                <input
+                                  type="text"
+                                  placeholder="Last name"
+                                  required
+                                  value={kid.lastName || ""}
+                                  onChange={(e) => updateKidName(i, "last", e.target.value)}
+                                  className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
+                                />
+                              </div>
                             </div>
                             <div>
-                              <label className="mb-1 block text-xs text-brown-300">Last Name <span className="text-red-500">*</span></label>
-                              <input
-                                type="text"
-                                placeholder="Last name"
-                                required
-                                value={kid.lastName || ""}
-                                onChange={(e) => updateKidName(i, "last", e.target.value)}
-                                className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
-                              />
+                              <label className="mb-1 block text-xs text-brown-300">Date of Birth <span className="text-red-500">*</span></label>
+                              <DobInput value={kid.dob} onChange={(v) => updateKid(i, "dob", v)} required />
                             </div>
-                          </div>
-                          <div>
-                            <label className="mb-1 block text-xs text-brown-300">Date of Birth <span className="text-red-500">*</span></label>
-                            <DobInput value={kid.dob} onChange={(v) => updateKid(i, "dob", v)} required />
-                          </div>
-                          <div>
-                            <label className="mb-1 block text-xs text-brown-300">Grade <span className="text-red-500">*</span></label>
-                            <select
-                              required
-                              value={kid.grade}
-                              onChange={(e) => updateKid(i, "grade", e.target.value)}
-                              className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white text-sm focus:border-mesa-accent focus:outline-none"
-                            >
-                              <option value="">Select grade...</option>
-                              <option value="K">Kindergarten</option>
-                              <option value="1">1st Grade</option>
-                              <option value="2">2nd Grade</option>
-                              <option value="3">3rd Grade</option>
-                              <option value="4">4th Grade</option>
-                              <option value="5">5th Grade</option>
-                              <option value="6">6th Grade</option>
-                              <option value="7">7th Grade</option>
-                              <option value="8">8th Grade</option>
-                              <option value="9">9th Grade</option>
-                              <option value="10">10th Grade</option>
-                              <option value="11">11th Grade</option>
-                              <option value="12">12th Grade</option>
-                              <option value="College +">College / Pro</option>
-                              <option value="Adult">Adult</option>
-                            </select>
+                            <div>
+                              <label className="mb-1 block text-xs text-brown-300">Grade <span className="text-red-500">*</span></label>
+                              <select
+                                required
+                                value={kid.grade}
+                                onChange={(e) => updateKid(i, "grade", e.target.value)}
+                                className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white text-sm focus:border-mesa-accent focus:outline-none"
+                              >
+                                <option value="">Select grade...</option>
+                                <option value="K">Kindergarten</option>
+                                <option value="1">1st Grade</option>
+                                <option value="2">2nd Grade</option>
+                                <option value="3">3rd Grade</option>
+                                <option value="4">4th Grade</option>
+                                <option value="5">5th Grade</option>
+                                <option value="6">6th Grade</option>
+                                <option value="7">7th Grade</option>
+                                <option value="8">8th Grade</option>
+                                <option value="9">9th Grade</option>
+                                <option value="10">10th Grade</option>
+                                <option value="11">11th Grade</option>
+                                <option value="12">12th Grade</option>
+                                <option value="College +">College / Pro</option>
+                                <option value="Adult">Adult</option>
+                              </select>
+                            </div>
                           </div>
                           {kid.name && (
                             <div className="flex justify-end pt-1">
@@ -4347,7 +4369,7 @@ export default function Home() {
                           <button
                             type="button"
                             onClick={() => toggleKidExpanded(i)}
-                            className="flex h-7 items-center gap-2 text-sm text-white"
+                            className="flex flex-1 h-7 items-center gap-2 text-sm text-white text-left"
                           >
                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-mesa-accent shrink-0">
                               <polyline points="6 9 12 15 18 9" />
