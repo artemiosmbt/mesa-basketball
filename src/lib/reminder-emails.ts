@@ -103,19 +103,33 @@ export async function runReminderEmailWindow(window: ReminderWindow, options?: {
     // regGroupKey/exact date+start+end+location match is the same
     // battle-tested logic buildWeeklyPlan already relies on for matching a
     // registration back to a live sheet session.
-    const { data: existingRegs } = await supabase
-      .from("registrations")
-      .select("email, booked_date, booked_start_time, booked_end_time, booked_location, booked_group, session_details")
-      .eq("status", "confirmed")
-      .eq("booked_date", targetDate);
+    //
+    // booked_date is stored as whatever raw format the sheet's date column
+    // happened to export at booking time (e.g. "4/25/2026"), never
+    // normalized to ISO at write time — every other date-filtering query in
+    // this codebase already accounts for that by fetching broadly and
+    // comparing in JS (see e.g. getRemainingPackageCapacity in supabase.ts)
+    // rather than an exact-string `.eq("booked_date", ...)` SQL filter,
+    // which would silently return zero rows for any non-ISO-stored date and
+    // make this whole exclusion a no-op. Bounded instead by the small set
+    // of groups actually running in this window.
+    const groupNames = Array.from(new Set(windowSessions.map((s) => s.group)));
+    const { data: existingRegs } = groupNames.length > 0
+      ? await supabase
+          .from("registrations")
+          .select("email, booked_date, booked_start_time, booked_end_time, booked_location, booked_group, session_details")
+          .eq("status", "confirmed")
+          .in("booked_group", groupNames)
+      : { data: [] };
 
     const alreadyBookedKeys = new Set<string>();
     for (const r of existingRegs || []) {
-      if (!r.email) continue;
+      if (!r.email || !r.booked_date) continue;
+      if (normalizeDate(r.booked_date) !== targetDate) continue;
       const group = regGroupKey(r);
       if (!group) continue;
       alreadyBookedKeys.add(
-        `${r.email.toLowerCase().trim()}|${group}|${r.booked_date}|${r.booked_start_time}|${r.booked_end_time || ""}|${r.booked_location || ""}`
+        `${r.email.toLowerCase().trim()}|${group}|${targetDate}|${r.booked_start_time}|${r.booked_end_time || ""}|${r.booked_location || ""}`
       );
     }
 
@@ -134,7 +148,7 @@ export async function runReminderEmailWindow(window: ReminderWindow, options?: {
           const sessions = groupToSessions.get(g);
           if (!sessions) continue;
           for (const s of sessions) {
-            const bookedKey = `${emailNorm}|${s.group}|${s.date}|${s.startTime}|${s.endTime}|${s.location}`;
+            const bookedKey = `${emailNorm}|${s.group}|${targetDate}|${s.startTime}|${s.endTime}|${s.location}`;
             if (alreadyBookedKeys.has(bookedKey)) continue;
 
             if (!byEmail.has(p.email)) byEmail.set(p.email, { parentName: p.parent_name || "", sessionsByKey: new Map() });
