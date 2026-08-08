@@ -3597,7 +3597,18 @@ export default function Home() {
                     return (
                     <div key={i} className="flex flex-col gap-2 pb-2">
                       {isExpanded ? (
-                        <div className="rounded-lg border border-brown-700 bg-brown-800/50 p-3 space-y-2">
+                        <div className="rounded-lg border-2 border-mesa-accent bg-brown-800 p-3 shadow-lg shadow-black/30 space-y-2">
+                          {kids.length > 1 && (
+                            <div className="flex justify-end -mt-1 -mr-1">
+                              <button
+                                type="button"
+                                onClick={() => removeKid(i)}
+                                className="flex h-7 w-7 items-center justify-center rounded-full text-brown-300 hover:bg-brown-900 hover:text-red-400 text-xl leading-none"
+                              >
+                                &times;
+                              </button>
+                            </div>
+                          )}
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                             <div>
                               <label className="mb-1 block text-xs text-brown-300">First Name <span className="text-red-500">*</span></label>
@@ -3621,18 +3632,6 @@ export default function Home() {
                                 className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
                               />
                             </div>
-                          </div>
-                          <div className="flex justify-end gap-3">
-                            {kid.name && (
-                              <button type="button" onClick={() => toggleKidExpanded(i)} className="text-brown-500 hover:text-mesa-accent text-xs px-1" aria-label="Collapse">
-                                Done
-                              </button>
-                            )}
-                            {kids.length > 1 && (
-                              <button type="button" onClick={() => removeKid(i)} className="text-brown-500 hover:text-red-400 text-xl leading-none">
-                                &times;
-                              </button>
-                            )}
                           </div>
                           <div>
                             <label className="mb-1 block text-xs text-brown-300">Date of Birth <span className="text-red-500">*</span></label>
@@ -3672,6 +3671,17 @@ export default function Home() {
                               </select>
                             </div>
                           </div>
+                          {kid.name && (
+                            <div className="flex justify-end pt-1">
+                              <button
+                                type="button"
+                                onClick={() => toggleKidExpanded(i)}
+                                className="rounded bg-mesa-accent px-4 py-1.5 text-xs font-semibold text-white hover:bg-yellow-600 transition"
+                              >
+                                Save Changes
+                              </button>
+                            </div>
+                          )}
                         </div>
                       ) : (
                         <div className="flex items-center justify-between gap-3 rounded-full border-2 border-mesa-accent bg-brown-800 py-1.5 pl-4 pr-2 shadow-lg shadow-black/30 hover:bg-brown-700 transition min-w-[180px]">
@@ -4254,7 +4264,18 @@ export default function Home() {
                     return (
                     <div key={i} className="flex flex-col gap-2 pb-2">
                       {isExpanded ? (
-                        <div className="rounded-lg border border-brown-700 bg-brown-800/50 p-3 space-y-2">
+                        <div className="rounded-lg border-2 border-mesa-accent bg-brown-800 p-3 shadow-lg shadow-black/30 space-y-2">
+                          {kids.length > 1 && (
+                            <div className="flex justify-end -mt-1 -mr-1">
+                              <button
+                                type="button"
+                                onClick={() => removeKid(i)}
+                                className="flex h-7 w-7 items-center justify-center rounded-full text-brown-300 hover:bg-brown-900 hover:text-red-400 text-xl leading-none"
+                              >
+                                &times;
+                              </button>
+                            </div>
+                          )}
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                             <div>
                               <label className="mb-1 block text-xs text-brown-300">First Name <span className="text-red-500">*</span></label>
@@ -4278,16 +4299,6 @@ export default function Home() {
                                 className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
                               />
                             </div>
-                          </div>
-                          <div className="flex justify-end gap-3">
-                            {kid.name && (
-                              <button type="button" onClick={() => toggleKidExpanded(i)} className="text-brown-500 hover:text-mesa-accent text-xs px-1" aria-label="Collapse">
-                                Done
-                              </button>
-                            )}
-                            {kids.length > 1 && (
-                              <button type="button" onClick={() => removeKid(i)} className="text-brown-500 hover:text-red-400 text-xl leading-none">&times;</button>
-                            )}
                           </div>
                           <div>
                             <label className="mb-1 block text-xs text-brown-300">Date of Birth <span className="text-red-500">*</span></label>
@@ -4319,6 +4330,17 @@ export default function Home() {
                               <option value="Adult">Adult</option>
                             </select>
                           </div>
+                          {kid.name && (
+                            <div className="flex justify-end pt-1">
+                              <button
+                                type="button"
+                                onClick={() => toggleKidExpanded(i)}
+                                className="rounded bg-mesa-accent px-4 py-1.5 text-xs font-semibold text-white hover:bg-yellow-600 transition"
+                              >
+                                Save Changes
+                              </button>
+                            </div>
+                          )}
                         </div>
                       ) : (
                         <div className="flex items-center justify-between gap-3 rounded-full border-2 border-mesa-accent bg-brown-800 py-1.5 pl-4 pr-2 shadow-lg shadow-black/30 hover:bg-brown-700 transition min-w-[180px]">

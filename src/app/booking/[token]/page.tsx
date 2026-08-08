@@ -1494,7 +1494,18 @@ export default function ManageBooking({
                     return (
                     <div key={i} className="flex flex-col gap-2 pb-2">
                       {isExpanded ? (
-                        <div className="rounded-lg border border-brown-700 bg-brown-800/50 p-3 space-y-2">
+                        <div className="rounded-lg border-2 border-mesa-accent bg-brown-800 p-3 shadow-lg shadow-black/30 space-y-2">
+                          {reschedulePlayers.length > 1 && (
+                            <div className="flex justify-end -mt-1 -mr-1">
+                              <button
+                                type="button"
+                                onClick={() => setReschedulePlayers(prev => prev.filter((_, j) => j !== i))}
+                                className="flex h-7 w-7 items-center justify-center rounded-full text-brown-300 hover:bg-brown-900 hover:text-red-400 text-xl leading-none"
+                              >
+                                &times;
+                              </button>
+                            </div>
+                          )}
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                             <div>
                               <label className="mb-1 block text-xs text-brown-300">First Name <span className="text-red-500">*</span></label>
@@ -1518,18 +1529,6 @@ export default function ManageBooking({
                                 className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none"
                               />
                             </div>
-                          </div>
-                          <div className="flex justify-end gap-3">
-                            {player.name && (
-                              <button type="button" onClick={() => toggleReschedulePlayerExpanded(i)} className="text-brown-500 hover:text-mesa-accent text-xs px-1" aria-label="Collapse">
-                                Done
-                              </button>
-                            )}
-                            {reschedulePlayers.length > 1 && (
-                              <button type="button" onClick={() => setReschedulePlayers(prev => prev.filter((_, j) => j !== i))} className="text-brown-500 hover:text-red-400 text-xl leading-none">
-                                &times;
-                              </button>
-                            )}
                           </div>
                           <div>
                             <label className="mb-1 block text-xs text-brown-300">Date of Birth <span className="text-red-500">*</span></label>
@@ -1555,6 +1554,17 @@ export default function ManageBooking({
                               </select>
                             </div>
                           </div>
+                          {player.name && (
+                            <div className="flex justify-end pt-1">
+                              <button
+                                type="button"
+                                onClick={() => toggleReschedulePlayerExpanded(i)}
+                                className="rounded bg-mesa-accent px-4 py-1.5 text-xs font-semibold text-white hover:bg-yellow-600 transition"
+                              >
+                                Save Changes
+                              </button>
+                            </div>
+                          )}
                         </div>
                       ) : (
                         <div className="flex items-center justify-between gap-3 rounded-full border-2 border-mesa-accent bg-brown-800 py-1.5 pl-4 pr-2 shadow-lg shadow-black/30 hover:bg-brown-700 transition min-w-[180px]">
