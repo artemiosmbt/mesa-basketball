@@ -3617,10 +3617,10 @@ export default function Home() {
                           className="rounded-lg border-2 border-mesa-accent bg-brown-800 p-3 shadow-lg shadow-black/30 space-y-2 cursor-pointer"
                         >
                           {kids.length > 1 && (
-                            <div className="flex justify-end -mt-1 -mr-1" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex justify-end -mt-1 -mr-1">
                               <button
                                 type="button"
-                                onClick={() => removeKid(i)}
+                                onClick={(e) => { e.stopPropagation(); removeKid(i); }}
                                 className="flex h-7 w-7 items-center justify-center rounded-full text-brown-300 hover:bg-brown-900 hover:text-red-400 text-xl leading-none"
                               >
                                 &times;
@@ -4293,10 +4293,10 @@ export default function Home() {
                           className="rounded-lg border-2 border-mesa-accent bg-brown-800 p-3 shadow-lg shadow-black/30 space-y-2 cursor-pointer"
                         >
                           {kids.length > 1 && (
-                            <div className="flex justify-end -mt-1 -mr-1" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex justify-end -mt-1 -mr-1">
                               <button
                                 type="button"
-                                onClick={() => removeKid(i)}
+                                onClick={(e) => { e.stopPropagation(); removeKid(i); }}
                                 className="flex h-7 w-7 items-center justify-center rounded-full text-brown-300 hover:bg-brown-900 hover:text-red-400 text-xl leading-none"
                               >
                                 &times;
