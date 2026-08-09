@@ -49,8 +49,16 @@
 import { createClient } from "@supabase/supabase-js";
 import { normalizeDate } from "./calendar";
 import { calcServiceFee } from "./pricing";
-import { getStripe } from "./stripe";
 import { a1Quote, appendValues, batchUpdate, batchUpdateValues, getSheetMeta, getValues, updateValues } from "./sheets-write";
+import {
+  STRIPE_PCT_CARD,
+  STRIPE_FIXED,
+  PAYMENT_METHOD_CACHE_TAB,
+  MAX_STRIPE_LOOKUPS_PER_RUN,
+  ensurePaymentMethodCacheTab,
+  readPaymentMethodCache,
+  resolveStripePct,
+} from "./stripe-payment-method";
 
 export const MONTHLY_REVENUE_SHEET_ID = "1_gSXvi7wXRdLZA2wMuiCwwublyBvUbCMrbJkUnUdaug";
 const TRACKER_START_DATE = "2026-08-01";
@@ -86,9 +94,7 @@ const BASE_HOURLY_RATE = 20;
 const INCENTIVE_PER_HEAD = 20;
 const PRIVATE_TRAINER_RATE_1_3 = 60;
 const PRIVATE_TRAINER_RATE_4PLUS = 90;
-const STRIPE_PCT_CARD = 0.029;
-const STRIPE_PCT_LINK = 0.027; // Stripe charges a lower % when the customer pays via Link instead of a plain card
-const STRIPE_FIXED = 0.3; // same fixed $0.30 for both
+// STRIPE_PCT_CARD/STRIPE_FIXED are imported from ./stripe-payment-method (shared with payroll-sync.ts).
 
 interface LocationSeed { name: string; monthlyRent: number }
 const KNOWN_LOCATIONS: LocationSeed[] = [
@@ -207,6 +213,7 @@ function parseKidNames(kidsStr: string | null): string[] {
 // ---------------------------------------------------------------------------
 
 interface DerivedSession {
+  registrationId: string; // used by the top-up-charge fold-in pass to match registration_topup_charges rows
   date: string;
   startHours: number; // decimal hours since midnight, for within-day chronological ordering
   trainer: string;
@@ -312,6 +319,7 @@ function deriveSession(reg: RegRow, isLateCancel: boolean, lateFeeAmountKept: nu
       : `${kidsLabel}${reg.type === "group-private" ? " (Group Private)" : ""} ${amountText}`;
 
   return {
+    registrationId: reg.id,
     date,
     startHours: timeToDecimalHours(reg.booked_start_time) ?? 0,
     trainer: reg.booked_trainer || OWNER_NAME,
@@ -498,72 +506,6 @@ function feeFingerprint(processing: number, stripe: number): string {
 function parseDollarSum(text: string): number {
   const matches = text.match(/\$([\d,]+\.\d{2})/g) || [];
   return round2(matches.reduce((sum, m) => sum + parseFloat(m.replace(/[$,]/g, "")), 0));
-}
-
-// ---------------------------------------------------------------------------
-// Card vs Link payment-method lookup — Stripe charges a lower % on Link
-// (2.7%+$0.30) than a plain card (2.9%+$0.30). Which one a given checkout
-// actually used isn't stored anywhere in Supabase, only on the Stripe
-// PaymentIntent itself, so this looks it up live and caches the result in a
-// hidden tab keyed by payment_intent_id — a completed transaction's payment
-// method never changes, so once looked up it never needs re-fetching.
-// ---------------------------------------------------------------------------
-
-const PAYMENT_METHOD_CACHE_TAB = "_PaymentMethodCache";
-// Bounds how many NEW (uncached) Stripe lookups happen in a single run —
-// the sync has a 60s function timeout, and each lookup is a real network
-// call. Any payment intent that doesn't fit this run's budget falls back to
-// the card rate for now and gets looked up (and corrected) on a later run.
-const MAX_STRIPE_LOOKUPS_PER_RUN = 40;
-
-async function ensurePaymentMethodCacheTab(): Promise<void> {
-  const meta = await getSheetMeta(MONTHLY_REVENUE_SHEET_ID);
-  if (meta.some((s) => s.title === PAYMENT_METHOD_CACHE_TAB)) return;
-  await batchUpdate(MONTHLY_REVENUE_SHEET_ID, [
-    { addSheet: { properties: { title: PAYMENT_METHOD_CACHE_TAB, hidden: true } } },
-  ]);
-  await updateValues(MONTHLY_REVENUE_SHEET_ID, `${a1Quote(PAYMENT_METHOD_CACHE_TAB)}!A1:B1`, [["payment_intent_id", "method_type"]]);
-}
-
-async function readPaymentMethodCache(): Promise<Map<string, string>> {
-  const rows = await getValues(MONTHLY_REVENUE_SHEET_ID, `${a1Quote(PAYMENT_METHOD_CACHE_TAB)}!A2:B`);
-  const map = new Map<string, string>();
-  for (const r of rows) {
-    const [id, type] = r as [string, string];
-    if (id) map.set(id, type || "card");
-  }
-  return map;
-}
-
-function stripePctForMethod(methodType: string): number {
-  return methodType === "link" ? STRIPE_PCT_LINK : STRIPE_PCT_CARD;
-}
-
-/** Resolves the real Stripe % for a payment intent — cached first, else a
- * live lookup (budget-limited), else falls back to the card rate. */
-async function resolveStripePct(
-  paymentIntentId: string | null,
-  cache: Map<string, string>,
-  cacheWrites: Map<string, string>,
-  budget: { remaining: number }
-): Promise<number> {
-  if (!paymentIntentId) return STRIPE_PCT_CARD;
-  const cached = cache.get(paymentIntentId);
-  if (cached) return stripePctForMethod(cached);
-  if (budget.remaining <= 0) return STRIPE_PCT_CARD; // picked up on a future run instead
-  budget.remaining--;
-  try {
-    const stripe = getStripe();
-    const pi = await stripe.paymentIntents.retrieve(paymentIntentId, { expand: ["payment_method"] });
-    const methodType = typeof pi.payment_method === "object" && pi.payment_method ? pi.payment_method.type : "card";
-    cache.set(paymentIntentId, methodType);
-    cacheWrites.set(paymentIntentId, methodType);
-    return stripePctForMethod(methodType);
-  } catch {
-    // Unretrievable (bad id, test-mode leftover, transient error) — default
-    // to card rather than fail the whole sync over one fee refinement.
-    return STRIPE_PCT_CARD;
-  }
 }
 
 async function buildMonthTab(
@@ -1207,8 +1149,8 @@ export async function runMonthlyRevenueSync(): Promise<MonthlyRevenueSyncResult>
 
   // Card-vs-Link lookup, shared by both the session and package fee
   // post-passes below (see resolveStripePct's header comment).
-  await ensurePaymentMethodCacheTab();
-  const pmCache = await readPaymentMethodCache();
+  await ensurePaymentMethodCacheTab(MONTHLY_REVENUE_SHEET_ID);
+  const pmCache = await readPaymentMethodCache(MONTHLY_REVENUE_SHEET_ID);
   const pmCacheWrites = new Map<string, string>();
   const stripeLookupBudget = { remaining: MAX_STRIPE_LOOKUPS_PER_RUN };
 
@@ -1238,6 +1180,34 @@ export async function runMonthlyRevenueSync(): Promise<MonthlyRevenueSyncResult>
     // whether this checkout was paid by card (2.9%) or Link (2.7%).
     const pct = await resolveStripePct(rep.paymentIntentId, pmCache, pmCacheWrites, stripeLookupBudget);
     rep.stripeFee = round2((totalCharged + rep.processingFee) * pct + STRIPE_FIXED);
+  }
+
+  // Fold in top-up charges (admin "Add Player" / a late reschedule's charged
+  // remainder — see registration_topup_charges) — each is a genuinely
+  // separate, additional real Stripe charge with its own fee, independent
+  // of whatever the original checkout's grouping above computed. This is
+  // the permanent fix for the Bryan Schrubbe case: previously the second
+  // charge was invisible to this sync entirely and needed a one-off manual
+  // day-row correction; now it's picked up automatically every run.
+  if (sessions.length > 0) {
+    const { data: topups } = await supabase
+      .from("registration_topup_charges")
+      .select("registration_id, stripe_payment_intent_id, price_delta, service_fee")
+      .in("registration_id", sessions.map((s) => s.registrationId));
+    const topupsByReg = new Map<string, { stripe_payment_intent_id: string; price_delta: number; service_fee: number }[]>();
+    for (const t of (topups || []) as { registration_id: string; stripe_payment_intent_id: string; price_delta: number; service_fee: number }[]) {
+      if (!topupsByReg.has(t.registration_id)) topupsByReg.set(t.registration_id, []);
+      topupsByReg.get(t.registration_id)!.push(t);
+    }
+    for (const s of sessions) {
+      const regTopups = topupsByReg.get(s.registrationId);
+      if (!regTopups) continue;
+      for (const t of regTopups) {
+        s.processingFee = round2(s.processingFee + t.service_fee);
+        const pct = await resolveStripePct(t.stripe_payment_intent_id, pmCache, pmCacheWrites, stripeLookupBudget);
+        s.stripeFee = round2(s.stripeFee + (t.price_delta + t.service_fee) * pct + STRIPE_FIXED);
+      }
+    }
   }
 
   const { data: pkgSales, error: pkgErr } = await supabase

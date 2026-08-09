@@ -634,6 +634,37 @@ export async function logLateFeeEvent(event: {
   }
 }
 
+/**
+ * Records a real, additional off-session Stripe charge that topped up an
+ * existing registration (admin "Add Player", or a late reschedule's charged
+ * remainder) — see registration_topup_charges migration for why this table
+ * exists: without it, a second real charge on the same booking is
+ * invisible to every revenue/payroll report. Fire-and-forget, same style as
+ * logLateFeeEvent — a logging failure here shouldn't block the response
+ * that already told the client their card was charged.
+ */
+export async function logRegistrationTopupCharge(event: {
+  registrationId: string;
+  stripePaymentIntentId: string;
+  priceDelta: number;
+  serviceFee: number;
+  source: "add_player" | "reschedule_topup";
+}): Promise<void> {
+  try {
+    const supabase = getSupabase();
+    const { error } = await supabase.from("registration_topup_charges").insert({
+      registration_id: event.registrationId,
+      stripe_payment_intent_id: event.stripePaymentIntentId,
+      price_delta: event.priceDelta,
+      service_fee: event.serviceFee,
+      source: event.source,
+    });
+    if (error) throw error;
+  } catch (err) {
+    console.error("Failed to log registration topup charge:", err);
+  }
+}
+
 /** Check if email OR phone has any previous registrations (fraud-resistant new client check) */
 export async function isNewClient(email: string, phone: string): Promise<boolean> {
   const supabase = getSupabase();

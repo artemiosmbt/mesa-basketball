@@ -9,7 +9,7 @@ import {
 import { sendRescheduleNotification } from "@/lib/email";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import { getWeeklySchedule } from "@/lib/sheets";
-import { addAccountCredit, deductAccountCredit, addReferralCredit, addRegistration, cancelRegistration, logLateFeeEvent, getPackageById, countPackageSessionsUsed, setPackageSessions, checkGroupSessionCapacity } from "@/lib/supabase";
+import { addAccountCredit, deductAccountCredit, addReferralCredit, addRegistration, cancelRegistration, logLateFeeEvent, logRegistrationTopupCharge, getPackageById, countPackageSessionsUsed, setPackageSessions, checkGroupSessionCapacity } from "@/lib/supabase";
 import { isLateAction, resolveOffSessionPaymentSource, chargeSavedCardOffSession, issueStripeRefund } from "@/lib/booking-finalize";
 import { calcServiceFee, serviceFeeLabel, fmtMoney, calcPrivatePrice, fullPriceForType, getTrainerTier, normalizeTrainerTier } from "@/lib/pricing";
 import { notifyTrainerOfCancellation, notifyTrainerOfReschedule, notifyTrainerOfNewBooking } from "@/lib/trainer-notify";
@@ -465,6 +465,22 @@ export async function POST(req: NextRequest) {
     } catch {
       // non-critical — don't fail the reschedule
     }
+  }
+
+  // Record this as a genuinely separate, additional Stripe charge on top of
+  // the original checkout — without this, no revenue/payroll report can
+  // ever know a second charge happened (see registration_topup_charges).
+  // amountToCharge already combines any late-fee remainder and package
+  // move-out charge into one real charge, so this is exactly one log row
+  // per off-session charge, matching what actually happened in Stripe.
+  if (autoChargedAmount > 0 && autoChargePaymentIntentId) {
+    await logRegistrationTopupCharge({
+      registrationId: reg.id,
+      stripePaymentIntentId: autoChargePaymentIntentId,
+      priceDelta: autoChargedAmount,
+      serviceFee: calcServiceFee(autoChargedAmount),
+      source: "reschedule_topup",
+    });
   }
 
   // Unchecking "keep referral credit" gives the credit back — they're no

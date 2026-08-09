@@ -32,6 +32,15 @@ import {
   getValues,
   updateValues,
 } from "./sheets-write";
+import { calcServiceFee } from "./pricing";
+import {
+  STRIPE_FIXED,
+  PAYMENT_METHOD_CACHE_TAB,
+  ensurePaymentMethodCacheTab,
+  readPaymentMethodCache,
+  resolvePaymentMethod,
+  MAX_STRIPE_LOOKUPS_PER_RUN,
+} from "./stripe-payment-method";
 
 // ---------------------------------------------------------------------------
 // Constants mirroring the sheet's own layout (build_mesa_sheet.py) and the
@@ -74,6 +83,10 @@ const DISCOUNT_TIERS = [0.15, 0.1, 0]; // checked in this order (largest first)
 // are cheap to skip.
 const MAX_WRITES_PER_RUN = 150;
 
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
 // ---------------------------------------------------------------------------
 // Supabase — a small dedicated client, deliberately not importing from
 // src/lib/supabase.ts, so this new/still-settling code can never affect the
@@ -101,6 +114,15 @@ interface RegistrationRow {
   session_price: number | null;
   applied_account_credit: number | null;
   package_id: string | null;
+  stripe_checkout_session_id: string | null;
+  stripe_payment_intent_id: string | null;
+}
+
+interface TopupChargeRow {
+  registration_id: string;
+  stripe_payment_intent_id: string;
+  price_delta: number;
+  service_fee: number;
 }
 
 interface MonthlyPackageRow {
@@ -199,6 +221,12 @@ function deriveRowFingerprint(r: DerivedRow): string {
   return JSON.stringify([
     r.cancellationFlag, r.participants, r.startTime, r.endTime,
     r.paymentType, r.packageSize, r.discount, r.creditApplied,
+    // processingFee/stripeFee are filled in by a later pass (checkout-session
+    // grouping, top-up folding) — including them here means a fee correction
+    // that arrives on its own (e.g. a top-up charge logged the day AFTER the
+    // original session already synced) is enough, by itself, to trigger a
+    // re-write of this row, same reasoning as the comment above.
+    r.processingFee, r.stripeFee,
   ]);
 }
 
@@ -272,12 +300,28 @@ interface DerivedRow {
   participants: number;
   startTime: string;
   endTime: string;
-  paymentType: "Credit Card" | "Credit Only" | "Package (Prepaid)";
+  paymentType: "Credit Card" | "Link" | "Credit Only" | "Package (Prepaid)";
   packageSize: "4-Pack" | "8-Pack" | "";
   discount: number;
   creditApplied: number;
   cancellationFlag: CancellationFlag;
   notes: string;
+  // The real amount actually run through Stripe for this row (post-credit,
+  // $0 for package-covered/credit-only rows) — NOT yet a fee. Used by the
+  // checkout-session-grouping post-pass in runPayrollSync (mirrors
+  // monthly-revenue-sync.ts's stripePortion) since a single checkout can
+  // cover several registration rows and the service/Stripe fee is only
+  // charged once per checkout, not once per row.
+  stripePortion: number;
+  checkoutSessionId: string | null;
+  paymentIntentId: string | null;
+  // Filled in by the post-pass in runPayrollSync — 0 until then. Written to
+  // the sheet as raw values (Q/S), not left as per-row formulas, since the
+  // real fee genuinely depends on cross-row (checkout-grouping) and
+  // external (registration_topup_charges) knowledge a single row's own
+  // cells can't derive.
+  processingFee: number;
+  stripeFee: number;
 }
 
 function deriveRow(
@@ -303,6 +347,12 @@ function deriveRow(
   } else if (credit > 0 && credit >= price) {
     paymentType = "Credit Only";
   }
+  // "Link" (vs the "Credit Card" default set above) is only ever resolved
+  // later, in runPayrollSync's checkout-grouping post-pass — this function
+  // has no Stripe access and stays synchronous.
+  const stripePortion = paymentType === "Package (Prepaid)" || paymentType === "Credit Only"
+    ? 0
+    : Math.max(price - credit, 0);
 
   // Discount only applies to non-package Group (pay-as-you-go weekly) rows —
   // inferred by comparing the sheet's own pre-discount formula against what
@@ -333,10 +383,18 @@ function deriveRow(
     creditApplied: credit,
     cancellationFlag,
     notes: `Auto-synced: ${reg.parent_name || reg.email || ""}`.trim(),
+    stripePortion,
+    checkoutSessionId: reg.stripe_checkout_session_id,
+    paymentIntentId: reg.stripe_payment_intent_id,
+    processingFee: 0,
+    stripeFee: 0,
   };
 }
 
-/** The 10 input-column values, in A,C,D,E,F,J,K,M,O,V,X sheet order (skipping formula columns). */
+/** The 12 input-column values, in A,C,D,E,F,J,K,M,O,Q,S,V,X sheet order
+ * (skipping formula columns). Q (Processing Fee) and S (Stripe Fee) are
+ * script-computed raw values (see DerivedRow's comment) — everything else
+ * here is unchanged from before. */
 function rowToInputValues(r: DerivedRow): { range: string; values: unknown[] }[] {
   return [
     { range: "A", values: [r.date] },
@@ -347,6 +405,8 @@ function rowToInputValues(r: DerivedRow): { range: string; values: unknown[] }[]
     { range: "J", values: [r.paymentType] },
     { range: "K", values: [r.packageSize] },
     { range: "M", values: [r.discount] },
+    { range: "Q", values: [r.processingFee] },
+    { range: "S", values: [r.stripeFee] },
     { range: "O", values: [r.creditApplied] },
     { range: "V", values: [r.cancellationFlag] },
     { range: "X", values: [r.notes] },
@@ -415,7 +475,7 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
   const { data: regs, error: regErr } = await supabase
     .from("registrations")
     .select(
-      "id, parent_name, email, type, total_participants, booked_date, booked_start_time, booked_end_time, booked_trainer, status, session_price, applied_account_credit, package_id"
+      "id, parent_name, email, type, total_participants, booked_date, booked_start_time, booked_end_time, booked_trainer, status, session_price, applied_account_credit, package_id, stripe_checkout_session_id, stripe_payment_intent_id"
     )
     .in("type", ["weekly", "private", "group-private"])
     .in("status", ["confirmed", "cancelled", "no_show"])
@@ -467,9 +527,14 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
     }
   }
 
+  // Pass 1: derive every in-scope row first (no Stripe calls, no writes) —
+  // needed before the fee post-pass below, since a real Processing/Stripe
+  // Fee depends on cross-row (checkout-session grouping) and external
+  // (registration_topup_charges) knowledge a single registration can't
+  // supply on its own.
+  interface DerivedEntry { reg: RegistrationRow; trainer: string; derived: DerivedRow }
+  const entries: DerivedEntry[] = [];
   for (const reg of registrations) {
-    if (writesThisRun >= MAX_WRITES_PER_RUN) break;
-
     const trainer = TRAINER_BY_NORMALIZED.get(normalizeTrainerName(reg.booked_trainer || ""));
     if (!trainer) {
       result.sessionsSkippedUnknownTrainer++;
@@ -480,7 +545,6 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
       result.sessionsSkippedNonLateCancel++;
       continue;
     }
-
     const derived = deriveRow(
       reg,
       lateFeeByReg.get(reg.id),
@@ -490,6 +554,72 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
       result.sessionsSkippedNoLoggableStatus++;
       continue;
     }
+    entries.push({ reg, trainer, derived });
+  }
+
+  // Pass 2: card-vs-Link resolution + checkout-session fee grouping — a
+  // single Stripe Checkout can cover several registration rows (e.g. a
+  // multi-date private series), and the ~$4.50/3.2% service fee plus the
+  // real Stripe cost are charged/incurred ONCE per checkout, not once per
+  // row. Mirrors monthly-revenue-sync.ts's checkoutGroups exactly — without
+  // this, a multi-row checkout would have its processing fee counted once
+  // per row instead of once for the whole checkout.
+  await ensurePaymentMethodCacheTab(spreadsheetId);
+  const pmCache = await readPaymentMethodCache(spreadsheetId);
+  const pmCacheWrites = new Map<string, string>();
+  const stripeLookupBudget = { remaining: MAX_STRIPE_LOOKUPS_PER_RUN };
+
+  const checkoutGroups = new Map<string, DerivedEntry[]>();
+  for (const entry of entries) {
+    const csid = entry.reg.stripe_checkout_session_id;
+    if (!csid || entry.derived.stripePortion <= 0) continue;
+    if (!checkoutGroups.has(csid)) checkoutGroups.set(csid, []);
+    checkoutGroups.get(csid)!.push(entry);
+  }
+  for (const group of checkoutGroups.values()) {
+    const totalCharged = round2(group.reduce((sum, e) => sum + e.derived.stripePortion, 0));
+    if (totalCharged <= 0) continue;
+    const rep = group.slice().sort((a, b) =>
+      (a.reg.booked_date || "").localeCompare(b.reg.booked_date || "") ||
+      (timeToDecimalHours(a.reg.booked_start_time) ?? 0) - (timeToDecimalHours(b.reg.booked_start_time) ?? 0)
+    )[0];
+    rep.derived.processingFee = calcServiceFee(totalCharged);
+    const { pct, label } = await resolvePaymentMethod(rep.reg.stripe_payment_intent_id, pmCache, pmCacheWrites, stripeLookupBudget);
+    rep.derived.stripeFee = round2((totalCharged + rep.derived.processingFee) * pct + STRIPE_FIXED);
+    // Only ever upgrades the plain-card default to "Link" — never touches
+    // "Credit Only"/"Package (Prepaid)", which were never card-charged.
+    if (rep.derived.paymentType === "Credit Card") rep.derived.paymentType = label;
+  }
+
+  // Pass 3: fold in top-up charges (admin "Add Player" / a late reschedule's
+  // charged remainder — see registration_topup_charges) — each is a
+  // genuinely separate, additional real Stripe charge with its own fee,
+  // independent of whatever the original checkout's grouping above computed.
+  if (entries.length > 0) {
+    const { data: topups } = await supabase
+      .from("registration_topup_charges")
+      .select("registration_id, stripe_payment_intent_id, price_delta, service_fee")
+      .in("registration_id", entries.map((e) => e.reg.id));
+    const topupsByReg = new Map<string, TopupChargeRow[]>();
+    for (const t of (topups || []) as TopupChargeRow[]) {
+      if (!topupsByReg.has(t.registration_id)) topupsByReg.set(t.registration_id, []);
+      topupsByReg.get(t.registration_id)!.push(t);
+    }
+    for (const entry of entries) {
+      const regTopups = topupsByReg.get(entry.reg.id);
+      if (!regTopups) continue;
+      for (const t of regTopups) {
+        entry.derived.processingFee = round2(entry.derived.processingFee + t.service_fee);
+        const { pct } = await resolvePaymentMethod(t.stripe_payment_intent_id, pmCache, pmCacheWrites, stripeLookupBudget);
+        entry.derived.stripeFee = round2(entry.derived.stripeFee + (t.price_delta + t.service_fee) * pct + STRIPE_FIXED);
+      }
+    }
+  }
+
+  // Pass 4: write — identical to the original single-pass loop, just now
+  // operating on entries whose fees were already fully resolved above.
+  for (const { reg, trainer, derived } of entries) {
+    if (writesThisRun >= MAX_WRITES_PER_RUN) break;
 
     try {
       const fingerprint = deriveRowFingerprint(derived);
@@ -523,6 +653,16 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
     } catch (err) {
       result.errors.push(`registration ${reg.id}: ${err instanceof Error ? err.message : String(err)}`);
     }
+  }
+
+  // Payment-method cache only ever grows (a completed transaction's method
+  // never changes) — every entry here is new, always append.
+  if (pmCacheWrites.size > 0) {
+    await appendValues(
+      spreadsheetId,
+      `${a1Quote(PAYMENT_METHOD_CACHE_TAB)}!A:B`,
+      Array.from(pmCacheWrites.entries()).map(([id, type]) => [id, type])
+    );
   }
 
   // ---- package purchases -> Package Sales Log ----

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { verifyAdmin } from "@/lib/auth";
-import { updateRegistrationPlayers, addAccountCredit } from "@/lib/supabase";
+import { updateRegistrationPlayers, addAccountCredit, logRegistrationTopupCharge } from "@/lib/supabase";
 import {
   addPrivateSessionToCalendar,
   deletePrivateSessionFromCalendar,
@@ -190,6 +190,19 @@ export async function POST(req: NextRequest) {
       }).catch((err) => console.error("Failed to refund add-player charge after failed update:", err));
     }
     return NextResponse.json({ error: "This booking is no longer confirmed — it may have just been cancelled" }, { status: 409 });
+  }
+
+  // Record this as a genuinely separate, additional Stripe charge on top of
+  // the original checkout — without this, no revenue/payroll report can
+  // ever know a second charge happened (see registration_topup_charges).
+  if (autoChargedAmount > 0 && autoChargePaymentIntentId) {
+    await logRegistrationTopupCharge({
+      registrationId: reg.id,
+      stripePaymentIntentId: autoChargePaymentIntentId,
+      priceDelta: autoChargedAmount,
+      serviceFee: calcServiceFee(autoChargedAmount),
+      source: "add_player",
+    });
   }
 
   let creditGranted = 0;
