@@ -853,7 +853,7 @@ async function buildMonthTab(
     },
   });
 
-  // PICKUPS table — title/subtitle/header labels and the TOTAL formula are
+  // PICKUPS table — title/header labels and the TOTAL formula are
   // rewritten every run (harmless, just labels/a formula); the data rows
   // (K11:L60) are never referenced by any updateCells request anywhere in
   // this file, so whatever the owner types there survives every rebuild
@@ -863,18 +863,6 @@ async function buildMonthTab(
       rows: [{ values: [{ userEnteredValue: { stringValue: "PICKUPS — Cash Games (St. Paul's)" }, userEnteredFormat: { textFormat: { bold: true, fontSize: 12 } } }] }],
       fields: "userEnteredValue,userEnteredFormat",
       start: { sheetId, rowIndex: 7, columnIndex: 10 },
-    },
-  });
-  requests.push({
-    updateCells: {
-      rows: [{
-        values: [{
-          userEnteredValue: { stringValue: "Off-the-books cash games you run yourself — not from the schedule. Add date + amount below; the total feeds into St. Paul's Revenue and Net Profit above automatically." },
-          userEnteredFormat: { textFormat: { italic: true }, wrapStrategy: "WRAP" },
-        }],
-      }],
-      fields: "userEnteredValue,userEnteredFormat",
-      start: { sheetId, rowIndex: 8, columnIndex: 10 },
     },
   });
   requests.push({
