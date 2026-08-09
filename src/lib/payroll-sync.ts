@@ -596,10 +596,14 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
   // genuinely separate, additional real Stripe charge with its own fee,
   // independent of whatever the original checkout's grouping above computed.
   if (entries.length > 0) {
-    const { data: topups } = await supabase
+    const { data: topups, error: topupsErr } = await supabase
       .from("registration_topup_charges")
       .select("registration_id, stripe_payment_intent_id, price_delta, service_fee")
       .in("registration_id", entries.map((e) => e.reg.id));
+    // A failed lookup here must NOT silently look identical to "no top-ups
+    // exist" — under-reporting a real fee with no signal anything's wrong
+    // is exactly the class of gap this table exists to close.
+    if (topupsErr) result.errors.push(`registration_topup_charges query: ${topupsErr.message}`);
     const topupsByReg = new Map<string, TopupChargeRow[]>();
     for (const t of (topups || []) as TopupChargeRow[]) {
       if (!topupsByReg.has(t.registration_id)) topupsByReg.set(t.registration_id, []);

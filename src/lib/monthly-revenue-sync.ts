@@ -1190,10 +1190,16 @@ export async function runMonthlyRevenueSync(): Promise<MonthlyRevenueSyncResult>
   // charge was invisible to this sync entirely and needed a one-off manual
   // day-row correction; now it's picked up automatically every run.
   if (sessions.length > 0) {
-    const { data: topups } = await supabase
+    const { data: topups, error: topupsErr } = await supabase
       .from("registration_topup_charges")
       .select("registration_id, stripe_payment_intent_id, price_delta, service_fee")
       .in("registration_id", sessions.map((s) => s.registrationId));
+    // A failed lookup here must NOT silently look identical to "no top-ups
+    // exist" — that's exactly the class of gap that caused Bryan Schrubbe's
+    // second charge to go uncounted in the first place, just one level
+    // removed. Throwing surfaces it in the cron's error response instead of
+    // quietly under-reporting fees with no signal anything's wrong.
+    if (topupsErr) throw new Error(`registration_topup_charges query: ${topupsErr.message}`);
     const topupsByReg = new Map<string, { stripe_payment_intent_id: string; price_delta: number; service_fee: number }[]>();
     for (const t of (topups || []) as { registration_id: string; stripe_payment_intent_id: string; price_delta: number; service_fee: number }[]) {
       if (!topupsByReg.has(t.registration_id)) topupsByReg.set(t.registration_id, []);
@@ -1245,11 +1251,9 @@ export async function runMonthlyRevenueSync(): Promise<MonthlyRevenueSyncResult>
   let y = startY, m = startM;
   while (y < endY || (y === endY && m <= endM)) {
     const monthPrefix = `${y}-${String(m).padStart(2, "0")}`;
-    const monthSessions = sessions.filter((s) => s.date.startsWith(monthPrefix));
     const monthPackages = packages.filter((p) => p.date.startsWith(monthPrefix));
     await buildMonthTab(y, m, sessions, monthPackages, dayLog, dayLogWrites);
     monthsBuilt.push(monthTabName(y, m));
-    void monthSessions;
     m += 1;
     if (m > 12) { m = 1; y += 1; }
   }
