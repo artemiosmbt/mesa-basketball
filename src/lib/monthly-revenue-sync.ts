@@ -814,6 +814,24 @@ async function buildMonthTab(
     },
   });
 
+  // Everything below Month Totals (Trainer Pay, Location Breakdown, Net
+  // Profit) is at a row position that shifts month to month (more/fewer
+  // weeks changes how many trainer-pay rows there are) and, now, run to run
+  // too (a week appearing/disappearing shifts the grand TOTAL row and
+  // everything under it). Without this, a section that lands on fewer rows
+  // than the last run leaves the previous run's content sitting there as an
+  // orphaned duplicate — exactly what happened here (a stale "Net Profit"
+  // row from before the Trainer Pay TOTAL row existed). Clearing a generous
+  // range first guarantees a clean slate every run regardless of how the
+  // layout shifts.
+  requests.push({
+    repeatCell: {
+      range: { sheetId, startRowIndex: totalsRow0 + 1, endRowIndex: totalsRow0 + 1 + 120, startColumnIndex: 0, endColumnIndex: 10 },
+      cell: { userEnteredValue: {}, userEnteredFormat: {} },
+      fields: "userEnteredValue,userEnteredFormat",
+    },
+  });
+
   // TRAINER PAY BY WEEK — the individual per-trainer/per-week amounts are
   // the one genuine exception ("a number directly pulled, not summable from
   // other cells" — there's no per-session row here to add up). Every total
