@@ -28,9 +28,9 @@
  * a day's whole row forever (a real incident, caught 2026-08-08: Aug 1 got
  * stuck on a stale Processing Fee from early in the month with no owner
  * edit responsible). Gross Revenue (F) and Net Revenue (I) are never
- * independently locked — they're always DERIVED (F = price + whichever
- * Processing Fee wins; I = a formula, F-H) from whatever the text/fee lock
- * decisions above resolve to. Month Totals, Trainer Pay's totals, and
+ * independently locked — they're always DERIVED (F = price only, from
+ * whatever the text lock decision above resolves to; I = a formula,
+ * F+G-H). Month Totals, Trainer Pay's totals, and
  * Location Breakdown are all real Sheets formulas over the day rows /
  * Trainer Pay cells, so they always reflect whatever's actually on the
  * sheet — hand-edited or fresh — with no separate tracking needed. The one
@@ -645,7 +645,8 @@ async function buildMonthTab(
   const trainerPayByWeek = new Map<string, Map<string, number>>(); // week -> trainer -> pay
 
   for (let d = 1; d <= nDays; d++) {
-    const dateStr = `${monthPrefix}-${String(d).padStart(2, "0")}`;
+    const dateStr = `${monthPrefix}-${String(d).padStart(2, "0")}`; // ISO — internal keying only (day-log, session/package date matching)
+    const dateDisplay = new Date(dateStr + "T12:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }); // "August 1, 2026" — what actually shows in column A
     const dayName = new Date(dateStr + "T12:00:00").toLocaleDateString("en-US", { weekday: "long" });
     // Chronological within the day, not insertion order — ties (two
     // trainers running sessions at the same start time) keep whatever
@@ -724,7 +725,7 @@ async function buildMonthTab(
     // Date/Day never change — always safe to (re)write.
     requests.push({
       updateCells: {
-        rows: [{ values: [{ userEnteredValue: { stringValue: dateStr } }, { userEnteredValue: { stringValue: dayName } }] }],
+        rows: [{ values: [{ userEnteredValue: { stringValue: dateDisplay } }, { userEnteredValue: { stringValue: dayName } }] }],
         fields: "userEnteredValue",
         start: { sheetId, rowIndex: rowIndex0, columnIndex: 0 },
       },
@@ -735,10 +736,7 @@ async function buildMonthTab(
       // Re-derive straight from the live session-list text (summing every
       // "$X.XX" it contains) rather than trusting a frozen number — so
       // removing/editing a line item is, by itself, enough to correct the
-      // total. Known limitation: labels only ever show the base price,
-      // never a folded-in fee, so this stays price-only even when the fee
-      // itself is fresh (unlocked) — a small, real gap, but only on a day
-      // already flagged as manually edited.
+      // total.
       priceComponent = round2(parseDollarSum(String(liveRow[0] ?? "")) + parseDollarSum(String(liveRow[1] ?? "")));
     } else {
       priceComponent = gPriceOnly;
@@ -762,14 +760,12 @@ async function buildMonthTab(
       });
     }
 
-    let feeComponent: number;
     if (feeLocked) {
       // Whatever the owner left in Processing/Stripe Fee stays exactly as
-      // it is — this is what lets a fee correction like Maria VORKAS's
-      // stick permanently, independent of the text lock above.
-      feeComponent = Number(liveRow[4]) || 0;
+      // it is — this is what lets a fee correction like Bryan Schrubbe's
+      // (or Maria VORKAS's) stick permanently, independent of the text
+      // lock above.
     } else {
-      feeComponent = gProcessing;
       dayLogWrites.set(logKey, { ...(dayLogWrites.get(logKey) || {}), fee: freshFeeFp });
       requests.push({
         updateCells: {
@@ -785,20 +781,21 @@ async function buildMonthTab(
       });
     }
 
-    // Gross (F) = price + whichever Processing Fee actually wins (fresh or
-    // fee-locked) — see the fee-folding comment further up. Net (I) is
-    // ALWAYS a formula, =F-H, so it self-updates the instant the owner
-    // edits Gross or Stripe directly, with no sync needed.
+    // Gross (F) is price ONLY — NOT fee-inclusive. Processing Fee is shown
+    // as its own column, exactly what it is: a separate surcharge, not part
+    // of "how much the session/package itself sold for." Net (I) is ALWAYS
+    // a formula, =F+G-H, so it self-updates the instant the owner edits
+    // Gross, Processing, or Stripe directly, with no sync needed.
     requests.push({
       updateCells: {
-        rows: [{ values: [{ userEnteredValue: { numberValue: round2(priceComponent + feeComponent) }, userEnteredFormat: { numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } } }] }],
+        rows: [{ values: [{ userEnteredValue: { numberValue: round2(priceComponent) }, userEnteredFormat: { numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } } }] }],
         fields: "userEnteredValue,userEnteredFormat",
         start: { sheetId, rowIndex: rowIndex0, columnIndex: 5 },
       },
     });
     requests.push({
       updateCells: {
-        rows: [{ values: [{ userEnteredValue: { formulaValue: `=F${rowNum1}-H${rowNum1}` }, userEnteredFormat: { numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } } }] }],
+        rows: [{ values: [{ userEnteredValue: { formulaValue: `=F${rowNum1}+G${rowNum1}-H${rowNum1}` }, userEnteredFormat: { numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } } }] }],
         fields: "userEnteredValue,userEnteredFormat",
         start: { sheetId, rowIndex: rowIndex0, columnIndex: 8 },
       },
