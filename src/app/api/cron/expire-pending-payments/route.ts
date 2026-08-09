@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { verifyCronSecret } from "@/lib/auth";
 import { getStalePendingBatches, getStalePendingPackages, cleanupOldRateLimitHits } from "@/lib/supabase";
 import { expireAbandonedBookingBatch, expireAbandonedCheckoutSession, expireAbandonedPackage, finalizePaidCheckoutSession } from "@/lib/booking-finalize";
 import { getStripe } from "@/lib/stripe";
@@ -22,8 +23,7 @@ import { getStripe } from "@/lib/stripe";
 const STALE_AFTER_MS = 2 * 60 * 60 * 1000;
 
 export async function GET(req: NextRequest) {
-  const authHeader = req.headers.get("authorization");
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (!verifyCronSecret(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

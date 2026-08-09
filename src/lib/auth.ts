@@ -3,6 +3,19 @@ import type { NextRequest } from "next/server";
 
 export const ADMIN_EMAIL = "artemios@mesabasketballtraining.com";
 
+// Every /api/cron/* route uses this to authenticate Vercel Cron's own
+// invocation. Requiring CRON_SECRET to actually be set (not just comparing
+// the header to it) matters: `authHeader !== \`Bearer ${process.env.CRON_SECRET}\``
+// alone fails OPEN if the env var were ever unset in production — it'd
+// silently become a literal comparison against the string "Bearer
+// undefined", which anyone could send. Centralized here so all ten cron
+// routes share one fail-closed check instead of ten copies that could
+// individually drift.
+export function verifyCronSecret(req: NextRequest): boolean {
+  const authHeader = req.headers.get("authorization");
+  return !!process.env.CRON_SECRET && authHeader === `Bearer ${process.env.CRON_SECRET}`;
+}
+
 // Trainer dashboard accounts — Upcoming/Past/Calendar/Packages only, no
 // Clients tab, no stats row, read-only everywhere except marking a session
 // No Show (Cancel/Reschedule/Delete/Add-Player/payment edits stay exclusive

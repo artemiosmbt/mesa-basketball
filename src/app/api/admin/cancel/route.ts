@@ -5,7 +5,7 @@ import { deletePrivateSessionFromCalendar, upsertGroupSessionCalendarEvent } fro
 import { sendCancellationNotification } from "@/lib/email";
 import { getCurrentSheetLocation } from "@/lib/sheets";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
-import { issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome, isLateAction } from "@/lib/booking-finalize";
+import { issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome, isLateAction, parseSessionDateTimeET } from "@/lib/booking-finalize";
 import { notifyTrainerOfCancellation } from "@/lib/trainer-notify";
 import {
   addAccountCredit,
@@ -46,6 +46,28 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (!reg) return NextResponse.json({ error: "Registration not found" }, { status: 404 });
+
+  // Same "can't cancel a camp day that's already started" guard the
+  // client-facing DELETE handler has (booking/[token]/route.ts) — this
+  // route had no equivalent, so a stale dashboard view or a delayed click
+  // could refund/credit a day the family already attended.
+  if (reg.type === "camp" && reg.booked_date && reg.booked_start_time) {
+    const timeMatch = reg.booked_start_time.match(/(\d+):(\d+)\s*(AM|PM)/i);
+    if (timeMatch) {
+      let hours = parseInt(timeMatch[1]);
+      const mins = parseInt(timeMatch[2]);
+      const period = timeMatch[3].toUpperCase();
+      if (period === "PM" && hours !== 12) hours += 12;
+      if (period === "AM" && hours === 12) hours = 0;
+      const sessionDateTime = parseSessionDateTimeET(reg.booked_date, hours, mins);
+      if (Date.now() >= sessionDateTime.getTime()) {
+        return NextResponse.json(
+          { error: "This day has already started — cancellations are no longer accepted for it." },
+          { status: 400 }
+        );
+      }
+    }
+  }
 
   // Same lateness rule a client-initiated cancellation uses. Unlike a
   // client cancelling their own booking, the admin gets to CHOOSE how to

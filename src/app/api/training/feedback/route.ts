@@ -23,7 +23,11 @@ export async function POST(req: NextRequest) {
 
   // If all drills in session are done, mark session completed
   if (session_id) {
-    const { data: session } = await supabase.from("workout_sessions").select("drill_ids").eq("id", session_id).single();
+    // Scoped to the caller's own session — without this, any logged-in user
+    // could pass another user's session_id to read their assigned drill
+    // list and mark their session completed, corrupting that user's real
+    // progress tracking.
+    const { data: session } = await supabase.from("workout_sessions").select("drill_ids").eq("id", session_id).eq("user_id", user.id).single();
     if (session) {
       const { count } = await supabase
         .from("drill_feedback")
@@ -32,7 +36,7 @@ export async function POST(req: NextRequest) {
         .in("drill_id", session.drill_ids)
         .gte("created_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
       if (count && count >= session.drill_ids.length) {
-        await supabase.from("workout_sessions").update({ completed_at: new Date().toISOString() }).eq("id", session_id);
+        await supabase.from("workout_sessions").update({ completed_at: new Date().toISOString() }).eq("id", session_id).eq("user_id", user.id);
         // Advance week if on week < 8
         const { data: profile } = await supabase.from("user_training_profiles").select("current_week").eq("user_id", user.id).single();
         if (profile && profile.current_week < 8) {

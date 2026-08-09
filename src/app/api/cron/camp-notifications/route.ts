@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { verifyCronSecret } from "@/lib/auth";
 import { createClient } from "@supabase/supabase-js";
 import twilio from "twilio";
 import { getCamps } from "@/lib/sheets";
@@ -33,8 +34,7 @@ function extractGradesFromKids(kids: string): string[] {
 }
 
 export async function GET(req: NextRequest) {
-  const authHeader = req.headers.get("authorization");
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (!verifyCronSecret(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

@@ -174,8 +174,18 @@ export async function POST(req: NextRequest) {
     autoChargePaymentIntentId = chargeResult.paymentIntentId;
   }
 
-  const ok = await updateRegistrationPlayers(reg.manage_token, newKids, newCount, newFullPrice, claimToken);
-  await releaseClaim();
+  // Wrapped in try/finally so a thrown error here (not just a normal
+  // {data,error} failure) can't leave the claim stuck forever AND the card
+  // already charged above with nothing to show for it — the money-refund
+  // logic below already handles ok===false either way.
+  let ok = false;
+  try {
+    ok = await updateRegistrationPlayers(reg.manage_token, newKids, newCount, newFullPrice, claimToken);
+  } catch (err) {
+    console.error("Admin add-player: updateRegistrationPlayers threw:", err);
+  } finally {
+    await releaseClaim();
+  }
   if (!ok) {
     // The booking stopped being confirmed in the moment between our fetch
     // and this write (e.g. the client cancelled) — extremely rare, but if

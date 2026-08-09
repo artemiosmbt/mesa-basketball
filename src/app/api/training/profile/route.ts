@@ -42,10 +42,18 @@ export async function PATCH(req: NextRequest) {
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json();
+  // Strip identity fields before applying — the WHERE clause already scopes
+  // this to the caller's own row, but a body containing user_id would still
+  // get applied as a SET, silently reassigning ownership of that row
+  // (id/created_at are similarly not the caller's to set).
+  const safeBody = { ...body };
+  delete safeBody.user_id;
+  delete safeBody.id;
+  delete safeBody.created_at;
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from("user_training_profiles")
-    .update({ ...body, updated_at: new Date().toISOString() })
+    .update({ ...safeBody, updated_at: new Date().toISOString() })
     .eq("user_id", user.id)
     .select()
     .single();

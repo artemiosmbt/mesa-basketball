@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { verifyCronSecret } from "@/lib/auth";
 import { runMonthlyRevenueSync } from "@/lib/monthly-revenue-sync";
 
 // Rebuilds the "Mesa Monthly Revenue" tracker (a separate document from the
@@ -9,8 +10,7 @@ import { runMonthlyRevenueSync } from "@/lib/monthly-revenue-sync";
 export const maxDuration = 60;
 
 export async function GET(req: NextRequest) {
-  const authHeader = req.headers.get("authorization");
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  if (!verifyCronSecret(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

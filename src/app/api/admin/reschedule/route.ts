@@ -378,27 +378,40 @@ export async function POST(req: NextRequest) {
   // row's status changed out from under us, the charge that already went
   // through needs to come straight back rather than leaving the client
   // charged for a change that was never actually applied.
-  const { data: updatedRows, error } = await supabase
-    .from("registrations")
-    .update({
-      type: effectiveType,
-      booked_date: bookedDate,
-      booked_start_time: bookedStartTime,
-      booked_end_time: bookedEndTime,
-      booked_location: bookedLocation,
-      booked_group: isNewPrivate ? null : (newSessionLabel || reg.booked_group),
-      booked_trainer: resolvedTrainer || null,
-      session_details: newSessionDetails,
-      admin_change_at: new Date().toISOString(),
-      is_free: newIsFree,
-      used_referral_credit: newUsedReferralCredit,
-      admin_action_claim_token: null,
-      ...(newFullPrice !== undefined ? { session_price: newFullPrice } : {}),
-      ...(clearPackageId ? { package_id: null } : {}),
-    })
-    .eq("id", id)
-    .eq("status", "confirmed")
-    .select("id");
+  // try/catch around the query itself (not just checking its returned
+  // `error`) — a thrown exception here (rather than a normal {data,error}
+  // result) would otherwise skip the refund-on-failure handling below
+  // entirely, leaving the just-charged card with no compensation and the
+  // claim lock never released.
+  let updatedRows: { id: string }[] | null = null;
+  let error: { message: string } | null = null;
+  try {
+    const result = await supabase
+      .from("registrations")
+      .update({
+        type: effectiveType,
+        booked_date: bookedDate,
+        booked_start_time: bookedStartTime,
+        booked_end_time: bookedEndTime,
+        booked_location: bookedLocation,
+        booked_group: isNewPrivate ? null : (newSessionLabel || reg.booked_group),
+        booked_trainer: resolvedTrainer || null,
+        session_details: newSessionDetails,
+        admin_change_at: new Date().toISOString(),
+        is_free: newIsFree,
+        used_referral_credit: newUsedReferralCredit,
+        admin_action_claim_token: null,
+        ...(newFullPrice !== undefined ? { session_price: newFullPrice } : {}),
+        ...(clearPackageId ? { package_id: null } : {}),
+      })
+      .eq("id", id)
+      .eq("status", "confirmed")
+      .select("id");
+    updatedRows = result.data;
+    error = result.error;
+  } catch (err) {
+    error = { message: err instanceof Error ? err.message : String(err) };
+  }
 
   if (!error && (!updatedRows || updatedRows.length === 0)) {
     let refundNote = "";
