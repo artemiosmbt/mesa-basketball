@@ -867,7 +867,7 @@ async function buildMonthTab(
     updateCells: {
       rows: [{ values: [{ userEnteredValue: { stringValue: "Pickups - (St. Paul's)" } }] }],
       fields: "userEnteredValue",
-      start: { sheetId, rowIndex: 7, columnIndex: 10 },
+      start: { sheetId, rowIndex: 8, columnIndex: 10 },
     },
   });
   requests.push({
