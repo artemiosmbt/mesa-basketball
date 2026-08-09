@@ -336,6 +336,12 @@ export async function POST(req: NextRequest) {
       // price or count.
       const groupCounts = new Map<string, number>();
       for (const s of weeklySessions) groupCounts.set(s.group, (groupCounts.get(s.group) || 0) + 1);
+      // Captured alongside price so it can be persisted on each row below —
+      // the later late-cancel/late-reschedule forfeiture policy needs a
+      // stable record of "was THIS booking bulk-discounted," not something
+      // re-derived from the group's live rate at cancellation time (which
+      // silently breaks if the owner changes that rate in between).
+      const perSessionIsBulkDiscounted: boolean[] = weeklySessions.map((s: { group: string }) => (groupCounts.get(s.group)!) >= 4);
       const perSessionPrices: number[] = weeklySessions.map((s: { group: string }, i: number) => {
         const liveMatch = liveWeeklyMatches[i]!;
         const groupCount = groupCounts.get(s.group)!;
@@ -396,6 +402,7 @@ export async function POST(req: NextRequest) {
           ...(weeklyCreditShares[i] > 0 ? { appliedAccountCredit: weeklyCreditShares[i] } : {}),
           status: amountToCharge > 0 ? "pending_payment" : undefined,
           bookingBatchId,
+          isBulkDiscounted: perSessionIsBulkDiscounted[i],
         });
       }
 

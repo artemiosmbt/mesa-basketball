@@ -124,22 +124,11 @@ export async function POST(req: NextRequest) {
   // booking (the 10%/15% off for booking several sessions at once) — the
   // full-forfeiture late-reschedule policy only applies to those, not a
   // plain 1-3 session weekly booking at the regular rate (which keeps the
-  // old 50% late-fee policy). Same live-rate comparison the client-facing
-  // endpoint uses.
-  let isBulkDiscountedWeekly = false;
-  if (reg.type === "weekly" && reg.session_price !== null && reg.booked_date && reg.booked_start_time) {
-    try {
-      const oldSessions = await getWeeklySchedule({ noCache: true });
-      const oldGroupLabel = reg.booked_group || reg.session_details.split(" — ")[0] || "";
-      const oldMatch = oldSessions.find((s) => s.group === oldGroupLabel && s.date === reg.booked_date && s.startTime === reg.booked_start_time);
-      if (oldMatch) {
-        const oldStandardRate = oldMatch.price * (reg.total_participants || 1);
-        isBulkDiscountedWeekly = reg.session_price < oldStandardRate;
-      }
-    } catch {
-      // Sheet lookup failed — default to not-discounted rather than guessing.
-    }
-  }
+  // old 50% late-fee policy). Read from the stored, booking-time-anchored
+  // flag rather than re-deriving it from the group's CURRENT live rate — a
+  // rate change since booking would otherwise silently reclassify this
+  // booking's policy (see is_bulk_discounted migration comment).
+  const isBulkDiscountedWeekly = reg.type === "weekly" && !!reg.is_bulk_discounted;
 
   const oldSessionDetails: string = reg.session_details;
   const oldBookedDate: string | null = reg.booked_date;

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { enrollInPackage, getActivePackage, hasPendingOrActivePackage, isNewClient, findReferrerInfoByCode, attachPackageCheckoutSession, getAccountCreditBalance, deductAccountCredit } from "@/lib/supabase";
+import { enrollInPackage, getActivePackage, hasPendingOrActivePackage, isNewClient, findReferrerInfoByCode, attachPackageCheckoutSession, getAccountCreditBalance, deductAccountCredit, addAccountCredit } from "@/lib/supabase";
 import { getStripe, buildCreditDiscount } from "@/lib/stripe";
 import { calcServiceFee, serviceFeeItemName, packagePrice, type TrainerTier } from "@/lib/pricing";
 import { resolveRequestEmail } from "@/lib/request-email";
@@ -85,10 +85,23 @@ export async function POST(req: NextRequest) {
     }
     const amountToCharge = Math.max(0, totalPrice - accountCreditApplied);
 
-    const { id } = await enrollInPackage({
-      email, parentName, phone, packageType, monthYear, totalPrice, trainerTier,
-      ...(accountCreditApplied > 0 ? { appliedAccountCredit: accountCreditApplied } : {}),
-    });
+    let id: string;
+    try {
+      ({ id } = await enrollInPackage({
+        email, parentName, phone, packageType, monthYear, totalPrice, trainerTier,
+        ...(accountCreditApplied > 0 ? { appliedAccountCredit: accountCreditApplied } : {}),
+      }));
+    } catch (err) {
+      // Credit was already deducted above — if the package row itself
+      // failed to create, that credit must come straight back rather than
+      // vanishing with nothing to show for it.
+      if (accountCreditApplied > 0) {
+        await addAccountCredit(email, accountCreditApplied).catch((refundErr) =>
+          console.error(`Failed to refund $${accountCreditApplied} credit after enrollInPackage failure for ${email}:`, refundErr)
+        );
+      }
+      throw err;
+    }
 
     const packageMetadata = {
       purpose: "package_enrollment",

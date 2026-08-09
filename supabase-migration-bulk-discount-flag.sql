@@ -1,0 +1,13 @@
+-- Whether this weekly registration was originally booked as part of a
+-- bulk/volume-discounted purchase (4+ sessions of the same group in one
+-- request = 10% off, 8+ = 15% off — see register/route.ts's
+-- volumeDiscountPct). Persisted at booking time because the late-cancel/
+-- late-reschedule forfeiture-vs-50%-fee policy decision (booking/[token]/
+-- route.ts, admin/cancel/route.ts, admin/reschedule/route.ts) used to
+-- re-derive "was this bulk-discounted" by comparing session_price against
+-- the group's CURRENT live schedule rate — which silently breaks the
+-- moment the owner changes that group's rate after the booking was made,
+-- reclassifying a genuinely-discounted booking as a plain one (or vice
+-- versa) and applying the wrong forfeiture/fee policy. This column is the
+-- stable, booking-time-anchored fact those checks should read instead.
+ALTER TABLE registrations ADD COLUMN IF NOT EXISTS is_bulk_discounted BOOLEAN DEFAULT false;

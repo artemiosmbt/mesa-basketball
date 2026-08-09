@@ -68,7 +68,16 @@ export async function POST(req: NextRequest) {
     const bucket = athletesByEmail.get(email)!;
     const cg = r.booked_group ? canonicalGroupForLabel(r.booked_group) : null;
     for (const kid of parseRegistrationKidsString(r.kids)) {
-      const key = normalizedAthleteName(kid.name);
+      // Keyed on name+DOB, not name alone — a name-only key collapses two
+      // same-named siblings (twins, or any kids sharing a name) across a
+      // parent's registration history into one bucket, silently dropping
+      // one of their DOB/grade/gender and misattributing both kids' groups
+      // to a single saved athlete. Still collapses genuinely identical
+      // twins sharing the exact same stored DOB string — no per-kid
+      // identifier exists in the historical "Name (DOB: ..., Grade: ...)"
+      // registration format to disambiguate that case; a real (rare) data
+      // limitation, not something this key change can solve.
+      const key = `${normalizedAthleteName(kid.name)}|${kid.dob}`;
       if (!bucket.has(key)) bucket.set(key, { ...kid, groups: new Set() });
       if (cg) bucket.get(key)!.groups.add(cg);
     }
@@ -99,7 +108,11 @@ export async function POST(req: NextRequest) {
     const merged = [...existingKids];
     let changed = false;
     for (const parsed of athleteMap.values()) {
-      const idx = merged.findIndex((k) => normalizedAthleteName(k.name) === normalizedAthleteName(parsed.name));
+      // Same name+DOB matching as the bucket key above — prevents a
+      // same-named sibling from being silently treated as "already saved"
+      // just because a differently-named-DOB'd athlete of the same name
+      // exists on the profile already.
+      const idx = merged.findIndex((k) => normalizedAthleteName(k.name) === normalizedAthleteName(parsed.name) && k.dob === parsed.dob);
       if (idx >= 0) continue;
       merged.push({
         id: crypto.randomUUID(),

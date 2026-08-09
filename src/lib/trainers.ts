@@ -56,7 +56,11 @@ export type TrainerTier = "artemios" | "other";
 const OWNER_TRAINER_NAME = "Artemios Gavalas";
 
 export function getTrainerTier(name: string | undefined | null): TrainerTier {
-  return (name || "").trim() === OWNER_TRAINER_NAME ? "artemios" : "other";
+  // Case/whitespace-insensitive, same as every other trainer-name comparison
+  // in this file (trainerNamesMatch) — a hand-typed schedule-sheet casing
+  // drift (e.g. "artemios gavalas") would otherwise silently fall through
+  // to the cheaper "other" tier instead of matching the owner.
+  return trainerNamesMatch(name, OWNER_TRAINER_NAME) ? "artemios" : "other";
 }
 
 // Validates a value read back from the database (monthly_packages.trainer_tier)

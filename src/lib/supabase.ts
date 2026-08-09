@@ -54,6 +54,7 @@ export interface Registration {
   stripe_customer_id?: string | null;
   stripe_refund_id?: string | null;
   package_id?: string | null;
+  is_bulk_discounted?: boolean;
 }
 
 export async function addRegistration(data: {
@@ -891,6 +892,11 @@ export async function addRegistrationWithRewards(data: {
   // from one that just happened to be free/credit-covered for another
   // reason, and know which package's session count it affects.
   packageId?: string;
+  // Set when this weekly session was priced as part of a bulk/volume
+  // discount (4+/8+ sessions of the same group booked together) — anchors
+  // the later forfeiture-vs-50%-fee policy decision to what was TRUE at
+  // booking time, not whatever the group's live rate happens to be later.
+  isBulkDiscounted?: boolean;
 }): Promise<{ id: string; manageToken: string }> {
   const supabase = getSupabase();
   const { data: row, error } = await supabase
@@ -917,6 +923,7 @@ export async function addRegistrationWithRewards(data: {
       is_full_camp: data.isFullCamp ?? false,
       camp_drop_in_rate: data.campDropInRate ?? null,
       applied_account_credit: data.appliedAccountCredit ?? 0,
+      is_bulk_discounted: data.isBulkDiscounted ?? false,
       ...(data.status ? { status: data.status } : {}),
       ...(data.bookingBatchId ? { booking_batch_id: data.bookingBatchId } : {}),
       ...(data.packageId ? { package_id: data.packageId } : {}),

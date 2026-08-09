@@ -39,12 +39,25 @@ export async function POST(req: NextRequest) {
   const existingKids: Athlete[] = Array.isArray(existing?.kids) ? existing.kids : [];
   const merged = [...existingKids];
 
+  // Tracks which `merged` indices an EARLIER entry in this same request
+  // already resolved to — without this, two same-named siblings (twins, or
+  // any kids sharing a name) submitted in one request collapse into a
+  // single saved athlete: the second one's name-only fallback match finds
+  // the one the first entry just created/updated and silently overwrites
+  // its DOB/grade/gender instead of creating its own entry. An explicit
+  // `incoming.id` still always matches regardless (an id is an unambiguous,
+  // deliberate reference, not a name guess), so re-submitting the SAME real
+  // athlete twice in one request (by id) still correctly merges into one.
+  const claimedThisRequest = new Set<number>();
   for (const incoming of (body.athletes || []) as Partial<Athlete>[]) {
     if (!incoming.name?.trim()) continue;
     let idx = incoming.id ? merged.findIndex((k) => k.id === incoming.id) : -1;
-    if (idx === -1) idx = merged.findIndex((k) => normalizedAthleteName(k.name) === normalizedAthleteName(incoming.name!));
+    if (idx === -1) {
+      idx = merged.findIndex((k, i) => !claimedThisRequest.has(i) && normalizedAthleteName(k.name) === normalizedAthleteName(incoming.name!));
+    }
     if (idx >= 0) {
       merged[idx] = mergeAthleteAfterBooking(merged[idx], incoming, body.bookedGroupLabels);
+      claimedThisRequest.add(idx);
     } else {
       const groups = defaultGroupsForGradeGender(incoming.grade || "", incoming.gender);
       const fresh: Athlete = {
@@ -56,6 +69,7 @@ export async function POST(req: NextRequest) {
         groups,
       };
       merged.push(mergeAthleteAfterBooking(fresh, incoming, body.bookedGroupLabels));
+      claimedThisRequest.add(merged.length - 1);
     }
   }
 

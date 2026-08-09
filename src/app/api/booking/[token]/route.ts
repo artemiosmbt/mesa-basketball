@@ -121,34 +121,21 @@ export async function DELETE(
   // Block cancellation of group sessions that were volume-discounted at
   // booking time (e.g. booking several sessions together nets a lower
   // per-session rate) — those get rescheduled instead so the discount math
-  // isn't disturbed. Compare against the group's actual live sheet rate, not
-  // a flat $50 — some groups (e.g. "HS Pickup") are normally priced below
-  // $50, and that's not a discount, just their regular rate. Also captured
-  // here for reuse below: the full-forfeiture-on-late-cancel policy only
-  // applies to these bulk/volume-discounted bookings, not a plain 1-3
-  // session weekly booking at the regular rate (which keeps the old 50%
-  // late-fee policy) — though in practice a request only reaches the fee
-  // logic below at all when this is false, since a true bulk booking is
-  // rejected right here.
-  let isBulkDiscountedWeekly = false;
-  if (reg.type === "weekly" && reg.session_price !== null && reg.booked_date && reg.booked_start_time) {
-    try {
-      const sessions = await getWeeklySchedule({ noCache: true });
-      const groupLabel = reg.booked_group || reg.session_details.split(" — ")[0] || "";
-      const match = sessions.find((s) => s.group === groupLabel && s.date === reg.booked_date && s.startTime === reg.booked_start_time);
-      if (match) {
-        const standardRate = match.price * (reg.total_participants || 1);
-        isBulkDiscountedWeekly = reg.session_price < standardRate;
-        if (isBulkDiscountedWeekly) {
-          return NextResponse.json(
-            { error: "Cancellation is not available for sessions booked at a discounted rate. Please use the reschedule option instead." },
-            { status: 403 }
-          );
-        }
-      }
-    } catch {
-      // Sheet lookup failed — don't block cancellation on an unverifiable guess.
-    }
+  // isn't disturbed. Read from the stored, booking-time-anchored flag rather
+  // than re-deriving it from the group's CURRENT live rate — a rate change
+  // since booking would otherwise silently reclassify this booking's policy
+  // (see is_bulk_discounted migration comment). Also captured here for reuse
+  // below: the full-forfeiture-on-late-cancel policy only applies to these
+  // bulk/volume-discounted bookings, not a plain 1-3 session weekly booking
+  // at the regular rate (which keeps the old 50% late-fee policy) — though
+  // in practice a request only reaches the fee logic below at all when this
+  // is false, since a true bulk booking is rejected right here.
+  const isBulkDiscountedWeekly = reg.type === "weekly" && !!reg.is_bulk_discounted;
+  if (isBulkDiscountedWeekly) {
+    return NextResponse.json(
+      { error: "Cancellation is not available for sessions booked at a discounted rate. Please use the reschedule option instead." },
+      { status: 403 }
+    );
   }
 
   // Block cancelling a camp day once that specific day's start time has passed.
@@ -943,23 +930,12 @@ export async function PUT(
   // booking (the 10%/15% off for booking several sessions at once) — the
   // full-forfeiture-on-late-reschedule policy only applies to those, not a
   // plain 1-3 session weekly booking at the regular rate (which keeps the
-  // old 50% late-fee policy). Same live-rate comparison as the cancel
-  // handler's volume-discount gate, just without blocking anything here —
-  // reschedule is always allowed regardless of discount.
-  let isBulkDiscountedWeekly = false;
-  if (reg.type === "weekly" && reg.session_price !== null && reg.booked_date && reg.booked_start_time) {
-    try {
-      const oldSessions = await getWeeklySchedule({ noCache: true });
-      const oldGroupLabel = reg.booked_group || reg.session_details.split(" — ")[0] || "";
-      const oldMatch = oldSessions.find((s) => s.group === oldGroupLabel && s.date === reg.booked_date && s.startTime === reg.booked_start_time);
-      if (oldMatch) {
-        const oldStandardRate = oldMatch.price * (reg.total_participants || 1);
-        isBulkDiscountedWeekly = reg.session_price < oldStandardRate;
-      }
-    } catch {
-      // Sheet lookup failed — default to not-discounted rather than guessing.
-    }
-  }
+  // old 50% late-fee policy). Read from the stored, booking-time-anchored
+  // flag rather than re-deriving it from the group's CURRENT live rate — a
+  // rate change since booking would otherwise silently reclassify this
+  // booking's policy (see is_bulk_discounted migration comment). Reschedule
+  // is always allowed regardless of discount, same as before.
+  const isBulkDiscountedWeekly = reg.type === "weekly" && !!reg.is_bulk_discounted;
 
   // What was actually paid for the old session via Stripe (if it was), net
   // of any account credit applied at booking time — this is the baseline

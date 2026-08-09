@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { verifyAdmin } from "@/lib/auth";
 import { deletePrivateSessionFromCalendar, upsertGroupSessionCalendarEvent } from "@/lib/calendar";
 import { sendCancellationNotification } from "@/lib/email";
-import { getCurrentSheetLocation, getWeeklySchedule } from "@/lib/sheets";
+import { getCurrentSheetLocation } from "@/lib/sheets";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import { issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome, isLateAction } from "@/lib/booking-finalize";
 import { notifyTrainerOfCancellation } from "@/lib/trainer-notify";
@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
   // a late cancellation the same way a client-initiated one would.
   const { data: reg } = await supabase
     .from("registrations")
-    .select("manage_token, type, email, parent_name, booked_date, booked_start_time, booked_end_time, booked_location, booked_group, booked_trainer, kids, session_details, total_participants, phone, sms_consent, is_paid, stripe_payment_intent_id, applied_account_credit, session_price, is_free, used_referral_credit, created_at, admin_change_at, package_id, is_full_camp, referral_code, camp_drop_in_rate")
+    .select("manage_token, type, email, parent_name, booked_date, booked_start_time, booked_end_time, booked_location, booked_group, booked_trainer, kids, session_details, total_participants, phone, sms_consent, is_paid, stripe_payment_intent_id, applied_account_credit, session_price, is_free, used_referral_credit, created_at, admin_change_at, package_id, is_full_camp, referral_code, camp_drop_in_rate, is_bulk_discounted")
     .eq("id", id)
     .single();
 
@@ -70,21 +70,11 @@ export async function POST(req: NextRequest) {
   // 10%/15% off for booking several sessions at once) — the full-forfeiture
   // late-cancellation policy only applies to those, not a plain 1-3 session
   // weekly booking at the regular rate (which keeps the old 50% late-fee
-  // policy). Same live-rate comparison the client-facing endpoint uses.
-  let isBulkDiscountedWeekly = false;
-  if (reg.type === "weekly" && reg.session_price !== null && reg.booked_date && reg.booked_start_time) {
-    try {
-      const sessions = await getWeeklySchedule({ noCache: true });
-      const groupLabel = reg.booked_group || reg.session_details.split(" — ")[0] || "";
-      const match = sessions.find((s) => s.group === groupLabel && s.date === reg.booked_date && s.startTime === reg.booked_start_time);
-      if (match) {
-        const standardRate = match.price * (reg.total_participants || 1);
-        isBulkDiscountedWeekly = reg.session_price < standardRate;
-      }
-    } catch {
-      // Sheet lookup failed — default to not-discounted rather than guessing.
-    }
-  }
+  // policy). Read from the stored, booking-time-anchored flag rather than
+  // re-deriving it from the group's CURRENT live rate — a rate change since
+  // booking would otherwise silently reclassify this booking's policy (see
+  // is_bulk_discounted migration comment).
+  const isBulkDiscountedWeekly = reg.type === "weekly" && !!reg.is_bulk_discounted;
 
   // A multi-day camp booking is actually SEVERAL rows sharing a referral_code
   // (see getCampGroupByReferralCode), each still carrying the ORIGINAL
