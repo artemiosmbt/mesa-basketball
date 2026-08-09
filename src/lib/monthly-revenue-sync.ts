@@ -16,7 +16,7 @@
  * bugs. Three exceptions, all real manual input that must survive a rebuild:
  * each month's per-location rent cell (see readExistingRentByName), any
  * day row the owner has hand-edited (see the _DayLog tab / textFingerprint
- * + feeFingerprint below), and the PICKUPS table (columns K:L — cash games
+ * + feeFingerprint below), and the PICKUPS table (columns K:M — cash games
  * the owner runs off-schedule; see buildMonthTab's PICKUPS section) whose
  * data rows this file never issues a write against, so they're untouched
  * by construction rather than needing a fingerprint/lock at all. Session-list text/Place and Processing/Stripe
@@ -585,20 +585,22 @@ async function buildMonthTab(
 
   // PICKUPS — off-the-books cash games the owner runs himself (not on the
   // live schedule, no Stripe fees since it's cash-in-hand). Always at
-  // St. Paul's per the owner. Lives in columns K:L, entirely outside the
-  // A:J range every other write in this file touches (including the big
-  // clear-region below) — so the owner's entered dates/amounts
-  // (K11:L60) are NEVER touched by any sync run, only the title/header
-  // labels and the TOTAL formula get (re)written each time, same
-  // "manual input survives a rebuild" pattern as rent. The TOTAL cell is
-  // a fixed, always-the-same location ($L$61) that Location Breakdown's
+  // St. Paul's per the owner. Lives in columns K:M (Date/Name/Amount),
+  // entirely outside the A:J range every other write in this file touches
+  // (including the big clear-region below) — so the owner's entered
+  // dates/names/amounts (K11:M60) are NEVER touched by any sync run, only
+  // the header labels and the TOTAL formula get (re)written each time,
+  // same "manual input survives a rebuild" pattern as rent. The TOTAL cell
+  // is a fixed, always-the-same location ($M$61) that Location Breakdown's
   // St. Paul's row, the Other/Unlisted row (to keep the location totals
   // reconciling with Month Totals), and Net Profit to Mesa all read
-  // directly by formula.
+  // directly by formula. The title cell (K9) is written value-only — its
+  // format (color/font) is whatever the owner set by hand and this file
+  // never touches it, so it can never get silently reverted by a sync.
   const PICKUPS_DATA_FIRST_ROW1 = 11;
   const PICKUPS_DATA_LAST_ROW1 = 60;
   const PICKUPS_TOTAL_ROW1 = 61;
-  const PICKUPS_TOTAL_CELL = `$L$${PICKUPS_TOTAL_ROW1}`;
+  const PICKUPS_TOTAL_CELL = `$M$${PICKUPS_TOTAL_ROW1}`;
 
   const requests: object[] = [];
 
@@ -855,26 +857,29 @@ async function buildMonthTab(
 
   // PICKUPS table — title/header labels and the TOTAL formula are
   // rewritten every run (harmless, just labels/a formula); the data rows
-  // (K11:L60) are never referenced by any updateCells request anywhere in
+  // (K11:M60) are never referenced by any updateCells request anywhere in
   // this file, so whatever the owner types there survives every rebuild
-  // untouched, exactly like the rent cells.
+  // untouched, exactly like the rent cells. The title's own format
+  // (fill color, italic, etc.) is the owner's own manual styling — only
+  // its text is ever rewritten, never its format, so that styling is
+  // permanent no matter how many times this runs.
   requests.push({
     updateCells: {
-      rows: [{ values: [{ userEnteredValue: { stringValue: "Pickups - (St. Paul's)" }, userEnteredFormat: { textFormat: { bold: true, fontSize: 12 } } }] }],
-      fields: "userEnteredValue,userEnteredFormat",
+      rows: [{ values: [{ userEnteredValue: { stringValue: "Pickups - (St. Paul's)" } }] }],
+      fields: "userEnteredValue",
       start: { sheetId, rowIndex: 7, columnIndex: 10 },
     },
   });
   requests.push({
     repeatCell: {
-      range: { sheetId, startRowIndex: 9, endRowIndex: 10, startColumnIndex: 10, endColumnIndex: 12 },
+      range: { sheetId, startRowIndex: 9, endRowIndex: 10, startColumnIndex: 10, endColumnIndex: 13 },
       cell: { userEnteredFormat: { backgroundColorStyle: { rgbColor: HEADER_BG }, textFormat: { bold: true, foregroundColorStyle: { rgbColor: WHITE } } } },
       fields: "userEnteredFormat(backgroundColorStyle,textFormat)",
     },
   });
   requests.push({
     updateCells: {
-      rows: [{ values: [{ userEnteredValue: { stringValue: "Date" } }, { userEnteredValue: { stringValue: "Amount" } }] }],
+      rows: [{ values: [{ userEnteredValue: { stringValue: "Date" } }, { userEnteredValue: { stringValue: "Name" } }, { userEnteredValue: { stringValue: "Amount" } }] }],
       fields: "userEnteredValue",
       start: { sheetId, rowIndex: 9, columnIndex: 10 },
     },
@@ -884,8 +889,9 @@ async function buildMonthTab(
       rows: [{
         values: [
           { userEnteredValue: { stringValue: "TOTAL" }, userEnteredFormat: { textFormat: { bold: true } } },
+          { userEnteredValue: { stringValue: "" } },
           {
-            userEnteredValue: { formulaValue: `=SUM(L${PICKUPS_DATA_FIRST_ROW1}:L${PICKUPS_DATA_LAST_ROW1})` },
+            userEnteredValue: { formulaValue: `=SUM(M${PICKUPS_DATA_FIRST_ROW1}:M${PICKUPS_DATA_LAST_ROW1})` },
             userEnteredFormat: { textFormat: { bold: true }, numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } },
           },
         ],
