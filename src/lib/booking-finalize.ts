@@ -26,6 +26,7 @@ import {
   abandonPendingPackage,
   getRegistrationByToken,
   updateRegistrationPlayers,
+  alertIfPrivateDoubleBooked,
   type Registration,
 } from "@/lib/supabase";
 
@@ -345,6 +346,14 @@ export interface FinalizePrivateBookingParams {
  */
 export async function finalizeConfirmedPrivateBooking(params: FinalizePrivateBookingParams): Promise<void> {
   const isPrivateType = params.type === "private" || params.type === "group-private";
+
+  // Best-effort double-booking detection — see alertIfPrivateDoubleBooked's
+  // own doc comment. Never blocks/fails this booking on error.
+  if (isPrivateType && params.bookedTrainer) {
+    alertIfPrivateDoubleBooked(params.bookedDate, params.bookedStartTime, params.bookedEndTime, params.bookedLocation, params.bookedTrainer, params.parentName).catch((err) =>
+      console.error("Double-booking check failed:", err)
+    );
+  }
 
   let packageSessionsRemaining: number | undefined;
   let packageType: number | undefined;
@@ -796,6 +805,18 @@ export interface FinalizePrivateSeriesBookingParams {
 export async function finalizeConfirmedPrivateSeriesBooking(params: FinalizePrivateSeriesBookingParams): Promise<void> {
   const { privateSessions } = params;
   const isPrivateType = params.type === "private" || params.type === "group-private";
+
+  // Best-effort double-booking detection — see alertIfPrivateDoubleBooked's
+  // own doc comment. One check per date in the series. Never blocks/fails
+  // this booking on error.
+  if (isPrivateType) {
+    for (const s of privateSessions) {
+      if (!s.trainer) continue;
+      alertIfPrivateDoubleBooked(s.date, s.startTime, s.endTime, s.location, s.trainer, params.parentName).catch((err) =>
+        console.error("Double-booking check failed:", err)
+      );
+    }
+  }
 
   // Package usage is a per-month concept — recompute/persist it for every
   // month touched by this series, not just once. Wrapped like every other

@@ -1630,6 +1630,49 @@ export async function hasConflictingPrivateBooking(
   });
 }
 
+// hasConflictingPrivateBooking above is a plain read-then-decide check, not
+// an atomic guard — two near-simultaneous requests for the same trainer's
+// same slot can both pass it and both go on to pay. Unlike the structurally
+// identical package-overdraw race (syncPackageSessionsUsed's "⚠️ PACKAGE
+// OVERDRAWN" alert), a lost private-booking race here was completely
+// silent — nobody found out until two families showed up for the same slot.
+// Called from finalizeConfirmedPrivateBooking/...SeriesBooking, the single
+// choke point every private/group-private booking passes through once it's
+// actually confirmed (both the $0-immediate-confirm and paid-via-webhook
+// paths funnel through there) — so this catches a real double-booking
+// regardless of which path won the race.
+export async function alertIfPrivateDoubleBooked(
+  date: string,
+  startTime: string,
+  endTime: string,
+  location: string,
+  trainer: string,
+  parentName: string
+): Promise<void> {
+  const supabase = getSupabase();
+  const { data } = await supabase
+    .from("registrations")
+    .select("booked_start_time, booked_end_time, booked_trainer, parent_name")
+    .in("type", ["private", "group-private"])
+    .eq("status", "confirmed")
+    .eq("booked_date", date)
+    .eq("booked_location", location);
+  if (!data) return;
+  const wantStart = parseTimeToMins(startTime);
+  const wantEnd = parseTimeToMins(endTime);
+  const overlapping = data.filter((r) => {
+    if (!trainerNamesMatch(r.booked_trainer, trainer)) return false;
+    const rowStart = parseTimeToMins(r.booked_start_time as string);
+    const rowEnd = parseTimeToMins(r.booked_end_time as string);
+    return rowStart < wantEnd && rowEnd > wantStart;
+  });
+  if (overlapping.length > 1) {
+    await sendAdminSMS(
+      `⚠️ DOUBLE-BOOKED: ${trainer} has ${overlapping.length} overlapping private sessions on ${date} ${startTime}-${endTime} at ${location} (incl. ${parentName}'s just-confirmed booking) — likely two bookings raced each other. Review and reschedule one manually.`
+    ).catch(() => {});
+  }
+}
+
 /**
  * Same purpose as checkGroupSessionCapacity, for a camp day — camps had NO
  * server-side capacity check at all (only a client-side UI limit), so a
