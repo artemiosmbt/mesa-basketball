@@ -215,11 +215,27 @@ export async function issueStripeRefund(params: {
           });
           if (params.manageToken) await recordStripeRefund(params.manageToken, partial.id).catch(() => {});
         }
-        const shortfall = Math.round((params.amountDollars - refundableDollars) * 100) / 100;
+        // The "shortfall" (what Stripe won't let us refund again) is only
+        // legitimately owed as account credit when the charge was PARTIALLY
+        // refunded before — e.g. an earlier reschedule already refunded part
+        // of it, and this credit makes the client whole for the rest. If the
+        // charge is instead ALREADY FULLY refunded (charge.amount_refunded
+        // covers the whole charge), the client has already gotten 100% of
+        // it back through Stripe — most likely a refund issued directly in
+        // the Stripe Dashboard, which this app has no other record of.
+        // Crediting the shortfall in that case would pay them a second time
+        // for money they've already received. Only credit when SOME (not
+        // all) of the charge is already refunded.
+        const chargeFullyRefunded = !!charge && charge.amount_refunded >= charge.amount;
+        const shortfall = chargeFullyRefunded ? 0 : Math.round((params.amountDollars - refundableDollars) * 100) / 100;
         if (shortfall > 0) {
           await addAccountCredit(params.email, shortfall).catch(() => {});
         }
-        await sendAdminSMS(`Partial refund: ${params.sessionLabel}\n${params.email}\n$${fmtMoney(refundableDollars)} refunded to card${shortfall > 0 ? `, $${fmtMoney(shortfall)} credited to account (an earlier reschedule already used up part of this charge)` : ""}.`).catch(() => {});
+        if (chargeFullyRefunded) {
+          await sendAdminSMS(`Refund skipped: ${params.sessionLabel}\n${params.email}\nThis charge was already fully refunded (likely directly in Stripe) before this cancellation ran — no further refund or credit issued, since they've already received the full $${fmtMoney(params.amountDollars)} back. Verify this is correct.`).catch(() => {});
+        } else {
+          await sendAdminSMS(`Partial refund: ${params.sessionLabel}\n${params.email}\n$${fmtMoney(refundableDollars)} refunded to card${shortfall > 0 ? `, $${fmtMoney(shortfall)} credited to account (an earlier reschedule already used up part of this charge)` : ""}.`).catch(() => {});
+        }
         return { refundedAmount: refundableDollars, creditedAmount: shortfall, failed: false };
       } catch (fallbackErr) {
         console.error("Stripe refund fallback failed:", fallbackErr);

@@ -23,6 +23,7 @@
  */
 import { createClient } from "@supabase/supabase-js";
 import { normalizeDate } from "./calendar";
+import { parseSessionDateTimeET } from "./booking-finalize";
 import {
   a1Quote,
   appendValues,
@@ -188,10 +189,19 @@ function sessionEndDateTime(dateStr: string, endTime: string | null): Date | nul
   if (endHours === null) return null;
   const h = Math.floor(endHours);
   const min = Math.round((endHours - h) * 60);
-  // Constructing via a local-timezone string keeps this consistent with how
-  // the rest of the site reasons about booked_date/booked_*_time (plain wall
-  // clock, no explicit UTC offset stored) — see calendar.ts's TIMEZONE use.
-  return new Date(`${dateStr}T${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}:00`);
+  // Delegates to parseSessionDateTimeET (booking-finalize.ts) rather than
+  // building a bare `${dateStr}T${h}:${min}:00` string — that string has no
+  // timezone offset, so JS parses it as the SERVER's local time, which is
+  // UTC on Vercel, not America/New_York. A session ending 8:00 PM ET was
+  // silently computed as 8:00 PM UTC — 4-5 hours early depending on DST —
+  // meaning "has this session ended yet" could read true hours before it
+  // actually happened, or false hours after. Masked in normal daily runs
+  // (both crons fire at 6am ET, when the error is swallowed by the >14-hour
+  // gap to any session from a prior day) but live every time this function
+  // is called outside that window, DST or not. parseSessionDateTimeET
+  // already gets this right (verified DST-safe via its own midday-offset
+  // sampling) and is the same helper the client/admin cancel paths rely on.
+  return parseSessionDateTimeET(dateStr, h, min);
 }
 
 // ---------------------------------------------------------------------------

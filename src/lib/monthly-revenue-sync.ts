@@ -48,6 +48,7 @@
  */
 import { createClient } from "@supabase/supabase-js";
 import { normalizeDate } from "./calendar";
+import { parseSessionDateTimeET } from "./booking-finalize";
 import { calcServiceFee } from "./pricing";
 import { a1Quote, appendValues, batchUpdate, batchUpdateValues, getSheetMeta, getValues, updateValues } from "./sheets-write";
 import {
@@ -180,7 +181,12 @@ function sessionEndDateTime(dateStr: string, endTime: string | null): Date | nul
   if (endHours === null) return null;
   const h = Math.floor(endHours);
   const min = Math.round((endHours - h) * 60);
-  return new Date(`${dateStr}T${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}:00`);
+  // See payroll-sync.ts's identical function for why this delegates to
+  // parseSessionDateTimeET rather than building a bare, timezone-less date
+  // string — that string silently parsed as UTC (the server's local time on
+  // Vercel), not America/New_York, a 4-5 hour error masked only by this
+  // cron's fixed early-morning schedule.
+  return parseSessionDateTimeET(dateStr, h, min);
 }
 function normalizeTrainerName(name: string | null | undefined): string {
   return (name || "").trim().toLowerCase().replace(/\s+/g, " ");

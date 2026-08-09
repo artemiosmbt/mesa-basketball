@@ -1358,11 +1358,17 @@ export async function countPackageSessionsUsed(packageId: string, excludeRegistr
 // purpose keeps those unlinked rather than wrongly absorbing them. Never
 // touches a row that's already linked to ANY package (this one or another).
 // Returns how many rows it linked.
+// Returns the package's up-to-date total sessions-used count (not just how
+// many were newly linked) — the only caller (admin/packages GET) used to
+// throw this away and immediately re-run countPackageSessionsUsed itself,
+// a second identical query in the common case where nothing new gets
+// linked (most packages, most page loads). Computing it here instead means
+// one query does double duty.
 export async function backfillPackageLinks(pkg: { id: string; email: string; month_year: string; package_type: number }): Promise<number> {
   const supabase = getSupabase();
   const alreadyLinked = await countPackageSessionsUsed(pkg.id);
   const capacity = pkg.package_type - alreadyLinked;
-  if (capacity <= 0) return 0;
+  if (capacity <= 0) return alreadyLinked;
 
   const { data, error } = await supabase
     .from("registrations")
@@ -1371,7 +1377,7 @@ export async function backfillPackageLinks(pkg: { id: string; email: string; mon
     .in("type", ["private", "group-private"])
     .in("status", ["confirmed", "no_show"])
     .is("package_id", null);
-  if (error || !data || data.length === 0) return 0;
+  if (error || !data || data.length === 0) return alreadyLinked;
 
   const [year, month] = pkg.month_year.split("-").map(Number);
   const inMonth = data.filter((r) => {
@@ -1379,7 +1385,7 @@ export async function backfillPackageLinks(pkg: { id: string; email: string; mon
     const d = new Date(r.booked_date);
     return !isNaN(d.getTime()) && d.getFullYear() === year && d.getMonth() + 1 === month;
   });
-  if (inMonth.length === 0) return 0;
+  if (inMonth.length === 0) return alreadyLinked;
 
   function toMins(t: string | null): number {
     if (!t) return 0;
@@ -1398,13 +1404,13 @@ export async function backfillPackageLinks(pkg: { id: string; email: string; mon
   });
 
   const toLink = inMonth.slice(0, capacity).map((r) => r.id);
-  if (toLink.length === 0) return 0;
+  if (toLink.length === 0) return alreadyLinked;
 
   const { error: updateError } = await supabase
     .from("registrations")
     .update({ package_id: pkg.id })
     .in("id", toLink);
-  return updateError ? 0 : toLink.length;
+  return updateError ? alreadyLinked : alreadyLinked + toLink.length;
 }
 
 export async function getPackageById(packageId: string): Promise<MonthlyPackage | null> {

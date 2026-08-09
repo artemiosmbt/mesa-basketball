@@ -144,9 +144,15 @@ export default function PackagesPage() {
       const isPast = daysUntilExpiry(p.month_year) < 0;
       if (isPast !== (pkgTab === "past")) return false;
       if (monthFilter !== "all" && p.month_year !== monthFilter) return false;
-      if (search) {
-        const q = search.toLowerCase();
-        if (!p.parent_name?.toLowerCase().includes(q) && !p.email?.toLowerCase().includes(q) && !p.phone?.includes(q)) return false;
+      if (search.trim()) {
+        // Same normalization as the admin Clients search — whitespace in
+        // names and digits-only phone matching.
+        const q = search.trim().toLowerCase().replace(/\s+/g, " ");
+        const qDigits = search.replace(/\D/g, "");
+        const nameMatch = !!p.parent_name?.toLowerCase().replace(/\s+/g, " ").includes(q);
+        const emailMatch = !!p.email?.toLowerCase().includes(q);
+        const phoneMatch = !!qDigits && !!p.phone?.replace(/\D/g, "").includes(qDigits);
+        if (!nameMatch && !emailMatch && !phoneMatch) return false;
       }
       return true;
     });

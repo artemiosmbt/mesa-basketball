@@ -44,8 +44,10 @@ export async function GET(req: NextRequest) {
   // count an individually-paid overflow session against a package that
   // never covered it).
   await Promise.all(packages.map(async (pkg) => {
-    await backfillPackageLinks(pkg);
-    const actual = await countPackageSessionsUsed(pkg.id);
+    // backfillPackageLinks now returns the up-to-date total itself — no
+    // need for a second, usually-redundant countPackageSessionsUsed call
+    // right after (see its own doc comment).
+    const actual = await backfillPackageLinks(pkg);
     if (actual !== pkg.sessions_used) {
       await setPackageSessions(pkg.id, actual);
       pkg.sessions_used = actual;

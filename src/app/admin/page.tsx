@@ -1588,9 +1588,19 @@ export default function AdminPage() {
       } else if (typeFilter !== "all") {
         if (r.type !== typeFilter) return false;
       }
-      if (search) {
-        const q = search.toLowerCase();
-        if (!r.parent_name?.toLowerCase().includes(q) && !r.email?.toLowerCase().includes(q) && !r.phone?.includes(q)) return false;
+      if (search.trim()) {
+        // Whitespace-normalized name match (a stray double space in a saved
+        // name shouldn't hide it from a normally-typed search) and
+        // digits-only phone match (so searching "5551234567" finds a client
+        // stored as "(555) 123-4567" and vice versa) — same normalization
+        // classes already established elsewhere in this codebase for
+        // exactly this reason.
+        const q = search.trim().toLowerCase().replace(/\s+/g, " ");
+        const qDigits = search.replace(/\D/g, "");
+        const nameMatch = !!r.parent_name?.toLowerCase().replace(/\s+/g, " ").includes(q);
+        const emailMatch = !!r.email?.toLowerCase().includes(q);
+        const phoneMatch = !!qDigits && !!r.phone?.replace(/\D/g, "").includes(qDigits);
+        if (!nameMatch && !emailMatch && !phoneMatch) return false;
       }
       return true;
     });
