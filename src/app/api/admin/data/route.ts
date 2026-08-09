@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { verifyDashboardAccess } from "@/lib/auth";
+import { requireTrainerNameConfigured, trainerScopeFilter, deriveOwnClientEmails, scopeToOwnClients } from "@/lib/admin-data-scope";
+import { attachComputedFields } from "@/lib/admin-registration-enrichment";
 
 
 export async function GET(req: NextRequest) {
@@ -39,28 +41,16 @@ export async function GET(req: NextRequest) {
 
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
 
-  // A misconfigured TRAINER_ACCOUNTS row (role: "trainer" but no
-  // trainerName set) must fail CLOSED, not open — every scoping guard below
-  // is gated on `ctx.trainerName` being truthy, so silently letting this
-  // through would skip all of them and hand this account every client's
-  // full registrations, contact info, and credit balances sitewide instead
-  // of the intended narrow scope. Checked once, up front, rather than
-  // trusting every downstream `if (... && ctx.trainerName)` to agree.
-  if (ctx.role === "trainer" && !ctx.trainerName) {
-    return NextResponse.json({ error: "Trainer account is missing its name configuration — contact the admin." }, { status: 403 });
-  }
+  const scopeError = requireTrainerNameConfigured(ctx);
+  if (scopeError) return scopeError;
 
   let registrationsQuery = supabase.from("registrations").select("*").order("created_at", { ascending: false });
   // A plain trainer account only ever sees their own schedule — scoped at
   // the query itself so their browser never receives another trainer's
   // clients' contact info in the first place, not just a UI that hides it.
-  // Case-insensitive (ilike, not eq) since booked_trainer is whatever
-  // casing was live on the hand-typed schedule sheet at booking time, which
-  // can drift from the exact casing configured in TRAINER_ACCOUNTS —
-  // without this, a stray capitalization difference would silently show
-  // this trainer an incomplete schedule instead of their real one.
-  if (ctx.role === "trainer") {
-    registrationsQuery = registrationsQuery.ilike("booked_trainer", ctx.trainerName!);
+  const trainerFilter = trainerScopeFilter(ctx);
+  if (trainerFilter) {
+    registrationsQuery = registrationsQuery.ilike("booked_trainer", trainerFilter);
   }
 
   const [{ data: registrations }, { data: profilesRaw }, { data: referralCreditsRaw }, { data: packages }, { data: accountCreditsRaw }, { data: lateFeeEventsRaw }] = await Promise.all([
@@ -81,23 +71,22 @@ export async function GET(req: NextRequest) {
   // A plain trainer's registrations query above is already scoped to their
   // own bookings — but profiles/referralCredits/accountCredits/lateFeeEvents
   // were still being fetched completely unscoped and shipped to their
-  // browser in full, regardless of role. That directly contradicts this
-  // route's own stated invariant just above ("their browser never receives
-  // another trainer's clients' contact info in the first place") — a plain
-  // trainer account could open devtools and read every client's phone
-  // number, kids, and credit balances site-wide, not just their own
-  // clients', even though the UI never renders most of it. Scope these the
-  // same way registrations already is: down to only the clients who
+  // browser in full, regardless of role, until this was fixed. Scope these
+  // the same way registrations already is: down to only the clients who
   // actually appear in THIS trainer's own scoped registrations. Elevated
   // trainers and admin are unaffected (they're meant to see everyone).
-  const isPlainTrainer = ctx.role === "trainer";
-  const ownClientEmails = isPlainTrainer
-    ? new Set((registrations || []).map((r) => (r.email || "").toLowerCase().trim()).filter(Boolean))
-    : null;
-  const profiles = ownClientEmails ? (profilesRaw || []).filter((p) => ownClientEmails.has((p.email || "").toLowerCase().trim())) : profilesRaw;
-  const referralCredits = ownClientEmails ? (referralCreditsRaw || []).filter((r) => ownClientEmails.has((r.email || "").toLowerCase().trim())) : referralCreditsRaw;
-  const accountCredits = ownClientEmails ? (accountCreditsRaw || []).filter((a) => ownClientEmails.has((a.email || "").toLowerCase().trim())) : accountCreditsRaw;
-  const lateFeeEvents = ownClientEmails ? (lateFeeEventsRaw || []).filter((e) => ownClientEmails.has((e.email || "").toLowerCase().trim())) : lateFeeEventsRaw;
+  const ownClientEmails = deriveOwnClientEmails(registrations || [], ctx);
+  const profiles = scopeToOwnClients(profilesRaw, ownClientEmails);
+  const referralCredits = scopeToOwnClients(referralCreditsRaw, ownClientEmails);
+  const accountCredits = scopeToOwnClients(accountCreditsRaw, ownClientEmails);
+  const lateFeeEvents = scopeToOwnClients(lateFeeEventsRaw, ownClientEmails);
 
-  return NextResponse.json({ registrations: registrations || [], profiles: profiles || [], referralCredits: referralCredits || [], packages: packages || [], accountCredits: accountCredits || [], lateFeeEvents: lateFeeEvents || [] });
+  // Package-membership badges and bulk-discount pricing need to see each
+  // client's complete relevant history (one month, or one booking batch) to
+  // compute correctly — done server-side here (not left to the client-side
+  // useMemos this replaces) specifically so this stays correct once other
+  // views start returning partial windows instead of everything.
+  const enrichedRegistrations = await attachComputedFields(supabase, registrations || [], packages || []);
+
+  return NextResponse.json({ registrations: enrichedRegistrations, profiles: profiles || [], referralCredits: referralCredits || [], packages: packages || [], accountCredits: accountCredits || [], lateFeeEvents: lateFeeEvents || [] });
 }

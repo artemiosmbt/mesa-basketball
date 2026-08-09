@@ -38,6 +38,13 @@ interface Registration {
   is_late_cancel?: boolean;
   camp_day_late_fee?: number | null;
   package_id?: string | null;
+  // Computed server-side (see src/lib/admin-registration-enrichment.ts) —
+  // replaces the old client-side packageMembership/weeklyDiscountRates
+  // useMemos, which needed the full unfiltered dataset in memory to get
+  // this positional/tier math right.
+  within_package?: boolean;
+  package_paid?: boolean;
+  weekly_discount_rate?: number;
 }
 
 interface ProfileKid {
@@ -48,14 +55,6 @@ interface ProfileKid {
   gender?: string;
   groups?: CanonicalGroupId[];
   hidden?: boolean;
-}
-
-interface PackageData {
-  id: string;
-  email: string;
-  package_type: number;
-  month_year: string;
-  is_paid: boolean;
 }
 
 interface RescheduleForm {
@@ -201,15 +200,16 @@ function formatPrice(price: number | null): string {
 }
 
 // Full session rate before any account credit is netted out — the base
-// priceDisplay() builds on.
-function preCreditPrice(r: Registration, weeklyDiscountRates?: Map<string, number>): number {
+// priceDisplay() builds on. weekly_discount_rate is computed server-side
+// (see src/lib/admin-registration-enrichment.ts) and attached directly to
+// the row, rather than passed in as a separately-fetched Map.
+function preCreditPrice(r: Registration): number {
   const isPrivateType = r.type === "private" || r.type === "group-private";
   let basePrice: number;
   if (r.session_price != null) {
     basePrice = r.session_price;
-  } else if (r.type === "weekly" && r.referral_code && weeklyDiscountRates?.has(r.referral_code)) {
-    const discount = weeklyDiscountRates.get(r.referral_code)!;
-    basePrice = Math.round(50 * (r.total_participants || 1) * (1 - discount));
+  } else if (r.type === "weekly" && r.weekly_discount_rate != null) {
+    basePrice = Math.round(50 * (r.total_participants || 1) * (1 - r.weekly_discount_rate));
   } else {
     basePrice = fullPriceForType(r.type, getTrainerTier(r.booked_trainer));
   }
@@ -220,8 +220,8 @@ function preCreditPrice(r: Registration, weeklyDiscountRates?: Map<string, numbe
 // spending account credit, not from nothing being owed — so break it out:
 // "$X credit" when credit covered it in full, "$X credit, $Y card" when it
 // only covered part, otherwise the plain amount exactly as before.
-function priceDisplay(r: Registration, weeklyDiscountRates?: Map<string, number>): string {
-  const total = preCreditPrice(r, weeklyDiscountRates);
+function priceDisplay(r: Registration): string {
+  const total = preCreditPrice(r);
   const credit = Math.min(r.applied_account_credit || 0, total);
   const owed = Math.max(0, total - credit);
   if (credit <= 0) return formatPrice(owed);
@@ -741,8 +741,6 @@ function folderLabel(sample: Registration): string {
 
 interface CalendarViewProps {
   list: Registration[];
-  packageMembership: Map<string, { withinPackage: boolean; packagePaid: boolean }>;
-  weeklyDiscountRates: Map<string, number>;
   weeklyCapacity: Map<string, number>;
   campCapacity: Map<string, number>;
   canEdit: boolean;
@@ -757,7 +755,7 @@ interface CalendarViewProps {
   deleting: string | null;
 }
 
-function CalendarView({ list, packageMembership, weeklyDiscountRates, weeklyCapacity, campCapacity, canEdit, cancelRegistration, markNoShow, openReschedule, deleteRegistration, cancelling, noShowing, noShowConfirm, setNoShowConfirm, deleting }: CalendarViewProps) {
+function CalendarView({ list, weeklyCapacity, campCapacity, canEdit, cancelRegistration, markNoShow, openReschedule, deleteRegistration, cancelling, noShowing, noShowConfirm, setNoShowConfirm, deleting }: CalendarViewProps) {
   const [currentMonth, setCurrentMonth] = useState(() => {
     const n = new Date();
     return new Date(n.getFullYear(), n.getMonth(), 1);
@@ -781,7 +779,7 @@ function CalendarView({ list, packageMembership, weeklyDiscountRates, weeklyCapa
             <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mb-1">
               <span className="font-medium text-sm">{r.parent_name}</span>
               <span className={`rounded-full px-2 py-0.5 text-xs ${typePill(r.type, r.session_details)}`}>{typePillLabel(r.type, r.session_details)}</span>
-              {packageMembership.get(r.id)?.withinPackage && (
+              {r.within_package && (
                 <span className="rounded-full bg-teal-900/40 text-teal-400 px-2 py-0.5 text-xs font-medium">pkg</span>
               )}
             </div>
@@ -797,9 +795,9 @@ function CalendarView({ list, packageMembership, weeklyDiscountRates, weeklyCapa
             <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusBadge(r.status).cls}`}>
               {statusBadge(r.status).label}
             </span>
-            {canEdit && !packageMembership.get(r.id)?.withinPackage && (
+            {canEdit && !r.within_package && (
               <span className="text-xs font-medium text-green-400">
-                {priceDisplay(r, weeklyDiscountRates)}
+                {priceDisplay(r)}
               </span>
             )}
             {r.status === "confirmed" && (
@@ -994,7 +992,6 @@ export default function AdminPage() {
   const [videoConsentMap, setVideoConsentMap] = useState<Record<string, boolean>>({});
   const [profilesMap, setProfilesMap] = useState<Record<string, { phone: string; parentName: string; kids: ProfileKid[] }>>({});
   const [referralCreditsMap, setReferralCreditsMap] = useState<Record<string, { available: number; total: number }>>({});
-  const [packages, setPackages] = useState<PackageData[]>([]);
   const [tab, setTab] = useState<"upcoming" | "past" | "clients" | "calendar" | "groups">("upcoming");
   const [typeFilter, setTypeFilter] = useState("all");
   const [search, setSearch] = useState("");
@@ -1063,7 +1060,6 @@ export default function AdminPage() {
           if (rc.email) creditsMap[rc.email] = { available: rc.credits || 0, total: rc.total_referrals || 0 };
         }
         setReferralCreditsMap(creditsMap);
-        setPackages(adminData.packages || []);
       }).finally(() => setLoading(false));
 
       // Time-change sync writes data — trainer accounts are read-only, so
@@ -1361,10 +1357,10 @@ export default function AdminPage() {
 
   // Everything the dashboard displays is scoped through this — "all" is a
   // no-op for a basic trainer account anyway, since the server already only
-  // ever sent them their own sessions. packageMembership/weeklyDiscountRates
-  // deliberately do NOT use this (see their own comments) — narrowing the
-  // registrations that feed those would make their cross-session math wrong,
-  // not just narrower.
+  // ever sent them their own sessions. within_package/weekly_discount_rate
+  // are computed server-side (src/lib/admin-registration-enrichment.ts)
+  // against each client's complete relevant history, not this filtered
+  // view, so they stay correct regardless of what's shown here.
   // trainerNamesMatch (not ===) — booked_trainer is whatever casing was
   // live on the hand-typed schedule sheet at booking time, which can drift
   // row to row for the same real trainer (see the same fix already applied
@@ -1562,22 +1558,6 @@ export default function AdminPage() {
       .sort((a, b) => dateMs(b.booked_date) - dateMs(a.booked_date));
   }, [visibleRegistrations, selectedClient]);
 
-  // Volume discount rates for group sessions booked together (no stored session_price)
-  const weeklyDiscountRates = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const r of registrations) {
-      if (r.type === "weekly" && r.referral_code && r.session_price == null) {
-        counts.set(r.referral_code, (counts.get(r.referral_code) || 0) + 1);
-      }
-    }
-    const rateMap = new Map<string, number>();
-    for (const [code, count] of counts) {
-      if (count >= 8) rateMap.set(code, 0.15);
-      else if (count >= 4) rateMap.set(code, 0.10);
-    }
-    return rateMap;
-  }, [registrations]);
-
   // Apply type filter + search to a list
   function applyFilters(list: Registration[]) {
     return list.filter((r) => {
@@ -1614,47 +1594,6 @@ export default function AdminPage() {
     groups: visibleRegistrations.filter((r) => r.type === "weekly" && r.status === "confirmed").length,
   }), [visibleRegistrations]);
 
-  // Map each registration id to whether it falls within a monthly package —
-  // deliberately built from the FULL registrations, not visibleRegistrations,
-  // because package membership is a positional index across every private
-  // session in that email+month, trainer filter or not; narrowing the input
-  // here would make sessions look "within package" (or not) incorrectly
-  // rather than just hiding ones outside the current filter.
-  const packageMembership = useMemo(() => {
-    const result = new Map<string, { withinPackage: boolean; packagePaid: boolean }>();
-
-    function toMonthYear(dateStr: string | null): string | null {
-      if (!dateStr) return null;
-      const d = new Date(dateStr);
-      if (isNaN(d.getTime())) return null;
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-    }
-
-    const pkgMap = new Map<string, { package_type: number; is_paid: boolean }>();
-    for (const pkg of packages) {
-      const key = `${pkg.email.toLowerCase().trim()}|${pkg.month_year}`;
-      if (!pkgMap.has(key)) pkgMap.set(key, { package_type: pkg.package_type, is_paid: pkg.is_paid });
-    }
-    const regsByKey = new Map<string, Registration[]>();
-    for (const r of registrations) {
-      if (r.type !== "private" && r.type !== "group-private") continue;
-      if (r.status !== "confirmed") continue;
-      const monthYear = toMonthYear(r.booked_date);
-      if (!monthYear) continue;
-      const key = `${(r.email || "").toLowerCase().trim()}|${monthYear}`;
-      if (!pkgMap.has(key)) continue;
-      if (!regsByKey.has(key)) regsByKey.set(key, []);
-      regsByKey.get(key)!.push(r);
-    }
-    for (const [key, regs] of regsByKey) {
-      const pkg = pkgMap.get(key)!;
-      const sorted = [...regs].sort((a, b) => sessionMs(a.booked_date, a.booked_start_time) - sessionMs(b.booked_date, b.booked_start_time));
-      for (let i = 0; i < sorted.length; i++) {
-        result.set(sorted[i].id, { withinPackage: i < pkg.package_type, packagePaid: pkg.is_paid });
-      }
-    }
-    return result;
-  }, [registrations, packages]);
 
   // Session-slot capacity from the live schedule sheet, keyed the same way
   // folders are — powers the "X signed up / Y" folder header.
@@ -1678,7 +1617,7 @@ export default function AdminPage() {
             <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
               <span className="font-medium text-sm">{r.parent_name}</span>
               <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${isPickup(r) ? "bg-orange-500 text-white" : "bg-amber-400 text-blue-900"}`}>{typePillLabel(r.type, r.session_details)}</span>
-              {packageMembership.get(r.id)?.withinPackage && (
+              {r.within_package && (
                 <span className="rounded-full bg-teal-900/40 text-teal-400 px-2 py-0.5 text-xs font-medium">pkg</span>
               )}
               {(() => { const da = daysAway(r.booked_date); return da ? <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${da.cls}`}>{da.label}</span> : null; })()}
@@ -1694,8 +1633,8 @@ export default function AdminPage() {
           </div>
           <div className="shrink-0 flex flex-col items-end justify-between self-stretch">
             <span className={`text-brown-500 transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}>▾</span>
-            {canEdit && !packageMembership.get(r.id)?.withinPackage && (
-              <span className="text-white font-medium text-xs">{priceDisplay(r, weeklyDiscountRates)}</span>
+            {canEdit && !r.within_package && (
+              <span className="text-white font-medium text-xs">{priceDisplay(r)}</span>
             )}
           </div>
         </button>
@@ -1726,10 +1665,10 @@ export default function AdminPage() {
                   <p className="text-brown-200">{r.booked_trainer}</p>
                 </div>
               )}
-              {canEdit && !packageMembership.get(r.id)?.withinPackage && (
+              {canEdit && !r.within_package && (
                 <div>
                   <p className="text-brown-500 uppercase tracking-wider mb-0.5">Price</p>
-                  <p className="text-green-400 font-medium">{priceDisplay(r, weeklyDiscountRates)}</p>
+                  <p className="text-green-400 font-medium">{priceDisplay(r)}</p>
                 </div>
               )}
             </div>
@@ -2078,8 +2017,6 @@ export default function AdminPage() {
           <div className="rounded-xl border border-brown-700 bg-brown-900/20 p-4">
             <CalendarView
               list={[...upcoming, ...past]}
-              packageMembership={packageMembership}
-              weeklyDiscountRates={weeklyDiscountRates}
               weeklyCapacity={weeklyCapacity}
               campCapacity={campCapacity}
               canEdit={canEdit}

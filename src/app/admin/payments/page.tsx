@@ -34,14 +34,10 @@ interface Registration {
   applied_account_credit: number | null;
   booking_batch_id: string | null;
   booked_trainer: string | null;
-}
-
-interface PackageData {
-  id: string;
-  email: string;
-  package_type: number;
-  month_year: string;
-  is_paid: boolean;
+  // Computed server-side (see src/lib/admin-registration-enrichment.ts).
+  within_package?: boolean;
+  package_paid?: boolean;
+  weekly_discount_rate?: number;
 }
 
 interface AccountCreditData {
@@ -125,7 +121,6 @@ export default function PaymentsPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [registrations, setRegistrations] = useState<Registration[]>([]);
-  const [packages, setPackages] = useState<PackageData[]>([]);
   const [accountCredits, setAccountCredits] = useState<AccountCreditData[]>([]);
   const [lateFeeEvents, setLateFeeEvents] = useState<LateFeeEvent[]>([]);
   const [token, setToken] = useState<string | null>(null);
@@ -153,7 +148,6 @@ export default function PaymentsPage() {
         .then((r) => r.json())
         .then((data) => {
           setRegistrations(data.registrations || []);
-          setPackages(data.packages || []);
           setAccountCredits(data.accountCredits || []);
           setLateFeeEvents(data.lateFeeEvents || []);
         })
@@ -288,22 +282,6 @@ export default function PaymentsPage() {
     return date.getTime();
   }
 
-  // Volume discount rates for group sessions booked together (where session_price was not stored)
-  const weeklyDiscountRates = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const r of registrations) {
-      if (r.type === "weekly" && !r.is_full_camp && r.referral_code && r.session_price == null) {
-        counts.set(r.referral_code, (counts.get(r.referral_code) || 0) + 1);
-      }
-    }
-    const rateMap = new Map<string, number>();
-    for (const [code, count] of counts) {
-      if (count >= 8) rateMap.set(code, 0.15);
-      else if (count >= 4) rateMap.set(code, 0.10);
-    }
-    return rateMap;
-  }, [registrations]);
-
   // Recomputed current total per full-camp referral_code group (capped at the
   // original full-week price), shared by effectiveAmount() and campAdjustments
   // below so both agree on the same number for a given family.
@@ -332,7 +310,9 @@ export default function PaymentsPage() {
   // after credit can't be "unpaid") and by the amount column in the tables.
   // useCallback (not a plain function) so the unpaid useMemo below can
   // declare it as a real dependency instead of silently closing over
-  // campGroupFinalAmounts/weeklyDiscountRates.
+  // campGroupFinalAmounts. weekly_discount_rate is computed server-side
+  // (see src/lib/admin-registration-enrichment.ts) and attached directly to
+  // each row.
   const effectiveAmount = useCallback((r: Registration): number => {
     const isPrivateType = r.type === "private" || r.type === "group-private";
     let basePrice: number;
@@ -340,9 +320,8 @@ export default function PaymentsPage() {
       basePrice = campGroupFinalAmounts.get(campGroupKey(r))!;
     } else if (r.session_price != null) {
       basePrice = r.session_price;
-    } else if (r.type === "weekly" && !r.is_full_camp && r.referral_code && weeklyDiscountRates.has(r.referral_code)) {
-      const discount = weeklyDiscountRates.get(r.referral_code)!;
-      basePrice = Math.round(50 * (r.total_participants || 1) * (1 - discount));
+    } else if (r.type === "weekly" && !r.is_full_camp && r.weekly_discount_rate != null) {
+      basePrice = Math.round(50 * (r.total_participants || 1) * (1 - r.weekly_discount_rate));
     } else {
       basePrice = fullPriceForType(r.type, getTrainerTier(r.booked_trainer));
     }
@@ -351,43 +330,7 @@ export default function PaymentsPage() {
     // credit applied at booking time is a separate field and has to be
     // subtracted here, or this shows what they'd owe with no credit at all.
     return Math.max(0, discounted - (r.applied_account_credit || 0));
-  }, [campGroupFinalAmounts, weeklyDiscountRates]);
-
-  const packageMembership = useMemo(() => {
-    const result = new Map<string, { withinPackage: boolean; packagePaid: boolean }>();
-
-    function toMonthYear(dateStr: string | null): string | null {
-      if (!dateStr) return null;
-      const d = new Date(dateStr);
-      if (isNaN(d.getTime())) return null;
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-    }
-
-    const pkgMap = new Map<string, { package_type: number; is_paid: boolean }>();
-    for (const pkg of packages) {
-      const key = `${pkg.email.toLowerCase().trim()}|${pkg.month_year}`;
-      if (!pkgMap.has(key)) pkgMap.set(key, { package_type: pkg.package_type, is_paid: pkg.is_paid });
-    }
-    const regsByKey = new Map<string, Registration[]>();
-    for (const r of registrations) {
-      if (r.type !== "private" && r.type !== "group-private") continue;
-      if (r.status !== "confirmed") continue;
-      const monthYear = toMonthYear(r.booked_date);
-      if (!monthYear) continue;
-      const key = `${(r.email || "").toLowerCase().trim()}|${monthYear}`;
-      if (!pkgMap.has(key)) continue;
-      if (!regsByKey.has(key)) regsByKey.set(key, []);
-      regsByKey.get(key)!.push(r);
-    }
-    for (const [key, regs] of regsByKey) {
-      const pkg = pkgMap.get(key)!;
-      const sorted = [...regs].sort((a, b) => sessionDateTimeMs(a) - sessionDateTimeMs(b));
-      for (let i = 0; i < sorted.length; i++) {
-        result.set(sorted[i].id, { withinPackage: i < pkg.package_type, packagePaid: pkg.is_paid });
-      }
-    }
-    return result;
-  }, [registrations, packages]);
+  }, [campGroupFinalAmounts]);
 
   // Now that Stripe collects payment upfront for every new booking, this
   // list only has a reason to show anything for bookings that were never
@@ -407,8 +350,7 @@ export default function PaymentsPage() {
     return registrations
       .filter((r) => {
         if (r.status !== "confirmed" || r.is_paid || r.stripe_payment_intent_id) return false;
-        const mem = packageMembership.get(r.id);
-        if (mem?.withinPackage && mem.packagePaid) return false;
+        if (r.within_package && r.package_paid) return false;
         // A booking fully covered by account credit at booking time never
         // touches Stripe (no payment_intent) and is_paid is never set for
         // it either — same shape as a real pre-Stripe unpaid row, but
@@ -424,7 +366,7 @@ export default function PaymentsPage() {
         return true;
       })
       .sort((a, b) => dateMs(a.booked_date) - dateMs(b.booked_date));
-  }, [registrations, packageMembership, effectiveAmount]);
+  }, [registrations, effectiveAmount]);
 
   const paid = useMemo(() => {
     const seenCamps = new Set<string>();
@@ -518,7 +460,6 @@ export default function PaymentsPage() {
             <div className="space-y-2">
               {unpaid.map((r) => {
                 const da = daysAway(r.booked_date);
-                const pkgMem = packageMembership.get(r.id);
                 const amount = effectiveAmount(r);
                 return (
                 <div key={r.id} className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-3 flex items-center justify-between gap-3">
@@ -527,7 +468,7 @@ export default function PaymentsPage() {
                       <span className="font-medium text-sm">{r.parent_name}</span>
                       <span className="rounded-full bg-amber-400 px-2 py-0.5 text-xs font-semibold text-blue-900 shrink-0">{TYPE_LABELS[r.type] || r.type}</span>
                       {r.is_full_camp && <span className="rounded-full bg-purple-900/40 text-purple-300 px-2 py-0.5 text-xs font-medium shrink-0">full camp</span>}
-                      {pkgMem?.withinPackage && (
+                      {r.within_package && (
                         <span className="rounded-full bg-teal-900/40 text-teal-400 px-2 py-0.5 text-xs font-medium shrink-0">pkg</span>
                       )}
                       {da && <span className={`rounded-full px-2 py-0.5 text-xs font-medium shrink-0 ${da.cls}`}>{da.label}</span>}
@@ -718,7 +659,7 @@ export default function PaymentsPage() {
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                       <span className="font-medium text-sm">{r.parent_name}</span>
                       <span className="rounded-full bg-amber-400 px-2 py-0.5 text-xs font-semibold text-blue-900 shrink-0">{TYPE_LABELS[r.type] || r.type}</span>
-                      {packageMembership.get(r.id)?.withinPackage && (
+                      {r.within_package && (
                         <span className="rounded-full bg-teal-900/40 text-teal-400 px-2 py-0.5 text-xs font-medium shrink-0">pkg</span>
                       )}
                       {da && <span className={`rounded-full px-2 py-0.5 text-xs font-medium shrink-0 ${da.cls}`}>{da.label}</span>}
