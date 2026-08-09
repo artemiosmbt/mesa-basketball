@@ -34,6 +34,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { normalizeDate } from "./calendar";
 import { calcServiceFee } from "./pricing";
+import { getStripe } from "./stripe";
 import { a1Quote, appendValues, batchUpdate, batchUpdateValues, getSheetMeta, getValues, updateValues } from "./sheets-write";
 
 export const MONTHLY_REVENUE_SHEET_ID = "1_gSXvi7wXRdLZA2wMuiCwwublyBvUbCMrbJkUnUdaug";
@@ -70,8 +71,9 @@ const BASE_HOURLY_RATE = 20;
 const INCENTIVE_PER_HEAD = 20;
 const PRIVATE_TRAINER_RATE_1_3 = 60;
 const PRIVATE_TRAINER_RATE_4PLUS = 90;
-const STRIPE_PCT_CC = 0.029;
-const STRIPE_FIXED = 0.3;
+const STRIPE_PCT_CARD = 0.029;
+const STRIPE_PCT_LINK = 0.027; // Stripe charges a lower % when the customer pays via Link instead of a plain card
+const STRIPE_FIXED = 0.3; // same fixed $0.30 for both
 
 interface LocationSeed { name: string; monthlyRent: number }
 const KNOWN_LOCATIONS: LocationSeed[] = [
@@ -121,6 +123,7 @@ interface RegRow {
   applied_account_credit: number | null;
   package_id: string | null;
   stripe_checkout_session_id: string | null;
+  stripe_payment_intent_id: string | null;
 }
 
 interface PackageRow {
@@ -131,6 +134,7 @@ interface PackageRow {
   total_price: number | null;
   trainer_tier: string | null;
   parent_name: string | null;
+  stripe_payment_intent_id: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -198,6 +202,7 @@ interface DerivedSession {
   // only charged the $4.50-ish fee once).
   stripePortion: number;
   checkoutSessionId: string | null;
+  paymentIntentId: string | null; // used by the post-pass to look up card vs Link, which changes Stripe's real %
   processingFee: number; // filled in by the post-pass; 0 until then
   stripeFee: number; // filled in by the post-pass; 0 until then
   trainerPay: number;
@@ -295,6 +300,7 @@ function deriveSession(reg: RegRow, isLateCancel: boolean, lateFeeAmountKept: nu
     grossRevenue,
     stripePortion,
     checkoutSessionId: reg.stripe_checkout_session_id,
+    paymentIntentId: reg.stripe_payment_intent_id,
     processingFee: 0,
     stripeFee: 0,
     trainerPay,
@@ -307,7 +313,8 @@ interface DerivedPackage {
   label: string;
   totalPrice: number; // counted as real Gross Revenue on this date — see deriveSession's grossRevenue=0 for package-covered sessions for why this can't also be counted again per-session later
   processingFee: number;
-  stripeFee: number;
+  stripeFee: number; // default assumes a card payment; the payment-method-aware post-pass in runMonthlyRevenueSync overrides this for Link
+  paymentIntentId: string | null;
 }
 
 function derivePackage(pkg: PackageRow): DerivedPackage | null {
@@ -315,13 +322,14 @@ function derivePackage(pkg: PackageRow): DerivedPackage | null {
   if (!date || date < TRACKER_START_DATE) return null;
   const price = pkg.total_price ?? 0;
   const processingFee = price > 0 ? calcServiceFee(price) : 0;
-  // Stripe's 2.9%+$0.30 is charged on the TOTAL amount that actually hits
-  // the card — price PLUS the service-fee surcharge added on top at
-  // checkout — not on the package price alone.
-  const stripeFee = price > 0 ? round2((price + processingFee) * STRIPE_PCT_CC + STRIPE_FIXED) : 0;
+  // Stripe's 2.9%+$0.30 (card) is charged on the TOTAL amount that actually
+  // hits the card — price PLUS the service-fee surcharge added on top at
+  // checkout — not on the package price alone. Defaults to the card rate;
+  // overridden below for Link payments (2.7%+$0.30).
+  const stripeFee = price > 0 ? round2((price + processingFee) * STRIPE_PCT_CARD + STRIPE_FIXED) : 0;
   const size = pkg.package_type === 8 ? "8-Pack" : "4-Pack";
   const buyer = pkg.parent_name || "Unknown";
-  return { date, label: `${buyer} — ${size} $${price.toFixed(2)}`, totalPrice: price, processingFee, stripeFee };
+  return { date, label: `${buyer} — ${size} $${price.toFixed(2)}`, totalPrice: price, processingFee, stripeFee, paymentIntentId: pkg.stripe_payment_intent_id };
 }
 
 // ---------------------------------------------------------------------------
@@ -438,6 +446,72 @@ function dayRowFingerprint(
   net: number
 ): string {
   return JSON.stringify([privateText, groupText, place, gross, processing, stripe, net]);
+}
+
+// ---------------------------------------------------------------------------
+// Card vs Link payment-method lookup — Stripe charges a lower % on Link
+// (2.7%+$0.30) than a plain card (2.9%+$0.30). Which one a given checkout
+// actually used isn't stored anywhere in Supabase, only on the Stripe
+// PaymentIntent itself, so this looks it up live and caches the result in a
+// hidden tab keyed by payment_intent_id — a completed transaction's payment
+// method never changes, so once looked up it never needs re-fetching.
+// ---------------------------------------------------------------------------
+
+const PAYMENT_METHOD_CACHE_TAB = "_PaymentMethodCache";
+// Bounds how many NEW (uncached) Stripe lookups happen in a single run —
+// the sync has a 60s function timeout, and each lookup is a real network
+// call. Any payment intent that doesn't fit this run's budget falls back to
+// the card rate for now and gets looked up (and corrected) on a later run.
+const MAX_STRIPE_LOOKUPS_PER_RUN = 40;
+
+async function ensurePaymentMethodCacheTab(): Promise<void> {
+  const meta = await getSheetMeta(MONTHLY_REVENUE_SHEET_ID);
+  if (meta.some((s) => s.title === PAYMENT_METHOD_CACHE_TAB)) return;
+  await batchUpdate(MONTHLY_REVENUE_SHEET_ID, [
+    { addSheet: { properties: { title: PAYMENT_METHOD_CACHE_TAB, hidden: true } } },
+  ]);
+  await updateValues(MONTHLY_REVENUE_SHEET_ID, `${a1Quote(PAYMENT_METHOD_CACHE_TAB)}!A1:B1`, [["payment_intent_id", "method_type"]]);
+}
+
+async function readPaymentMethodCache(): Promise<Map<string, string>> {
+  const rows = await getValues(MONTHLY_REVENUE_SHEET_ID, `${a1Quote(PAYMENT_METHOD_CACHE_TAB)}!A2:B`);
+  const map = new Map<string, string>();
+  for (const r of rows) {
+    const [id, type] = r as [string, string];
+    if (id) map.set(id, type || "card");
+  }
+  return map;
+}
+
+function stripePctForMethod(methodType: string): number {
+  return methodType === "link" ? STRIPE_PCT_LINK : STRIPE_PCT_CARD;
+}
+
+/** Resolves the real Stripe % for a payment intent — cached first, else a
+ * live lookup (budget-limited), else falls back to the card rate. */
+async function resolveStripePct(
+  paymentIntentId: string | null,
+  cache: Map<string, string>,
+  cacheWrites: Map<string, string>,
+  budget: { remaining: number }
+): Promise<number> {
+  if (!paymentIntentId) return STRIPE_PCT_CARD;
+  const cached = cache.get(paymentIntentId);
+  if (cached) return stripePctForMethod(cached);
+  if (budget.remaining <= 0) return STRIPE_PCT_CARD; // picked up on a future run instead
+  budget.remaining--;
+  try {
+    const stripe = getStripe();
+    const pi = await stripe.paymentIntents.retrieve(paymentIntentId, { expand: ["payment_method"] });
+    const methodType = typeof pi.payment_method === "object" && pi.payment_method ? pi.payment_method.type : "card";
+    cache.set(paymentIntentId, methodType);
+    cacheWrites.set(paymentIntentId, methodType);
+    return stripePctForMethod(methodType);
+  } catch {
+    // Unretrievable (bad id, test-mode leftover, transient error) — default
+    // to card rather than fail the whole sync over one fee refinement.
+    return STRIPE_PCT_CARD;
+  }
 }
 
 async function buildMonthTab(
@@ -884,7 +958,7 @@ export async function runMonthlyRevenueSync(): Promise<MonthlyRevenueSyncResult>
   const { data: regs, error: regErr } = await supabase
     .from("registrations")
     .select(
-      "id, parent_name, email, kids, type, total_participants, booked_date, booked_start_time, booked_end_time, booked_location, booked_group, booked_trainer, status, session_price, applied_account_credit, package_id, stripe_checkout_session_id"
+      "id, parent_name, email, kids, type, total_participants, booked_date, booked_start_time, booked_end_time, booked_location, booked_group, booked_trainer, status, session_price, applied_account_credit, package_id, stripe_checkout_session_id, stripe_payment_intent_id"
     )
     .in("type", ["weekly", "private", "group-private", "camp"])
     .in("status", ["confirmed", "cancelled", "no_show"]);
@@ -919,6 +993,13 @@ export async function runMonthlyRevenueSync(): Promise<MonthlyRevenueSyncResult>
     if (derived) sessions.push(derived);
   }
 
+  // Card-vs-Link lookup, shared by both the session and package fee
+  // post-passes below (see resolveStripePct's header comment).
+  await ensurePaymentMethodCacheTab();
+  const pmCache = await readPaymentMethodCache();
+  const pmCacheWrites = new Map<string, string>();
+  const stripeLookupBudget = { remaining: MAX_STRIPE_LOOKUPS_PER_RUN };
+
   // A single Stripe Checkout can cover several session rows (e.g. booking 2
   // sessions at once) — the ~$4.50/3.2% service fee and the real Stripe cost
   // are charged/incurred ONCE per checkout, not once per row. Group by
@@ -939,15 +1020,17 @@ export async function runMonthlyRevenueSync(): Promise<MonthlyRevenueSyncResult>
     if (totalCharged <= 0) continue;
     const rep = group.slice().sort((a, b) => a.date.localeCompare(b.date) || a.startHours - b.startHours)[0];
     rep.processingFee = calcServiceFee(totalCharged);
-    // Stripe's 2.9%+$0.30 is charged on the TOTAL amount that actually hits
+    // Stripe's %+$0.30 is charged on the TOTAL amount that actually hits
     // the card — totalCharged PLUS the service-fee surcharge added on top
-    // at checkout — not on the session price alone.
-    rep.stripeFee = round2((totalCharged + rep.processingFee) * STRIPE_PCT_CC + STRIPE_FIXED);
+    // at checkout — not on the session price alone. The % itself depends on
+    // whether this checkout was paid by card (2.9%) or Link (2.7%).
+    const pct = await resolveStripePct(rep.paymentIntentId, pmCache, pmCacheWrites, stripeLookupBudget);
+    rep.stripeFee = round2((totalCharged + rep.processingFee) * pct + STRIPE_FIXED);
   }
 
   const { data: pkgSales, error: pkgErr } = await supabase
     .from("monthly_packages")
-    .select("id, created_at, package_type, status, total_price, trainer_tier, parent_name")
+    .select("id, created_at, package_type, status, total_price, trainer_tier, parent_name, stripe_payment_intent_id")
     .in("status", ["active", "cancelled"])
     .gte("created_at", TRACKER_START_DATE);
   if (pkgErr) throw new Error(`monthly_packages query: ${pkgErr.message}`);
@@ -955,6 +1038,14 @@ export async function runMonthlyRevenueSync(): Promise<MonthlyRevenueSyncResult>
   for (const pkg of (pkgSales || []) as PackageRow[]) {
     const derived = derivePackage(pkg);
     if (derived) packages.push(derived);
+  }
+  // Same card-vs-Link correction as the session checkout groups above —
+  // packages are always their own standalone checkout, so no grouping
+  // needed, just a straight per-package lookup.
+  for (const pkg of packages) {
+    if (!pkg.paymentIntentId || pkg.totalPrice <= 0) continue;
+    const pct = await resolveStripePct(pkg.paymentIntentId, pmCache, pmCacheWrites, stripeLookupBudget);
+    pkg.stripeFee = round2((pkg.totalPrice + pkg.processingFee) * pct + STRIPE_FIXED);
   }
 
   // Day-row edit protection (see the file header comment and
@@ -995,6 +1086,16 @@ export async function runMonthlyRevenueSync(): Promise<MonthlyRevenueSyncResult>
   }
   if (logUpdates.length > 0) await batchUpdateValues(MONTHLY_REVENUE_SHEET_ID, logUpdates);
   if (logNewRows.length > 0) await appendValues(MONTHLY_REVENUE_SHEET_ID, `${a1Quote(DAY_LOG_TAB)}!A:B`, logNewRows);
+
+  // Payment-method cache only ever grows (a completed transaction's method
+  // never changes) — every entry here is new, always append.
+  if (pmCacheWrites.size > 0) {
+    await appendValues(
+      MONTHLY_REVENUE_SHEET_ID,
+      `${a1Quote(PAYMENT_METHOD_CACHE_TAB)}!A:B`,
+      Array.from(pmCacheWrites.entries()).map(([id, type]) => [id, type])
+    );
+  }
 
   return { monthsBuilt, sessionsConsidered: sessions.length, packagesConsidered: packages.length };
 }
