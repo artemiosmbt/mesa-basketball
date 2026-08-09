@@ -67,13 +67,18 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "DB error" }, { status: 500 });
   }
 
-  // Get phone numbers that already have a booking in the upcoming week
+  // Get phone numbers that already have a booking in the upcoming week.
+  // Must exclude cancelled rows — cancelling never clears booked_date, so
+  // without this a client who just cancelled their only session next week
+  // reads as "already booked" and gets silently skipped, missing the exact
+  // nudge to rebook that this reminder exists to send them.
   const { data: alreadyBooked, error: bookedError } = await supabase
     .from("registrations")
     .select("phone")
     .gte("booked_date", mondayStr)
     .lte("booked_date", sundayStr)
-    .not("booked_date", "is", null);
+    .not("booked_date", "is", null)
+    .eq("status", "confirmed");
 
   if (bookedError) {
     console.error("Failed to fetch booked registrations:", bookedError);
@@ -99,6 +104,17 @@ export async function GET(req: NextRequest) {
     phonesToText.push(r.phone);
   }
 
+  // Re-check consent right before sending, not just at the top of the run —
+  // an opt-out (STOP reply) landing partway through this loop must not still
+  // get texted just because they were opted-in when phonesToText was built.
+  const { data: stillOptedIn } = await supabase
+    .from("registrations")
+    .select("phone")
+    .eq("sms_consent", true);
+  const stillConsentedNorm = new Set(
+    (stillOptedIn || []).map((r) => normalizePhone(r.phone || "")).filter(Boolean)
+  );
+
   const client = twilio(
     process.env.TWILIO_ACCOUNT_SID,
     process.env.TWILIO_AUTH_TOKEN
@@ -108,6 +124,7 @@ export async function GET(req: NextRequest) {
   let failed = 0;
 
   for (const phone of phonesToText) {
+    if (!stillConsentedNorm.has(normalizePhone(phone))) continue;
     try {
       await client.messages.create({
         body: "Mesa Basketball: Don't forget to book your group or individual session this week! Reserve your spot at mesabasketballtraining.com. Reply STOP to opt out.",

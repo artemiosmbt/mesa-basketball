@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { WeeklySession } from "@/lib/sheets";
+import { normalizeSessionLabelForComparison as normLabel } from "@/lib/group-matching";
 
 export interface WeeklyRegKeyFields {
   id: string;
@@ -58,7 +59,7 @@ export function buildWeeklyPlan<T extends WeeklyRegKeyFields>(sheetRows: WeeklyS
 
   const sheetByKey = new Map<string, WeeklySession[]>();
   for (const s of sheetRows) {
-    const key = `${s.date}|${s.group}`;
+    const key = `${s.date}|${normLabel(s.group)}`;
     if (!sheetByKey.has(key)) sheetByKey.set(key, []);
     sheetByKey.get(key)!.push(s);
   }
@@ -68,7 +69,7 @@ export function buildWeeklyPlan<T extends WeeklyRegKeyFields>(sheetRows: WeeklyS
     if (!r.booked_date) continue;
     const g = regGroupKey(r);
     if (!g) continue;
-    const key = `${r.booked_date}|${g}`;
+    const key = `${r.booked_date}|${normLabel(g)}`;
     if (!regsByKey.has(key)) regsByKey.set(key, []);
     regsByKey.get(key)!.push(r);
   }
@@ -93,7 +94,7 @@ export function buildWeeklyPlan<T extends WeeklyRegKeyFields>(sheetRows: WeeklyS
           !claimedRowIdx.has(i) &&
           s.startTime === sample.booked_start_time &&
           s.endTime === (sample.booked_end_time || "") &&
-          s.location === (sample.booked_location || "")
+          normLabel(s.location) === normLabel(sample.booked_location)
       );
       if (matchIdx !== -1) {
         claimedRowIdx.add(matchIdx);
@@ -148,10 +149,10 @@ export function findWeeklyTrainerReassignments<T extends WeeklyRegKeyFields & { 
     const match = sheetRows.find(
       (s) =>
         s.date === r.booked_date &&
-        s.group === g &&
+        normLabel(s.group) === normLabel(g) &&
         s.startTime === r.booked_start_time &&
         s.endTime === (r.booked_end_time || "") &&
-        s.location === (r.booked_location || "")
+        normLabel(s.location) === normLabel(r.booked_location)
     );
     if (!match) continue; // no exact slot match — a real time/location change, handled by buildWeeklyPlan instead
     const sheetTrainer = match.trainer || "Artemios Gavalas";

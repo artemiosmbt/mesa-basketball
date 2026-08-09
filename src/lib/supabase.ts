@@ -2,6 +2,8 @@ import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { sendAdminSMS } from "@/lib/sms";
 import { REFERRAL_PROGRAM_ENABLED } from "@/lib/feature-flags";
 import { trainerNamesMatch } from "@/lib/trainers";
+import { normalizeSessionLabelForComparison as normLabel } from "@/lib/group-matching";
+import { regGroupKey } from "@/lib/weekly-schedule-matching";
 import type { Athlete } from "@/lib/athletes";
 
 let _supabase: SupabaseClient | null = null;
@@ -1092,7 +1094,15 @@ export async function enrollInPackage(data: {
     })
     .select("id")
     .single();
-  if (error) throw error;
+  if (error) {
+    // monthly_packages_active_pending_unique (see the migration file of the
+    // same name) — the losing side of a double-purchase race. Translated to
+    // a distinct message so the caller can return the same clean "already
+    // have a package" response the pre-check gives the non-racing case,
+    // instead of a raw 500.
+    if (error.code === "23505") throw new Error("DUPLICATE_PACKAGE");
+    throw error;
+  }
   return { id: row.id };
 }
 
@@ -1635,9 +1645,19 @@ export async function checkCampCapacity(
   return { available: enrolled + kidCount <= maxSpots, enrolled };
 }
 
+// Two different weekly groups (different locations) can legitimately share
+// the exact same date+startTime — filtering only on those two fields, as
+// this used to, would sweep an unrelated group's registrants into whatever
+// notification/DB-time-update is happening for the group the caller actually
+// meant, both cross-notifying them with a bogus time change AND overwriting
+// their real booked_start_time/booked_end_time with the wrong session's new
+// values. When `group` is omitted and the date+time match isn't unique,
+// fails closed (throws) rather than guessing which group the caller meant.
 export async function getRegistrantsBySession(
   date: string,
-  startTime: string
+  startTime: string,
+  group?: string,
+  location?: string
 ): Promise<Registration[]> {
   const supabase = getSupabase();
   const { data, error } = await supabase
@@ -1648,7 +1668,23 @@ export async function getRegistrantsBySession(
     .eq("status", "confirmed")
     .eq("type", "weekly");
   if (error) throw error;
-  return (data || []) as Registration[];
+  const rows = (data || []) as Registration[];
+
+  if (group) {
+    return rows.filter(
+      (r) =>
+        normLabel(regGroupKey(r)) === normLabel(group) &&
+        (!location || normLabel(r.booked_location) === normLabel(location))
+    );
+  }
+
+  const distinctGroups = new Set(rows.map((r) => normLabel(regGroupKey(r))));
+  if (distinctGroups.size > 1) {
+    throw new Error(
+      `Ambiguous: ${distinctGroups.size} different groups share ${date} ${startTime} — pass "group" to disambiguate instead of notifying/updating all of them.`
+    );
+  }
+  return rows;
 }
 
 export async function checkDuplicateRegistration(

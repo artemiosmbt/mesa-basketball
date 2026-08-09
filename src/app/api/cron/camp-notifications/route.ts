@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import twilio from "twilio";
 import { getCamps } from "@/lib/sheets";
+import { formatPhone } from "@/lib/sms";
 
 const GRADE_ORDER = ["K", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "College +"];
 
@@ -137,7 +138,7 @@ export async function GET(req: NextRequest) {
         await twilioClient.messages.create({
           body: message,
           from: process.env.TWILIO_PHONE_NUMBER,
-          to: phone,
+          to: formatPhone(phone),
         });
         sent++;
       } catch (err) {

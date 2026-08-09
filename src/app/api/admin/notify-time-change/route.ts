@@ -13,12 +13,19 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const date = searchParams.get("date");
   const startTime = searchParams.get("startTime");
+  const group = searchParams.get("group") || undefined;
+  const location = searchParams.get("location") || undefined;
 
   if (!date || !startTime) {
     return NextResponse.json({ error: "Missing date or startTime" }, { status: 400 });
   }
 
-  const registrants = await getRegistrantsBySession(date, startTime);
+  let registrants;
+  try {
+    registrants = await getRegistrantsBySession(date, startTime, group, location);
+  } catch (err) {
+    return NextResponse.json({ error: err instanceof Error ? err.message : "Ambiguous session" }, { status: 400 });
+  }
   return NextResponse.json({
     registrants: registrants.map((r) => ({
       id: r.id,
@@ -38,19 +45,32 @@ export async function POST(req: NextRequest) {
   if (!(await verifyAdmin(req))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json();
-  const { date, oldStartTime, newStartTime, newEndTime, sessionLabel } = body as {
+  const { date, oldStartTime, newStartTime, newEndTime, sessionLabel, group, location } = body as {
     date: string;
     oldStartTime: string;
     newStartTime: string;
     newEndTime: string;
     sessionLabel: string;
+    group?: string;
+    location?: string;
   };
 
   if (!date || !oldStartTime || !newStartTime || !newEndTime) {
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
   }
 
-  const registrants = await getRegistrantsBySession(date, oldStartTime);
+  let registrants;
+  try {
+    // Deliberately NOT falling back to sessionLabel here — it's a free-text
+    // display string (defaults to the generic "Group Session" below), not
+    // guaranteed to match the stored booked_group text, so treating it as a
+    // filter could wrongly zero out a legitimate single-group match.
+    // getRegistrantsBySession only requires an explicit `group` when the
+    // date+time is actually ambiguous (multiple distinct groups collide).
+    registrants = await getRegistrantsBySession(date, oldStartTime, group, location);
+  } catch (err) {
+    return NextResponse.json({ error: err instanceof Error ? err.message : "Ambiguous session — pass group/location explicitly." }, { status: 400 });
+  }
 
   if (registrants.length === 0) {
     return NextResponse.json({ success: true, notified: 0, emailsSent: 0, smsSent: 0 });

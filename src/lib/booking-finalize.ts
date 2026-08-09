@@ -6,6 +6,7 @@ import { getStripe } from "@/lib/stripe";
 import { calcServiceFee, fmtMoney, packagePrice, fullPriceForType, calcPrivatePrice, getTrainerTier, normalizeTrainerTier } from "@/lib/pricing";
 import { notifyTrainerOfNewBooking, notifyTrainerOfCancellation } from "@/lib/trainer-notify";
 import { trainerNamesMatch, formatTrainerForDisplay } from "@/lib/trainers";
+import { normalizeSessionLabelForComparison as normLabel } from "@/lib/group-matching";
 import { getWeeklySchedule, parseTimeToMins } from "@/lib/sheets";
 import {
   addReferralCredit,
@@ -1151,7 +1152,7 @@ export async function computePlayerEditPricing(
     // players attend this one single session.
     try {
       const liveSessions = await getWeeklySchedule({ noCache: true });
-      const liveMatch = liveSessions.find((s) => s.group === reg.booked_group && s.date === reg.booked_date && s.startTime === reg.booked_start_time);
+      const liveMatch = liveSessions.find((s) => normLabel(s.group) === normLabel(reg.booked_group) && s.date === reg.booked_date && s.startTime === reg.booked_start_time);
       if (liveMatch) {
         const newGroupPrice = Math.round(liveMatch.price * newCount * 100) / 100;
         if (newGroupPrice !== reg.session_price) {

@@ -31,7 +31,7 @@ export function formatMonthYear(monthYear: string): string {
   return d.toLocaleDateString("en-US", { month: "long", year: "numeric" });
 }
 
-function formatPhone(phone: string): string {
+export function formatPhone(phone: string): string {
   const digits = phone.replace(/\D/g, "");
   if (digits.length === 10) return `+1${digits}`;
   if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;

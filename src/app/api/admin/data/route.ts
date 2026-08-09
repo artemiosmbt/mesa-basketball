@@ -17,14 +17,22 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const emailFilter = searchParams.get("email");
 
-  // Used only to expand a single client's sessions from the Packages page,
-  // which every recognized account can see in full (packages aren't
-  // trainer-scoped) — no additional filtering here.
+  // Used only to expand a single client's private-session dates on the
+  // Packages page, which every recognized account can see in full (packages
+  // aren't trainer-scoped) — but that only justifies exposing the handful of
+  // fields the UI actually renders (id/type/date/time), never a full-row
+  // dump: `select("*")` used to also ship `manage_token` (the sole secret
+  // needed to cancel/reschedule a booking via the public token endpoint),
+  // phone, session_price, and stripe_payment_intent_id to any trainer-tier
+  // account for ANY client, not just their own. Exact-match (not ilike) on
+  // the normalized email, since this is an exact client lookup, not a
+  // search — ilike with a client-supplied pattern let `%`/`_` wildcard-match
+  // the whole table.
   if (emailFilter) {
     const { data: registrations } = await supabase
       .from("registrations")
-      .select("*")
-      .ilike("email", emailFilter.trim())
+      .select("id, type, booked_date, booked_start_time, booked_end_time")
+      .eq("email", emailFilter.trim().toLowerCase())
       .order("booked_date", { ascending: true });
     return NextResponse.json({ registrations: registrations || [] });
   }

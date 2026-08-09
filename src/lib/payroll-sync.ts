@@ -22,6 +22,7 @@
  *   happened, and the sheet's own spec never logs those as a row).
  */
 import { createClient } from "@supabase/supabase-js";
+import { normalizeDate } from "./calendar";
 import {
   a1Quote,
   appendValues,
@@ -280,7 +281,17 @@ function deriveCancellationFlag(
   if (reg.status === "no_show") return "No Show";
   if (reg.status === "confirmed") {
     if (!reg.booked_date) return null; // can't tell if it's happened yet
-    const end = sessionEndDateTime(reg.booked_date, reg.booked_end_time);
+    // booked_date is stored as whatever raw format the schedule sheet
+    // happened to export at booking time (e.g. "August 9, 2026"), never
+    // normalized to ISO at write time — sessionEndDateTime's `${date}T...`
+    // construction silently produces an Invalid Date without this, which
+    // made `end.getTime() < Date.now()` permanently false (NaN comparisons
+    // are always false) and meant this branch could never return
+    // "Completed" for ANY confirmed session, regardless of how long ago it
+    // actually happened. Same underlying bug already found and fixed in
+    // monthly-revenue-sync.ts's deriveSession and reminder-emails.ts — this
+    // file had its own independent, unfixed copy of the same pattern.
+    const end = sessionEndDateTime(normalizeDate(reg.booked_date), reg.booked_end_time);
     if (!end) return null;
     return end.getTime() < Date.now() ? "Completed" : null; // still upcoming — nothing to log yet
   }
@@ -453,6 +464,31 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
   if (!spreadsheetId) throw new Error("PAYROLL_SHEET_ID not configured");
 
   const supabase = getSupabase();
+
+  // Claim the single-row lock before doing any real work — see
+  // supabase-migration-payroll-sync-lock.sql for why. A stuck lock (crashed
+  // mid-run before the finally below could release it) would permanently
+  // block future runs, which is worse than the race it prevents — 10
+  // minutes is far longer than a real run ever takes (maxDuration is 60s),
+  // so a lock that old is treated as abandoned and stolen instead of
+  // honored.
+  const staleCutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const { data: claimed } = await supabase
+    .from("payroll_sync_lock")
+    .update({ is_running: true, started_at: new Date().toISOString() })
+    .eq("id", 1)
+    .or(`is_running.eq.false,started_at.lt.${staleCutoff}`)
+    .select("id");
+  if (!claimed || claimed.length === 0) {
+    return {
+      sessionsConsidered: 0, sessionsWritten: 0, sessionsUpdated: 0,
+      sessionsSkippedUnknownTrainer: 0, sessionsSkippedNoLoggableStatus: 0, sessionsSkippedNonLateCancel: 0,
+      packagesConsidered: 0, packagesWritten: 0, packagesUpdated: 0,
+      errors: ["Payroll sync already in progress — skipped to avoid interleaving writes."],
+    };
+  }
+
+  try {
   const result: PayrollSyncResult = {
     sessionsConsidered: 0,
     sessionsWritten: 0,
@@ -709,6 +745,9 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
   }
 
   return result;
+  } finally {
+    await supabase.from("payroll_sync_lock").update({ is_running: false }).eq("id", 1);
+  }
 }
 
 // Small cache so repeated lookups within one run don't re-fetch spreadsheet metadata.

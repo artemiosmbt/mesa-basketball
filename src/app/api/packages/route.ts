@@ -100,6 +100,9 @@ export async function POST(req: NextRequest) {
           console.error(`Failed to refund $${accountCreditApplied} credit after enrollInPackage failure for ${email}:`, refundErr)
         );
       }
+      if (err instanceof Error && err.message === "DUPLICATE_PACKAGE") {
+        return NextResponse.json({ error: "You already have a package for this month." }, { status: 400 });
+      }
       throw err;
     }
 

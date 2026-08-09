@@ -39,6 +39,19 @@ export function getGradesForGroup(groupName: string) {
   return [...filtered, { value: "Other", label: "Other" }];
 }
 
+// Normalizes a hand-typed group/location label for EQUALITY COMPARISONS only
+// (never for storage/display — always keep/write whatever the sheet's real
+// text is). Same fix as trainers.ts's normalizeTrainerNameForComparison,
+// applied to group/location strings: a stray capitalization or extra space
+// typed into the schedule sheet must not make a session look "deleted" to
+// code that matches registrations against live sheet rows by exact string
+// (weekly-schedule-matching.ts, booking-finalize.ts's live repricing) — that
+// class of bug previously auto-cancelled real, still-happening sessions and
+// issued real refunds for them.
+export function normalizeSessionLabelForComparison(label: string | null | undefined): string {
+  return (label || "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
 export interface CanonicalGroup {
   id: CanonicalGroupId;
   label: string;
