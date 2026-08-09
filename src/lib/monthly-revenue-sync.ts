@@ -638,9 +638,6 @@ async function buildMonthTab(
         const wkMap = trainerPayByWeek.get(wk)!;
         wkMap.set(s.trainer, round2((wkMap.get(s.trainer) || 0) + s.trainerPay));
       }
-      if (s.location) {
-        revenueByLocation.set(s.location, round2((revenueByLocation.get(s.location) || 0) + s.grossRevenue));
-      }
     });
 
     // Package purchases made this day — shown as their own unnumbered line
@@ -708,6 +705,8 @@ async function buildMonthTab(
       locked = liveFingerprint !== stored.fingerprint;
     }
 
+    let effGross: number;
+    let effPlaceStr: string;
     if (locked) {
       // Gross Revenue is re-derived straight from the live session-list
       // text (summing every "$X.XX" it contains) rather than trusting a
@@ -723,6 +722,8 @@ async function buildMonthTab(
       const liveStripe = Number(liveRow[5]) || 0;
       const liveNet = round2(liveGross + liveProcessing - liveStripe);
       monthGross += liveGross; monthProcessing += liveProcessing; monthStripe += liveStripe; monthNet += liveNet;
+      effGross = liveGross;
+      effPlaceStr = String(liveRow[2] ?? "");
 
       // Only Gross (F) and Net (I) get rewritten — Date/Day/session
       // text/Place/Processing/Stripe (A,B,C,D,E,G,H) are the owner's
@@ -743,6 +744,8 @@ async function buildMonthTab(
       });
     } else {
       monthGross += gGross; monthProcessing += gProcessing; monthStripe += gStripe; monthNet += gNet;
+      effGross = gGross;
+      effPlaceStr = placesStr;
       dayLogWrites.set(logKey, freshFingerprint);
 
       // WRAP explicitly — otherwise Sheets' default wrap strategy only
@@ -774,6 +777,23 @@ async function buildMonthTab(
           start: { sheetId, rowIndex: rowIndex0, columnIndex: 0 },
         },
       });
+    }
+
+    // Location Breakdown is built from the day's own EFFECTIVE Gross
+    // Revenue and Place — the same numbers that actually end up in that
+    // day's row (live/edited values for a locked day, freshly-written ones
+    // otherwise) — instead of independently re-summing each session from
+    // the database, so a hand-edit to a day's total or location is
+    // reflected here too, exactly like Month Totals already is. A day
+    // naming more than one location splits its Gross evenly across them.
+    if (effGross > 0) {
+      const dayLocs = effPlaceStr.split(" / ").map((s) => s.trim()).filter(Boolean);
+      if (dayLocs.length > 0) {
+        const share = round2(effGross / dayLocs.length);
+        for (const loc of dayLocs) {
+          revenueByLocation.set(loc, round2((revenueByLocation.get(loc) || 0) + share));
+        }
+      }
     }
   }
   requests.push(...dayRowRequests);
