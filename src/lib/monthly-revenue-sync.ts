@@ -14,17 +14,29 @@
  * change after the fact, a corrected price, etc. just fall out of a fresh
  * rebuild automatically, sidestepping an entire class of incremental-sync
  * bugs. Two exceptions, both real manual input that must survive a rebuild:
- * each month's per-location rent cell (see readExistingRentByName), and any day
- * row the owner has hand-edited (see the _DayLog tab / dayRowFingerprint
- * below) — a day is only ever rewritten if its live content still matches
- * the fingerprint of what THIS sync last wrote there; the moment it
- * diverges (a manual edit), that day is frozen forever and skipped on every
- * future run, and Month Totals is computed from its live (edited) values
- * instead of a freshly recomputed one. This does NOT extend to Trainer Pay
- * by Week or Location Breakdown below — those still always recompute
- * straight from the database regardless of any day-row edit, since they
- * need per-session detail a hand-edited day cell can't reliably provide
- * (confirmed acceptable with the owner).
+ * each month's per-location rent cell (see readExistingRentByName), and any
+ * day row the owner has hand-edited (see the _DayLog tab / textFingerprint
+ * + feeFingerprint below). Session-list text/Place and Processing/Stripe
+ * Fee are locked INDEPENDENTLY of each other — a day is only ever
+ * text-frozen if its live text/Place diverges from what THIS sync last
+ * wrote, and only ever fee-frozen if its live Processing/Stripe diverges
+ * from what THIS sync last wrote. They must stay independent: Processing/
+ * Stripe legitimately change on their own whenever the underlying booking
+ * data does (a participant added after the fact, a price correction), with
+ * no owner edit involved at all — bundling that drift into the same lock
+ * as the text once meant a routine data change alone could silently freeze
+ * a day's whole row forever (a real incident, caught 2026-08-08: Aug 1 got
+ * stuck on a stale Processing Fee from early in the month with no owner
+ * edit responsible). Gross Revenue (F) and Net Revenue (I) are never
+ * independently locked — they're always DERIVED (F = price + whichever
+ * Processing Fee wins; I = a formula, F-H) from whatever the text/fee lock
+ * decisions above resolve to. Month Totals, Trainer Pay's totals, and
+ * Location Breakdown are all real Sheets formulas over the day rows /
+ * Trainer Pay cells, so they always reflect whatever's actually on the
+ * sheet — hand-edited or fresh — with no separate tracking needed. The one
+ * remaining DB-only exception is each individual trainer's per-week pay
+ * amount in Trainer Pay by Week: there's no per-session cell for it to sum
+ * from, so it's always freshly computed, never locked.
  *
  * Trainer pay is computed here in code from the exact rate constants
  * captured live from the payroll sheet's own Settings tab (2026-08-08) —
@@ -428,7 +440,8 @@ const DAY_LOG_TAB = "_DayLog";
 
 interface DayLogEntry {
   row: number; // 1-indexed row in _DayLog
-  fingerprint: string;
+  textFingerprint: string;
+  feeFingerprint: string;
 }
 
 async function ensureDayLogTab(): Promise<void> {
@@ -437,37 +450,42 @@ async function ensureDayLogTab(): Promise<void> {
   await batchUpdate(MONTHLY_REVENUE_SHEET_ID, [
     { addSheet: { properties: { title: DAY_LOG_TAB, hidden: true } } },
   ]);
-  await updateValues(MONTHLY_REVENUE_SHEET_ID, `${a1Quote(DAY_LOG_TAB)}!A1:B1`, [["key", "fingerprint"]]);
+  await updateValues(MONTHLY_REVENUE_SHEET_ID, `${a1Quote(DAY_LOG_TAB)}!A1:C1`, [["key", "textFingerprint", "feeFingerprint"]]);
 }
 
 async function readDayLog(): Promise<Map<string, DayLogEntry>> {
-  const rows = await getValues(MONTHLY_REVENUE_SHEET_ID, `${a1Quote(DAY_LOG_TAB)}!A2:B`);
+  const rows = await getValues(MONTHLY_REVENUE_SHEET_ID, `${a1Quote(DAY_LOG_TAB)}!A2:C`);
   const map = new Map<string, DayLogEntry>();
   rows.forEach((r, i) => {
-    const [key, fingerprint] = r as [string, string];
+    const [key, textFingerprint, feeFingerprint] = r as [string, string, string];
     if (!key) return;
-    map.set(key, { row: i + 2, fingerprint: fingerprint || "" });
+    map.set(key, { row: i + 2, textFingerprint: textFingerprint || "", feeFingerprint: feeFingerprint || "" });
   });
   return map;
 }
 
-/** Fingerprints the fields a day's row can show that are genuinely
- * independent facts — the session list text, Place, and the 2 fee columns.
- * Gross Revenue and Net Revenue are deliberately excluded: they're always
- * DERIVED (Gross by summing every "$X.XX" in the session text, Net as
- * Gross+Processing-Stripe — see the locked branch in buildMonthTab) rather
- * than something to independently lock, so editing the session list alone
- * (e.g. removing a line) is enough to correct Gross without also having to
- * hand-recompute it. Date/Day (A:B) are never user-editable in practice so
- * they're excluded too. */
-function dayRowFingerprint(
-  privateText: string,
-  groupText: string,
-  place: string,
-  processing: number,
-  stripe: number
-): string {
-  return JSON.stringify([privateText, groupText, place, processing, stripe]);
+/** Fingerprints the session-list text + Place — TEXT lock only. Kept
+ * strictly separate from the fee fingerprint below: text and fees are
+ * edited independently (the owner might fix a fee without ever touching
+ * the session list, or vice versa), and — critically — Processing/Stripe
+ * legitimately change on their own whenever the underlying booking data
+ * does (a participant added after the fact, a price correction), with no
+ * owner edit involved at all. Bundling that drift into the SAME lock as
+ * the text once meant a routine data change alone could permanently freeze
+ * a day's whole row, silently, forever — exactly the bug that surfaced
+ * live on 2026-08-08 (Aug 1 stuck showing a stale Processing Fee from
+ * early in the day, dragging Gross Revenue down with it, with no owner
+ * edit responsible at all). */
+function textFingerprint(privateText: string, groupText: string, place: string): string {
+  return JSON.stringify([privateText, groupText, place]);
+}
+
+/** Fingerprints Processing + Stripe Fee — FEE lock only, independent of
+ * the text lock above. This is what lets a fee correction like Maria
+ * VORKAS's stick permanently, without that same mechanism accidentally
+ * freezing Gross/session-text on a day the owner never touched. */
+function feeFingerprint(processing: number, stripe: number): string {
+  return JSON.stringify([processing, stripe]);
 }
 
 /** Sums every "$X.XX" (or "$X,XXX.XX") dollar figure found in a block of
@@ -551,7 +569,7 @@ async function buildMonthTab(
   sessions: DerivedSession[],
   packages: DerivedPackage[],
   dayLog: Map<string, DayLogEntry>,
-  dayLogWrites: Map<string, string>
+  dayLogWrites: Map<string, { text?: string; fee?: string }>
 ): Promise<void> {
   const tabName = monthTabName(year, month1);
   const sheetId = await ensureMonthTab(tabName);
@@ -626,7 +644,6 @@ async function buildMonthTab(
   // own row/grand totals ARE formulas over these cells.
   const trainerPayByWeek = new Map<string, Map<string, number>>(); // week -> trainer -> pay
 
-  const dayRowRequests: object[] = [];
   for (let d = 1; d <= nDays; d++) {
     const dateStr = `${monthPrefix}-${String(d).padStart(2, "0")}`;
     const dayName = new Date(dateStr + "T12:00:00").toLocaleDateString("en-US", { weekday: "long" });
@@ -638,7 +655,10 @@ async function buildMonthTab(
     const privateSegs: TextSegment[] = [];
     const groupSegs: TextSegment[] = [];
     const places = new Set<string>();
-    let gGross = 0, gProcessing = 0, gStripe = 0;
+    // gPriceOnly is the base session/package price total, WITHOUT the fee
+    // surcharge — kept separate from Gross (F) itself, since F = price +
+    // whichever G value actually wins (fresh or fee-locked — see below).
+    let gPriceOnly = 0, gProcessing = 0, gStripe = 0;
 
     daySessions.forEach((s) => {
       // Numbered within its own column (Private vs Group), not across the
@@ -649,18 +669,7 @@ async function buildMonthTab(
       const seg: TextSegment = { text: `${n}. ${s.label}`, color: s.isCamp ? CAMP_COLOR : TRAINER_COLOR[s.trainer] || CAMP_COLOR };
       if (s.isGroupColumn) groupSegs.push(seg); else privateSegs.push(seg);
       if (s.location) places.add(s.location);
-      // Gross Revenue is the FULL amount that actually hit the Stripe
-      // account — session/package price PLUS the service-fee surcharge the
-      // client was charged on top — not just the base price. A booking
-      // charged at $150 with a $4.80 surcharge really brought in $154.80;
-      // showing only $150 as "Gross" made it look like that $4.80 (minus
-      // whatever Stripe actually takes) wasn't being counted anywhere, even
-      // though it always flowed correctly into Net Revenue via Processing
-      // minus Stripe. Folding it into Gross directly fixes that appearance
-      // — Location Breakdown (built from Gross) now reflects it too — with
-      // no change to the final Net Revenue/Net Profit number, since that
-      // was always Gross(old)+Processing-Stripe = Gross(new)-Stripe.
-      gGross += s.grossRevenue + s.processingFee;
+      gPriceOnly += s.grossRevenue;
       gProcessing += s.processingFee;
       gStripe += s.stripeFee;
 
@@ -679,7 +688,7 @@ async function buildMonthTab(
     // "Other/Unlisted" in the Location Breakdown below, which is correct.
     for (const p of packagesByDate.get(dateStr) || []) {
       privateSegs.push({ text: `[Package Purchased] ${p.label}`, color: { red: 0, green: 0, blue: 0 }, bold: true });
-      gGross += p.totalPrice + p.processingFee; // see the fee-folding comment above
+      gPriceOnly += p.totalPrice;
       gProcessing += p.processingFee;
       gStripe += p.stripeFee;
     }
@@ -690,128 +699,111 @@ async function buildMonthTab(
     const groupCell = groupSegs.length > 0 ? richTextCellData(groupSegs) : null;
     const placesStr = Array.from(places).join(" / ");
 
-    // Locked = this day's session-list text or fee cells no longer match
-    // what THIS sync last wrote there — i.e. the owner hand-edited one of
-    // them since. A never-logged day (dayLog has no entry) is treated as
-    // unlocked: either it's brand new, or it's an already-existing day from
-    // before this protection existed, which gets one final overwrite here
-    // and is logged/protected from then on.
+    // Text-locked and fee-locked are checked INDEPENDENTLY — a day's
+    // session-list text and its Processing/Stripe Fee are edited (or left
+    // alone) completely separately in practice. Bundling them into one
+    // all-or-nothing lock was the bug: Processing/Stripe legitimately
+    // change on their own whenever the underlying booking data does (a
+    // participant added after the fact, a price correction) with no owner
+    // edit involved — that alone was enough to freeze a day's whole row,
+    // silently, forever. A never-logged day is treated as unlocked on both
+    // counts: either it's brand new, or it's a day from before this
+    // protection existed, getting one final overwrite and logged from then on.
     const logKey = `${tabName}|${dateStr}`;
     const stored = dayLog.get(logKey);
-    const freshFingerprint = dayRowFingerprint(
-      privateCell?.stringValue ?? "",
-      groupCell?.stringValue ?? "",
-      placesStr,
-      gProcessing,
-      gStripe
-    );
-    let locked = false;
-    if (stored) {
-      const liveRow = liveDayRows[d - 1] || [];
-      // Fingerprint format changed (Gross/Net dropped, since those are now
-      // always derived rather than lockable — see dayRowFingerprint) —
-      // entries logged before that change are a 7-element array. Comparing
-      // those against the old 7-field shape one more time (rather than
-      // treating them as "never logged") is what keeps an already-locked
-      // day like a hand-corrected fee actually staying locked through this
-      // transition, instead of getting one unwanted final overwrite.
-      let storedLen = 0;
-      try {
-        storedLen = (JSON.parse(stored.fingerprint) as unknown[]).length;
-      } catch {
-        storedLen = 0;
-      }
-      const liveFingerprint = storedLen === 7
-        ? JSON.stringify([
-            String(liveRow[0] ?? ""), String(liveRow[1] ?? ""), String(liveRow[2] ?? ""),
-            Number(liveRow[3]) || 0, Number(liveRow[4]) || 0, Number(liveRow[5]) || 0, Number(liveRow[6]) || 0,
-          ])
-        : dayRowFingerprint(
-            String(liveRow[0] ?? ""),
-            String(liveRow[1] ?? ""),
-            String(liveRow[2] ?? ""),
-            Number(liveRow[4]) || 0,
-            Number(liveRow[5]) || 0
-          );
-      locked = liveFingerprint !== stored.fingerprint;
-    }
+    const freshTextFp = textFingerprint(privateCell?.stringValue ?? "", groupCell?.stringValue ?? "", placesStr);
+    const freshFeeFp = feeFingerprint(gProcessing, gStripe);
+    const liveRow = liveDayRows[d - 1] || [];
+    const textLocked = !!stored && textFingerprint(String(liveRow[0] ?? ""), String(liveRow[1] ?? ""), String(liveRow[2] ?? "")) !== stored.textFingerprint;
+    const feeLocked = !!stored && feeFingerprint(Number(liveRow[4]) || 0, Number(liveRow[5]) || 0) !== stored.feeFingerprint;
 
-    // Net Revenue (I) is ALWAYS a formula, =F-H, for every day row
-    // regardless of lock status — Gross (F) already includes the
-    // Processing Fee surcharge (see the fee-folding comment above), so
-    // subtracting the real Stripe cost (H) is all that's left to reach Net.
-    // It's genuinely just arithmetic on cells already on the sheet, so it
-    // self-updates the instant the owner edits Gross or Stripe directly,
-    // with no sync needed.
-    const netFormula = `=F${rowNum1}-H${rowNum1}`;
+    // WRAP explicitly — otherwise Sheets' default wrap strategy only
+    // auto-expands row height inconsistently (observed live: a day with 9
+    // combined lines expanded fine, one with only 2-3 got clipped).
+    const wrapFormat = { wrapStrategy: "WRAP" };
+    // Date/Day never change — always safe to (re)write.
+    requests.push({
+      updateCells: {
+        rows: [{ values: [{ userEnteredValue: { stringValue: dateStr } }, { userEnteredValue: { stringValue: dayName } }] }],
+        fields: "userEnteredValue",
+        start: { sheetId, rowIndex: rowIndex0, columnIndex: 0 },
+      },
+    });
 
-    if (locked) {
-      // Gross Revenue is re-derived straight from the live session-list
-      // text (summing every "$X.XX" it contains) rather than trusting a
-      // frozen number — so removing/editing a line item is, by itself,
-      // enough to correct the total; nothing gets silently missed just
-      // because only the text was touched. Processing/Stripe Fee stay
-      // exactly whatever the owner left them at (they aren't derivable from
-      // the text). Known limitation: session labels only ever show the base
-      // price, never the folded-in fee, so a locked day's re-derived Gross
-      // won't include that fee margin the way a fresh (unlocked) day's does
-      // — a small, real gap, but only on days already flagged as manually
-      // edited.
-      const liveRow = liveDayRows[d - 1] || [];
-      const liveGross = round2(parseDollarSum(String(liveRow[0] ?? "")) + parseDollarSum(String(liveRow[1] ?? "")));
-
-      // Only Gross (F) and Net (I) get rewritten — Date/Day/session
-      // text/Place/Processing/Stripe (A,B,C,D,E,G,H) are the owner's
-      // protected domain and are never touched once locked.
-      requests.push({
-        updateCells: {
-          rows: [{ values: [{ userEnteredValue: { numberValue: liveGross }, userEnteredFormat: { numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } } }] }],
-          fields: "userEnteredValue,userEnteredFormat",
-          start: { sheetId, rowIndex: rowIndex0, columnIndex: 5 },
-        },
-      });
-      requests.push({
-        updateCells: {
-          rows: [{ values: [{ userEnteredValue: { formulaValue: netFormula }, userEnteredFormat: { numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } } }] }],
-          fields: "userEnteredValue,userEnteredFormat",
-          start: { sheetId, rowIndex: rowIndex0, columnIndex: 8 },
-        },
-      });
+    let priceComponent: number;
+    if (textLocked) {
+      // Re-derive straight from the live session-list text (summing every
+      // "$X.XX" it contains) rather than trusting a frozen number — so
+      // removing/editing a line item is, by itself, enough to correct the
+      // total. Known limitation: labels only ever show the base price,
+      // never a folded-in fee, so this stays price-only even when the fee
+      // itself is fresh (unlocked) — a small, real gap, but only on a day
+      // already flagged as manually edited.
+      priceComponent = round2(parseDollarSum(String(liveRow[0] ?? "")) + parseDollarSum(String(liveRow[1] ?? "")));
     } else {
-      dayLogWrites.set(logKey, freshFingerprint);
-
-      // WRAP explicitly — otherwise Sheets' default wrap strategy only
-      // auto-expands row height inconsistently (observed live: a day with 9
-      // combined lines expanded fine, one with only 2-3 got clipped).
-      const wrapFormat = { wrapStrategy: "WRAP" };
-      dayRowRequests.push({
+      priceComponent = gPriceOnly;
+      dayLogWrites.set(logKey, { text: freshTextFp });
+      requests.push({
         updateCells: {
-          rows: [
-            {
-              values: [
-                { userEnteredValue: { stringValue: dateStr } },
-                { userEnteredValue: { stringValue: dayName } },
-                privateCell
-                  ? { userEnteredValue: { stringValue: privateCell.stringValue }, textFormatRuns: privateCell.textFormatRuns, userEnteredFormat: wrapFormat }
-                  : { userEnteredValue: { stringValue: "" } },
-                groupCell
-                  ? { userEnteredValue: { stringValue: groupCell.stringValue }, textFormatRuns: groupCell.textFormatRuns, userEnteredFormat: wrapFormat }
-                  : { userEnteredValue: { stringValue: "" } },
-                { userEnteredValue: { stringValue: placesStr } },
-                { userEnteredValue: { numberValue: gGross }, userEnteredFormat: { numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } } },
-                { userEnteredValue: { numberValue: gProcessing }, userEnteredFormat: { numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } } },
-                { userEnteredValue: { numberValue: gStripe }, userEnteredFormat: { numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } } },
-                { userEnteredValue: { formulaValue: netFormula }, userEnteredFormat: { numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } } },
-              ],
-            },
-          ],
+          rows: [{
+            values: [
+              privateCell
+                ? { userEnteredValue: { stringValue: privateCell.stringValue }, textFormatRuns: privateCell.textFormatRuns, userEnteredFormat: wrapFormat }
+                : { userEnteredValue: { stringValue: "" } },
+              groupCell
+                ? { userEnteredValue: { stringValue: groupCell.stringValue }, textFormatRuns: groupCell.textFormatRuns, userEnteredFormat: wrapFormat }
+                : { userEnteredValue: { stringValue: "" } },
+              { userEnteredValue: { stringValue: placesStr } },
+            ],
+          }],
           fields: "userEnteredValue,userEnteredFormat,textFormatRuns",
-          start: { sheetId, rowIndex: rowIndex0, columnIndex: 0 },
+          start: { sheetId, rowIndex: rowIndex0, columnIndex: 2 },
         },
       });
     }
+
+    let feeComponent: number;
+    if (feeLocked) {
+      // Whatever the owner left in Processing/Stripe Fee stays exactly as
+      // it is — this is what lets a fee correction like Maria VORKAS's
+      // stick permanently, independent of the text lock above.
+      feeComponent = Number(liveRow[4]) || 0;
+    } else {
+      feeComponent = gProcessing;
+      dayLogWrites.set(logKey, { ...(dayLogWrites.get(logKey) || {}), fee: freshFeeFp });
+      requests.push({
+        updateCells: {
+          rows: [{
+            values: [
+              { userEnteredValue: { numberValue: gProcessing }, userEnteredFormat: { numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } } },
+              { userEnteredValue: { numberValue: gStripe }, userEnteredFormat: { numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } } },
+            ],
+          }],
+          fields: "userEnteredValue,userEnteredFormat",
+          start: { sheetId, rowIndex: rowIndex0, columnIndex: 6 },
+        },
+      });
+    }
+
+    // Gross (F) = price + whichever Processing Fee actually wins (fresh or
+    // fee-locked) — see the fee-folding comment further up. Net (I) is
+    // ALWAYS a formula, =F-H, so it self-updates the instant the owner
+    // edits Gross or Stripe directly, with no sync needed.
+    requests.push({
+      updateCells: {
+        rows: [{ values: [{ userEnteredValue: { numberValue: round2(priceComponent + feeComponent) }, userEnteredFormat: { numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } } }] }],
+        fields: "userEnteredValue,userEnteredFormat",
+        start: { sheetId, rowIndex: rowIndex0, columnIndex: 5 },
+      },
+    });
+    requests.push({
+      updateCells: {
+        rows: [{ values: [{ userEnteredValue: { formulaValue: `=F${rowNum1}-H${rowNum1}` }, userEnteredFormat: { numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } } }] }],
+        fields: "userEnteredValue,userEnteredFormat",
+        start: { sheetId, rowIndex: rowIndex0, columnIndex: 8 },
+      },
+    });
   }
-  requests.push(...dayRowRequests);
 
   // TOTALS row — real SUM formulas over the day rows above, not
   // independently-tracked JS totals, so this is always exactly "what's in
@@ -1193,12 +1185,12 @@ export async function runMonthlyRevenueSync(): Promise<MonthlyRevenueSyncResult>
     pkg.stripeFee = round2((pkg.totalPrice + pkg.processingFee) * pct + STRIPE_FIXED);
   }
 
-  // Day-row edit protection (see the file header comment and
-  // dayRowFingerprint) — read once, shared across every month built this
+  // Day-row edit protection (see the file header comment, textFingerprint,
+  // and feeFingerprint) — read once, shared across every month built this
   // run, written back once at the end.
   await ensureDayLogTab();
   const dayLog = await readDayLog();
-  const dayLogWrites = new Map<string, string>();
+  const dayLogWrites = new Map<string, { text?: string; fee?: string }>();
 
   // Every month from TRACKER_START_DATE through the current month (ET).
   const monthsBuilt: string[] = [];
@@ -1217,20 +1209,25 @@ export async function runMonthlyRevenueSync(): Promise<MonthlyRevenueSyncResult>
     if (m > 12) { m = 1; y += 1; }
   }
 
-  // Write back every day that was (re)generated this run — new keys get
-  // appended, previously-logged keys get updated in place.
+  // Write back every text/fee fingerprint that was freshly (re)computed
+  // this run — new keys get appended (always with both fields, since a
+  // never-logged day is always unlocked on both counts), previously-logged
+  // keys get ONLY the field(s) that were actually unlocked updated in
+  // place, leaving the other column's stored value (and thus its lock)
+  // completely untouched.
   const logUpdates: { range: string; values: unknown[][] }[] = [];
   const logNewRows: unknown[][] = [];
-  for (const [key, fingerprint] of dayLogWrites) {
+  for (const [key, entry] of dayLogWrites) {
     const existing = dayLog.get(key);
     if (existing) {
-      logUpdates.push({ range: `${a1Quote(DAY_LOG_TAB)}!B${existing.row}`, values: [[fingerprint]] });
+      if (entry.text !== undefined) logUpdates.push({ range: `${a1Quote(DAY_LOG_TAB)}!B${existing.row}`, values: [[entry.text]] });
+      if (entry.fee !== undefined) logUpdates.push({ range: `${a1Quote(DAY_LOG_TAB)}!C${existing.row}`, values: [[entry.fee]] });
     } else {
-      logNewRows.push([key, fingerprint]);
+      logNewRows.push([key, entry.text ?? "", entry.fee ?? ""]);
     }
   }
   if (logUpdates.length > 0) await batchUpdateValues(MONTHLY_REVENUE_SHEET_ID, logUpdates);
-  if (logNewRows.length > 0) await appendValues(MONTHLY_REVENUE_SHEET_ID, `${a1Quote(DAY_LOG_TAB)}!A:B`, logNewRows);
+  if (logNewRows.length > 0) await appendValues(MONTHLY_REVENUE_SHEET_ID, `${a1Quote(DAY_LOG_TAB)}!A:C`, logNewRows);
 
   // Payment-method cache only ever grows (a completed transaction's method
   // never changes) — every entry here is new, always append.
