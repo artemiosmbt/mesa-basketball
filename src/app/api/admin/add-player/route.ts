@@ -174,7 +174,7 @@ export async function POST(req: NextRequest) {
     autoChargePaymentIntentId = chargeResult.paymentIntentId;
   }
 
-  const ok = await updateRegistrationPlayers(reg.manage_token, newKids, newCount, newFullPrice);
+  const ok = await updateRegistrationPlayers(reg.manage_token, newKids, newCount, newFullPrice, claimToken);
   await releaseClaim();
   if (!ok) {
     // The booking stopped being confirmed in the moment between our fetch

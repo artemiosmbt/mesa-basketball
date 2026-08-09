@@ -1027,6 +1027,16 @@ export async function expireAbandonedBookingBatch(
 export async function expireAbandonedPackage(packageId: string): Promise<void> {
   const pkg = await abandonPendingPackage(packageId);
   if (!pkg) return;
+  // Same restoration expireAbandonedBookingBatch already does for a
+  // registration — this function's doc comment claimed to mirror that one
+  // but was missing this step, so account credit applied toward a package
+  // purchase just vanished if the client never completed the Stripe
+  // checkout for the remainder.
+  if (pkg.applied_account_credit && pkg.applied_account_credit > 0) {
+    await addAccountCredit(pkg.email, pkg.applied_account_credit).catch((err) =>
+      console.error(`Failed to restore $${pkg.applied_account_credit} account credit after abandoned package ${packageId}:`, err)
+    );
+  }
   try {
     await sendAbandonedPackageEmail({
       parentName: pkg.parent_name,
@@ -1432,8 +1442,10 @@ export async function finalizeRescheduleTopup(params: FinalizeRescheduleTopupPar
   let lateFeeCredited = 0;
   let lateFeeCreditApplied = 0;
   let packageSessionForfeited = false;
+  let settlementFailed = false;
   if (!oldReg) {
     console.error(`finalizeRescheduleTopup: original booking (token ${params.originalManageToken}) not found — settlement skipped, new booking still confirmed.`);
+    settlementFailed = true;
   } else {
     const settled = await settleOldBookingForReschedule({
       reg: oldReg,
@@ -1447,10 +1459,44 @@ export async function finalizeRescheduleTopup(params: FinalizeRescheduleTopupPar
     });
     if (!settled.cancelled) {
       console.error(`finalizeRescheduleTopup: original booking (token ${params.originalManageToken}) was no longer confirmed by payment time — settlement skipped (likely a duplicate webhook or a double-submitted reschedule), new booking still confirmed.`);
+      settlementFailed = true;
     }
     lateFeeCredited = settled.lateFeeCredited;
     lateFeeCreditApplied = settled.lateFeeCreditApplied;
     packageSessionForfeited = settled.packageSessionForfeited;
+  }
+
+  // If the old booking couldn't be settled (most likely: the client
+  // independently cancelled it themselves in another tab while this topup
+  // checkout was still open), the client already got a full refund/credit
+  // for the old session through THAT path — leaving the new booking
+  // confirmed here would give them a different session for only the topup
+  // delta, with the business eating the rest. Undo instead: cancel the new
+  // booking and refund exactly what this checkout charged, the same
+  // "charge went through but the precondition didn't hold, so bring it back
+  // rather than keep it" pattern finalizePlayerEditTopup already uses below.
+  if (settlementFailed) {
+    const topupTotalWithFee = Math.round((params.amountCharged + calcServiceFee(params.amountCharged)) * 100) / 100;
+    const newReg = await getRegistrationByToken(params.manageToken);
+    if (newReg?.applied_account_credit && newReg.email) {
+      await addAccountCredit(newReg.email, newReg.applied_account_credit).catch((err) =>
+        console.error("Failed to refund new booking's applied account credit after reschedule-topup settlement failure:", err)
+      );
+    }
+    const cancelled = await cancelRegistration(params.manageToken, false, 0);
+    if (cancelled && newReg?.stripe_payment_intent_id && topupTotalWithFee > 0) {
+      await issueStripeRefund({
+        email: params.email,
+        manageToken: params.manageToken,
+        paymentIntentId: newReg.stripe_payment_intent_id,
+        amountDollars: topupTotalWithFee,
+        sessionLabel: params.newSessionDetails,
+      }).catch((err) => console.error("Failed to refund reschedule topup after settlement failure:", err));
+    }
+    await sendAdminSMS(
+      `RESCHEDULE TOPUP UNWOUND: ${params.email}\nOld booking was already gone by payment time — new booking cancelled and $${fmtMoney(topupTotalWithFee)} refunded instead of confirming a session for less than its price. Please verify manually.`
+    ).catch(() => {});
+    return;
   }
   const fullForfeitNoRefund = params.isBulkDiscountedWeekly && params.isLateReschedule;
 

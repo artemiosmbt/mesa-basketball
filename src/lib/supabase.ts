@@ -213,21 +213,35 @@ export async function getRegistrationsByEmail(
 // booking was cancelled a moment ago) isn't a Supabase error, so callers
 // must check the real row count before proceeding (granting credit,
 // sending notifications) as if the edit actually took effect.
+// claimToken: pass the admin_action_claim_token this caller already holds
+// (see admin/add-player's and admin/reschedule's claim-then-release lock) to
+// require the row's claim still matches it. Omit it for the client's own
+// edit-players call — that path never claims anything itself, but requiring
+// the claim column to be NULL when it's omitted is exactly what closes the
+// gap this comment is about: without this, the claim lock only ever
+// protected admin-vs-admin races (updateRegistrationPlayers itself never
+// checked it), so a client independently editing players via their own
+// manage-booking link while an admin's add-player action was mid-flight
+// could silently land in between the admin's claim and its write, and
+// whichever write landed second would silently discard the other's edit
+// with no error to either side.
 export async function updateRegistrationPlayers(
   token: string,
   kids: string,
   totalParticipants: number,
-  sessionPrice: number | null
+  sessionPrice: number | null,
+  claimToken?: string
 ): Promise<boolean> {
   const supabase = getSupabase();
   const update: Record<string, unknown> = { kids, total_participants: totalParticipants };
   if (sessionPrice !== null) update.session_price = sessionPrice;
-  const { data, error } = await supabase
+  let query = supabase
     .from("registrations")
     .update(update)
     .eq("manage_token", token)
-    .eq("status", "confirmed")
-    .select("id");
+    .eq("status", "confirmed");
+  query = claimToken ? query.eq("admin_action_claim_token", claimToken) : query.is("admin_action_claim_token", null);
+  const { data, error } = await query.select("id");
   return !error && !!data && data.length > 0;
 }
 

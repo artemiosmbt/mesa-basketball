@@ -497,10 +497,27 @@ export async function GET(req: NextRequest) {
     }
     deletedFound[cancelledKeys.get(summaryKey)!].count++;
 
-    await supabase
+    // Conditional on status still being "confirmed" — same guard
+    // cancelRegistration (the client's own cancel path) already uses.
+    // Without it, a client cancelling their own booking at the same moment
+    // this cron independently sees the sheet row gone would let BOTH paths
+    // run their full refund flow on the same registration: the client's own
+    // cancel issues a real Stripe refund, then this write (racing in
+    // unguarded) would still succeed, and refundTrainerCancelledBooking
+    // below would re-credit referral/account credit and attempt a second
+    // Stripe refund — Stripe rejects the over-refund, but the fallback path
+    // then credits the whole "shortfall" to account credit anyway, so the
+    // client ends up refunded twice through two different channels.
+    const { data: claimedRows } = await supabase
       .from("registrations")
       .update({ status: "cancelled", is_late_cancel: false })
-      .eq("id", r.id);
+      .eq("id", r.id)
+      .eq("status", "confirmed")
+      .select("id");
+    if (!claimedRows || claimedRows.length === 0) {
+      deletedFound[cancelledKeys.get(summaryKey)!].count--; // wasn't actually ours to cancel — keep the admin summary accurate
+      continue;
+    }
 
     const moneyResult = await refundTrainerCancelledBooking(r);
 
@@ -589,10 +606,23 @@ export async function GET(req: NextRequest) {
     }
     deletedFound[cancelledKeys.get(summaryKey)!].count++;
 
-    await supabase
+    // Conditional on status still being "confirmed" — same guard as the
+    // weekly-deletion loop above (see its comment for the double-refund
+    // scenario this closes: a client cancelling their own session at the
+    // same moment this cron independently sees it gone from the sheet).
+    const { data: claimedPrivateRows } = await supabase
       .from("registrations")
       .update({ status: "cancelled", is_late_cancel: false })
-      .eq("id", r.id);
+      .eq("id", r.id)
+      .eq("status", "confirmed")
+      .select("id");
+    if (!claimedPrivateRows || claimedPrivateRows.length === 0) {
+      // Leave it in cancelledPrivateIds (already added above) — whoever else
+      // changed it also means it's no longer "confirmed" either way, so it
+      // should stay excluded from the trainer-reassignment pass below.
+      deletedFound[cancelledKeys.get(summaryKey)!].count--;
+      continue;
+    }
 
     // Every other cancellation path in this codebase (client cancel, admin
     // cancel/delete, admin reschedule) removes the private session's Google
