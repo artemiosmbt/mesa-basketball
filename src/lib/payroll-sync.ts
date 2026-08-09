@@ -34,6 +34,7 @@ import {
   updateValues,
 } from "./sheets-write";
 import { calcServiceFee } from "./pricing";
+import { sendAdminSMS } from "./sms";
 import {
   STRIPE_FIXED,
   PAYMENT_METHOD_CACHE_TAB,
@@ -668,9 +669,17 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
         if (existing.status === fingerprint) continue; // already synced, unchanged
         await writeTrainerRow(spreadsheetId, trainer, existing.row, derived);
         existing.status = fingerprint;
-        await appendValues(spreadsheetId, `${a1Quote(SYNC_LOG_TAB)}!A:D`, [
-          [reg.id, trainer, existing.row, fingerprint],
-        ]);
+        try {
+          await appendValues(spreadsheetId, `${a1Quote(SYNC_LOG_TAB)}!A:D`, [
+            [reg.id, trainer, existing.row, fingerprint],
+          ]);
+        } catch (logErr) {
+          // The visible row already updated successfully — only the log of
+          // that fact failed. Not dangerous on its own for an UPDATE (next
+          // run just re-detects the same fingerprint mismatch and re-writes
+          // the same row), but still surfaced so it isn't silently invisible.
+          console.error(`Payroll sync: row update for ${reg.id} (${trainer} row ${existing.row}) succeeded but SyncLog append failed:`, logErr);
+        }
         result.sessionsUpdated++;
       } else {
         const row = Math.max(nextRow.get(trainer) ?? TRAINER_FIRST_ROW - 1, TRAINER_FIRST_ROW - 1) + 1;
@@ -684,9 +693,23 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
         await writeTrainerRow(spreadsheetId, trainer, row, derived);
         nextRow.set(trainer, row);
         log.set(reg.id, { key: reg.id, tab: trainer, row, status: fingerprint });
-        await appendValues(spreadsheetId, `${a1Quote(SYNC_LOG_TAB)}!A:D`, [
-          [reg.id, trainer, row, fingerprint],
-        ]);
+        try {
+          await appendValues(spreadsheetId, `${a1Quote(SYNC_LOG_TAB)}!A:D`, [
+            [reg.id, trainer, row, fingerprint],
+          ]);
+        } catch (logErr) {
+          // A NEW row was just written to the trainer's tab, but the log
+          // entry recording that (which is the only thing that stops the
+          // NEXT run from thinking this session was never synced and
+          // copying a second, duplicate row for it) failed to save. Unlike
+          // the update case above, this is a real double-pay risk if left
+          // silent — alert immediately rather than only logging an error
+          // that might never get reviewed.
+          console.error(`Payroll sync: new row for ${reg.id} (${trainer} row ${row}) was written but SyncLog append failed — risk of a duplicate row next run:`, logErr);
+          await sendAdminSMS(
+            `⚠️ PAYROLL SYNC LOG FAILURE: a new row was just written to ${trainer}'s tab (row ${row}) for a session, but the record of that write failed to save. If left unfixed, the next sync run may create a DUPLICATE row for the same session. Check ${trainer}'s tab around row ${row} and the _SyncLog tab manually.`
+          ).catch(() => {});
+        }
         result.sessionsWritten++;
       }
       writesThisRun++;

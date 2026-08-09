@@ -63,7 +63,10 @@ function parseCSV(text: string): string[][] {
 
 export async function getWeeklySchedule(options?: { noCache?: boolean }): Promise<WeeklySession[]> {
   const url = process.env.SHEET_CSV_WEEKLY_SCHEDULE;
-  if (!url) return [];
+  if (!url) {
+    console.error("SHEET_CSV_WEEKLY_SCHEDULE is not set — returning an empty schedule instead of the real one.");
+    return [];
+  }
   const fetchOptions = options?.noCache
     ? { cache: "no-store" as const }
     : { next: { revalidate: 60 } };
@@ -86,7 +89,10 @@ export async function getWeeklySchedule(options?: { noCache?: boolean }): Promis
 
 export async function getCamps(options?: { noCache?: boolean }): Promise<Camp[]> {
   const url = process.env.SHEET_CSV_CAMPS;
-  if (!url) return [];
+  if (!url) {
+    console.error("SHEET_CSV_CAMPS is not set — returning an empty camp list instead of the real one.");
+    return [];
+  }
   const fetchOptions = options?.noCache
     ? { cache: "no-store" as const }
     : { next: { revalidate: 60 } };
@@ -113,7 +119,10 @@ export async function getCamps(options?: { noCache?: boolean }): Promise<Camp[]>
 
 export async function getPrivateSlots(options?: { noCache?: boolean }): Promise<PrivateSlot[]> {
   const url = process.env.SHEET_CSV_PRIVATE_SLOTS;
-  if (!url) return [];
+  if (!url) {
+    console.error("SHEET_CSV_PRIVATE_SLOTS is not set — returning an empty slot list instead of the real one.");
+    return [];
+  }
   const fetchOptions = options?.noCache
     ? { cache: "no-store" as const }
     : { next: { revalidate: 60 } };

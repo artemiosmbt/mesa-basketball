@@ -875,6 +875,32 @@ export async function generateUniqueReferralCode(parentName: string, email: stri
   }
 }
 
+/**
+ * Like generateUniqueReferralCode, but also persists the result — for
+ * display contexts (e.g. "Your referral code" on My Bookings) that used to
+ * call the bare, unchecked generateReferralCode() just to show SOMETHING.
+ * That bare call skipped the uniqueness check entirely, so two families
+ * sharing a last name could both be shown the identical "SMITH-MESA" —
+ * sharing it either silently fails (if nobody's code is actually stored) or
+ * worse, credits the wrong family (if the OTHER Smith already legitimately
+ * has that exact code on file). Persisting here means the code shown is
+ * always the same one findReferrerInfoByCode will actually resolve.
+ */
+export async function getOrCreatePersistedReferralCode(userId: string, email: string, fallbackName: string): Promise<string> {
+  const code = await generateUniqueReferralCode(fallbackName, email);
+  const supabase = getSupabase();
+  // Partial upsert — only sets these three columns; an existing profile
+  // row's other fields (kids, phone, etc.) are left untouched. Best-effort:
+  // still return the freshly-generated code for display even if the
+  // persist fails, rather than failing the whole My Bookings request.
+  try {
+    await supabase.from("profiles").upsert({ id: userId, email, referral_code: code });
+  } catch (err) {
+    console.error(`Failed to persist auto-generated referral code for ${email}:`, err);
+  }
+  return code;
+}
+
 /** Insert a registration with referral_code and is_free columns */
 export async function addRegistrationWithRewards(data: {
   parentName: string;

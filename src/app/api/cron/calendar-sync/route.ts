@@ -13,7 +13,14 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const today = new Date().toISOString().split("T")[0];
+  // ET, not UTC — same reasoning as deleteStaleGroupSessionEvents in
+  // calendar.ts (which already gets this right): UTC drifts a calendar day
+  // ahead of ET during the 8pm-midnight ET window, which would wrongly
+  // exclude that evening's still-happening sessions from expectedTags and
+  // then have deleteStaleGroupSessionEvents delete their real calendar
+  // events. Currently masked by this cron's fixed 7-8am ET schedule, but
+  // would misfire if ever manually re-triggered in the evening.
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
   let synced = 0;
   let errors = 0;
   const errorDetails: string[] = [];

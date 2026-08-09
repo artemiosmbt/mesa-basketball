@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import {
   getRegistrationsByEmail,
   getReferralCredits,
-  generateReferralCode,
+  getOrCreatePersistedReferralCode,
   getProfileReferralCode,
   getActivePackage,
   getAccountCreditBalance,
@@ -16,7 +16,7 @@ import { getWeeklySchedule, getPrivateSlots } from "@/lib/sheets";
 // account credit balance, and referral credits — it must never trust a
 // client-supplied email. Only the caller's OWN authenticated session can
 // resolve which email to look up, same pattern as /api/profile.
-async function getAuthedEmail(req: NextRequest): Promise<string | null> {
+async function getAuthedUser(req: NextRequest): Promise<{ id: string; email: string } | null> {
   const token = req.headers.get("authorization")?.replace("Bearer ", "");
   if (!token) return null;
   const supabase = createClient(
@@ -24,18 +24,19 @@ async function getAuthedEmail(req: NextRequest): Promise<string | null> {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
   const { data: { user } } = await supabase.auth.getUser(token);
-  return user?.email ? user.email.toLowerCase().trim() : null;
+  return user?.email ? { id: user.id, email: user.email.toLowerCase().trim() } : null;
 }
 
 export async function POST(req: NextRequest) {
-  const email = await getAuthedEmail(req);
-  if (!email) {
+  const authedUser = await getAuthedUser(req);
+  if (!authedUser) {
     return NextResponse.json(
       { error: "Please log in to view your bookings." },
       { status: 401 }
     );
   }
 
+  const email = authedUser.email;
   try {
     const currentMonthYear = new Date().toISOString().substring(0, 7); // "2026-03"
     const [registrations, referralCredits, activePackage, profileCode, weeklySessions, privateSlots, accountCreditBalance] = await Promise.all([
@@ -59,13 +60,17 @@ export async function POST(req: NextRequest) {
 
     const packageCancellable = activePackage ? !(await packageHasAnyBookedSession(activePackage.id).catch(() => true)) : false;
 
-    // Profile is source of truth; fall back to registrations, then generate from name
+    // Profile is source of truth; fall back to registrations, then
+    // generate+persist a real one — never the bare unchecked generator,
+    // which could collide with another family sharing the same last name.
     const referralCode =
       profileCode ||
       registrations.find((r) => r.referral_code)?.referral_code ||
-      generateReferralCode(
+      (await getOrCreatePersistedReferralCode(
+        authedUser.id,
+        email,
         registrations.length > 0 ? registrations[0].parent_name : email.split("@")[0]
-      );
+      ));
 
     return NextResponse.json({
       registrations: registrations.map((r) => {

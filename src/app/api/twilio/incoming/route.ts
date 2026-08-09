@@ -8,7 +8,14 @@ const OPT_IN = new Set(["START", "UNSTOP", "YES"]);
 const EMPTY_TWIML = `<?xml version="1.0" encoding="UTF-8"?><Response></Response>`;
 
 export async function POST(req: NextRequest) {
-  const authToken = process.env.TWILIO_AUTH_TOKEN!;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  // Explicit fail-closed check before ever calling validateRequest — same
+  // reasoning as verifyCronSecret in lib/auth.ts: relying on the twilio SDK
+  // to reject an undefined signing key is trusting undocumented library
+  // internals rather than failing closed by construction here.
+  if (!authToken) {
+    return new NextResponse("Forbidden", { status: 403 });
+  }
   const twilioSignature = req.headers.get("x-twilio-signature") || "";
   const proto = req.headers.get("x-forwarded-proto") || "https";
   const host = req.headers.get("host") || "";

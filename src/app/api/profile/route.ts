@@ -114,6 +114,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Failed to save profile." }, { status: 500 });
   }
 
+  // Also sync to registrations — sms-reminders.ts's cron reads
+  // registrations.sms_consent directly, not profiles. Without this, a
+  // client explicitly opting out here still gets texted: their existing
+  // registration rows keep whatever sms_consent value was set whenever they
+  // last booked. Twilio's own STOP-reply handler (twilio/incoming/route.ts)
+  // already dual-writes both tables for the exact same reason — this path
+  // was missing that.
+  if (body.smsConsent !== undefined && user.email) {
+    const { error: regConsentError } = await supabase
+      .from("registrations")
+      .update({ sms_consent: !!body.smsConsent })
+      .eq("email", user.email.toLowerCase().trim());
+    if (regConsentError) console.error(`Failed to sync sms_consent to registrations for ${user.email}:`, regConsentError);
+  }
+
   // Keep auth display name in sync so it shows in Supabase dashboard —
   // previously uncaught/unlogged, so a future transient failure here would
   // silently leave the Auth dashboard's display name blank with no trace.
