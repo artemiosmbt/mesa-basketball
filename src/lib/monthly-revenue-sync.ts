@@ -433,19 +433,32 @@ async function readDayLog(): Promise<Map<string, DayLogEntry>> {
   return map;
 }
 
-/** Fingerprints exactly the fields a day's row can show — text content plus
- * the 4 dollar columns. Date/Day (A:B) are never user-editable in practice
- * so they're deliberately excluded. */
+/** Fingerprints the fields a day's row can show that are genuinely
+ * independent facts — the session list text, Place, and the 2 fee columns.
+ * Gross Revenue and Net Revenue are deliberately excluded: they're always
+ * DERIVED (Gross by summing every "$X.XX" in the session text, Net as
+ * Gross+Processing-Stripe — see the locked branch in buildMonthTab) rather
+ * than something to independently lock, so editing the session list alone
+ * (e.g. removing a line) is enough to correct Gross without also having to
+ * hand-recompute it. Date/Day (A:B) are never user-editable in practice so
+ * they're excluded too. */
 function dayRowFingerprint(
   privateText: string,
   groupText: string,
   place: string,
-  gross: number,
   processing: number,
-  stripe: number,
-  net: number
+  stripe: number
 ): string {
-  return JSON.stringify([privateText, groupText, place, gross, processing, stripe, net]);
+  return JSON.stringify([privateText, groupText, place, processing, stripe]);
+}
+
+/** Sums every "$X.XX" (or "$X,XXX.XX") dollar figure found in a block of
+ * text — used to re-derive a locked day's Gross Revenue straight from
+ * whatever the owner's session-list text currently says, instead of a
+ * frozen number that can silently drift out of sync with an edit. */
+function parseDollarSum(text: string): number {
+  const matches = text.match(/\$([\d,]+\.\d{2})/g) || [];
+  return round2(matches.reduce((sum, m) => sum + parseFloat(m.replace(/[$,]/g, "")), 0));
 }
 
 // ---------------------------------------------------------------------------
@@ -649,47 +662,85 @@ async function buildMonthTab(
     const groupCell = groupSegs.length > 0 ? richTextCellData(groupSegs) : null;
     const placesStr = Array.from(places).join(" / ");
 
-    // Locked = this day's live content no longer matches what THIS sync
-    // last wrote there — i.e. the owner hand-edited it since. A never-
-    // logged day (dayLog has no entry) is treated as unlocked: either it's
-    // brand new, or it's an already-existing day from before this
-    // protection existed, which gets one final overwrite here and is
-    // logged/protected from then on.
+    // Locked = this day's session-list text or fee cells no longer match
+    // what THIS sync last wrote there — i.e. the owner hand-edited one of
+    // them since. A never-logged day (dayLog has no entry) is treated as
+    // unlocked: either it's brand new, or it's an already-existing day from
+    // before this protection existed, which gets one final overwrite here
+    // and is logged/protected from then on.
     const logKey = `${tabName}|${dateStr}`;
     const stored = dayLog.get(logKey);
     const freshFingerprint = dayRowFingerprint(
       privateCell?.stringValue ?? "",
       groupCell?.stringValue ?? "",
       placesStr,
-      gGross,
       gProcessing,
-      gStripe,
-      gNet
+      gStripe
     );
     let locked = false;
     if (stored) {
       const liveRow = liveDayRows[d - 1] || [];
-      const liveFingerprint = dayRowFingerprint(
-        String(liveRow[0] ?? ""),
-        String(liveRow[1] ?? ""),
-        String(liveRow[2] ?? ""),
-        Number(liveRow[3]) || 0,
-        Number(liveRow[4]) || 0,
-        Number(liveRow[5]) || 0,
-        Number(liveRow[6]) || 0
-      );
+      // Fingerprint format changed (Gross/Net dropped, since those are now
+      // always derived rather than lockable — see dayRowFingerprint) —
+      // entries logged before that change are a 7-element array. Comparing
+      // those against the old 7-field shape one more time (rather than
+      // treating them as "never logged") is what keeps an already-locked
+      // day like a hand-corrected fee actually staying locked through this
+      // transition, instead of getting one unwanted final overwrite.
+      let storedLen = 0;
+      try {
+        storedLen = (JSON.parse(stored.fingerprint) as unknown[]).length;
+      } catch {
+        storedLen = 0;
+      }
+      const liveFingerprint = storedLen === 7
+        ? JSON.stringify([
+            String(liveRow[0] ?? ""), String(liveRow[1] ?? ""), String(liveRow[2] ?? ""),
+            Number(liveRow[3]) || 0, Number(liveRow[4]) || 0, Number(liveRow[5]) || 0, Number(liveRow[6]) || 0,
+          ])
+        : dayRowFingerprint(
+            String(liveRow[0] ?? ""),
+            String(liveRow[1] ?? ""),
+            String(liveRow[2] ?? ""),
+            Number(liveRow[4]) || 0,
+            Number(liveRow[5]) || 0
+          );
       locked = liveFingerprint !== stored.fingerprint;
     }
 
-    // Month Totals must reflect whatever a locked day's live (edited)
-    // dollar figures actually say, not the freshly recomputed ones the
-    // owner just corrected away from.
     if (locked) {
+      // Gross Revenue is re-derived straight from the live session-list
+      // text (summing every "$X.XX" it contains) rather than trusting a
+      // frozen number — so removing/editing a line item is, by itself,
+      // enough to correct the total; nothing gets silently missed just
+      // because only the text was touched. Processing/Stripe Fee stay
+      // exactly whatever the owner left them at (they aren't derivable from
+      // the text), and Net is always Gross+Processing-Stripe so the row
+      // never shows an inconsistent total.
       const liveRow = liveDayRows[d - 1] || [];
-      monthGross += Number(liveRow[3]) || 0;
-      monthProcessing += Number(liveRow[4]) || 0;
-      monthStripe += Number(liveRow[5]) || 0;
-      monthNet += Number(liveRow[6]) || 0;
+      const liveGross = round2(parseDollarSum(String(liveRow[0] ?? "")) + parseDollarSum(String(liveRow[1] ?? "")));
+      const liveProcessing = Number(liveRow[4]) || 0;
+      const liveStripe = Number(liveRow[5]) || 0;
+      const liveNet = round2(liveGross + liveProcessing - liveStripe);
+      monthGross += liveGross; monthProcessing += liveProcessing; monthStripe += liveStripe; monthNet += liveNet;
+
+      // Only Gross (F) and Net (I) get rewritten — Date/Day/session
+      // text/Place/Processing/Stripe (A,B,C,D,E,G,H) are the owner's
+      // protected domain and are never touched once locked.
+      requests.push({
+        updateCells: {
+          rows: [{ values: [{ userEnteredValue: { numberValue: liveGross }, userEnteredFormat: { numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } } }] }],
+          fields: "userEnteredValue,userEnteredFormat",
+          start: { sheetId, rowIndex: rowIndex0, columnIndex: 5 },
+        },
+      });
+      requests.push({
+        updateCells: {
+          rows: [{ values: [{ userEnteredValue: { numberValue: liveNet }, userEnteredFormat: { numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } } }] }],
+          fields: "userEnteredValue,userEnteredFormat",
+          start: { sheetId, rowIndex: rowIndex0, columnIndex: 8 },
+        },
+      });
     } else {
       monthGross += gGross; monthProcessing += gProcessing; monthStripe += gStripe; monthNet += gNet;
       dayLogWrites.set(logKey, freshFingerprint);
