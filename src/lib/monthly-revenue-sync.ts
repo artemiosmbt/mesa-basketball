@@ -860,7 +860,7 @@ async function buildMonthTab(
   // untouched, exactly like the rent cells.
   requests.push({
     updateCells: {
-      rows: [{ values: [{ userEnteredValue: { stringValue: "PICKUPS — Cash Games (St. Paul's)" }, userEnteredFormat: { textFormat: { bold: true, fontSize: 12 } } }] }],
+      rows: [{ values: [{ userEnteredValue: { stringValue: "Pickups - (St. Paul's)" }, userEnteredFormat: { textFormat: { bold: true, fontSize: 12 } } }] }],
       fields: "userEnteredValue,userEnteredFormat",
       start: { sheetId, rowIndex: 7, columnIndex: 10 },
     },
