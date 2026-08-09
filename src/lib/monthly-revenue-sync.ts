@@ -315,7 +315,10 @@ function derivePackage(pkg: PackageRow): DerivedPackage | null {
   if (!date || date < TRACKER_START_DATE) return null;
   const price = pkg.total_price ?? 0;
   const processingFee = price > 0 ? calcServiceFee(price) : 0;
-  const stripeFee = price > 0 ? round2(price * STRIPE_PCT_CC + STRIPE_FIXED) : 0;
+  // Stripe's 2.9%+$0.30 is charged on the TOTAL amount that actually hits
+  // the card — price PLUS the service-fee surcharge added on top at
+  // checkout — not on the package price alone.
+  const stripeFee = price > 0 ? round2((price + processingFee) * STRIPE_PCT_CC + STRIPE_FIXED) : 0;
   const size = pkg.package_type === 8 ? "8-Pack" : "4-Pack";
   const buyer = pkg.parent_name || "Unknown";
   return { date, label: `${buyer} — ${size} $${price.toFixed(2)}`, totalPrice: price, processingFee, stripeFee };
@@ -936,7 +939,10 @@ export async function runMonthlyRevenueSync(): Promise<MonthlyRevenueSyncResult>
     if (totalCharged <= 0) continue;
     const rep = group.slice().sort((a, b) => a.date.localeCompare(b.date) || a.startHours - b.startHours)[0];
     rep.processingFee = calcServiceFee(totalCharged);
-    rep.stripeFee = round2(totalCharged * STRIPE_PCT_CC + STRIPE_FIXED);
+    // Stripe's 2.9%+$0.30 is charged on the TOTAL amount that actually hits
+    // the card — totalCharged PLUS the service-fee surcharge added on top
+    // at checkout — not on the session price alone.
+    rep.stripeFee = round2((totalCharged + rep.processingFee) * STRIPE_PCT_CC + STRIPE_FIXED);
   }
 
   const { data: pkgSales, error: pkgErr } = await supabase
