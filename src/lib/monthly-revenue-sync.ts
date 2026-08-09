@@ -317,7 +317,7 @@ function deriveSession(reg: RegRow, isLateCancel: boolean, lateFeeAmountKept: nu
 interface DerivedPackage {
   date: string;
   label: string;
-  totalPrice: number; // counted as real Gross Revenue on this date — see deriveSession's grossRevenue=0 for package-covered sessions for why this can't also be counted again per-session later
+  totalPrice: number; // the raw package price (excl. fee) — counted as real Gross Revenue (plus processingFee, see buildMonthTab) on this date; see deriveSession's grossRevenue=0 for package-covered sessions for why this can't also be counted again per-session later
   processingFee: number;
   stripeFee: number; // default assumes a card payment; the payment-method-aware post-pass in runMonthlyRevenueSync overrides this for Link
   paymentIntentId: string | null;
@@ -649,7 +649,18 @@ async function buildMonthTab(
       const seg: TextSegment = { text: `${n}. ${s.label}`, color: s.isCamp ? CAMP_COLOR : TRAINER_COLOR[s.trainer] || CAMP_COLOR };
       if (s.isGroupColumn) groupSegs.push(seg); else privateSegs.push(seg);
       if (s.location) places.add(s.location);
-      gGross += s.grossRevenue;
+      // Gross Revenue is the FULL amount that actually hit the Stripe
+      // account — session/package price PLUS the service-fee surcharge the
+      // client was charged on top — not just the base price. A booking
+      // charged at $150 with a $4.80 surcharge really brought in $154.80;
+      // showing only $150 as "Gross" made it look like that $4.80 (minus
+      // whatever Stripe actually takes) wasn't being counted anywhere, even
+      // though it always flowed correctly into Net Revenue via Processing
+      // minus Stripe. Folding it into Gross directly fixes that appearance
+      // — Location Breakdown (built from Gross) now reflects it too — with
+      // no change to the final Net Revenue/Net Profit number, since that
+      // was always Gross(old)+Processing-Stripe = Gross(new)-Stripe.
+      gGross += s.grossRevenue + s.processingFee;
       gProcessing += s.processingFee;
       gStripe += s.stripeFee;
 
@@ -668,7 +679,7 @@ async function buildMonthTab(
     // "Other/Unlisted" in the Location Breakdown below, which is correct.
     for (const p of packagesByDate.get(dateStr) || []) {
       privateSegs.push({ text: `[Package Purchased] ${p.label}`, color: { red: 0, green: 0, blue: 0 }, bold: true });
-      gGross += p.totalPrice;
+      gGross += p.totalPrice + p.processingFee; // see the fee-folding comment above
       gProcessing += p.processingFee;
       gStripe += p.stripeFee;
     }
@@ -725,11 +736,14 @@ async function buildMonthTab(
       locked = liveFingerprint !== stored.fingerprint;
     }
 
-    // Net Revenue (I) is ALWAYS a formula, =F+G-H, for every day row
-    // regardless of lock status — it's genuinely just arithmetic on 3 other
-    // cells already on the sheet, so it self-updates the instant the owner
-    // edits Gross, Processing, or Stripe directly, with no sync needed.
-    const netFormula = `=F${rowNum1}+G${rowNum1}-H${rowNum1}`;
+    // Net Revenue (I) is ALWAYS a formula, =F-H, for every day row
+    // regardless of lock status — Gross (F) already includes the
+    // Processing Fee surcharge (see the fee-folding comment above), so
+    // subtracting the real Stripe cost (H) is all that's left to reach Net.
+    // It's genuinely just arithmetic on cells already on the sheet, so it
+    // self-updates the instant the owner edits Gross or Stripe directly,
+    // with no sync needed.
+    const netFormula = `=F${rowNum1}-H${rowNum1}`;
 
     if (locked) {
       // Gross Revenue is re-derived straight from the live session-list
@@ -738,7 +752,11 @@ async function buildMonthTab(
       // enough to correct the total; nothing gets silently missed just
       // because only the text was touched. Processing/Stripe Fee stay
       // exactly whatever the owner left them at (they aren't derivable from
-      // the text).
+      // the text). Known limitation: session labels only ever show the base
+      // price, never the folded-in fee, so a locked day's re-derived Gross
+      // won't include that fee margin the way a fresh (unlocked) day's does
+      // — a small, real gap, but only on days already flagged as manually
+      // edited.
       const liveRow = liveDayRows[d - 1] || [];
       const liveGross = round2(parseDollarSum(String(liveRow[0] ?? "")) + parseDollarSum(String(liveRow[1] ?? "")));
 
