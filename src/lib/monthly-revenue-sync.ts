@@ -13,10 +13,13 @@
  * Design: each month's tab is rebuilt from scratch every run — a status
  * change after the fact, a corrected price, etc. just fall out of a fresh
  * rebuild automatically, sidestepping an entire class of incremental-sync
- * bugs. Two exceptions, both real manual input that must survive a rebuild:
- * each month's per-location rent cell (see readExistingRentByName), and any
+ * bugs. Three exceptions, all real manual input that must survive a rebuild:
+ * each month's per-location rent cell (see readExistingRentByName), any
  * day row the owner has hand-edited (see the _DayLog tab / textFingerprint
- * + feeFingerprint below). Session-list text/Place and Processing/Stripe
+ * + feeFingerprint below), and the PICKUPS table (columns K:L — cash games
+ * the owner runs off-schedule; see buildMonthTab's PICKUPS section) whose
+ * data rows this file never issues a write against, so they're untouched
+ * by construction rather than needing a fingerprint/lock at all. Session-list text/Place and Processing/Stripe
  * Fee are locked INDEPENDENTLY of each other — a day is only ever
  * text-frozen if its live text/Place diverges from what THIS sync last
  * wrote, and only ever fee-frozen if its live Processing/Stripe diverges
@@ -580,6 +583,23 @@ async function buildMonthTab(
   // one getValues call per day.
   const liveDayRows = await getValues(MONTHLY_REVENUE_SHEET_ID, `${a1Quote(tabName)}!C9:I${8 + nDays}`);
 
+  // PICKUPS — off-the-books cash games the owner runs himself (not on the
+  // live schedule, no Stripe fees since it's cash-in-hand). Always at
+  // St. Paul's per the owner. Lives in columns K:L, entirely outside the
+  // A:J range every other write in this file touches (including the big
+  // clear-region below) — so the owner's entered dates/amounts
+  // (K11:L60) are NEVER touched by any sync run, only the title/header
+  // labels and the TOTAL formula get (re)written each time, same
+  // "manual input survives a rebuild" pattern as rent. The TOTAL cell is
+  // a fixed, always-the-same location ($L$61) that Location Breakdown's
+  // St. Paul's row, the Other/Unlisted row (to keep the location totals
+  // reconciling with Month Totals), and Net Profit to Mesa all read
+  // directly by formula.
+  const PICKUPS_DATA_FIRST_ROW1 = 11;
+  const PICKUPS_DATA_LAST_ROW1 = 60;
+  const PICKUPS_TOTAL_ROW1 = 61;
+  const PICKUPS_TOTAL_CELL = `$L$${PICKUPS_TOTAL_ROW1}`;
+
   const requests: object[] = [];
 
   // Row 1: title
@@ -833,6 +853,60 @@ async function buildMonthTab(
     },
   });
 
+  // PICKUPS table — title/subtitle/header labels and the TOTAL formula are
+  // rewritten every run (harmless, just labels/a formula); the data rows
+  // (K11:L60) are never referenced by any updateCells request anywhere in
+  // this file, so whatever the owner types there survives every rebuild
+  // untouched, exactly like the rent cells.
+  requests.push({
+    updateCells: {
+      rows: [{ values: [{ userEnteredValue: { stringValue: "PICKUPS — Cash Games (St. Paul's)" }, userEnteredFormat: { textFormat: { bold: true, fontSize: 12 } } }] }],
+      fields: "userEnteredValue,userEnteredFormat",
+      start: { sheetId, rowIndex: 7, columnIndex: 10 },
+    },
+  });
+  requests.push({
+    updateCells: {
+      rows: [{
+        values: [{
+          userEnteredValue: { stringValue: "Off-the-books cash games you run yourself — not from the schedule. Add date + amount below; the total feeds into St. Paul's Revenue and Net Profit above automatically." },
+          userEnteredFormat: { textFormat: { italic: true }, wrapStrategy: "WRAP" },
+        }],
+      }],
+      fields: "userEnteredValue,userEnteredFormat",
+      start: { sheetId, rowIndex: 8, columnIndex: 10 },
+    },
+  });
+  requests.push({
+    repeatCell: {
+      range: { sheetId, startRowIndex: 9, endRowIndex: 10, startColumnIndex: 10, endColumnIndex: 12 },
+      cell: { userEnteredFormat: { backgroundColorStyle: { rgbColor: HEADER_BG }, textFormat: { bold: true, foregroundColorStyle: { rgbColor: WHITE } } } },
+      fields: "userEnteredFormat(backgroundColorStyle,textFormat)",
+    },
+  });
+  requests.push({
+    updateCells: {
+      rows: [{ values: [{ userEnteredValue: { stringValue: "Date" } }, { userEnteredValue: { stringValue: "Amount" } }] }],
+      fields: "userEnteredValue",
+      start: { sheetId, rowIndex: 9, columnIndex: 10 },
+    },
+  });
+  requests.push({
+    updateCells: {
+      rows: [{
+        values: [
+          { userEnteredValue: { stringValue: "TOTAL" }, userEnteredFormat: { textFormat: { bold: true } } },
+          {
+            userEnteredValue: { formulaValue: `=SUM(L${PICKUPS_DATA_FIRST_ROW1}:L${PICKUPS_DATA_LAST_ROW1})` },
+            userEnteredFormat: { textFormat: { bold: true }, numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } },
+          },
+        ],
+      }],
+      fields: "userEnteredValue,userEnteredFormat",
+      start: { sheetId, rowIndex: PICKUPS_TOTAL_ROW1 - 1, columnIndex: 10 },
+    },
+  });
+
   // Everything below Month Totals (Trainer Pay, Location Breakdown, Net
   // Profit) is at a row position that shifts month to month (more/fewer
   // weeks changes how many trainer-pay rows there are) and, now, run to run
@@ -965,13 +1039,19 @@ async function buildMonthTab(
   for (const loc of KNOWN_LOCATIONS) {
     const rent = existingRentByName.get(loc.name) ?? loc.monthlyRent;
     const locRowNum1 = row0 + 1;
+    // St. Paul's is the only location where the owner runs cash pickup
+    // games — see the PICKUPS table above — so its Revenue folds in the
+    // pickups TOTAL cell on top of the normal SUMIF over booked sessions.
+    const revenueFormula = loc.name === "St. Paul's"
+      ? `=SUMIF(E${firstDayRow1}:E${lastDayRow1},"*"&A${locRowNum1}&"*",F${firstDayRow1}:F${lastDayRow1})+${PICKUPS_TOTAL_CELL}`
+      : `=SUMIF(E${firstDayRow1}:E${lastDayRow1},"*"&A${locRowNum1}&"*",F${firstDayRow1}:F${lastDayRow1})`;
     requests.push({
       updateCells: {
         rows: [{
           values: [
             { userEnteredValue: { stringValue: loc.name } },
             { userEnteredValue: { numberValue: rent } },
-            { userEnteredValue: { formulaValue: `=SUMIF(E${firstDayRow1}:E${lastDayRow1},"*"&A${locRowNum1}&"*",F${firstDayRow1}:F${lastDayRow1})` } },
+            { userEnteredValue: { formulaValue: revenueFormula } },
             { userEnteredValue: { formulaValue: `=C${locRowNum1}-B${locRowNum1}` } },
           ],
         }],
@@ -989,7 +1069,11 @@ async function buildMonthTab(
         values: [
           { userEnteredValue: { stringValue: "Other / Unlisted" } },
           { userEnteredValue: { numberValue: 0 } },
-          { userEnteredValue: { formulaValue: `=F${totalsRow1}-SUM(C${firstLocRow1}:C${lastLocRow1})` } },
+          // +PICKUPS_TOTAL_CELL here isn't pickups revenue landing in
+          // "Other" — it's cancelling out the same amount that was just
+          // added to St. Paul's above, so the location rows still
+          // reconcile to Month Totals' Gross Revenue + Pickups, not less.
+          { userEnteredValue: { formulaValue: `=F${totalsRow1}+${PICKUPS_TOTAL_CELL}-SUM(C${firstLocRow1}:C${lastLocRow1})` } },
           { userEnteredValue: { formulaValue: `=C${otherRowNum1}-B${otherRowNum1}` } },
         ],
       }],
@@ -1009,10 +1093,10 @@ async function buildMonthTab(
           { userEnteredValue: { stringValue: "NET PROFIT TO MESA THIS MONTH" }, userEnteredFormat: { textFormat: { bold: true, fontSize: 12 } } },
           { userEnteredValue: { stringValue: "" } },
           {
-            userEnteredValue: { formulaValue: `=I${totalsRow1}-${trainerGrandTotalCell}-SUM(B${firstLocRow1}:B${lastLocRow1})` },
+            userEnteredValue: { formulaValue: `=I${totalsRow1}+${PICKUPS_TOTAL_CELL}-${trainerGrandTotalCell}-SUM(B${firstLocRow1}:B${lastLocRow1})` },
             userEnteredFormat: { textFormat: { bold: true, fontSize: 12 }, ...currencyFmt },
           },
-          { userEnteredValue: { stringValue: "= Net Revenue − Trainer Pay − Rent" } },
+          { userEnteredValue: { stringValue: "= Net Revenue + Pickups − Trainer Pay − Rent" } },
         ],
       }],
       fields: "userEnteredValue,userEnteredFormat",
