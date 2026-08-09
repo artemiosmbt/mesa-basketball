@@ -82,17 +82,13 @@ const KNOWN_LOCATIONS: LocationSeed[] = [
 ];
 
 // booked_location is free text typed into the live schedule, not a fixed
-// enum — a live spot-check caught it stored as "St. Paul's", not the fuller
-// "St. Paul's Cathedral" this was first written with, silently dumping all
-// of that month's revenue into the "Other/Unlisted" catch-all instead.
-// Fuzzy-matching (rather than requiring an exact string) means a small
-// future variant of the same name doesn't reintroduce that silently.
-function locationMatches(rawLocation: string, knownName: string): boolean {
-  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
-  const a = norm(rawLocation), b = norm(knownName);
-  if (!a || !b) return false;
-  return a.includes(b) || b.includes(a);
-}
+// enum — a live spot-check once caught it stored as "St. Paul's", not the
+// fuller "St. Paul's Cathedral" this was first written with, silently
+// dumping all of that month's revenue into the "Other/Unlisted" catch-all
+// instead. Location Breakdown's Revenue This Month is now a live SUMIF
+// formula (see buildMonthTab) doing its own wildcard "*name*" match against
+// the Place column, so a small future variant of a location's name still
+// won't silently stop matching.
 
 // ---------------------------------------------------------------------------
 // Supabase
@@ -170,6 +166,16 @@ function normalizeTrainerName(name: string | null | undefined): string {
 }
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
+}
+/** 1-indexed column number -> A1-notation letter(s): 1->"A", 2->"B", 27->"AA". */
+function colLetter(n: number): string {
+  let s = "";
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    s = String.fromCharCode(65 + rem) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s;
 }
 
 /** registrations.kids is "Name (DOB: ..., Grade: ..., Gender: ...), Name2 (...)" — same split-and-strip convention already used elsewhere in this codebase (see booking/[token]/route.ts's parseKidsList). */
@@ -601,9 +607,12 @@ async function buildMonthTab(
     packagesByDate.get(p.date)!.push(p);
   }
 
-  let monthGross = 0, monthProcessing = 0, monthStripe = 0, monthNet = 0;
+  // Trainer pay isn't recoverable from anywhere else in the sheet (no
+  // per-session cells to sum), so it's the one genuine exception to "every
+  // total is a formula" — these are real values written directly, per
+  // trainer per week; see the TRAINER PAY BY WEEK section below for how its
+  // own row/grand totals ARE formulas over these cells.
   const trainerPayByWeek = new Map<string, Map<string, number>>(); // week -> trainer -> pay
-  const revenueByLocation = new Map<string, number>();
 
   const dayRowRequests: object[] = [];
   for (let d = 1; d <= nDays; d++) {
@@ -652,9 +661,8 @@ async function buildMonthTab(
       gStripe += p.stripeFee;
     }
 
-    const gNet = round2(gGross + gProcessing - gStripe);
-
     const rowIndex0 = 8 + (d - 1); // header is row index 7 (row 8, 1-indexed)
+    const rowNum1 = rowIndex0 + 1; // 1-indexed, for building formula strings
     const privateCell = privateSegs.length > 0 ? richTextCellData(privateSegs) : null;
     const groupCell = groupSegs.length > 0 ? richTextCellData(groupSegs) : null;
     const placesStr = Array.from(places).join(" / ");
@@ -705,8 +713,12 @@ async function buildMonthTab(
       locked = liveFingerprint !== stored.fingerprint;
     }
 
-    let effGross: number;
-    let effPlaceStr: string;
+    // Net Revenue (I) is ALWAYS a formula, =F+G-H, for every day row
+    // regardless of lock status — it's genuinely just arithmetic on 3 other
+    // cells already on the sheet, so it self-updates the instant the owner
+    // edits Gross, Processing, or Stripe directly, with no sync needed.
+    const netFormula = `=F${rowNum1}+G${rowNum1}-H${rowNum1}`;
+
     if (locked) {
       // Gross Revenue is re-derived straight from the live session-list
       // text (summing every "$X.XX" it contains) rather than trusting a
@@ -714,16 +726,9 @@ async function buildMonthTab(
       // enough to correct the total; nothing gets silently missed just
       // because only the text was touched. Processing/Stripe Fee stay
       // exactly whatever the owner left them at (they aren't derivable from
-      // the text), and Net is always Gross+Processing-Stripe so the row
-      // never shows an inconsistent total.
+      // the text).
       const liveRow = liveDayRows[d - 1] || [];
       const liveGross = round2(parseDollarSum(String(liveRow[0] ?? "")) + parseDollarSum(String(liveRow[1] ?? "")));
-      const liveProcessing = Number(liveRow[4]) || 0;
-      const liveStripe = Number(liveRow[5]) || 0;
-      const liveNet = round2(liveGross + liveProcessing - liveStripe);
-      monthGross += liveGross; monthProcessing += liveProcessing; monthStripe += liveStripe; monthNet += liveNet;
-      effGross = liveGross;
-      effPlaceStr = String(liveRow[2] ?? "");
 
       // Only Gross (F) and Net (I) get rewritten — Date/Day/session
       // text/Place/Processing/Stripe (A,B,C,D,E,G,H) are the owner's
@@ -737,15 +742,12 @@ async function buildMonthTab(
       });
       requests.push({
         updateCells: {
-          rows: [{ values: [{ userEnteredValue: { numberValue: liveNet }, userEnteredFormat: { numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } } }] }],
+          rows: [{ values: [{ userEnteredValue: { formulaValue: netFormula }, userEnteredFormat: { numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } } }] }],
           fields: "userEnteredValue,userEnteredFormat",
           start: { sheetId, rowIndex: rowIndex0, columnIndex: 8 },
         },
       });
     } else {
-      monthGross += gGross; monthProcessing += gProcessing; monthStripe += gStripe; monthNet += gNet;
-      effGross = gGross;
-      effPlaceStr = placesStr;
       dayLogWrites.set(logKey, freshFingerprint);
 
       // WRAP explicitly — otherwise Sheets' default wrap strategy only
@@ -769,7 +771,7 @@ async function buildMonthTab(
                 { userEnteredValue: { numberValue: gGross }, userEnteredFormat: { numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } } },
                 { userEnteredValue: { numberValue: gProcessing }, userEnteredFormat: { numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } } },
                 { userEnteredValue: { numberValue: gStripe }, userEnteredFormat: { numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } } },
-                { userEnteredValue: { numberValue: gNet }, userEnteredFormat: { numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } } },
+                { userEnteredValue: { formulaValue: netFormula }, userEnteredFormat: { numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } } },
               ],
             },
           ],
@@ -778,28 +780,18 @@ async function buildMonthTab(
         },
       });
     }
-
-    // Location Breakdown is built from the day's own EFFECTIVE Gross
-    // Revenue and Place — the same numbers that actually end up in that
-    // day's row (live/edited values for a locked day, freshly-written ones
-    // otherwise) — instead of independently re-summing each session from
-    // the database, so a hand-edit to a day's total or location is
-    // reflected here too, exactly like Month Totals already is. A day
-    // naming more than one location splits its Gross evenly across them.
-    if (effGross > 0) {
-      const dayLocs = effPlaceStr.split(" / ").map((s) => s.trim()).filter(Boolean);
-      if (dayLocs.length > 0) {
-        const share = round2(effGross / dayLocs.length);
-        for (const loc of dayLocs) {
-          revenueByLocation.set(loc, round2((revenueByLocation.get(loc) || 0) + share));
-        }
-      }
-    }
   }
   requests.push(...dayRowRequests);
 
-  // TOTALS row
+  // TOTALS row — real SUM formulas over the day rows above, not
+  // independently-tracked JS totals, so this is always exactly "what's in
+  // the sheet, added up" and stays correct even if a day row is hand-edited
+  // after the fact with no further sync needed.
   const totalsRow0 = 8 + nDays;
+  const totalsRow1 = totalsRow0 + 1;
+  const firstDayRow1 = 9;
+  const lastDayRow1 = 8 + nDays;
+  const currencyFmt = { numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } };
   requests.push({
     updateCells: {
       rows: [
@@ -810,10 +802,10 @@ async function buildMonthTab(
             { userEnteredValue: { stringValue: "" } },
             { userEnteredValue: { stringValue: "" } },
             { userEnteredValue: { stringValue: "" } },
-            { userEnteredValue: { numberValue: round2(monthGross) }, userEnteredFormat: { textFormat: { bold: true }, numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } } },
-            { userEnteredValue: { numberValue: round2(monthProcessing) }, userEnteredFormat: { textFormat: { bold: true }, numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } } },
-            { userEnteredValue: { numberValue: round2(monthStripe) }, userEnteredFormat: { textFormat: { bold: true }, numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } } },
-            { userEnteredValue: { numberValue: round2(monthNet) }, userEnteredFormat: { textFormat: { bold: true }, numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } } },
+            { userEnteredValue: { formulaValue: `=SUM(F${firstDayRow1}:F${lastDayRow1})` }, userEnteredFormat: { textFormat: { bold: true }, ...currencyFmt } },
+            { userEnteredValue: { formulaValue: `=SUM(G${firstDayRow1}:G${lastDayRow1})` }, userEnteredFormat: { textFormat: { bold: true }, ...currencyFmt } },
+            { userEnteredValue: { formulaValue: `=SUM(H${firstDayRow1}:H${lastDayRow1})` }, userEnteredFormat: { textFormat: { bold: true }, ...currencyFmt } },
+            { userEnteredValue: { formulaValue: `=SUM(I${firstDayRow1}:I${lastDayRow1})` }, userEnteredFormat: { textFormat: { bold: true }, ...currencyFmt } },
           ],
         },
       ],
@@ -822,7 +814,11 @@ async function buildMonthTab(
     },
   });
 
-  // TRAINER PAY BY WEEK
+  // TRAINER PAY BY WEEK — the individual per-trainer/per-week amounts are
+  // the one genuine exception ("a number directly pulled, not summable from
+  // other cells" — there's no per-session row here to add up). Every total
+  // that DOES sit on top of them (each week's row Total, and the grand
+  // TOTAL row below) is a real formula.
   let row0 = totalsRow0 + 2;
   requests.push(subtitleHeaderRequest(sheetId, row0, "TRAINER PAY BY WEEK"));
   row0 += 1;
@@ -842,19 +838,17 @@ async function buildMonthTab(
     },
   });
   row0 += 1;
+  const trainerDataStartRow0 = row0;
+  const lastTrainerColLetter = colLetter(1 + SUB_TRAINERS.length); // "F" for 5 trainers (B..F)
   const weeks = Array.from(trainerPayByWeek.keys()).sort();
-  let monthTrainerPayTotal = 0;
   for (const wk of weeks) {
     const wkMap = trainerPayByWeek.get(wk)!;
-    let weekTotal = 0;
-    const values = [{ userEnteredValue: { stringValue: wk } }];
+    const weekRowNum1 = row0 + 1;
+    const values: object[] = [{ userEnteredValue: { stringValue: wk } }];
     for (const t of SUB_TRAINERS) {
-      const pay = wkMap.get(t) || 0;
-      weekTotal += pay;
-      values.push({ userEnteredValue: { numberValue: pay } } as { userEnteredValue: { numberValue: number } } as never);
+      values.push({ userEnteredValue: { numberValue: wkMap.get(t) || 0 } });
     }
-    values.push({ userEnteredValue: { numberValue: round2(weekTotal) } } as never);
-    monthTrainerPayTotal += weekTotal;
+    values.push({ userEnteredValue: { formulaValue: `=SUM(B${weekRowNum1}:${lastTrainerColLetter}${weekRowNum1})` } });
     requests.push({
       updateCells: {
         rows: [{ values }],
@@ -874,8 +868,39 @@ async function buildMonthTab(
     });
     row0 += 1;
   }
+  // Grand total row — sums straight down each trainer's own column across
+  // every week row (or, with zero weeks, across the harmless placeholder
+  // text row above, which contributes $0 since B:F are blank there).
+  const trainerDataEndRow1 = row0; // 1-indexed last data/placeholder row
+  const trainerDataStartRow1 = trainerDataStartRow0 + 1;
+  const trainerTotalRow0 = row0;
+  const trainerTotalRow1 = trainerTotalRow0 + 1;
+  const trainerTotalValues: object[] = [{ userEnteredValue: { stringValue: "TOTAL" }, userEnteredFormat: { textFormat: { bold: true } } }];
+  for (let i = 0; i < SUB_TRAINERS.length; i++) {
+    const col = colLetter(2 + i);
+    trainerTotalValues.push({
+      userEnteredValue: { formulaValue: `=SUM(${col}${trainerDataStartRow1}:${col}${trainerDataEndRow1})` },
+      userEnteredFormat: { textFormat: { bold: true } },
+    });
+  }
+  trainerTotalValues.push({
+    userEnteredValue: { formulaValue: `=SUM(B${trainerTotalRow1}:${lastTrainerColLetter}${trainerTotalRow1})` },
+    userEnteredFormat: { textFormat: { bold: true } },
+  });
+  requests.push({
+    updateCells: {
+      rows: [{ values: trainerTotalValues }],
+      fields: "userEnteredValue,userEnteredFormat",
+      start: { sheetId, rowIndex: trainerTotalRow0, columnIndex: 0 },
+    },
+  });
+  const trainerGrandTotalCell = `${colLetter(2 + SUB_TRAINERS.length)}${trainerTotalRow1}`; // e.g. "G{row}"
+  row0 += 1;
 
-  // LOCATION BREAKDOWN
+  // LOCATION BREAKDOWN — Revenue This Month is a SUMIF straight against the
+  // day rows' own Place (E) and Gross Revenue (F) columns, so it always
+  // matches whatever those actually say, hand-edited or not. Net is just
+  // Revenue-Rent on the same row.
   row0 += 1;
   requests.push(subtitleHeaderRequest(sheetId, row0, "LOCATION BREAKDOWN"));
   row0 += 1;
@@ -895,26 +920,19 @@ async function buildMonthTab(
     },
   });
   row0 += 1;
-  let monthRentTotal = 0;
-  let namedLocationRevenue = 0;
+  const firstLocRow1 = row0 + 1;
   for (const loc of KNOWN_LOCATIONS) {
     const existingRent = await readExistingRent(tabName, row0 + 1); // 1-indexed row for getValues
     const rent = existingRent ?? loc.monthlyRent;
-    monthRentTotal += rent;
-    let revenue = 0;
-    for (const [rawLoc, amt] of revenueByLocation) {
-      if (locationMatches(rawLoc, loc.name)) revenue += amt;
-    }
-    revenue = round2(revenue);
-    namedLocationRevenue += revenue;
+    const locRowNum1 = row0 + 1;
     requests.push({
       updateCells: {
         rows: [{
           values: [
             { userEnteredValue: { stringValue: loc.name } },
             { userEnteredValue: { numberValue: rent } },
-            { userEnteredValue: { numberValue: revenue } },
-            { userEnteredValue: { numberValue: round2(revenue - rent) } },
+            { userEnteredValue: { formulaValue: `=SUMIF(E${firstDayRow1}:E${lastDayRow1},"*"&A${locRowNum1}&"*",F${firstDayRow1}:F${lastDayRow1})` } },
+            { userEnteredValue: { formulaValue: `=C${locRowNum1}-B${locRowNum1}` } },
           ],
         }],
         fields: "userEnteredValue",
@@ -923,15 +941,16 @@ async function buildMonthTab(
     });
     row0 += 1;
   }
-  const otherRevenue = round2(monthGross - namedLocationRevenue);
+  const lastLocRow1 = row0; // 1-indexed last KNOWN_LOCATIONS row
+  const otherRowNum1 = row0 + 1;
   requests.push({
     updateCells: {
       rows: [{
         values: [
           { userEnteredValue: { stringValue: "Other / Unlisted" } },
           { userEnteredValue: { numberValue: 0 } },
-          { userEnteredValue: { numberValue: otherRevenue } },
-          { userEnteredValue: { numberValue: otherRevenue } },
+          { userEnteredValue: { formulaValue: `=F${totalsRow1}-SUM(C${firstLocRow1}:C${lastLocRow1})` } },
+          { userEnteredValue: { formulaValue: `=C${otherRowNum1}-B${otherRowNum1}` } },
         ],
       }],
       fields: "userEnteredValue",
@@ -940,15 +959,19 @@ async function buildMonthTab(
   });
   row0 += 2;
 
-  // NET PROFIT TO MESA
-  const netProfit = round2(monthNet - monthTrainerPayTotal - monthRentTotal);
+  // NET PROFIT TO MESA — references Month Totals' own Net Revenue cell,
+  // the Trainer Pay grand total cell, and the location rows' own Rent
+  // column, instead of independently-tracked JS running totals.
   requests.push({
     updateCells: {
       rows: [{
         values: [
           { userEnteredValue: { stringValue: "NET PROFIT TO MESA THIS MONTH" }, userEnteredFormat: { textFormat: { bold: true, fontSize: 12 } } },
           { userEnteredValue: { stringValue: "" } },
-          { userEnteredValue: { numberValue: netProfit }, userEnteredFormat: { textFormat: { bold: true, fontSize: 12 }, numberFormat: { type: "CURRENCY", pattern: "$#,##0.00" } } },
+          {
+            userEnteredValue: { formulaValue: `=I${totalsRow1}-${trainerGrandTotalCell}-SUM(B${firstLocRow1}:B${lastLocRow1})` },
+            userEnteredFormat: { textFormat: { bold: true, fontSize: 12 }, ...currencyFmt },
+          },
           { userEnteredValue: { stringValue: "= Net Revenue − Trainer Pay − Rent" } },
         ],
       }],
