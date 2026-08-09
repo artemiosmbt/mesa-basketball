@@ -14,7 +14,7 @@
  * change after the fact, a corrected price, etc. just fall out of a fresh
  * rebuild automatically, sidestepping an entire class of incremental-sync
  * bugs. Two exceptions, both real manual input that must survive a rebuild:
- * each month's per-location rent cell (see readExistingRent), and any day
+ * each month's per-location rent cell (see readExistingRentByName), and any day
  * row the owner has hand-edited (see the _DayLog tab / dayRowFingerprint
  * below) — a day is only ever rewritten if its live content still matches
  * the fingerprint of what THIS sync last wrote there; the moment it
@@ -397,10 +397,22 @@ async function ensureMonthTab(tabName: string): Promise<number> {
   return created.sheetId;
 }
 
-async function readExistingRent(tabName: string, rowIndex1: number): Promise<number | null> {
-  const vals = await getValues(MONTHLY_REVENUE_SHEET_ID, `${a1Quote(tabName)}!B${rowIndex1}`);
-  const v = vals?.[0]?.[0];
-  return typeof v === "number" ? v : null;
+/** Scans a wide range below Month Totals for (Location name, Rent) pairs,
+ * keyed by name rather than row position — the Location Breakdown section's
+ * row position shifts (a week appearing/disappearing in Trainer Pay above
+ * it moves everything below), so reading "whatever's currently at this row
+ * number" is unsafe: it silently grabbed a DIFFERENT location's rent after
+ * a shift once, corrupting both. Returns an empty map if nothing's there
+ * yet (new tab). */
+async function readExistingRentByName(tabName: string, scanStartRow1: number, scanRows: number): Promise<Map<string, number>> {
+  const rows = await getValues(MONTHLY_REVENUE_SHEET_ID, `${a1Quote(tabName)}!A${scanStartRow1}:B${scanStartRow1 + scanRows}`);
+  const map = new Map<string, number>();
+  for (const row of rows) {
+    const name = String((row as unknown[])?.[0] ?? "").trim();
+    const rent = (row as unknown[])?.[1];
+    if (name && typeof rent === "number") map.set(name, rent);
+  }
+  return map;
 }
 
 // ---------------------------------------------------------------------------
@@ -939,9 +951,12 @@ async function buildMonthTab(
   });
   row0 += 1;
   const firstLocRow1 = row0 + 1;
+  // Read BEFORE the clear-region request (queued above, not yet sent —
+  // it only takes effect once batchUpdate runs at the end of this
+  // function) executes, so this still sees whatever rent was really there.
+  const existingRentByName = await readExistingRentByName(tabName, totalsRow0 + 1, 120);
   for (const loc of KNOWN_LOCATIONS) {
-    const existingRent = await readExistingRent(tabName, row0 + 1); // 1-indexed row for getValues
-    const rent = existingRent ?? loc.monthlyRent;
+    const rent = existingRentByName.get(loc.name) ?? loc.monthlyRent;
     const locRowNum1 = row0 + 1;
     requests.push({
       updateCells: {
