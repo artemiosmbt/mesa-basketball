@@ -1004,6 +1004,7 @@ export default function AdminPage() {
   const [authCtx, setAuthCtx] = useState<AuthContext | null>(null);
   const [trainerFilter, setTrainerFilter] = useState("all");
   const [selectedClient, setSelectedClient] = useState<string | null>(null);
+  const [stats, setStats] = useState<{ total: number; confirmed: number; cancelled: number; camps: number; groups: number } | null>(null);
 
   // Groups tab state — which athlete row (keyed "email|athleteId") is
   // expanded to show parent info, and which group-assignment mutation (if
@@ -1041,10 +1042,33 @@ export default function AdminPage() {
       setAuthCtx(ctx);
       setToken(session.access_token);
 
-      // Load registrations first so the dashboard renders right away
+      // Two fetches in parallel: a small, fast "upcoming only" one (what
+      // the dashboard shows first, every time) and the full historical
+      // fetch every other tab still needs today. Whichever resolves first
+      // paints the page — usually upcoming, since it's the much smaller
+      // query — but the full fetch's result always wins if it lands after,
+      // never the other way around, so Past/Calendar/Clients can't get
+      // regressed back to a narrower dataset by a slow-but-later upcoming
+      // response. This is deliberately NOT two permanently-separate arrays
+      // that every mutation handler (cancel/reschedule/no-show/etc.) would
+      // then need to keep in sync — full data supersedes upcoming-only
+      // moments later and everything downstream keeps working exactly as
+      // it already does today.
+      let fullDataLoaded = false;
+
+      fetch(`/api/admin/data?view=upcoming`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      }).then((r) => r.json()).then((upcomingData) => {
+        if (!fullDataLoaded) {
+          setRegistrations(upcomingData.registrations || []);
+          setLoading(false);
+        }
+      }).catch(() => {});
+
       fetch("/api/admin/data", {
         headers: { Authorization: `Bearer ${session.access_token}` },
       }).then((r) => r.json()).then((adminData) => {
+        fullDataLoaded = true;
         setRegistrations(adminData.registrations || []);
         const map: Record<string, boolean> = {};
         const profMap: Record<string, { phone: string; parentName: string; kids: ProfileKid[] }> = {};
@@ -1586,13 +1610,21 @@ export default function AdminPage() {
     });
   }
 
-  const stats = useMemo(() => ({
-    total: visibleRegistrations.length,
-    confirmed: visibleRegistrations.filter((r) => r.status === "confirmed").length,
-    cancelled: visibleRegistrations.filter((r) => r.status === "cancelled").length,
-    camps: visibleRegistrations.filter((r) => r.type === "camp" && r.status === "confirmed").length,
-    groups: visibleRegistrations.filter((r) => r.type === "weekly" && r.status === "confirmed").length,
-  }), [visibleRegistrations]);
+  // Fetched from a dedicated aggregate-count endpoint (src/app/api/admin/stats)
+  // instead of computed by .length-ing the full registrations dataset —
+  // admin-only, same as the tiles themselves, and independent of whatever
+  // subset of history is currently loaded for the active tab. Re-fetches
+  // when the trainer-filter dropdown changes, preserving the same
+  // "narrow the whole page (including these tiles) to one trainer" behavior
+  // the old client-side version had.
+  useEffect(() => {
+    if (!token || authCtx?.role !== "admin") return;
+    const params = trainerFilter !== "all" ? `?trainer=${encodeURIComponent(trainerFilter)}` : "";
+    fetch(`/api/admin/stats${params}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.json())
+      .then((data) => setStats(data))
+      .catch(() => {});
+  }, [token, authCtx, trainerFilter]);
 
 
   // Session-slot capacity from the live schedule sheet, keyed the same way
@@ -1882,14 +1914,14 @@ export default function AdminPage() {
         {authCtx?.role === "admin" && (
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
             {[
-              { label: "Total", value: stats.total },
-              { label: "Confirmed", value: stats.confirmed },
-              { label: "Cancelled", value: stats.cancelled },
-              { label: "Camp Bookings", value: stats.camps },
-              { label: "Group Bookings", value: stats.groups },
+              { label: "Total", value: stats?.total },
+              { label: "Confirmed", value: stats?.confirmed },
+              { label: "Cancelled", value: stats?.cancelled },
+              { label: "Camp Bookings", value: stats?.camps },
+              { label: "Group Bookings", value: stats?.groups },
             ].map((s) => (
               <div key={s.label} className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-4 text-center">
-                <p className="font-[family-name:var(--font-oswald)] text-3xl font-bold text-mesa-accent">{s.value}</p>
+                <p className="font-[family-name:var(--font-oswald)] text-3xl font-bold text-mesa-accent">{s.value ?? "—"}</p>
                 <p className="text-xs text-brown-400 mt-1">{s.label}</p>
               </div>
             ))}

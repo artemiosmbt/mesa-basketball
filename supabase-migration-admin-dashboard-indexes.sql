@@ -9,19 +9,31 @@
 -- alphabetically, not chronologically (e.g. "August..." would sort before
 -- "March..." even though August is later in the year). Every date-range
 -- query the lazy-loading redesign needs (Past's "last 30 days", Calendar's
--- "this month") instead reads it through TO_DATE(booked_date, 'FMMonth DD,
--- YYYY') — verified against every month name and both single/double-digit
--- days before relying on this. Application code (Phase 2+) MUST use this
--- exact same expression in its queries, or Postgres won't use the indexes
--- below at all.
+-- "this month") instead reads it through the function below — verified
+-- against every month name and both single/double-digit days before
+-- relying on this. Application code (Phase 2+) MUST call this exact
+-- function in its queries, or Postgres won't use the indexes below at all.
+--
+-- Wrapped in a named IMMUTABLE function rather than inlining
+-- TO_DATE(booked_date, 'FMMonth DD, YYYY') directly in the index — Postgres
+-- refuses a bare TO_DATE call in a functional index because it's normally
+-- STABLE (its output can depend on the session's locale/DateStyle
+-- settings), and an index needs a guarantee that never changes. Wrapping it
+-- asserts that guarantee explicitly: this project always parses with a
+-- fixed English month-name format, never a different locale, so the result
+-- for a given input text is genuinely permanent.
+CREATE OR REPLACE FUNCTION parse_booked_date(text) RETURNS date AS $$
+  SELECT TO_DATE($1, 'FMMonth DD, YYYY')
+$$ LANGUAGE sql IMMUTABLE STRICT;
+
 CREATE INDEX IF NOT EXISTS idx_registrations_booked_date_parsed
-  ON registrations ((TO_DATE(booked_date, 'FMMonth DD, YYYY')));
+  ON registrations (parse_booked_date(booked_date));
 
 -- Composite for the single most common combined filter (status + date
 -- window together) — lets Postgres use one index instead of intersecting
 -- two.
 CREATE INDEX IF NOT EXISTS idx_registrations_status_booked_date_parsed
-  ON registrations (status, (TO_DATE(booked_date, 'FMMonth DD, YYYY')));
+  ON registrations (status, parse_booked_date(booked_date));
 
 -- Plain (non-parsed) index too — several existing queries elsewhere in the
 -- app (capacity checks, conflict checks) already do exact-text equality
@@ -42,7 +54,7 @@ CREATE INDEX IF NOT EXISTS idx_registrations_email ON registrations (lower(email
 -- Backs the server-side package-membership sub-query (one client's private/
 -- group-private sessions, filtered to a specific month).
 CREATE INDEX IF NOT EXISTS idx_registrations_email_booked_date_parsed
-  ON registrations (lower(email), (TO_DATE(booked_date, 'FMMonth DD, YYYY')));
+  ON registrations (lower(email), parse_booked_date(booked_date));
 
 -- Plain-trainer scoping (.ilike("booked_trainer", ...)) runs on every
 -- windowed query a trainer-role account makes.

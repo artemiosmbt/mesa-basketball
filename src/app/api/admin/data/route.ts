@@ -18,6 +18,7 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const emailFilter = searchParams.get("email");
+  const view = searchParams.get("view");
 
   // Used only to expand a single client's private-session dates on the
   // Packages page, which every recognized account can see in full (packages
@@ -37,6 +38,40 @@ export async function GET(req: NextRequest) {
       .eq("email", emailFilter.trim().toLowerCase())
       .order("booked_date", { ascending: true });
     return NextResponse.json({ registrations: registrations || [] });
+  }
+
+  // Upcoming loads eagerly on every dashboard open (see the lazy-loading
+  // plan) — a coarse SQL-level "today or later" filter first (backed by the
+  // parse_booked_date functional index via the registrations_with_parsed_date
+  // view, since PostgREST can't filter on an arbitrary function call
+  // directly), then the caller does the exact "has this specific session's
+  // start time already passed today" check client-side against the much
+  // smaller result. "Today" is computed in America/New_York, not the
+  // server's own (UTC) local time — the same class of bug already found
+  // and fixed twice elsewhere in this codebase (payroll-sync.ts,
+  // calendar-sync) if this used the server's raw local date instead.
+  if (view === "upcoming") {
+    const upcomingScopeError = requireTrainerNameConfigured(ctx);
+    if (upcomingScopeError) return upcomingScopeError;
+
+    const todayET = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+    let upcomingQuery = supabase
+      .from("registrations_with_parsed_date")
+      .select("*")
+      .in("status", ["confirmed", "pending_payment"])
+      .gte("booked_date_parsed", todayET)
+      .order("booked_date_parsed", { ascending: true });
+    const upcomingTrainerFilter = trainerScopeFilter(ctx);
+    if (upcomingTrainerFilter) {
+      upcomingQuery = upcomingQuery.ilike("booked_trainer", upcomingTrainerFilter);
+    }
+
+    const [{ data: upcomingRegs }, { data: upcomingPackages }] = await Promise.all([
+      upcomingQuery,
+      supabase.from("monthly_packages").select("id, email, package_type, month_year, is_paid").neq("status", "payment_abandoned"),
+    ]);
+    const enrichedUpcoming = await attachComputedFields(supabase, upcomingRegs || [], upcomingPackages || []);
+    return NextResponse.json({ registrations: enrichedUpcoming });
   }
 
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
