@@ -69,6 +69,20 @@ interface RescheduleForm {
   price?: number;
 }
 
+// Matches api/admin/data's ?view=clients response shape.
+interface ClientSummary {
+  name: string;
+  email: string;
+  phone: string;
+  kids: string;
+  athleteCount: number;
+  count: number;
+  lastDate: number;
+  videoConsent: boolean | null;
+  referralsAvailable: number;
+  referralsTotal: number;
+}
+
 interface ScheduleData {
   weeklySchedule: WeeklySession[];
   camps: Camp[];
@@ -116,12 +130,6 @@ function typePill(type: string, sessionDetails?: string) {
 function typePillLabel(type: string, sessionDetails?: string) {
   if (type === "weekly" && sessionDetails?.toLowerCase().includes("pickup")) return "Pickup";
   return TYPE_LABELS[type] || type;
-}
-
-function dateMs(d: string | null): number {
-  if (!d) return 0;
-  const p = new Date(d);
-  return isNaN(p.getTime()) ? 0 : p.setHours(0, 0, 0, 0);
 }
 
 function sessionMs(date: string | null, startTime: string | null): number {
@@ -1016,9 +1024,7 @@ export default function AdminPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [registrations, setRegistrations] = useState<Registration[]>([]);
-  const [videoConsentMap, setVideoConsentMap] = useState<Record<string, boolean>>({});
   const [profilesMap, setProfilesMap] = useState<Record<string, { phone: string; parentName: string; kids: ProfileKid[] }>>({});
-  const [referralCreditsMap, setReferralCreditsMap] = useState<Record<string, { available: number; total: number }>>({});
   const [tab, setTab] = useState<"upcoming" | "past" | "clients" | "calendar" | "groups">("upcoming");
   const [typeFilter, setTypeFilter] = useState("all");
   const [search, setSearch] = useState("");
@@ -1044,6 +1050,17 @@ export default function AdminPage() {
   const [pastLoading, setPastLoading] = useState(false);
   const [pastLoadingAll, setPastLoadingAll] = useState(false);
   const [pastSearchLoading, setPastSearchLoading] = useState(false);
+
+  // Clients tab: the list itself is a lightweight per-client aggregate
+  // (see api/admin/data's ?view=clients) fetched once per tab visit /
+  // trainer-filter change, not derived from the full registrations
+  // dataset. Clicking into one specific client fetches THAT client's full
+  // history on demand (clientDetailRegs) — never preloaded for everyone.
+  const [clientsList, setClientsList] = useState<ClientSummary[] | null>(null);
+  const [clientsLoading, setClientsLoading] = useState(false);
+  const [clientDetailRegs, setClientDetailRegs] = useState<Registration[] | null>(null);
+  const [clientDetailLoading, setClientDetailLoading] = useState(false);
+  const [clientDetailFor, setClientDetailFor] = useState<string | null>(null);
 
   // Groups tab state — which athlete row (keyed "email|athleteId") is
   // expanded to show parent info, and which group-assignment mutation (if
@@ -1109,20 +1126,17 @@ export default function AdminPage() {
       }).then((r) => r.json()).then((adminData) => {
         fullDataLoaded = true;
         setRegistrations(adminData.registrations || []);
-        const map: Record<string, boolean> = {};
+        // videoConsentMap/referralCreditsMap were only ever read by the
+        // Clients-tab aggregate, which now computes both server-side (see
+        // ?view=clients) — profilesMap is still needed here for the Groups
+        // tab and client-detail view, so profiles is still parsed, just no
+        // longer also built into the two now-unused maps.
         const profMap: Record<string, { phone: string; parentName: string; kids: ProfileKid[] }> = {};
         for (const p of (adminData.profiles || [])) {
           if (!p.email) continue;
-          map[p.email] = p.video_consent ?? true;
           profMap[p.email] = { phone: p.phone || "", parentName: p.parent_name || "", kids: Array.isArray(p.kids) ? p.kids : [] };
         }
-        setVideoConsentMap(map);
         setProfilesMap(profMap);
-        const creditsMap: Record<string, { available: number; total: number }> = {};
-        for (const rc of (adminData.referralCredits || [])) {
-          if (rc.email) creditsMap[rc.email] = { available: rc.credits || 0, total: rc.total_referrals || 0 };
-        }
-        setReferralCreditsMap(creditsMap);
       }).finally(() => setLoading(false));
 
       // Time-change sync writes data — trainer accounts are read-only, so
@@ -1203,6 +1217,42 @@ export default function AdminPage() {
     }, 300);
     return () => clearTimeout(handle);
   }, [tab, search, token]);
+
+  // Clients tab list — fetched on first visit, and re-fetched if the
+  // trainer-filter dropdown changes (it narrows Clients too, same as
+  // Upcoming/Past/Calendar) or nothing's loaded yet under the current
+  // filter.
+  useEffect(() => {
+    if (tab !== "clients" || !token || clientsLoading) return;
+    setClientsLoading(true);
+    const params = trainerFilter !== "all" ? `&trainer=${encodeURIComponent(trainerFilter)}` : "";
+    fetch(`/api/admin/data?view=clients${params}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.json())
+      .then((data) => setClientsList(data.clients || []))
+      .catch(() => setClientsList([]))
+      .finally(() => setClientsLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, token, trainerFilter]);
+
+  // Clicking into one specific client fetches THEIR full history on
+  // demand — never preloaded for everyone else. Re-fetches if a different
+  // client is selected; clearing the selection just hides the detail view,
+  // no need to discard what was already loaded.
+  useEffect(() => {
+    if (!selectedClient || !token || selectedClient === clientDetailFor) return;
+    setClientDetailLoading(true);
+    fetch(`/api/admin/data?email=${encodeURIComponent(selectedClient)}&full=1`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.json())
+      .then((data) => {
+        setClientDetailRegs(data.registrations || []);
+        setClientDetailFor(selectedClient);
+      })
+      .catch(() => {
+        setClientDetailRegs([]);
+        setClientDetailFor(selectedClient);
+      })
+      .finally(() => setClientDetailLoading(false));
+  }, [selectedClient, token, clientDetailFor]);
 
   async function deleteRegistration(id: string) {
     if (!token) return;
@@ -1538,35 +1588,12 @@ export default function AdminPage() {
       .sort((a, b) => sessionMs(b.booked_date, b.booked_start_time) - sessionMs(a.booked_date, a.booked_start_time));
   }, [pastSearchRegs, pastAllRegs, pastWindowRegs, trainerFilter]);
 
-  // Unique clients sorted by name — an abandoned checkout never counts
-  // toward a client's history (they never actually booked or paid). Athlete
-  // names/count come from the client's saved profile roster (every distinct
-  // athlete they've ever booked, kept up to date) when one exists — falling
-  // back to just the FIRST registration's kids string only for guest
-  // clients with no account, since that's all there is to go on for them.
-  const clients = useMemo(() => {
-    const map = new Map<string, { name: string; email: string; phone: string; kids: string; athleteCount: number; count: number; lastDate: number; videoConsent: boolean | null; referralsAvailable: number; referralsTotal: number }>();
-    for (const r of visibleRegistrations) {
-      if (r.status === "payment_abandoned") continue;
-      const key = r.email || r.parent_name;
-      const existing = map.get(key);
-      const d = dateMs(r.booked_date);
-      if (existing) {
-        existing.count++;
-        if (d > existing.lastDate) existing.lastDate = d;
-      } else {
-        const vc = r.email && r.email in videoConsentMap ? videoConsentMap[r.email] : null;
-        const rc = r.email ? (referralCreditsMap[r.email] ?? { available: 0, total: 0 }) : { available: 0, total: 0 };
-        const profile = r.email ? profilesMap[r.email] : undefined;
-        const profileKidNames = profile?.kids?.length ? profile.kids.map((k) => k.name).filter(Boolean) : null;
-        const kidsDisplay = profileKidNames ? (profileKidNames.join(", ") || "—") : athleteNames(r.kids || "");
-        const athleteCount = profileKidNames ? profileKidNames.length : (kidsDisplay === "—" ? 0 : kidsDisplay.split(",").length);
-        map.set(key, { name: r.parent_name, email: r.email, phone: r.phone, kids: kidsDisplay, athleteCount, count: 1, lastDate: d, videoConsent: vc, referralsAvailable: rc.available, referralsTotal: rc.total });
-      }
-    }
-    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
-  }, [visibleRegistrations, videoConsentMap, referralCreditsMap, profilesMap]);
-
+  // Fetched from api/admin/data's ?view=clients (see the effect above) —
+  // the server-side aggregate this useMemo used to compute client-side over
+  // the full registrations dataset. clientMatchesSearch's name/kid-token
+  // matching stays client-side since it's just filtering an already-small,
+  // already-loaded list — no reason to round-trip that to the server too.
+  const clients = useMemo(() => clientsList ?? [], [clientsList]);
   const filteredClients = useMemo(
     () => clients.filter((c) => clientMatchesSearch(c, clientSearch)),
     [clients, clientSearch]
@@ -1666,12 +1693,13 @@ export default function AdminPage() {
     }
   }
 
-  const clientRegistrations = useMemo(() => {
-    if (!selectedClient) return [];
-    return visibleRegistrations
-      .filter((r) => (r.email || r.parent_name) === selectedClient && r.status !== "payment_abandoned")
-      .sort((a, b) => dateMs(b.booked_date) - dateMs(a.booked_date));
-  }, [visibleRegistrations, selectedClient]);
+  // Fetched on demand when a client is clicked (see the effect above) —
+  // already exact-email-filtered, payment_abandoned-excluded, and
+  // date-descending sorted server-side. Every real registration has an
+  // email (verified against live data — 0 of 429 rows lack one), so the
+  // legacy "guest keyed by parent_name" case the old client-side filter
+  // defensively handled is not reachable in practice.
+  const clientRegistrations = clientDetailFor === selectedClient ? (clientDetailRegs ?? []) : [];
 
   // Apply type filter + search to a list
   // skipSearch: the Past tab's search is handled server-side (its `past`
@@ -2192,7 +2220,10 @@ export default function AdminPage() {
               className="mb-4 rounded-lg border border-brown-700 bg-brown-800/60 px-4 py-2 text-sm text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none w-full sm:w-80"
             />
             <div className="space-y-2">
-              {filteredClients.length === 0 && (
+              {clientsLoading && clientsList === null && (
+                <p className="text-sm text-brown-500 py-4 text-center">Loading…</p>
+              )}
+              {!(clientsLoading && clientsList === null) && filteredClients.length === 0 && (
                 <p className="text-sm text-brown-500 py-4 text-center">No clients found.</p>
               )}
               {filteredClients.map((c) => (
@@ -2305,8 +2336,14 @@ export default function AdminPage() {
                 </div>
               )}
               <div className="space-y-3">
-                {clientRegistrations.map((r) => <RegCard key={r.id} r={r} isPast={sessionMs(r.booked_date, r.booked_start_time) < Date.now()} />)}
-                {clientRegistrations.length === 0 && <p className="text-brown-500 text-sm">No registrations found.</p>}
+                {clientDetailLoading && clientDetailFor !== selectedClient ? (
+                  <p className="text-brown-500 text-sm">Loading…</p>
+                ) : (
+                  <>
+                    {clientRegistrations.map((r) => <RegCard key={r.id} r={r} isPast={sessionMs(r.booked_date, r.booked_start_time) < Date.now()} />)}
+                    {clientRegistrations.length === 0 && <p className="text-brown-500 text-sm">No registrations found.</p>}
+                  </>
+                )}
               </div>
             </>
           );

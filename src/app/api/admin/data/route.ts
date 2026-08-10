@@ -4,6 +4,17 @@ import { verifyDashboardAccess } from "@/lib/auth";
 import { requireTrainerNameConfigured, trainerScopeFilter, deriveOwnClientEmails, scopeToOwnClients } from "@/lib/admin-data-scope";
 import { attachComputedFields } from "@/lib/admin-registration-enrichment";
 
+// Mirrors admin/page.tsx's identical client-side helpers exactly — moved
+// here too since ?view=clients now does this aggregation server-side.
+function dateMs(d: string | null): number {
+  if (!d) return 0;
+  const p = new Date(d);
+  return isNaN(p.getTime()) ? 0 : p.setHours(0, 0, 0, 0);
+}
+function athleteNames(kids: string): string {
+  return kids ? kids.split(",").map((k) => k.split("(")[0].trim()).filter(Boolean).join(", ") : "—";
+}
+
 
 export async function GET(req: NextRequest) {
   const ctx = await verifyDashboardAccess(req);
@@ -32,12 +43,110 @@ export async function GET(req: NextRequest) {
   // search — ilike with a client-supplied pattern let `%`/`_` wildcard-match
   // the whole table.
   if (emailFilter) {
+    // full=1: the Clients-tab detail view — a single client's entire
+    // booking history, loaded only once the admin clicks into that
+    // specific client (see the lazy-loading plan). Needs the real column
+    // set RegCard renders, unlike the minimal id/type/date/time projection
+    // below the Packages page uses, and — unlike that branch — DOES need
+    // trainer scoping: a plain trainer must only ever see their own
+    // bookings for this client, same invariant as every other view.
+    if (searchParams.get("full") === "1") {
+      const fullScopeError = requireTrainerNameConfigured(ctx);
+      if (fullScopeError) return fullScopeError;
+
+      let clientQuery = supabase
+        .from("registrations_with_parsed_date")
+        .select("*")
+        .eq("email", emailFilter.trim().toLowerCase())
+        .neq("status", "payment_abandoned")
+        .order("booked_date_parsed", { ascending: false });
+      const clientTrainerFilter = trainerScopeFilter(ctx);
+      if (clientTrainerFilter) clientQuery = clientQuery.ilike("booked_trainer", clientTrainerFilter);
+
+      const [{ data: clientRegs }, { data: clientPackages }] = await Promise.all([
+        clientQuery,
+        supabase.from("monthly_packages").select("id, email, package_type, month_year, is_paid").neq("status", "payment_abandoned"),
+      ]);
+      const enrichedClient = await attachComputedFields(supabase, clientRegs || [], clientPackages || []);
+      return NextResponse.json({ registrations: enrichedClient });
+    }
+
     const { data: registrations } = await supabase
       .from("registrations")
       .select("id, type, booked_date, booked_start_time, booked_end_time")
       .eq("email", emailFilter.trim().toLowerCase())
       .order("booked_date", { ascending: true });
     return NextResponse.json({ registrations: registrations || [] });
+  }
+
+  // Clients tab list — built from an aggregate over registrations
+  // (email/parent_name, phone, kids, booked_date only — never the full
+  // row) instead of the browser deriving counts/last-session-date from
+  // every registration it happens to have loaded. Preserves the existing
+  // guest-client fallback (no profiles row: kids/count come straight from
+  // their own registrations) exactly as the client-side version did.
+  if (view === "clients") {
+    const clientsScopeError = requireTrainerNameConfigured(ctx);
+    if (clientsScopeError) return clientsScopeError;
+
+    let clientRegsQuery = supabase
+      .from("registrations")
+      .select("email, parent_name, phone, kids, booked_date")
+      .neq("status", "payment_abandoned");
+    const clientsTrainerFilter = trainerScopeFilter(ctx);
+    if (clientsTrainerFilter) {
+      clientRegsQuery = clientRegsQuery.ilike("booked_trainer", clientsTrainerFilter);
+    } else {
+      // Admin's own trainer-filter dropdown also narrows the Clients tab
+      // (per the dashboard's existing comment: "applies across
+      // Upcoming/Past/Calendar, admin also gets Clients").
+      const dropdownTrainer = searchParams.get("trainer");
+      if (dropdownTrainer) clientRegsQuery = clientRegsQuery.ilike("booked_trainer", dropdownTrainer);
+    }
+
+    const [{ data: clientRegs }, { data: profilesRaw }, { data: referralCreditsRaw }] = await Promise.all([
+      clientRegsQuery,
+      supabase.from("profiles").select("email, phone, parent_name, kids, video_consent"),
+      supabase.from("referral_credits").select("email, credits, total_referrals"),
+    ]);
+
+    const ownClientEmails = deriveOwnClientEmails(clientRegs || [], ctx);
+    const profiles = scopeToOwnClients(profilesRaw, ownClientEmails);
+    const referralCredits = scopeToOwnClients(referralCreditsRaw, ownClientEmails);
+    const profilesMap = new Map(profiles.map((p) => [p.email, p]));
+    const referralMap = new Map(referralCredits.map((r) => [r.email, r]));
+
+    interface ClientSummary {
+      name: string; email: string; phone: string; kids: string; athleteCount: number;
+      count: number; lastDate: number; videoConsent: boolean | null; referralsAvailable: number; referralsTotal: number;
+    }
+    const clientMap = new Map<string, ClientSummary>();
+    for (const r of clientRegs || []) {
+      const key = r.email || r.parent_name;
+      if (!key) continue;
+      const d = dateMs(r.booked_date);
+      const existing = clientMap.get(key);
+      if (existing) {
+        existing.count++;
+        if (d > existing.lastDate) existing.lastDate = d;
+        continue;
+      }
+      const profile = r.email ? profilesMap.get(r.email) : undefined;
+      const rc = r.email ? referralMap.get(r.email) : undefined;
+      const profileKids = (profile?.kids as { name?: string }[] | null) || null;
+      const profileKidNames = profileKids?.length ? profileKids.map((k) => k.name).filter(Boolean) as string[] : null;
+      const kidsDisplay = profileKidNames ? (profileKidNames.join(", ") || "—") : athleteNames(r.kids || "");
+      const athleteCount = profileKidNames ? profileKidNames.length : (kidsDisplay === "—" ? 0 : kidsDisplay.split(",").length);
+      clientMap.set(key, {
+        name: r.parent_name, email: r.email, phone: r.phone, kids: kidsDisplay, athleteCount,
+        count: 1, lastDate: d,
+        videoConsent: profile?.video_consent ?? null,
+        referralsAvailable: rc?.credits ?? 0,
+        referralsTotal: rc?.total_referrals ?? 0,
+      });
+    }
+    const clients = Array.from(clientMap.values()).sort((a, b) => a.name.localeCompare(b.name));
+    return NextResponse.json({ clients });
   }
 
   // Calendar fetches one month at a time as the admin navigates, instead of

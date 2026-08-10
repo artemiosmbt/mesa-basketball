@@ -6,9 +6,13 @@ import Link from "next/link";
 import { authClient, ADMIN_EMAIL } from "@/lib/auth";
 import { fullPriceForType, getTrainerTier } from "@/lib/pricing";
 
+// Matches the exact column list /api/admin/payments-data selects — this
+// page only ever needed a narrow slice of a registration row, not the
+// full-table `select("*")` the shared /api/admin/data endpoint used to
+// hand it (manage_token, full unfiltered session_details, etc. it never
+// rendered).
 interface Registration {
   id: string;
-  created_at: string;
   parent_name: string;
   email: string;
   phone: string;
@@ -21,18 +25,14 @@ interface Registration {
   status: string;
   is_paid: boolean;
   stripe_payment_intent_id: string | null;
-  is_late_cancel: boolean;
-  cancel_fee_settled: boolean;
   session_price: number | null;
   total_participants: number | null;
   is_free: boolean;
-  used_referral_credit: boolean;
   is_full_camp: boolean;
   referral_code: string | null;
   camp_day_late_fee: number | null;
   camp_drop_in_rate: number | null;
   applied_account_credit: number | null;
-  booking_batch_id: string | null;
   booked_trainer: string | null;
   // Computed server-side (see src/lib/admin-registration-enrichment.ts).
   within_package?: boolean;
@@ -142,7 +142,7 @@ export default function PaymentsPage() {
         return;
       }
       setToken(session.access_token);
-      fetch("/api/admin/data", {
+      fetch("/api/admin/payments-data", {
         headers: { Authorization: `Bearer ${session.access_token}` },
       })
         .then((r) => r.json())
