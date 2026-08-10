@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import Image from "next/image";
 import LandingNav from "../LandingNav";
+import TrainerVideo from "../TrainerVideo";
 
 export const metadata: Metadata = {
   title: "Artemios Gavalas | Mesa Basketball Training",
@@ -41,6 +42,7 @@ interface TrainerBio {
   title: string;
   headshot: string;
   headshotPosition?: string; // CSS object-position; defaults to center
+  pills: string[]; // credential/highlight pills shown under the name, matching Artemios's hero
   bioParagraphs: string[];
   // Set once a video is available — the layout below only splits into a
   // side-by-side bio+video row when this is present, so a trainer's bio
@@ -54,7 +56,8 @@ const TRAINERS: TrainerBio[] = [
     displayName: "Joe Owens",
     title: "Trainer",
     headshot: "/headshot-joe-owens.jpg",
-    headshotPosition: "50% 30%",
+    headshotPosition: "center",
+    pills: ["5+ Year Trainer", "All Ages Experience"],
     videoUrl: "/joe-owens-workout-reel.mp4",
     bioParagraphs: [
       "I am a dedicated basketball skills trainer passionate about helping athletes reach their full potential through skill development, basketball IQ, and confidence. I began my coaching career early after injuries shifted my focus to player development.",
@@ -258,6 +261,13 @@ export default function AboutPage() {
               <h2 className="font-[family-name:var(--font-fira-cond)] text-3xl font-black tracking-wide md:text-4xl">
                 {trainer.displayName.toUpperCase()}
               </h2>
+              {trainer.pills.length > 0 && (
+                <div className="mt-6 flex flex-wrap justify-center gap-3 text-sm text-brown-300">
+                  {trainer.pills.map((pill) => (
+                    <span key={pill} className="rounded-full border border-brown-700 px-4 py-1">{pill}</span>
+                  ))}
+                </div>
+              )}
             </div>
             <div className="flex flex-col md:flex-row gap-10 items-start">
               <div className="space-y-5 text-brown-200 leading-relaxed text-[17px] flex-1">
@@ -266,12 +276,9 @@ export default function AboutPage() {
                 ))}
               </div>
               {trainer.videoUrl && (
-                <div className="relative w-full aspect-[3/4] md:h-auto md:w-72 md:aspect-[3/4] rounded-xl overflow-hidden flex-shrink-0 shadow-xl bg-black">
-                  <video
+                <div className="relative w-full aspect-[3/4] md:h-auto md:w-72 md:aspect-[3/4] rounded-xl overflow-hidden flex-shrink-0 shadow-xl bg-black pointer-events-none">
+                  <TrainerVideo
                     src={trainer.videoUrl}
-                    controls
-                    playsInline
-                    preload="metadata"
                     className="absolute inset-0 h-full w-full object-cover"
                   />
                 </div>
