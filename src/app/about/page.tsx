@@ -204,9 +204,11 @@ export default function AboutPage() {
             reads in the same text-alongside-media layout as his "Why Mesa
             Exists" section, just with a video slot instead of a photo. */}
         {sortedTrainers.length > 0 && (
-          <div className="relative left-1/2 right-1/2 -mx-[50vw] w-screen overflow-hidden bg-brown-700 border-y border-mesa-accent/30">
+          <div className="relative left-1/2 right-1/2 -mx-[50vw] w-screen overflow-hidden bg-gradient-to-b from-brown-600 via-brown-700 to-brown-800 shadow-[0_15px_40px_-10px_rgba(0,0,0,0.6)]">
+            {/* Thin top highlight simulates a raised/beveled edge instead of a flat color fill */}
+            <div className="absolute inset-x-0 top-0 h-px bg-white/15" />
             <div className="mx-auto max-w-6xl px-6 py-12 text-center">
-              <h2 className="font-[family-name:var(--font-fira-cond)] text-4xl md:text-5xl font-black tracking-wide text-mesa-accent">
+              <h2 className="font-[family-name:var(--font-fira-cond)] text-4xl md:text-5xl font-black tracking-wide text-mesa-accent drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]">
                 MEET THE TEAM
               </h2>
             </div>
