@@ -204,7 +204,7 @@ export default function AboutPage() {
             reads in the same text-alongside-media layout as his "Why Mesa
             Exists" section, just with a video slot instead of a photo. */}
         {sortedTrainers.length > 0 && (
-          <div className="relative left-1/2 right-1/2 -mx-[50vw] w-screen overflow-hidden bg-gradient-to-br from-mesa-dark via-brown-900 to-brown-800">
+          <div className="relative left-1/2 right-1/2 -mx-[50vw] w-screen overflow-hidden bg-brown-700 border-y border-mesa-accent/30">
             <div className="mx-auto max-w-6xl px-6 py-12 text-center">
               <h2 className="font-[family-name:var(--font-fira-cond)] text-4xl md:text-5xl font-black tracking-wide text-mesa-accent">
                 MEET THE TEAM
@@ -215,13 +215,22 @@ export default function AboutPage() {
         {sortedTrainers.length > 0 && sortedTrainers.map((trainer, i) => (
           <Fragment key={trainer.slug}>
             {i > 0 && (
-              <div className="relative left-1/2 right-1/2 -mx-[50vw] w-screen overflow-hidden bg-gradient-to-br from-mesa-dark via-brown-900 to-brown-800 py-6" />
+              <div className="py-4">
+                <div className="flex items-center gap-4">
+                  <div className="h-px flex-1 bg-gradient-to-r from-transparent to-mesa-accent/70" />
+                  <div className="h-2 w-2 rotate-45 bg-mesa-accent" />
+                  <div className="h-px flex-1 bg-gradient-to-l from-transparent to-mesa-accent/70" />
+                </div>
+              </div>
             )}
             <section id={trainer.slug} className="scroll-mt-20">
             {/* Full-bleed gradient band behind the headshot/name/pills, matching
                 Artemios's own hero section above — breaks out of <main>'s
-                max-w-4xl to span the full viewport width. */}
-            <div className="relative left-1/2 right-1/2 -mx-[50vw] w-screen overflow-hidden bg-gradient-to-br from-mesa-dark via-brown-900 to-brown-800 py-20 md:py-28 mb-10">
+                max-w-4xl to span the full viewport width. Pulled up slightly
+                (-mt-8) to tighten the gap under the Meet the Team band / the
+                divider above each trainer — space-y-16 on <main> alone left
+                too much empty space before "TRAINER" ever appears. */}
+            <div className="relative left-1/2 right-1/2 -mx-[50vw] w-screen overflow-hidden bg-gradient-to-br from-mesa-dark via-brown-900 to-brown-800 py-20 md:py-28 mb-10 -mt-8">
               <div className="mx-auto max-w-6xl px-6 flex flex-col items-center text-center">
                 <p className="mb-4 text-sm font-semibold uppercase tracking-widest text-mesa-accent">
                   {trainer.title}
