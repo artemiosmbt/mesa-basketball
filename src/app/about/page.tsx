@@ -204,25 +204,18 @@ export default function AboutPage() {
             reads in the same text-alongside-media layout as his "Why Mesa
             Exists" section, just with a video slot instead of a photo. */}
         {sortedTrainers.length > 0 && (
-          <div className="text-center py-6">
-            <h2 className="font-[family-name:var(--font-fira-cond)] text-4xl md:text-5xl font-black tracking-wide text-mesa-accent">
-              MEET THE TEAM
-            </h2>
-            <div className="mt-5 flex items-center justify-center gap-4 max-w-xs mx-auto">
-              <div className="h-px flex-1 bg-gradient-to-r from-transparent to-mesa-accent/70" />
-              <div className="h-2 w-2 rotate-45 bg-mesa-accent" />
-              <div className="h-px flex-1 bg-gradient-to-l from-transparent to-mesa-accent/70" />
+          <div className="relative left-1/2 right-1/2 -mx-[50vw] w-screen overflow-hidden bg-gradient-to-br from-mesa-dark via-brown-900 to-brown-800">
+            <div className="mx-auto max-w-6xl px-6 py-12 text-center">
+              <h2 className="font-[family-name:var(--font-fira-cond)] text-4xl md:text-5xl font-black tracking-wide text-mesa-accent">
+                MEET THE TEAM
+              </h2>
             </div>
           </div>
         )}
         {sortedTrainers.length > 0 && sortedTrainers.map((trainer, i) => (
           <Fragment key={trainer.slug}>
             {i > 0 && (
-              <div className="flex items-center gap-4">
-                <div className="h-px flex-1 bg-gradient-to-r from-transparent to-mesa-accent/70" />
-                <div className="h-2 w-2 rotate-45 bg-mesa-accent" />
-                <div className="h-px flex-1 bg-gradient-to-l from-transparent to-mesa-accent/70" />
-              </div>
+              <div className="relative left-1/2 right-1/2 -mx-[50vw] w-screen overflow-hidden bg-gradient-to-br from-mesa-dark via-brown-900 to-brown-800 py-6" />
             )}
             <section id={trainer.slug} className="scroll-mt-20">
             {/* Full-bleed gradient band behind the headshot/name/pills, matching
