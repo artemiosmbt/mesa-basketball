@@ -211,6 +211,9 @@ export default function AboutPage() {
               <h2 className="font-[family-name:var(--font-fira-cond)] text-4xl md:text-5xl font-black tracking-wide text-mesa-accent drop-shadow-[0_1px_3px_rgba(0,0,0,0.4)]">
                 MEET THE TEAM
               </h2>
+              <p className="mt-2 text-xs font-semibold uppercase tracking-widest text-brown-300">
+                The ΜΕΣΑ Family
+              </p>
             </div>
           </div>
         )}
