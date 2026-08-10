@@ -7,9 +7,9 @@ import TrainerVideo from "../TrainerVideo";
 import { sortedTrainers } from "@/lib/trainer-bios";
 
 export const metadata: Metadata = {
-  title: "Artemios Gavalas | Mesa Basketball Training",
+  title: "About Us | Mesa Basketball Training",
   description:
-    "Artemios Gavalas — former Division I point guard at St. John's University and Butler University, international professional basketball player, and founder of Mesa Basketball Training on Long Island.",
+    "Meet the Mesa Basketball Training team, led by founder Artemios Gavalas — a former Division I point guard at St. John's University and Butler University and international professional basketball player — alongside our trainers on Long Island.",
   keywords: [
     "Artemios Gavalas",
     "Artemios Gavalas basketball",
@@ -20,13 +20,14 @@ export const metadata: Metadata = {
     "professional basketball trainer Long Island",
     "elite basketball coaching Long Island",
     "Mesa Basketball Training about",
+    "Mesa Basketball Training trainers",
   ],
   alternates: {
     canonical: "/about",
   },
   openGraph: {
-    title: "Artemios Gavalas | Mesa Basketball Training",
-    description: "Former D1 point guard at St. John's and Butler University, international professional player, and founder of Mesa Basketball Training on Long Island.",
+    title: "About Us | Mesa Basketball Training",
+    description: "Meet the Mesa Basketball Training team, led by founder Artemios Gavalas — former D1 point guard at St. John's and Butler University and international professional player — alongside our trainers on Long Island.",
     url: "https://www.mesabasketballtraining.com/about",
     images: [{ url: "/og-image.jpg", width: 1200, height: 630 }],
   },
@@ -106,7 +107,7 @@ export default function AboutPage() {
           <h2 className="font-[family-name:var(--font-fira-cond)] text-3xl font-black tracking-wide text-mesa-accent mb-6">
             WHY MESA EXISTS
           </h2>
-          <div className="flex flex-col md:flex-row gap-10 items-start">
+          <div className="flex flex-col md:flex-row gap-10 items-center">
             <div className="space-y-5 text-brown-200 leading-relaxed text-[17px] flex-1">
               <p>
                 I built Mesa out of a genuine love for the game and a deep commitment to helping others grow through it.
@@ -254,7 +255,7 @@ export default function AboutPage() {
                 )}
               </div>
             </div>
-            <div className="flex flex-col md:flex-row gap-10 items-start">
+            <div className="flex flex-col md:flex-row gap-10 items-center">
               <div className="space-y-5 text-brown-200 leading-relaxed text-[17px] flex-1">
                 {trainer.bioParagraphs.map((p, i) => (
                   <p key={i}>{p}</p>
