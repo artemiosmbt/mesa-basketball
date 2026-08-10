@@ -473,7 +473,7 @@ export default function PaymentsPage() {
                       )}
                       {da && <span className={`rounded-full px-2 py-0.5 text-xs font-medium shrink-0 ${da.cls}`}>{da.label}</span>}
                     </div>
-                    {r.kids && <div className="text-xs text-white mt-0.5 truncate">{r.kids.split(",").map((k) => k.split("(")[0].trim()).filter(Boolean).join(", ")}</div>}
+                    {r.kids && <div className="text-xs text-white mt-0.5 truncate">{r.kids.replace(/\([^)]*\)/g, "").split(",").map((k) => k.trim()).filter(Boolean).join(", ")}</div>}
                     <div className="text-xs text-brown-400 mt-0.5 truncate">{sessionLabel(r)}</div>
                     <div className="flex flex-wrap gap-x-3 mt-1 text-xs text-brown-500">
                       <span>{r.is_full_camp ? "Full camp total" : formatDate(r.booked_date)}</span>
@@ -529,7 +529,7 @@ export default function PaymentsPage() {
                       <span className="rounded-full bg-brown-800 text-brown-400 px-2 py-0.5 text-xs font-medium">{e.initiated_by === "admin" ? "by you" : "by client"}</span>
                       <span className="ml-auto text-xs text-brown-500 shrink-0">{timeAgo(e.created_at)}</span>
                     </div>
-                    {e.kids && <div className="text-xs text-white mt-1 truncate">{e.kids.split(",").map((k) => k.split("(")[0].trim()).filter(Boolean).join(", ")}</div>}
+                    {e.kids && <div className="text-xs text-white mt-1 truncate">{e.kids.replace(/\([^)]*\)/g, "").split(",").map((k) => k.trim()).filter(Boolean).join(", ")}</div>}
                     <div className="text-xs text-brown-400 mt-0.5 truncate">
                       {e.session_details ? e.session_details.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "") : "—"}
                       {e.booked_date && ` — ${formatDate(e.booked_date)}${e.booked_start_time ? ` ${e.booked_start_time}` : ""}`}
@@ -664,7 +664,7 @@ export default function PaymentsPage() {
                       )}
                       {da && <span className={`rounded-full px-2 py-0.5 text-xs font-medium shrink-0 ${da.cls}`}>{da.label}</span>}
                     </div>
-                    {r.kids && <div className="text-xs text-white mt-0.5 truncate">{r.kids.split(",").map((k) => k.split("(")[0].trim()).filter(Boolean).join(", ")}</div>}
+                    {r.kids && <div className="text-xs text-white mt-0.5 truncate">{r.kids.replace(/\([^)]*\)/g, "").split(",").map((k) => k.trim()).filter(Boolean).join(", ")}</div>}
                     <div className="text-xs text-brown-400 mt-0.5 truncate">{sessionLabel(r)}</div>
                     <div className="flex flex-wrap gap-x-3 mt-1 text-xs text-brown-500">
                       <span>{formatDate(r.booked_date)}</span>

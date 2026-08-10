@@ -158,8 +158,14 @@ function formatDate(d: string | null): string {
   return date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
 }
 
+// Kids are stored as "Name (DOB: ..., Grade: ..., Gender: ...), Name2 (...)"
+// — the DOB/Grade/Gender fields inside the parens have commas of their own,
+// so splitting on "," first (the old approach) chopped each parenthetical
+// into its own fragment and leaked "Grade: 5th"/"Gender: Male)" through as
+// if they were additional athlete names. Strip every "(...)" group first,
+// so splitting on "," afterward only ever splits between real names.
 function athleteNames(kids: string) {
-  return kids ? kids.split(",").map((k) => k.split("(")[0].trim()).filter(Boolean).join(", ") : "—";
+  return kids ? kids.replace(/\([^)]*\)/g, "").split(",").map((k) => k.trim()).filter(Boolean).join(", ") : "—";
 }
 
 // Last whitespace-separated token of a name, or "" if it's a single word
@@ -820,7 +826,7 @@ function CalendarView({ token, trainerFilter, weeklyCapacity, campCapacity, canE
       ? r.session_details.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim()
       : "—";
     return (
-      <div key={r.id} className="rounded-xl border border-brown-700 bg-brown-900/40 overflow-hidden">
+      <div key={r.id} className="rounded-xl border-2 border-brown-600 bg-brown-900/40 overflow-hidden shadow-lg shadow-black/30">
         <button
           type="button"
           onClick={() => toggleReg(r.id)}
@@ -921,7 +927,7 @@ function CalendarView({ token, trainerFilter, weeklyCapacity, campCapacity, canE
     const timeLabel = sample.booked_start_time ? `${sample.booked_start_time}${sample.booked_end_time ? `-${sample.booked_end_time}` : ""}` : null;
     const expanded = expandedFolders.has(folder.key);
     return (
-      <div key={folder.key} className="rounded-xl border border-brown-700 bg-brown-900/40 overflow-hidden">
+      <div key={folder.key} className="rounded-xl border-2 border-brown-600 bg-brown-900/40 overflow-hidden shadow-lg shadow-black/30">
         <button type="button" onClick={() => toggleFolder(folder.key)} className="w-full text-left px-4 py-3 flex items-center justify-between gap-3">
           <div className="min-w-0 flex flex-wrap items-center gap-x-2 gap-y-0.5">
             <span className={`text-brown-500 transition-transform duration-200 shrink-0 ${expanded ? "rotate-180" : ""}`}>▾</span>
@@ -1825,7 +1831,7 @@ export default function AdminPage() {
       ? r.session_details.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim()
       : "—";
     return (
-      <div className="rounded-xl border border-brown-700 bg-brown-900/40 overflow-hidden">
+      <div className="rounded-xl border-2 border-brown-600 bg-brown-900/40 overflow-hidden shadow-lg shadow-black/30">
         {/* Tappable summary row */}
         <button
           type="button"
@@ -1987,7 +1993,7 @@ export default function AdminPage() {
     const sample = folder.regs[0];
     const timeLabel = sample.booked_start_time ? `${sample.booked_start_time}${sample.booked_end_time ? `-${sample.booked_end_time}` : ""}` : null;
     return (
-      <div className="rounded-xl border border-brown-700 bg-brown-900/40 overflow-hidden">
+      <div className="rounded-xl border-2 border-brown-600 bg-brown-900/40 overflow-hidden shadow-lg shadow-black/30">
         <button type="button" onClick={() => setExpanded((v) => !v)} className="w-full text-left px-4 py-3 flex items-start justify-between gap-2">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
@@ -2298,7 +2304,7 @@ export default function AdminPage() {
               <button
                 key={c.email || c.name}
                 onClick={() => setSelectedClient(c.email || c.name)}
-                className="w-full text-left rounded-xl border border-brown-700 bg-brown-900/40 hover:bg-brown-800/60 px-4 py-3 transition"
+                className="w-full text-left rounded-xl border-2 border-brown-600 bg-brown-900/40 hover:bg-brown-800/60 px-4 py-3 transition shadow-lg shadow-black/30"
               >
                 <div className="flex items-center justify-between gap-3">
                   <div className="min-w-0">
@@ -2347,7 +2353,7 @@ export default function AdminPage() {
             <>
               <button onClick={() => setSelectedClient(null)} className="text-sm text-mesa-accent hover:underline mb-4 inline-block">← All Clients</button>
               {clientData && (
-                <div className="mb-4 rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-3">
+                <div className="mb-4 rounded-xl border-2 border-brown-600 bg-brown-900/40 px-4 py-3 shadow-lg shadow-black/30">
                   <div className="flex flex-wrap items-start justify-between gap-4">
                     <div className="min-w-0">
                       <p className="font-semibold text-base text-white">{clientData.name}</p>
@@ -2386,7 +2392,7 @@ export default function AdminPage() {
                 </div>
               )}
               {clientData && (
-                <div className="mb-4 rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-3 flex items-center gap-6">
+                <div className="mb-4 rounded-xl border-2 border-brown-600 bg-brown-900/40 px-4 py-3 flex items-center gap-6 shadow-lg shadow-black/30">
                   <div className="text-center">
                     <p className="text-mesa-accent font-bold text-xl leading-none">{clientData.count}</p>
                     <p className="text-xs text-brown-500 mt-1">session{clientData.count !== 1 ? "s" : ""}</p>

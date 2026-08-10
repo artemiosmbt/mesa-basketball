@@ -11,8 +11,12 @@ function dateMs(d: string | null): number {
   const p = new Date(d);
   return isNaN(p.getTime()) ? 0 : p.setHours(0, 0, 0, 0);
 }
+// See the identical fix + rationale on admin/page.tsx's copy of this
+// function: stripping "(...)" groups first (not splitting on "," first)
+// avoids leaking the DOB/Grade/Gender fields inside those parens as if
+// they were additional athlete names.
 function athleteNames(kids: string): string {
-  return kids ? kids.split(",").map((k) => k.split("(")[0].trim()).filter(Boolean).join(", ") : "—";
+  return kids ? kids.replace(/\([^)]*\)/g, "").split(",").map((k) => k.trim()).filter(Boolean).join(", ") : "—";
 }
 
 
