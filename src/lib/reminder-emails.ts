@@ -192,17 +192,25 @@ export async function runReminderEmailWindow(window: ReminderWindow, options?: {
     // One consolidated summary to Artemios per run (not a per-parent BCC —
     // with 10-15+ matches that would flood his inbox) so he can confirm a
     // run actually fired without digging through logs, and see any real
-    // send failures at a glance.
-    try {
-      await sendReminderEmailAdminSummary({
-        window,
-        targetDate,
-        sessionsInWindow: windowSessions.length,
-        parents: sentSummary,
-        failedEmails,
-      });
-    } catch (err) {
-      console.error("Reminder email admin summary failed:", err);
+    // send failures at a glance. Only worth an email when something
+    // actually happened, though — a quiet morning/evening with no group
+    // sessions in this window (e.g. no AM groups at all, or no PM sessions
+    // that day) is the common case, not something worth a notification
+    // every single time it occurs. A genuine send failure still gets
+    // reported even with zero successes, since that's a real problem, not
+    // "nothing to do."
+    if (emailsSent > 0 || failedEmails.length > 0) {
+      try {
+        await sendReminderEmailAdminSummary({
+          window,
+          targetDate,
+          sessionsInWindow: windowSessions.length,
+          parents: sentSummary,
+          failedEmails,
+        });
+      } catch (err) {
+        console.error("Reminder email admin summary failed:", err);
+      }
     }
   }
 
