@@ -40,6 +40,56 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ registrations: registrations || [] });
   }
 
+  // Calendar fetches one month at a time as the admin navigates, instead of
+  // being handed [...upcoming, ...past] the way it used to (which broke the
+  // moment Past stopped always holding full history) — same status
+  // exclusions as ?view=past, just scoped to a specific calendar month
+  // instead of a rolling window. Month arithmetic is done as plain string
+  // math, not via a JS Date + toISOString round-trip, which would risk the
+  // exact server-timezone-vs-ET drift already found and fixed twice
+  // elsewhere in this codebase.
+  if (view === "calendar") {
+    const calScopeError = requireTrainerNameConfigured(ctx);
+    if (calScopeError) return calScopeError;
+
+    const month = searchParams.get("month");
+    if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+      return NextResponse.json({ error: "Missing or invalid month (expected YYYY-MM)" }, { status: 400 });
+    }
+    const [y, m] = month.split("-").map(Number);
+    const monthStart = `${month}-01`;
+    const nextMonthNum = m === 12 ? 1 : m + 1;
+    const nextMonthYear = m === 12 ? y + 1 : y;
+    const monthEndExclusive = `${nextMonthYear}-${String(nextMonthNum).padStart(2, "0")}-01`;
+
+    let calQuery = supabase
+      .from("registrations_with_parsed_date")
+      .select("*")
+      .neq("status", "payment_abandoned")
+      .or("status.neq.cancelled,is_late_cancel.eq.true,camp_day_late_fee.gt.0")
+      .gte("booked_date_parsed", monthStart)
+      .lt("booked_date_parsed", monthEndExclusive)
+      .order("booked_date_parsed", { ascending: true });
+    const calTrainerFilter = trainerScopeFilter(ctx);
+    if (calTrainerFilter) {
+      calQuery = calQuery.ilike("booked_trainer", calTrainerFilter);
+    } else {
+      // No role-based restriction (admin/elevated_trainer) — still honor
+      // the dashboard's own trainer-filter dropdown if one is selected,
+      // same "narrow the whole page to one trainer" behavior every other
+      // tab already has.
+      const dropdownTrainer = searchParams.get("trainer");
+      if (dropdownTrainer) calQuery = calQuery.ilike("booked_trainer", dropdownTrainer);
+    }
+
+    const [{ data: calRegs }, { data: calPackages }] = await Promise.all([
+      calQuery,
+      supabase.from("monthly_packages").select("id, email, package_type, month_year, is_paid").neq("status", "payment_abandoned"),
+    ]);
+    const enrichedCal = await attachComputedFields(supabase, calRegs || [], calPackages || []);
+    return NextResponse.json({ registrations: enrichedCal });
+  }
+
   // Upcoming loads eagerly on every dashboard open (see the lazy-loading
   // plan) — a coarse SQL-level "today or later" filter first (backed by the
   // parse_booked_date functional index via the registrations_with_parsed_date
@@ -72,6 +122,71 @@ export async function GET(req: NextRequest) {
     ]);
     const enrichedUpcoming = await attachComputedFields(supabase, upcomingRegs || [], upcomingPackages || []);
     return NextResponse.json({ registrations: enrichedUpcoming });
+  }
+
+  // Past loads on-demand (first click into the tab), last 30 days by
+  // default, with two ways to see further back: the "Load all" button
+  // (window=all, drops the lower date bound) and typing into search — a
+  // search term BYPASSES the window entirely and queries full history, so
+  // browsing stays fast/bounded but searching never silently misses an
+  // older session just because "Load all" was never clicked.
+  if (view === "past") {
+    const pastScopeError = requireTrainerNameConfigured(ctx);
+    if (pastScopeError) return pastScopeError;
+
+    const search = searchParams.get("search");
+    const windowParam = searchParams.get("window") || "30d";
+    const pastTrainerFilter = trainerScopeFilter(ctx);
+
+    // Same "keep in history" exception the old client-side filter used —
+    // an on-time cancellation is clutter once its date passes, but a late
+    // cancellation/no-show that actually charged a fee is real activity
+    // worth keeping visible.
+    let pastQuery = supabase
+      .from("registrations_with_parsed_date")
+      .select("*")
+      .neq("status", "payment_abandoned")
+      .or("status.neq.cancelled,is_late_cancel.eq.true,camp_day_late_fee.gt.0");
+    if (pastTrainerFilter) pastQuery = pastQuery.ilike("booked_trainer", pastTrainerFilter);
+
+    let hasMore = false;
+    const todayET = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+
+    if (search && search.trim()) {
+      // Escape ilike's own wildcard characters in the user-supplied term —
+      // otherwise a search containing a literal "%" or "_" would silently
+      // match far more than intended (the exact class of bug already found
+      // and fixed once in this same route's old ?email= branch).
+      const escaped = search.trim().replace(/[%_]/g, (c) => `\\${c}`);
+      pastQuery = pastQuery.or(`parent_name.ilike.%${escaped}%,email.ilike.%${escaped}%,phone.ilike.%${escaped}%`);
+    } else {
+      pastQuery = pastQuery.lte("booked_date_parsed", todayET);
+      if (windowParam !== "all") {
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - 30);
+        const cutoffET = cutoff.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+        pastQuery = pastQuery.gte("booked_date_parsed", cutoffET);
+
+        let olderQuery = supabase
+          .from("registrations_with_parsed_date")
+          .select("id", { count: "exact", head: true })
+          .neq("status", "payment_abandoned")
+          .or("status.neq.cancelled,is_late_cancel.eq.true,camp_day_late_fee.gt.0")
+          .lt("booked_date_parsed", cutoffET);
+        if (pastTrainerFilter) olderQuery = olderQuery.ilike("booked_trainer", pastTrainerFilter);
+        const { count } = await olderQuery;
+        hasMore = !!count && count > 0;
+      }
+    }
+
+    pastQuery = pastQuery.order("booked_date_parsed", { ascending: false });
+
+    const [{ data: pastRegs }, { data: pastPackages }] = await Promise.all([
+      pastQuery,
+      supabase.from("monthly_packages").select("id, email, package_type, month_year, is_paid").neq("status", "payment_abandoned"),
+    ]);
+    const enrichedPast = await attachComputedFields(supabase, pastRegs || [], pastPackages || []);
+    return NextResponse.json({ registrations: enrichedPast, hasMore });
   }
 
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();

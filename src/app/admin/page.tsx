@@ -271,14 +271,6 @@ function isDeletablePending(r: Registration): boolean {
   return Date.now() - new Date(r.created_at).getTime() > 3 * 60 * 1000;
 }
 
-// A cancelled row is worth keeping in history only if a late fee actually
-// changed hands on it — a plain on-time cancellation (or the leftover
-// "cancelled" row a client reschedule leaves behind for the old session) is
-// just clutter once its date has passed.
-function keepCancelledInHistory(r: Registration): boolean {
-  return !!r.is_late_cancel || (r.camp_day_late_fee || 0) > 0;
-}
-
 function toDateKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
@@ -740,7 +732,8 @@ function folderLabel(sample: Registration): string {
 }
 
 interface CalendarViewProps {
-  list: Registration[];
+  token: string | null;
+  trainerFilter: string;
   weeklyCapacity: Map<string, number>;
   campCapacity: Map<string, number>;
   canEdit: boolean;
@@ -755,13 +748,46 @@ interface CalendarViewProps {
   deleting: string | null;
 }
 
-function CalendarView({ list, weeklyCapacity, campCapacity, canEdit, cancelRegistration, markNoShow, openReschedule, deleteRegistration, cancelling, noShowing, noShowConfirm, setNoShowConfirm, deleting }: CalendarViewProps) {
+function CalendarView({ token, trainerFilter, weeklyCapacity, campCapacity, canEdit, cancelRegistration, markNoShow, openReschedule, deleteRegistration, cancelling, noShowing, noShowConfirm, setNoShowConfirm, deleting }: CalendarViewProps) {
   const [currentMonth, setCurrentMonth] = useState(() => {
     const n = new Date();
     return new Date(n.getFullYear(), n.getMonth(), 1);
   });
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+
+  // One month's registrations at a time, fetched as the admin navigates —
+  // replaces being handed [...upcoming, ...past] directly, which broke once
+  // Past stopped always holding full history. Cached per month for this
+  // component's lifetime (it unmounts on tab switch today anyway, same as
+  // before) so navigating back to an already-seen month doesn't re-fetch.
+  const monthKey = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth() + 1).padStart(2, "0")}`;
+  // Trainer filter is part of the cache key — switching the dropdown must
+  // trigger a fresh fetch under its own key, not reuse a different
+  // trainer's cached month.
+  const cacheKey = `${monthKey}|${trainerFilter}`;
+  const [monthCache, setMonthCache] = useState<Map<string, Registration[]>>(new Map());
+  const cached = monthCache.get(cacheKey);
+  // Derived from the cache itself (absent = still loading) rather than a
+  // separate setState call at the top of the effect below — the earlier
+  // version's synchronous setCalLoading(true) there, in an effect that also
+  // depends on the very state it updates, is exactly the "cascading
+  // renders" pattern React's own linter warns against.
+  const calLoading = cached === undefined;
+
+  useEffect(() => {
+    if (!token || monthCache.has(cacheKey)) return;
+    const params = new URLSearchParams({ view: "calendar", month: monthKey });
+    if (trainerFilter !== "all") params.set("trainer", trainerFilter);
+    fetch(`/api/admin/data?${params.toString()}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.json())
+      .then((data) => {
+        setMonthCache((prev) => new Map(prev).set(cacheKey, data.registrations || []));
+      })
+      .catch(() => {
+        setMonthCache((prev) => new Map(prev).set(cacheKey, []));
+      });
+  }, [monthKey, cacheKey, token, monthCache, trainerFilter]);
 
   function toggleFolder(key: string) {
     setExpandedFolders((prev) => {
@@ -869,7 +895,7 @@ function CalendarView({ list, weeklyCapacity, campCapacity, canEdit, cancelRegis
 
   const sessionsByDay = useMemo(() => {
     const map = new Map<string, Registration[]>();
-    for (const r of list) {
+    for (const r of (cached ?? [])) {
       if (!r.booked_date) continue;
       const d = new Date(r.booked_date);
       if (isNaN(d.getTime())) continue;
@@ -878,7 +904,7 @@ function CalendarView({ list, weeklyCapacity, campCapacity, canEdit, cancelRegis
       map.get(key)!.push(r);
     }
     return map;
-  }, [list]);
+  }, [cached]);
 
   const days = useMemo(() => {
     const year = currentMonth.getFullYear();
@@ -924,6 +950,7 @@ function CalendarView({ list, weeklyCapacity, campCapacity, canEdit, cancelRegis
         <span className="font-semibold text-white">{monthLabel}</span>
         <button onClick={nextMonth} className="px-3 py-1.5 rounded-lg text-sm text-brown-400 hover:text-white hover:bg-brown-800 transition">Next →</button>
       </div>
+      {calLoading && <p className="text-xs text-brown-500 mb-3">Loading…</p>}
 
       {/* Day-of-week headers */}
       <div className="grid grid-cols-7 mb-1">
@@ -1005,6 +1032,18 @@ export default function AdminPage() {
   const [trainerFilter, setTrainerFilter] = useState("all");
   const [selectedClient, setSelectedClient] = useState<string | null>(null);
   const [stats, setStats] = useState<{ total: number; confirmed: number; cancelled: number; camps: number; groups: number } | null>(null);
+
+  // Past tab: last-30-days by default (pastWindowRegs), "Load all" upgrades
+  // to pastAllRegs, and typing a search term while on this tab bypasses the
+  // window entirely (pastSearchRegs) — see api/admin/data's ?view=past for
+  // why search can't just filter whatever's currently loaded.
+  const [pastWindowRegs, setPastWindowRegs] = useState<Registration[] | null>(null);
+  const [pastAllRegs, setPastAllRegs] = useState<Registration[] | null>(null);
+  const [pastSearchRegs, setPastSearchRegs] = useState<Registration[] | null>(null);
+  const [pastHasMore, setPastHasMore] = useState(false);
+  const [pastLoading, setPastLoading] = useState(false);
+  const [pastLoadingAll, setPastLoadingAll] = useState(false);
+  const [pastSearchLoading, setPastSearchLoading] = useState(false);
 
   // Groups tab state — which athlete row (keyed "email|athleteId") is
   // expanded to show parent info, and which group-assignment mutation (if
@@ -1113,6 +1152,57 @@ export default function AdminPage() {
       }).catch(() => {});
     });
   }, [router]);
+
+  // Fetch the Past tab's default (last-30-days) window the first time it's
+  // opened — not on mount, so a session that never visits Past never pays
+  // for it.
+  useEffect(() => {
+    if (tab !== "past" || !token || pastWindowRegs !== null || pastLoading) return;
+    setPastLoading(true);
+    fetch("/api/admin/data?view=past&window=30d", { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.json())
+      .then((data) => {
+        setPastWindowRegs(data.registrations || []);
+        setPastHasMore(!!data.hasMore);
+      })
+      .catch(() => setPastWindowRegs([]))
+      .finally(() => setPastLoading(false));
+  }, [tab, token, pastWindowRegs, pastLoading]);
+
+  async function loadAllPast() {
+    if (!token) return;
+    setPastLoadingAll(true);
+    try {
+      const res = await fetch("/api/admin/data?view=past&window=all", { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      setPastAllRegs(data.registrations || []);
+    } finally {
+      setPastLoadingAll(false);
+    }
+  }
+
+  // Typing into the shared search box while on the Past tab bypasses the
+  // window entirely and queries full history server-side — debounced so
+  // every keystroke doesn't fire its own request. Clearing the box (or
+  // leaving the tab, then coming back with it still empty) reverts to
+  // whatever's already loaded (pastAllRegs ?? pastWindowRegs) with no
+  // re-fetch needed, since that data was never discarded.
+  useEffect(() => {
+    if (tab !== "past" || !token) return;
+    if (!search.trim()) {
+      setPastSearchRegs(null);
+      return;
+    }
+    setPastSearchLoading(true);
+    const handle = setTimeout(() => {
+      fetch(`/api/admin/data?view=past&search=${encodeURIComponent(search.trim())}`, { headers: { Authorization: `Bearer ${token}` } })
+        .then((r) => r.json())
+        .then((data) => setPastSearchRegs(data.registrations || []))
+        .catch(() => setPastSearchRegs([]))
+        .finally(() => setPastSearchLoading(false));
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [tab, search, token]);
 
   async function deleteRegistration(id: string) {
     if (!token) return;
@@ -1430,22 +1520,23 @@ export default function AdminPage() {
       .sort((a, b) => sessionMs(a.booked_date, a.booked_start_time) - sessionMs(b.booked_date, b.booked_start_time));
   }, [visibleRegistrations]);
 
+  // Source: whichever of these is active — a search term (bypasses the
+  // window entirely), else "Load all" if it's been clicked, else the
+  // default last-30-days window. The payment_abandoned/cancelled-clutter/
+  // status exclusions (see keepCancelledInHistory's old logic) are now
+  // applied server-side (api/admin/data's ?view=past) — this just does the
+  // trainer-filter-dropdown narrowing and the exact "has this specific
+  // session's time actually passed yet" cut the server's coarse
+  // date-only bound can't do on its own (same two-stage pattern as
+  // ?view=upcoming).
   const past = useMemo(() => {
     const now = Date.now();
-    return visibleRegistrations
-      // An abandoned checkout never became a real booking — nothing to see
-      // here once its date passes, same as it never shows as upcoming. A
-      // cancelled row (including the leftover row a client reschedule
-      // leaves behind) is likewise just clutter unless a late fee was
-      // actually charged on it — see keepCancelledInHistory.
-      .filter((r) => {
-        if (r.status === "payment_abandoned") return false;
-        if (r.status === "cancelled" && !keepCancelledInHistory(r)) return false;
-        const ms = sessionMs(r.booked_date, r.booked_start_time);
-        return ms > 0 && ms <= now;
-      })
+    const source = pastSearchRegs ?? pastAllRegs ?? pastWindowRegs ?? [];
+    const scoped = trainerFilter === "all" ? source : source.filter((r) => trainerNamesMatch(r.booked_trainer, trainerFilter));
+    return scoped
+      .filter((r) => sessionMs(r.booked_date, r.booked_start_time) <= now)
       .sort((a, b) => sessionMs(b.booked_date, b.booked_start_time) - sessionMs(a.booked_date, a.booked_start_time));
-  }, [visibleRegistrations]);
+  }, [pastSearchRegs, pastAllRegs, pastWindowRegs, trainerFilter]);
 
   // Unique clients sorted by name — an abandoned checkout never counts
   // toward a client's history (they never actually booked or paid). Athlete
@@ -1583,7 +1674,12 @@ export default function AdminPage() {
   }, [visibleRegistrations, selectedClient]);
 
   // Apply type filter + search to a list
-  function applyFilters(list: Registration[]) {
+  // skipSearch: the Past tab's search is handled server-side (its `past`
+  // source is already the search-matched result once a term is typed —
+  // see the pastSearchRegs effect) — re-applying this client-side search
+  // on top would be redundant at best and could disagree at the edges
+  // with the server's own matching, so Past always passes true here.
+  function applyFilters(list: Registration[], skipSearch = false) {
     return list.filter((r) => {
       if (typeFilter === "pickup") {
         if (!isPickup(r)) return false;
@@ -1592,7 +1688,7 @@ export default function AdminPage() {
       } else if (typeFilter !== "all") {
         if (r.type !== typeFilter) return false;
       }
-      if (search.trim()) {
+      if (!skipSearch && search.trim()) {
         // Whitespace-normalized name match (a stray double space in a saved
         // name shouldn't hide it from a normally-typed search) and
         // digits-only phone match (so searching "5551234567" finds a client
@@ -1840,7 +1936,7 @@ export default function AdminPage() {
   }
 
   const displayedUpcoming = applyFilters(upcoming);
-  const displayedPast = applyFilters(past);
+  const displayedPast = applyFilters(past, true);
 
   return (
     <div className="min-h-screen bg-brown-950 text-white flex flex-col w-full max-w-full">
@@ -2031,16 +2127,35 @@ export default function AdminPage() {
         {/* Past */}
         {tab === "past" && (
           <>
-            <p className="text-xs text-brown-500 mb-3">{displayedPast.length} session{displayedPast.length !== 1 ? "s" : ""}</p>
-            <div className="space-y-4">
-              {displayedPast.length === 0 && <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-8 text-center text-brown-500 text-sm">No past sessions.</div>}
-              {groupByDate(displayedPast).map(({ key, label, sessions }) => (
-                <div key={key}>
-                  <div className="text-xs font-semibold text-mesa-accent border-b border-brown-700 pb-1.5 mb-2">{label}</div>
-                  <FolderAwareCardList list={sessions} isPast />
+            {pastLoading && pastWindowRegs === null ? (
+              <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-8 text-center text-brown-500 text-sm">Loading…</div>
+            ) : (
+              <>
+                <p className="text-xs text-brown-500 mb-3">
+                  {displayedPast.length} session{displayedPast.length !== 1 ? "s" : ""}
+                  {!search.trim() && !pastAllRegs && " (last 30 days)"}
+                  {pastSearchLoading && " — searching…"}
+                </p>
+                <div className="space-y-4">
+                  {displayedPast.length === 0 && <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-8 text-center text-brown-500 text-sm">No past sessions.</div>}
+                  {groupByDate(displayedPast).map(({ key, label, sessions }) => (
+                    <div key={key}>
+                      <div className="text-xs font-semibold text-mesa-accent border-b border-brown-700 pb-1.5 mb-2">{label}</div>
+                      <FolderAwareCardList list={sessions} isPast />
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+                {!search.trim() && !pastAllRegs && pastHasMore && (
+                  <button
+                    onClick={loadAllPast}
+                    disabled={pastLoadingAll}
+                    className="mt-4 w-full rounded-lg border border-brown-700 px-4 py-2.5 text-sm text-brown-300 hover:text-white hover:border-mesa-accent transition disabled:opacity-50"
+                  >
+                    {pastLoadingAll ? "Loading…" : "Load all past sessions"}
+                  </button>
+                )}
+              </>
+            )}
           </>
         )}
 
@@ -2048,7 +2163,8 @@ export default function AdminPage() {
         {tab === "calendar" && (
           <div className="rounded-xl border border-brown-700 bg-brown-900/20 p-4">
             <CalendarView
-              list={[...upcoming, ...past]}
+              token={token}
+              trainerFilter={trainerFilter}
               weeklyCapacity={weeklyCapacity}
               campCapacity={campCapacity}
               canEdit={canEdit}
