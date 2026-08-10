@@ -202,9 +202,14 @@ export default function AboutPage() {
             mirrors Artemios's own hero section above exactly; their bio
             reads in the same text-alongside-media layout as his "Why Mesa
             Exists" section, just with a video slot instead of a photo. */}
+        {sortedTrainers.length > 0 && (
+          <h2 className="font-[family-name:var(--font-fira-cond)] text-3xl font-black tracking-wide text-mesa-accent text-center">
+            MEET THE TEAM
+          </h2>
+        )}
         {sortedTrainers.length > 0 && sortedTrainers.map((trainer, i) => (
           <Fragment key={trainer.slug}>
-            {i > 0 && <hr className="border-t border-brown-800" />}
+            {i > 0 && <hr className="border-t-2 border-brown-800" />}
             <section id={trainer.slug} className="scroll-mt-20">
             {/* Full-bleed gradient band behind the headshot/name/pills, matching
                 Artemios's own hero section above — breaks out of <main>'s
