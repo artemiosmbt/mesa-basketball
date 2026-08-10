@@ -1,3 +1,4 @@
+import { Fragment } from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import Image from "next/image";
@@ -201,8 +202,10 @@ export default function AboutPage() {
             mirrors Artemios's own hero section above exactly; their bio
             reads in the same text-alongside-media layout as his "Why Mesa
             Exists" section, just with a video slot instead of a photo. */}
-        {sortedTrainers.length > 0 && sortedTrainers.map((trainer) => (
-          <section key={trainer.slug} id={trainer.slug} className="scroll-mt-20">
+        {sortedTrainers.length > 0 && sortedTrainers.map((trainer, i) => (
+          <Fragment key={trainer.slug}>
+            {i > 0 && <hr className="border-t border-brown-800" />}
+            <section id={trainer.slug} className="scroll-mt-20">
             {/* Full-bleed gradient band behind the headshot/name/pills, matching
                 Artemios's own hero section above — breaks out of <main>'s
                 max-w-4xl to span the full viewport width. */}
@@ -257,7 +260,8 @@ export default function AboutPage() {
                 </div>
               )}
             </div>
-          </section>
+            </section>
+          </Fragment>
         ))}
 
         {/* CTA */}
