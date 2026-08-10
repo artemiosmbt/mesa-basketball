@@ -44,10 +44,12 @@ interface TrainerBio {
   headshotPosition?: string; // CSS object-position; defaults to center
   pills: string[]; // credential/highlight pills shown under the name, matching Artemios's hero
   bioParagraphs: string[];
-  // Set once a video is available — the layout below only splits into a
-  // side-by-side bio+video row when this is present, so a trainer's bio
-  // reads cleanly full-width in the meantime.
+  // A trainer has either a video OR a set of photos alongside their bio
+  // (never both) — the layout below only splits into a side-by-side row
+  // when one of these is present, so a bio reads cleanly full-width
+  // otherwise. videoUrl takes priority if somehow both are set.
   videoUrl?: string;
+  photos?: string[];
 }
 
 const TRAINERS: TrainerBio[] = [
@@ -62,6 +64,19 @@ const TRAINERS: TrainerBio[] = [
     bioParagraphs: [
       "I am a dedicated basketball skills trainer passionate about helping athletes reach their full potential through skill development, basketball IQ, and confidence. I began my coaching career early after injuries shifted my focus to player development.",
       "I played four years of varsity basketball at Amityville Memorial High School and have trained athletes of all ages and skill levels, including developing Division I and professional athletes. I have also worked with Hoop Group Camps, gaining experience in developing high-level talent in a competitive environment.",
+    ],
+  },
+  {
+    slug: "steven-papadimitropoulos",
+    displayName: "Steven Papadimitropoulos",
+    title: "Trainer",
+    headshot: "/headshot-steven-papadimitropoulos.jpg",
+    headshotPosition: "center",
+    pills: ["4+ Year Trainer", "St. John's University", "Long Island Lutheran Alum"],
+    photos: ["/steven-papadimitropoulos-sideline.jpg", "/steven-papadimitropoulos-practice.jpg"],
+    bioParagraphs: [
+      "Steven is a dedicated basketball trainer with four years of coaching experience at Hoop Lab, where he has worked with athletes of all ages and skill levels to develop their game. He also brings four years of experience working with the women's basketball program at St. John's University, gaining valuable insight into high-level player development and collegiate basketball standards.",
+      "As a former varsity player at Long Island Lutheran High School, Steven combines firsthand playing experience with years of coaching and training expertise. His passion for teaching, attention to detail, and commitment to helping players improve make him a trusted mentor for athletes looking to elevate their skills, confidence, and understanding of the game.",
     ],
   },
 ];
@@ -281,6 +296,15 @@ export default function AboutPage() {
                     src={trainer.videoUrl}
                     className="absolute inset-0 h-full w-full object-cover"
                   />
+                </div>
+              )}
+              {!trainer.videoUrl && trainer.photos && trainer.photos.length > 0 && (
+                <div className="flex flex-row md:flex-col gap-4 w-full md:w-72 flex-shrink-0">
+                  {trainer.photos.map((photo) => (
+                    <div key={photo} className="relative w-full aspect-[3/4] rounded-xl overflow-hidden shadow-xl">
+                      <Image src={photo} alt={`${trainer.displayName} coaching`} fill className="object-cover" />
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

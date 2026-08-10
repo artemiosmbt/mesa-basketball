@@ -12,6 +12,7 @@ export const TRAINER_BIO_SLUGS: Record<string, string> = {
   // "Joe Owens" — this key must match the schedule-data string for the
   // "Show Bio" link to actually appear next to his sessions.
   "Joseph Owens": "joe-owens",
+  "Steven Papadimitropoulos": "steven-papadimitropoulos",
 };
 
 export function getTrainerBioSlug(name: string): string | null {
