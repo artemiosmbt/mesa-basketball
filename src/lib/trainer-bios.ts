@@ -31,8 +31,9 @@ export const TRAINERS: TrainerBio[] = [
     pills: ["5+ Year Trainer", "All Ages Experience"],
     videoUrl: "/joe-owens-workout-reel.mp4",
     bioParagraphs: [
-      "I am a dedicated basketball skills trainer passionate about helping athletes reach their full potential through skill development, basketball IQ, and confidence. I began my coaching career early after injuries shifted my focus to player development.",
-      "I played four years of varsity basketball at Amityville Memorial High School and have trained athletes of all ages and skill levels, including developing Division I and professional athletes. I have also worked with Hoop Group Camps, gaining experience in developing high-level talent in a competitive environment.",
+      "Joe is a dedicated basketball trainer whose passion for player development was sparked early, shifting his focus to coaching and skill work after injuries redirected his path. A former point guard and four-year varsity player at Amityville Memorial High School, Joe brings a player's perspective to every session he leads.",
+      "Joe has trained athletes of all ages and skill levels, with a track record that includes developing Division I and professional players. Among those he has worked with is Zakai Zeigler, the standout Tennessee point guard and two-time SEC Defensive Player of the Year who holds the Tennessee career assists record. Joe has also gained experience working with Hoop Group Camps, developing high-level talent in a competitive setting alongside some of the top players in the region.",
+      "His ability to connect with athletes, identify areas for growth, and deliver results-driven training makes Joe a valuable asset to any player looking to take their game to the next level. His commitment to the craft and genuine investment in each athlete's development set him apart as a trainer.",
     ],
   },
   {
