@@ -54,7 +54,8 @@ const TRAINERS: TrainerBio[] = [
     displayName: "Joe Owens",
     title: "Trainer",
     headshot: "/headshot-joe-owens.jpg",
-    headshotPosition: "50% 15%",
+    headshotPosition: "50% 30%",
+    videoUrl: "/joe-owens-workout-reel.mp4",
     bioParagraphs: [
       "I am a dedicated basketball skills trainer passionate about helping athletes reach their full potential through skill development, basketball IQ, and confidence. I began my coaching career early after injuries shifted my focus to player development.",
       "I played four years of varsity basketball at Amityville Memorial High School and have trained athletes of all ages and skill levels, including developing Division I and professional athletes. I have also worked with Hoop Group Camps, gaining experience in developing high-level talent in a competitive environment.",
@@ -233,58 +234,51 @@ export default function AboutPage() {
           </div>
         </section>
 
-        {/* Our Trainers — grows alphabetically by last name as more join */}
-        {sortedTrainers.length > 0 && (
-          <section>
-            <h2 className="font-[family-name:var(--font-fira-cond)] text-3xl font-black tracking-wide text-mesa-accent mb-10">
-              OUR TRAINERS
-            </h2>
-            <div className="space-y-14">
-              {sortedTrainers.map((trainer) => (
-                <div key={trainer.slug} id={trainer.slug} className="scroll-mt-20">
-                  <div className="flex items-center gap-4 mb-6">
-                    <div className="rounded-full p-[3px] bg-white/90 shadow-lg shadow-black/40 ring-2 ring-mesa-accent/40 flex-shrink-0">
-                      <div
-                        className="h-20 w-20 rounded-full"
-                        style={{
-                          backgroundImage: `url(${trainer.headshot})`,
-                          backgroundSize: "cover",
-                          backgroundPosition: trainer.headshotPosition || "center",
-                        }}
-                      />
-                    </div>
-                    <div>
-                      <h3 className="font-[family-name:var(--font-fira-cond)] text-2xl font-black tracking-wide">
-                        {trainer.displayName.toUpperCase()}
-                      </h3>
-                      <p className="text-sm font-semibold uppercase tracking-widest text-mesa-accent mt-0.5">
-                        {trainer.title}
-                      </p>
-                    </div>
-                  </div>
-                  <div className={`flex flex-col gap-8 ${trainer.videoUrl ? "md:flex-row md:items-start" : ""}`}>
-                    <div className="space-y-4 text-brown-200 leading-relaxed text-[17px] flex-1">
-                      {trainer.bioParagraphs.map((p, i) => (
-                        <p key={i}>{p}</p>
-                      ))}
-                    </div>
-                    {trainer.videoUrl && (
-                      <div className="w-full md:w-96 flex-shrink-0 aspect-video rounded-xl overflow-hidden shadow-xl">
-                        <iframe
-                          src={trainer.videoUrl}
-                          title={`${trainer.displayName} video`}
-                          className="w-full h-full"
-                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                          allowFullScreen
-                        />
-                      </div>
-                    )}
-                  </div>
+        {/* Our Trainers — grows alphabetically by last name as more join.
+            Each trainer's header (centered, circular headshot, big name)
+            mirrors Artemios's own hero section above exactly; their bio
+            reads in the same text-alongside-media layout as his "Why Mesa
+            Exists" section, just with a video slot instead of a photo. */}
+        {sortedTrainers.length > 0 && sortedTrainers.map((trainer) => (
+          <section key={trainer.slug} id={trainer.slug} className="scroll-mt-20">
+            <div className="flex flex-col items-center text-center mb-10">
+              <p className="mb-4 text-sm font-semibold uppercase tracking-widest text-mesa-accent">
+                {trainer.title}
+              </p>
+              <div className="mb-5 rounded-full p-[4px] bg-white/90 shadow-lg shadow-black/40 ring-2 ring-mesa-accent/40">
+                <div
+                  className="h-28 w-28 rounded-full"
+                  style={{
+                    backgroundImage: `url(${trainer.headshot})`,
+                    backgroundSize: "cover",
+                    backgroundPosition: trainer.headshotPosition || "center",
+                  }}
+                />
+              </div>
+              <h2 className="font-[family-name:var(--font-fira-cond)] text-3xl font-black tracking-wide md:text-4xl">
+                {trainer.displayName.toUpperCase()}
+              </h2>
+            </div>
+            <div className="flex flex-col md:flex-row gap-10 items-start">
+              <div className="space-y-5 text-brown-200 leading-relaxed text-[17px] flex-1">
+                {trainer.bioParagraphs.map((p, i) => (
+                  <p key={i}>{p}</p>
+                ))}
+              </div>
+              {trainer.videoUrl && (
+                <div className="relative w-full aspect-[3/4] md:h-auto md:w-72 md:aspect-[3/4] rounded-xl overflow-hidden flex-shrink-0 shadow-xl bg-black">
+                  <video
+                    src={trainer.videoUrl}
+                    controls
+                    playsInline
+                    preload="metadata"
+                    className="absolute inset-0 h-full w-full object-cover"
+                  />
                 </div>
-              ))}
+              )}
             </div>
           </section>
-        )}
+        ))}
 
         {/* CTA */}
         <section className="rounded-xl border border-brown-700 bg-brown-900/40 px-8 py-10 text-center">
