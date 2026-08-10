@@ -63,12 +63,16 @@ export async function GET(req: NextRequest) {
       const clientTrainerFilter = trainerScopeFilter(ctx);
       if (clientTrainerFilter) clientQuery = clientQuery.eq("booked_trainer_normalized", clientTrainerFilter);
 
-      const [{ data: clientRegs }, { data: clientPackages }] = await Promise.all([
+      const [{ data: clientRegs }, { data: clientPackages }, { data: clientProfileRows }] = await Promise.all([
         clientQuery,
         supabase.from("monthly_packages").select("id, email, package_type, month_year, is_paid").neq("status", "payment_abandoned"),
+        // Single-row lookup for this one client — lets the client-detail view
+        // show grade/DOB/video-consent from their profile without the
+        // dashboard needing the site-wide profiles list loaded at all.
+        supabase.from("profiles").select("email, phone, parent_name, kids, video_consent").eq("email", emailFilter.trim().toLowerCase()),
       ]);
       const enrichedClient = await attachComputedFields(supabase, clientRegs || [], clientPackages || []);
-      return NextResponse.json({ registrations: enrichedClient });
+      return NextResponse.json({ registrations: enrichedClient, profile: clientProfileRows?.[0] || null });
     }
 
     const { data: registrations } = await supabase
@@ -147,6 +151,19 @@ export async function GET(req: NextRequest) {
     }
     const clients = Array.from(clientMap.values()).sort((a, b) => a.name.localeCompare(b.name));
     return NextResponse.json({ clients });
+  }
+
+  // Groups tab — admin-only management view over every saved athlete's
+  // profile (grade/DOB/group assignments), independent of any registration
+  // data. Split out from the old catch-all fetch below so opening the
+  // dashboard doesn't pay for this (and the unbounded registrations dump
+  // that fetch also did) on every load just in case Groups gets visited.
+  if (view === "groups") {
+    if (ctx.role !== "admin") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    const { data: profiles } = await supabase.from("profiles").select("email, phone, parent_name, kids, video_consent");
+    return NextResponse.json({ profiles: profiles || [] });
   }
 
   // Calendar fetches one month at a time as the admin navigates, instead of
@@ -298,54 +315,5 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ registrations: enrichedPast, hasMore });
   }
 
-  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-
-  const scopeError = requireTrainerNameConfigured(ctx);
-  if (scopeError) return scopeError;
-
-  let registrationsQuery = supabase.from("registrations_with_parsed_date").select("*").order("created_at", { ascending: false });
-  // A plain trainer account only ever sees their own schedule — scoped at
-  // the query itself so their browser never receives another trainer's
-  // clients' contact info in the first place, not just a UI that hides it.
-  const trainerFilter = trainerScopeFilter(ctx);
-  if (trainerFilter) {
-    registrationsQuery = registrationsQuery.eq("booked_trainer_normalized", trainerFilter);
-  }
-
-  const [{ data: registrations }, { data: profilesRaw }, { data: referralCreditsRaw }, { data: packages }, { data: accountCreditsRaw }, { data: lateFeeEventsRaw }] = await Promise.all([
-    registrationsQuery,
-    supabase.from("profiles").select("email, phone, parent_name, kids, video_consent"),
-    supabase.from("referral_credits").select("email, credits, total_referrals"),
-    // Deliberately NOT trainer-scoped, unlike everything else below — an
-    // "Any Available Trainer" package floats across whichever substitute has
-    // an open slot, so any trainer plausibly needs to know a walk-in client
-    // has one, not just clients they've personally already served.
-    supabase.from("monthly_packages").select("id, email, package_type, month_year, is_paid").neq("status", "payment_abandoned"),
-    supabase.from("account_credits").select("email, balance").gt("balance", 0),
-    // Recent-activity feed only — older rows are irrelevant clutter, so the
-    // query itself narrows to the last week rather than filtering client-side.
-    supabase.from("late_fee_events").select("*").gte("created_at", sevenDaysAgo).order("created_at", { ascending: false }),
-  ]);
-
-  // A plain trainer's registrations query above is already scoped to their
-  // own bookings — but profiles/referralCredits/accountCredits/lateFeeEvents
-  // were still being fetched completely unscoped and shipped to their
-  // browser in full, regardless of role, until this was fixed. Scope these
-  // the same way registrations already is: down to only the clients who
-  // actually appear in THIS trainer's own scoped registrations. Elevated
-  // trainers and admin are unaffected (they're meant to see everyone).
-  const ownClientEmails = deriveOwnClientEmails(registrations || [], ctx);
-  const profiles = scopeToOwnClients(profilesRaw, ownClientEmails);
-  const referralCredits = scopeToOwnClients(referralCreditsRaw, ownClientEmails);
-  const accountCredits = scopeToOwnClients(accountCreditsRaw, ownClientEmails);
-  const lateFeeEvents = scopeToOwnClients(lateFeeEventsRaw, ownClientEmails);
-
-  // Package-membership badges and bulk-discount pricing need to see each
-  // client's complete relevant history (one month, or one booking batch) to
-  // compute correctly — done server-side here (not left to the client-side
-  // useMemos this replaces) specifically so this stays correct once other
-  // views start returning partial windows instead of everything.
-  const enrichedRegistrations = await attachComputedFields(supabase, registrations || [], packages || []);
-
-  return NextResponse.json({ registrations: enrichedRegistrations, profiles: profiles || [], referralCredits: referralCredits || [], packages: packages || [], accountCredits: accountCredits || [], lateFeeEvents: lateFeeEvents || [] });
+  return NextResponse.json({ error: "Missing or unrecognized view parameter" }, { status: 400 });
 }

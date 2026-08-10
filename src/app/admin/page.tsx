@@ -745,7 +745,7 @@ interface CalendarViewProps {
   weeklyCapacity: Map<string, number>;
   campCapacity: Map<string, number>;
   canEdit: boolean;
-  cancelRegistration: (id: string) => Promise<void>;
+  cancelRegistration: (id: string, feeChoice?: "waive" | "charge", regHint?: Registration) => Promise<void>;
   markNoShow: (id: string) => Promise<void>;
   openReschedule: (r: Registration) => void;
   deleteRegistration: (id: string) => Promise<void>;
@@ -877,7 +877,7 @@ function CalendarView({ token, trainerFilter, weeklyCapacity, campCapacity, canE
             {r.status === "confirmed" && (
               <div className="flex flex-wrap gap-3 pt-1 border-t border-brown-800">
                 {canEdit && (
-                  <button onClick={() => cancelRegistration(r.id)} disabled={cancelling === r.id} className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50">
+                  <button onClick={() => cancelRegistration(r.id, undefined, r)} disabled={cancelling === r.id} className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50">
                     {cancelling === r.id ? "..." : "Cancel"}
                   </button>
                 )}
@@ -1101,6 +1101,7 @@ export default function AdminPage() {
   const [clientsList, setClientsList] = useState<ClientSummary[] | null>(null);
   const [clientsLoading, setClientsLoading] = useState(false);
   const [clientDetailRegs, setClientDetailRegs] = useState<Registration[] | null>(null);
+  const [clientDetailProfile, setClientDetailProfile] = useState<{ phone: string; parent_name: string; kids: ProfileKid[]; video_consent: boolean | null } | null>(null);
   const [clientDetailLoading, setClientDetailLoading] = useState(false);
   const [clientDetailFor, setClientDetailFor] = useState<string | null>(null);
 
@@ -1109,9 +1110,20 @@ export default function AdminPage() {
   // any) is currently in flight, to disable its button while saving.
   const [expandedGroupAthlete, setExpandedGroupAthlete] = useState<string | null>(null);
   const [groupActionPending, setGroupActionPending] = useState<string | null>(null);
+  // profilesMap (site-wide, needed for groupBuckets) is fetched only once
+  // Groups is actually visited — see the effect below — not bundled into
+  // dashboard mount like it used to be.
+  const [groupsLoaded, setGroupsLoaded] = useState(false);
+  const [groupsLoading, setGroupsLoading] = useState(false);
 
   // Admin reschedule state
   const [reschedulingId, setReschedulingId] = useState<string | null>(null);
+  // The full row being rescheduled, captured at the moment the modal opens
+  // rather than re-looked-up from `registrations` later — `registrations`
+  // now only ever holds upcoming bookings (see the lazy-loading effect
+  // above), but Calendar's rows allow Reschedule on a past confirmed
+  // session too, which that lookup would silently fail to find.
+  const [reschedulingReg, setReschedulingReg] = useState<Registration | null>(null);
   const [rescheduleStep, setRescheduleStep] = useState<"edit" | "confirm">("edit");
   const [rescheduleForm, setRescheduleForm] = useState<RescheduleForm>({ group: "", date: "", start: "", end: "", location: "", trainer: "" });
   const [rescheduleSaving, setRescheduleSaving] = useState(false);
@@ -1140,46 +1152,23 @@ export default function AdminPage() {
       setAuthCtx(ctx);
       setToken(session.access_token);
 
-      // Two fetches in parallel: a small, fast "upcoming only" one (what
-      // the dashboard shows first, every time) and the full historical
-      // fetch every other tab still needs today. Whichever resolves first
-      // paints the page — usually upcoming, since it's the much smaller
-      // query — but the full fetch's result always wins if it lands after,
-      // never the other way around, so Past/Calendar/Clients can't get
-      // regressed back to a narrower dataset by a slow-but-later upcoming
-      // response. This is deliberately NOT two permanently-separate arrays
-      // that every mutation handler (cancel/reschedule/no-show/etc.) would
-      // then need to keep in sync — full data supersedes upcoming-only
-      // moments later and everything downstream keeps working exactly as
-      // it already does today.
-      let fullDataLoaded = false;
-
+      // Upcoming is the only data the dashboard needs at mount — it's what
+      // every role lands on, and Past/Calendar/Clients/Groups each fetch
+      // their own scoped data lazily on first visit (see the effects
+      // below). This used to also fire a second, unbounded all-time
+      // registrations+profiles+packages+referral-credits+account-credits+
+      // late-fee-events fetch on every single mount (re-enriching the
+      // ENTIRE booking history every time, most of it never even read by
+      // the UI) — that's what was making the dashboard feel slower and
+      // slower as booking history grew. Reschedule/cancel/no-show and the
+      // trainer-filter dropdown only ever act on an upcoming booking, so
+      // this one fetch is genuinely all `registrations` state needs to hold
+      // now.
       fetch(`/api/admin/data?view=upcoming`, {
         headers: { Authorization: `Bearer ${session.access_token}` },
       }).then((r) => r.json()).then((upcomingData) => {
-        if (!fullDataLoaded) {
-          setRegistrations(upcomingData.registrations || []);
-          setLoading(false);
-        }
-      }).catch(() => {});
-
-      fetch("/api/admin/data", {
-        headers: { Authorization: `Bearer ${session.access_token}` },
-      }).then((r) => r.json()).then((adminData) => {
-        fullDataLoaded = true;
-        setRegistrations(adminData.registrations || []);
-        // videoConsentMap/referralCreditsMap were only ever read by the
-        // Clients-tab aggregate, which now computes both server-side (see
-        // ?view=clients) — profilesMap is still needed here for the Groups
-        // tab and client-detail view, so profiles is still parsed, just no
-        // longer also built into the two now-unused maps.
-        const profMap: Record<string, { phone: string; parentName: string; kids: ProfileKid[] }> = {};
-        for (const p of (adminData.profiles || [])) {
-          if (!p.email) continue;
-          profMap[p.email] = { phone: p.phone || "", parentName: p.parent_name || "", kids: Array.isArray(p.kids) ? p.kids : [] };
-        }
-        setProfilesMap(profMap);
-      }).finally(() => setLoading(false));
+        setRegistrations(upcomingData.registrations || []);
+      }).catch(() => {}).finally(() => setLoading(false));
 
       // Time-change sync writes data — trainer accounts are read-only, so
       // only admin ever triggers this.
@@ -1287,14 +1276,37 @@ export default function AdminPage() {
       .then((r) => r.json())
       .then((data) => {
         setClientDetailRegs(data.registrations || []);
+        setClientDetailProfile(data.profile || null);
         setClientDetailFor(selectedClient);
       })
       .catch(() => {
         setClientDetailRegs([]);
+        setClientDetailProfile(null);
         setClientDetailFor(selectedClient);
       })
       .finally(() => setClientDetailLoading(false));
   }, [selectedClient, token, clientDetailFor]);
+
+  // Groups tab's athlete list needs the site-wide profiles table (grade/DOB/
+  // group assignments) — fetched once on first visit, same lazy pattern as
+  // every other tab, not bundled into dashboard mount.
+  useEffect(() => {
+    if (tab !== "groups" || !token || groupsLoaded || groupsLoading) return;
+    setGroupsLoading(true);
+    fetch("/api/admin/data?view=groups", { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => r.json())
+      .then((data) => {
+        const profMap: Record<string, { phone: string; parentName: string; kids: ProfileKid[] }> = {};
+        for (const p of (data.profiles || [])) {
+          if (!p.email) continue;
+          profMap[p.email] = { phone: p.phone || "", parentName: p.parent_name || "", kids: Array.isArray(p.kids) ? p.kids : [] };
+        }
+        setProfilesMap(profMap);
+        setGroupsLoaded(true);
+      })
+      .catch(() => {})
+      .finally(() => setGroupsLoading(false));
+  }, [tab, token, groupsLoaded, groupsLoading]);
 
   async function deleteRegistration(id: string) {
     if (!token) return;
@@ -1309,7 +1321,7 @@ export default function AdminPage() {
     setDeleting(null);
   }
 
-  async function cancelRegistration(id: string, feeChoice?: "waive" | "charge") {
+  async function cancelRegistration(id: string, feeChoice?: "waive" | "charge", regHint?: Registration) {
     if (!token) return;
     if (!feeChoice && !confirm("Cancel this registration? If the client already paid, they'll be refunded in full automatically.")) return;
     setCancelling(id);
@@ -1338,7 +1350,10 @@ export default function AdminPage() {
       }
     } else if (data?.needsFeeChoice) {
       setCancelling(null);
-      const reg = registrations.find((x) => x.id === id);
+      // regHint (the row the click came from) covers Calendar's past
+      // sessions too, which the now upcoming-only `registrations` state
+      // wouldn't contain.
+      const reg = regHint ?? registrations.find((x) => x.id === id);
       const feeExplainer = reg?.package_id
         ? "OK = CHARGE — the session is forfeited from their package (no fee, but no refund/carryover either).\n\nCancel = WAIVE the fee — the slot is freed back to their package, same as an on-time cancellation."
         : reg && isBulkDiscountedWeekly(reg, scheduleData?.weeklySchedule || [])
@@ -1347,7 +1362,7 @@ export default function AdminPage() {
       const charge = confirm(
         `This booking is within the 24-hour late-cancellation window.\n\n${feeExplainer}`
       );
-      return cancelRegistration(id, charge ? "charge" : "waive");
+      return cancelRegistration(id, charge ? "charge" : "waive", reg);
     } else {
       alert(data?.error || "Failed to cancel.");
     }
@@ -1407,6 +1422,7 @@ export default function AdminPage() {
 
   function openReschedule(r: Registration) {
     setReschedulingId(r.id);
+    setReschedulingReg(r);
     setRescheduleStep("edit");
     setRescheduleError(null);
     setRescheduleConvertToPrivate(false);
@@ -1427,8 +1443,13 @@ export default function AdminPage() {
     });
   }
 
+  function closeReschedule() {
+    setReschedulingId(null);
+    setReschedulingReg(null);
+  }
+
   function reviewReschedule() {
-    const r = registrations.find((x) => x.id === reschedulingId);
+    const r = reschedulingReg;
     const convertingToPrivate = r?.type === "weekly" && rescheduleConvertToPrivate;
     const convertingToGroup = !!r && isPrivateTypeClient(r.type) && rescheduleConvertToGroup;
     const needsGroup = (r?.type === "weekly" && !convertingToPrivate) || r?.type === "camp" || convertingToGroup;
@@ -1442,7 +1463,7 @@ export default function AdminPage() {
 
   async function submitReschedule(feeChoice?: "waive" | "charge") {
     if (!token || !reschedulingId) return;
-    const r = registrations.find((x) => x.id === reschedulingId);
+    const r = reschedulingReg;
     if (!r) return;
     setRescheduleSaving(true);
     setRescheduleError(null);
@@ -1524,7 +1545,7 @@ export default function AdminPage() {
       used_referral_credit: typeof data.newUsedReferralCredit === "boolean" ? data.newUsedReferralCredit : reg.used_referral_credit,
       session_details: data.sessionDetails || reg.session_details,
     } : reg)));
-    setReschedulingId(null);
+    closeReschedule();
     const notes: string[] = [];
     if (data.packageSessionForfeited) {
       notes.push(`Original session forfeited from their package (late reschedule).${data.newSessionPackageCovered ? " New session still covered — nothing charged." : " Package had no capacity left for the new date."}`);
@@ -1913,7 +1934,7 @@ export default function AdminPage() {
             {(r.status === "confirmed" || (canEdit && (isPast || isDeletablePending(r)))) && (
               <div className="flex flex-wrap gap-3 pt-1 border-t border-brown-800">
                 {canEdit && r.status === "confirmed" && !isPast && (
-                  <button onClick={() => cancelRegistration(r.id)} disabled={cancelling === r.id} className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50">
+                  <button onClick={() => cancelRegistration(r.id, undefined, r)} disabled={cancelling === r.id} className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50">
                     {cancelling === r.id ? "Cancelling..." : "Cancel"}
                   </button>
                 )}
@@ -2315,7 +2336,7 @@ export default function AdminPage() {
         {/* Client detail */}
         {tab === "clients" && authCtx?.role === "admin" && selectedClient && (() => {
           const clientData = clients.find((c) => (c.email || c.name) === selectedClient);
-          const profile = clientData?.email ? profilesMap[clientData.email] : undefined;
+          const profile = clientDetailFor === selectedClient ? clientDetailProfile : undefined;
           const kids: ProfileKid[] = profile?.kids?.length
             ? profile.kids
             : clientData && clientData.kids !== "—"
@@ -2397,7 +2418,10 @@ export default function AdminPage() {
         })()}
 
         {/* Groups */}
-        {tab === "groups" && authCtx?.role === "admin" && (
+        {tab === "groups" && authCtx?.role === "admin" && !groupsLoaded && (
+          <p className="text-sm text-brown-500 py-4 text-center">Loading…</p>
+        )}
+        {tab === "groups" && authCtx?.role === "admin" && groupsLoaded && (
           <div className="space-y-6">
             {[...CANONICAL_GROUPS, { id: "all-else" as const, label: "All Else" }].map((g) => {
               const rows = groupBuckets[g.id];
@@ -2514,7 +2538,7 @@ export default function AdminPage() {
 
       {/* Admin reschedule modal */}
       {reschedulingId && (() => {
-        const r = registrations.find((x) => x.id === reschedulingId);
+        const r = reschedulingReg;
         if (!r) return null;
 
         // For the confirm-step "To" label: converting clears the group in favor
@@ -2534,7 +2558,7 @@ export default function AdminPage() {
 
         if (rescheduleStep === "confirm") {
           return (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4" onClick={() => setReschedulingId(null)}>
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4" onClick={() => closeReschedule()}>
               <div className="w-full max-w-sm rounded-xl bg-brown-900 border border-brown-700 p-5" onClick={(e) => e.stopPropagation()}>
                 <h3 className="text-sm font-semibold text-white mb-1">Confirm Reschedule</h3>
                 <p className="text-xs text-brown-400 mb-3">{r.parent_name} — {athleteNames(r.kids || "")}</p>
@@ -2605,7 +2629,7 @@ export default function AdminPage() {
                     Back
                   </button>
                 </div>
-                <button onClick={() => setReschedulingId(null)} disabled={rescheduleSaving} className="mt-2 w-full text-center text-xs text-brown-500 hover:text-brown-300 transition disabled:opacity-50">
+                <button onClick={() => closeReschedule()} disabled={rescheduleSaving} className="mt-2 w-full text-center text-xs text-brown-500 hover:text-brown-300 transition disabled:opacity-50">
                   Cancel
                 </button>
               </div>
@@ -2614,7 +2638,7 @@ export default function AdminPage() {
         }
 
         return (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4" onClick={() => setReschedulingId(null)}>
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4" onClick={() => closeReschedule()}>
             <div className="w-full max-w-sm rounded-xl bg-brown-900 border border-brown-700 p-5" onClick={(e) => e.stopPropagation()}>
               <h3 className="text-sm font-semibold text-white mb-1">Reschedule Session</h3>
               <p className="text-xs text-brown-400 mb-3">{r.parent_name} — {athleteNames(r.kids || "")}</p>
@@ -2699,7 +2723,7 @@ export default function AdminPage() {
                 <button onClick={reviewReschedule} disabled={!scheduleData} className="flex-1 rounded-lg bg-mesa-accent text-white text-sm font-semibold py-2 disabled:opacity-50">
                   Review Change
                 </button>
-                <button onClick={() => setReschedulingId(null)} className="rounded-lg border border-brown-700 text-brown-300 text-sm px-4 py-2">
+                <button onClick={() => closeReschedule()} className="rounded-lg border border-brown-700 text-brown-300 text-sm px-4 py-2">
                   Cancel
                 </button>
               </div>
