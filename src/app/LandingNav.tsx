@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import { authClient, resolveAuthRole } from "@/lib/auth";
+import { ABOUT_PAGE_ROSTER } from "@/lib/trainer-bios";
 
 const chevron = (open?: boolean) => (
   <svg xmlns="http://www.w3.org/2000/svg" className={`h-3 w-3 mt-0.5 transition-transform ${open ? "rotate-180" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -13,6 +14,7 @@ const chevron = (open?: boolean) => (
 
 export default function LandingNav() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
   const [schedulingOpen, setSchedulingOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
@@ -44,7 +46,25 @@ export default function LandingNav() {
         <div className="flex items-center gap-4 text-sm">
           <Link href="/" className="hidden md:inline text-brown-600 hover:text-mesa-dark">Home</Link>
           <span className="hidden md:inline text-brown-300">|</span>
-          <Link href="/about" className="hidden md:inline text-brown-600 hover:text-mesa-dark">About</Link>
+          {/* Desktop About dropdown */}
+          <div className="relative group hidden md:block">
+            <Link href="/about" className="flex items-center gap-1 text-brown-600 hover:text-mesa-dark">
+              About {chevron()}
+            </Link>
+            <div className="absolute top-full left-0 w-56 z-50 hidden group-hover:block pt-2">
+              <div className="rounded-lg border border-gray-200 bg-white shadow-lg py-1">
+                {ABOUT_PAGE_ROSTER.map((person) => (
+                  <Link
+                    key={person.slug}
+                    href={`/about#${person.slug}`}
+                    className="block px-4 py-2 text-brown-600 hover:text-mesa-dark hover:bg-gray-50"
+                  >
+                    {person.displayName}
+                  </Link>
+                ))}
+              </div>
+            </div>
+          </div>
           <span className="hidden md:inline text-brown-300">|</span>
           {/* Desktop Scheduling dropdown */}
           <div className="relative group hidden md:block">
@@ -120,7 +140,28 @@ export default function LandingNav() {
       {mobileMenuOpen && (
         <div className="md:hidden border-t border-gray-200 bg-white px-6 py-4 space-y-4 text-sm">
           <Link href="/" onClick={() => setMobileMenuOpen(false)} className="block text-brown-600 hover:text-mesa-dark py-1">Home</Link>
-          <Link href="/about" onClick={() => setMobileMenuOpen(false)} className="block text-brown-600 hover:text-mesa-dark py-1">About</Link>
+          <div>
+            <div className="flex items-center justify-between">
+              <Link href="/about" onClick={() => setMobileMenuOpen(false)} className="flex-1 py-2 text-brown-600 hover:text-mesa-dark">About</Link>
+              <button onClick={() => setAboutOpen((o) => !o)} className="px-3 py-2 text-brown-600 hover:text-mesa-dark" aria-label="Toggle about submenu">
+                {chevron(aboutOpen)}
+              </button>
+            </div>
+            {aboutOpen && (
+              <div className="ml-4 mt-1 space-y-1">
+                {ABOUT_PAGE_ROSTER.map((person) => (
+                  <Link
+                    key={person.slug}
+                    href={`/about#${person.slug}`}
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="block text-brown-500 hover:text-mesa-dark py-1"
+                  >
+                    {person.displayName}
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
           <div>
             <div className="flex items-center justify-between">
               <Link href="/schedule" onClick={() => setMobileMenuOpen(false)} className="flex-1 py-2 text-brown-600 hover:text-mesa-dark">Programs</Link>
