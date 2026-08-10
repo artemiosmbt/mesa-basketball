@@ -6,6 +6,12 @@
  */
 export const TRAINER_BIO_SLUGS: Record<string, string> = {
   "Artemios Gavalas": "artemios-gavalas",
+  // Keyed on "Joseph Owens" (the exact name configured in TRAINER_ACCOUNTS/
+  // payroll-sync.ts's TRAINERS, and what actually appears as booked_trainer
+  // on the schedule sheet) even though his About page bio displays as
+  // "Joe Owens" — this key must match the schedule-data string for the
+  // "Show Bio" link to actually appear next to his sessions.
+  "Joseph Owens": "joe-owens",
 };
 
 export function getTrainerBioSlug(name: string): string | null {

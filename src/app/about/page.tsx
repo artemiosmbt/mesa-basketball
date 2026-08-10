@@ -29,6 +29,45 @@ export const metadata: Metadata = {
   },
 };
 
+// The site's growing roster of sub-trainers (everyone besides Artemios,
+// whose own founder-specific bio/career sections above are hand-built, not
+// data-driven). Add a new entry here for each trainer as they're brought
+// on — sorted below by last name so the page stays in alphabetical order
+// automatically as the roster grows, matching how the admin dashboard's
+// Groups tab already sorts athletes for the same reason.
+interface TrainerBio {
+  slug: string; // must match the corresponding key in TRAINER_BIO_SLUGS (src/lib/trainers.ts)
+  displayName: string; // may differ from the exact schedule-data name (e.g. a nickname)
+  title: string;
+  headshot: string;
+  headshotPosition?: string; // CSS object-position; defaults to center
+  bioParagraphs: string[];
+  // Set once a video is available — the layout below only splits into a
+  // side-by-side bio+video row when this is present, so a trainer's bio
+  // reads cleanly full-width in the meantime.
+  videoUrl?: string;
+}
+
+const TRAINERS: TrainerBio[] = [
+  {
+    slug: "joe-owens",
+    displayName: "Joe Owens",
+    title: "Trainer",
+    headshot: "/headshot-joe-owens.jpg",
+    headshotPosition: "50% 15%",
+    bioParagraphs: [
+      "I am a dedicated basketball skills trainer passionate about helping athletes reach their full potential through skill development, basketball IQ, and confidence. I began my coaching career early after injuries shifted my focus to player development.",
+      "I played four years of varsity basketball at Amityville Memorial High School and have trained athletes of all ages and skill levels, including developing Division I and professional athletes. I have also worked with Hoop Group Camps, gaining experience in developing high-level talent in a competitive environment.",
+    ],
+  },
+];
+
+function trainerLastName(fullName: string): string {
+  const parts = fullName.trim().split(/\s+/);
+  return parts[parts.length - 1] || fullName;
+}
+const sortedTrainers = [...TRAINERS].sort((a, b) => trainerLastName(a.displayName).localeCompare(trainerLastName(b.displayName)));
+
 const personJsonLd = {
   "@context": "https://schema.org",
   "@type": "Person",
@@ -193,6 +232,59 @@ export default function AboutPage() {
             ))}
           </div>
         </section>
+
+        {/* Our Trainers — grows alphabetically by last name as more join */}
+        {sortedTrainers.length > 0 && (
+          <section>
+            <h2 className="font-[family-name:var(--font-fira-cond)] text-3xl font-black tracking-wide text-mesa-accent mb-10">
+              OUR TRAINERS
+            </h2>
+            <div className="space-y-14">
+              {sortedTrainers.map((trainer) => (
+                <div key={trainer.slug} id={trainer.slug} className="scroll-mt-20">
+                  <div className="flex items-center gap-4 mb-6">
+                    <div className="rounded-full p-[3px] bg-white/90 shadow-lg shadow-black/40 ring-2 ring-mesa-accent/40 flex-shrink-0">
+                      <div
+                        className="h-20 w-20 rounded-full"
+                        style={{
+                          backgroundImage: `url(${trainer.headshot})`,
+                          backgroundSize: "cover",
+                          backgroundPosition: trainer.headshotPosition || "center",
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <h3 className="font-[family-name:var(--font-fira-cond)] text-2xl font-black tracking-wide">
+                        {trainer.displayName.toUpperCase()}
+                      </h3>
+                      <p className="text-sm font-semibold uppercase tracking-widest text-mesa-accent mt-0.5">
+                        {trainer.title}
+                      </p>
+                    </div>
+                  </div>
+                  <div className={`flex flex-col gap-8 ${trainer.videoUrl ? "md:flex-row md:items-start" : ""}`}>
+                    <div className="space-y-4 text-brown-200 leading-relaxed text-[17px] flex-1">
+                      {trainer.bioParagraphs.map((p, i) => (
+                        <p key={i}>{p}</p>
+                      ))}
+                    </div>
+                    {trainer.videoUrl && (
+                      <div className="w-full md:w-96 flex-shrink-0 aspect-video rounded-xl overflow-hidden shadow-xl">
+                        <iframe
+                          src={trainer.videoUrl}
+                          title={`${trainer.displayName} video`}
+                          className="w-full h-full"
+                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                          allowFullScreen
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         {/* CTA */}
         <section className="rounded-xl border border-brown-700 bg-brown-900/40 px-8 py-10 text-center">
