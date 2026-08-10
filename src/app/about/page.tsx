@@ -203,9 +203,16 @@ export default function AboutPage() {
             reads in the same text-alongside-media layout as his "Why Mesa
             Exists" section, just with a video slot instead of a photo. */}
         {sortedTrainers.length > 0 && (
-          <h2 className="font-[family-name:var(--font-fira-cond)] text-3xl font-black tracking-wide text-mesa-accent">
-            MEET THE TEAM
-          </h2>
+          <div className="text-center py-6">
+            <h2 className="font-[family-name:var(--font-fira-cond)] text-4xl md:text-5xl font-black tracking-wide text-mesa-accent">
+              MEET THE TEAM
+            </h2>
+            <div className="mt-5 flex items-center justify-center gap-4 max-w-xs mx-auto">
+              <div className="h-px flex-1 bg-gradient-to-r from-transparent to-mesa-accent/70" />
+              <div className="h-2 w-2 rotate-45 bg-mesa-accent" />
+              <div className="h-px flex-1 bg-gradient-to-l from-transparent to-mesa-accent/70" />
+            </div>
+          </div>
         )}
         {sortedTrainers.length > 0 && sortedTrainers.map((trainer, i) => (
           <Fragment key={trainer.slug}>
