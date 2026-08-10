@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { AuthContext } from "@/lib/auth";
+import { normalizeTrainerNameForComparison } from "@/lib/trainers";
 
 // Shared trainer-role scoping for every /api/admin/data* view. Extracted
 // from what used to be one inline copy of this logic in admin/data/route.ts
@@ -21,14 +22,27 @@ export function requireTrainerNameConfigured(ctx: AuthContext): NextResponse | n
   return null;
 }
 
-// The trainer name a registrations query should be scoped to via
-// .ilike("booked_trainer", ...), or null if this role sees every trainer's
-// bookings (admin/elevated_trainer). Case-insensitive match — booked_trainer
-// is whatever casing was live on the hand-typed schedule sheet at booking
-// time, which can drift from the exact casing configured in
-// TRAINER_ACCOUNTS.
+// The trainer name a registrations query should be scoped to, pre-
+// normalized (trim, lowercase, whitespace-collapsed — matches
+// normalizeTrainerNameForComparison exactly) for comparison against the
+// booked_trainer_normalized column (see
+// supabase-migration-admin-dashboard-trainer-normalize.sql), or null if
+// this role sees every trainer's bookings (admin/elevated_trainer).
+// booked_trainer is whatever casing/spacing was live on the hand-typed
+// schedule sheet at booking time, which can drift from the exact text
+// configured in TRAINER_ACCOUNTS — a bare .ilike() only forgives a casing
+// difference, not a whitespace one, which is exactly the gap this
+// normalized-column comparison closes.
 export function trainerScopeFilter(ctx: AuthContext): string | null {
-  return ctx.role === "trainer" ? ctx.trainerName! : null;
+  return ctx.role === "trainer" ? normalizeTrainerNameForComparison(ctx.trainerName!) : null;
+}
+
+// Same normalization, for the admin dashboard's own trainer-filter
+// dropdown value (a non-security, "narrow what I'm looking at" filter) —
+// needs the identical treatment so it matches booked_trainer_normalized
+// too.
+export function normalizeDropdownTrainer(raw: string): string {
+  return normalizeTrainerNameForComparison(raw);
 }
 
 // Derives the "clients this trainer is actually allowed to see" set from

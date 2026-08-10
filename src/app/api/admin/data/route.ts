@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { verifyDashboardAccess } from "@/lib/auth";
-import { requireTrainerNameConfigured, trainerScopeFilter, deriveOwnClientEmails, scopeToOwnClients } from "@/lib/admin-data-scope";
+import { requireTrainerNameConfigured, trainerScopeFilter, normalizeDropdownTrainer, deriveOwnClientEmails, scopeToOwnClients } from "@/lib/admin-data-scope";
 import { attachComputedFields } from "@/lib/admin-registration-enrichment";
 
 // Mirrors admin/page.tsx's identical client-side helpers exactly — moved
@@ -61,7 +61,7 @@ export async function GET(req: NextRequest) {
         .neq("status", "payment_abandoned")
         .order("booked_date_parsed", { ascending: false });
       const clientTrainerFilter = trainerScopeFilter(ctx);
-      if (clientTrainerFilter) clientQuery = clientQuery.ilike("booked_trainer", clientTrainerFilter);
+      if (clientTrainerFilter) clientQuery = clientQuery.eq("booked_trainer_normalized", clientTrainerFilter);
 
       const [{ data: clientRegs }, { data: clientPackages }] = await Promise.all([
         clientQuery,
@@ -90,18 +90,18 @@ export async function GET(req: NextRequest) {
     if (clientsScopeError) return clientsScopeError;
 
     let clientRegsQuery = supabase
-      .from("registrations")
+      .from("registrations_with_parsed_date")
       .select("email, parent_name, phone, kids, booked_date")
       .neq("status", "payment_abandoned");
     const clientsTrainerFilter = trainerScopeFilter(ctx);
     if (clientsTrainerFilter) {
-      clientRegsQuery = clientRegsQuery.ilike("booked_trainer", clientsTrainerFilter);
+      clientRegsQuery = clientRegsQuery.eq("booked_trainer_normalized", clientsTrainerFilter);
     } else {
       // Admin's own trainer-filter dropdown also narrows the Clients tab
       // (per the dashboard's existing comment: "applies across
       // Upcoming/Past/Calendar, admin also gets Clients").
       const dropdownTrainer = searchParams.get("trainer");
-      if (dropdownTrainer) clientRegsQuery = clientRegsQuery.ilike("booked_trainer", dropdownTrainer);
+      if (dropdownTrainer) clientRegsQuery = clientRegsQuery.eq("booked_trainer_normalized", normalizeDropdownTrainer(dropdownTrainer));
     }
 
     const [{ data: clientRegs }, { data: profilesRaw }, { data: referralCreditsRaw }] = await Promise.all([
@@ -181,14 +181,14 @@ export async function GET(req: NextRequest) {
       .order("booked_date_parsed", { ascending: true });
     const calTrainerFilter = trainerScopeFilter(ctx);
     if (calTrainerFilter) {
-      calQuery = calQuery.ilike("booked_trainer", calTrainerFilter);
+      calQuery = calQuery.eq("booked_trainer_normalized", calTrainerFilter);
     } else {
       // No role-based restriction (admin/elevated_trainer) — still honor
       // the dashboard's own trainer-filter dropdown if one is selected,
       // same "narrow the whole page to one trainer" behavior every other
       // tab already has.
       const dropdownTrainer = searchParams.get("trainer");
-      if (dropdownTrainer) calQuery = calQuery.ilike("booked_trainer", dropdownTrainer);
+      if (dropdownTrainer) calQuery = calQuery.eq("booked_trainer_normalized", normalizeDropdownTrainer(dropdownTrainer));
     }
 
     const [{ data: calRegs }, { data: calPackages }] = await Promise.all([
@@ -222,7 +222,7 @@ export async function GET(req: NextRequest) {
       .order("booked_date_parsed", { ascending: true });
     const upcomingTrainerFilter = trainerScopeFilter(ctx);
     if (upcomingTrainerFilter) {
-      upcomingQuery = upcomingQuery.ilike("booked_trainer", upcomingTrainerFilter);
+      upcomingQuery = upcomingQuery.eq("booked_trainer_normalized", upcomingTrainerFilter);
     }
 
     const [{ data: upcomingRegs }, { data: upcomingPackages }] = await Promise.all([
@@ -256,7 +256,7 @@ export async function GET(req: NextRequest) {
       .select("*")
       .neq("status", "payment_abandoned")
       .or("status.neq.cancelled,is_late_cancel.eq.true,camp_day_late_fee.gt.0");
-    if (pastTrainerFilter) pastQuery = pastQuery.ilike("booked_trainer", pastTrainerFilter);
+    if (pastTrainerFilter) pastQuery = pastQuery.eq("booked_trainer_normalized", pastTrainerFilter);
 
     let hasMore = false;
     const todayET = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
@@ -282,7 +282,7 @@ export async function GET(req: NextRequest) {
           .neq("status", "payment_abandoned")
           .or("status.neq.cancelled,is_late_cancel.eq.true,camp_day_late_fee.gt.0")
           .lt("booked_date_parsed", cutoffET);
-        if (pastTrainerFilter) olderQuery = olderQuery.ilike("booked_trainer", pastTrainerFilter);
+        if (pastTrainerFilter) olderQuery = olderQuery.eq("booked_trainer_normalized", pastTrainerFilter);
         const { count } = await olderQuery;
         hasMore = !!count && count > 0;
       }
@@ -303,13 +303,13 @@ export async function GET(req: NextRequest) {
   const scopeError = requireTrainerNameConfigured(ctx);
   if (scopeError) return scopeError;
 
-  let registrationsQuery = supabase.from("registrations").select("*").order("created_at", { ascending: false });
+  let registrationsQuery = supabase.from("registrations_with_parsed_date").select("*").order("created_at", { ascending: false });
   // A plain trainer account only ever sees their own schedule — scoped at
   // the query itself so their browser never receives another trainer's
   // clients' contact info in the first place, not just a UI that hides it.
   const trainerFilter = trainerScopeFilter(ctx);
   if (trainerFilter) {
-    registrationsQuery = registrationsQuery.ilike("booked_trainer", trainerFilter);
+    registrationsQuery = registrationsQuery.eq("booked_trainer_normalized", trainerFilter);
   }
 
   const [{ data: registrations }, { data: profilesRaw }, { data: referralCreditsRaw }, { data: packages }, { data: accountCreditsRaw }, { data: lateFeeEventsRaw }] = await Promise.all([
