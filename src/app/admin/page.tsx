@@ -763,6 +763,7 @@ function CalendarView({ token, trainerFilter, weeklyCapacity, campCapacity, canE
   });
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+  const [expandedRegs, setExpandedRegs] = useState<Set<string>>(new Set());
 
   // One month's registrations at a time, fetched as the admin navigates —
   // replaces being handed [...upcoming, ...past] directly, which broke once
@@ -805,37 +806,76 @@ function CalendarView({ token, trainerFilter, weeklyCapacity, campCapacity, canE
     });
   }
 
+  function toggleReg(id: string) {
+    setExpandedRegs((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
   function regRowJSX(r: Registration) {
+    const expanded = expandedRegs.has(r.id);
+    const fullSession = r.session_details
+      ? r.session_details.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim()
+      : "—";
     return (
-      <div key={r.id} className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-3">
-        <div className="flex items-start justify-between gap-3">
+      <div key={r.id} className="rounded-xl border border-brown-700 bg-brown-900/40 overflow-hidden">
+        <button
+          type="button"
+          onClick={() => toggleReg(r.id)}
+          className="w-full text-left px-4 py-3 flex items-start justify-between gap-2"
+        >
           <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mb-1">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
               <span className="font-medium text-sm">{r.parent_name}</span>
               <span className={`rounded-full px-2 py-0.5 text-xs ${typePill(r.type, r.session_details)}`}>{typePillLabel(r.type, r.session_details)}</span>
               {r.within_package && (
                 <span className="rounded-full bg-teal-900/40 text-teal-400 px-2 py-0.5 text-xs font-medium">pkg</span>
               )}
+              <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusBadge(r.status).cls}`}>
+                {statusBadge(r.status).label}
+              </span>
             </div>
-            <div className="text-xs text-brown-300 whitespace-pre-line">
-              {r.kids ? r.kids.split(",").map((k) => k.trim()).join("\n") : "—"}
-            </div>
-            <div className="text-xs text-brown-500 mt-0.5">{r.email} · {r.phone}</div>
-            <div className="text-xs text-brown-400 mt-1 leading-relaxed whitespace-pre-line">
-              {r.session_details ? r.session_details.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim() : "—"}
+            <div className="text-xs text-brown-300 mt-0.5 truncate">{athleteNames(r.kids || "")}</div>
+            <div className="flex flex-wrap gap-x-3 mt-1 text-xs text-brown-500">
+              {r.booked_date && <span className="text-mesa-accent">{formatDate(r.booked_date)}</span>}
+              {r.booked_start_time && (
+                <span>{r.booked_start_time}{r.booked_end_time ? `-${r.booked_end_time}` : ""}</span>
+              )}
             </div>
           </div>
-          <div className="shrink-0 flex flex-col items-end gap-2">
-            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusBadge(r.status).cls}`}>
-              {statusBadge(r.status).label}
-            </span>
+          <div className="shrink-0 flex flex-col items-end justify-between self-stretch gap-1">
+            <span className={`text-brown-500 transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}>▾</span>
             {canEdit && !r.within_package && (
-              <span className="text-xs font-medium text-green-400">
-                {priceDisplay(r)}
-              </span>
+              <span className="text-xs font-medium text-green-400">{priceDisplay(r)}</span>
             )}
+          </div>
+        </button>
+
+        {expanded && (
+          <div className="border-t border-brown-700 px-4 py-3 space-y-3 text-xs">
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+              <div>
+                <p className="text-brown-500 uppercase tracking-wider mb-0.5">Email</p>
+                <p className="text-brown-200 break-all">{r.email || "—"}</p>
+              </div>
+              <div>
+                <p className="text-brown-500 uppercase tracking-wider mb-0.5">Phone</p>
+                <p className="text-brown-200">{r.phone || "—"}</p>
+              </div>
+            </div>
+            <div>
+              <p className="text-brown-500 uppercase tracking-wider mb-0.5">Athletes</p>
+              <p className="text-brown-200 whitespace-pre-line">{r.kids ? r.kids.split(",").map((k) => k.trim()).join("\n") : "—"}</p>
+            </div>
+            <div>
+              <p className="text-brown-500 uppercase tracking-wider mb-0.5">Session Details</p>
+              <p className="text-brown-200 whitespace-pre-line leading-relaxed">{fullSession}</p>
+            </div>
+
             {r.status === "confirmed" && (
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-3 pt-1 border-t border-brown-800">
                 {canEdit && (
                   <button onClick={() => cancelRegistration(r.id)} disabled={cancelling === r.id} className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50">
                     {cancelling === r.id ? "..." : "Cancel"}
@@ -864,12 +904,14 @@ function CalendarView({ token, trainerFilter, weeklyCapacity, campCapacity, canE
             {canEdit && isDeletablePending(r) && (
               // Never a real booking — nothing charged, no slot to
               // free — safe to delete right away.
-              <button onClick={() => deleteRegistration(r.id)} disabled={deleting === r.id} className="text-xs text-brown-500 hover:text-red-400 transition disabled:opacity-50">
-                {deleting === r.id ? "..." : "Delete"}
-              </button>
+              <div className="flex flex-wrap gap-3 pt-1 border-t border-brown-800">
+                <button onClick={() => deleteRegistration(r.id)} disabled={deleting === r.id} className="text-xs text-brown-600 hover:text-red-500 transition disabled:opacity-50">
+                  {deleting === r.id ? "..." : "Delete"}
+                </button>
+              </div>
             )}
           </div>
-        </div>
+        )}
       </div>
     );
   }
@@ -1784,7 +1826,9 @@ export default function AdminPage() {
             <div className="text-xs text-brown-300 mt-0.5 truncate">{athleteNames(r.kids || "")}</div>
             <div className="flex flex-wrap gap-x-3 mt-1 text-xs text-brown-500">
               {r.booked_date && <span className="text-mesa-accent">{formatDate(r.booked_date)}</span>}
-              <span>{r.phone}</span>
+              {r.booked_start_time && (
+                <span>{r.booked_start_time}{r.booked_end_time ? `-${r.booked_end_time}` : ""}</span>
+              )}
             </div>
           </div>
           <div className="shrink-0 flex flex-col items-end justify-between self-stretch">
@@ -1813,7 +1857,10 @@ export default function AdminPage() {
               </div>
               <div>
                 <p className="text-brown-500 uppercase tracking-wider mb-0.5">Session Date</p>
-                <p className="text-mesa-accent font-medium">{formatDate(r.booked_date)}</p>
+                <p className="text-mesa-accent font-medium">
+                  {formatDate(r.booked_date)}
+                  {r.booked_start_time && ` · ${r.booked_start_time}${r.booked_end_time ? `-${r.booked_end_time}` : ""}`}
+                </p>
               </div>
               {r.booked_trainer && (
                 <div>
