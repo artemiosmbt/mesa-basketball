@@ -13,6 +13,7 @@ export const TRAINER_BIO_SLUGS: Record<string, string> = {
   // "Show Bio" link to actually appear next to his sessions.
   "Joseph Owens": "joe-owens",
   "Steven Papadimitropoulos": "steven-papadimitropoulos",
+  "Zain Amjad": "zain-amjad",
 };
 
 export function getTrainerBioSlug(name: string): string | null {

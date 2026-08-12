@@ -37,6 +37,20 @@ export const TRAINERS: TrainerBio[] = [
     ],
   },
   {
+    slug: "zain-amjad",
+    displayName: "Zain Amjad",
+    title: "Trainer",
+    headshot: "/headshot-zain-amjad.jpg",
+    headshotPosition: "center",
+    pills: ["AAU Head Coach", "Rising Stars Youth Foundation"],
+    photos: ["/zain-amjad-action.jpg"],
+    bioParagraphs: [
+      "Zain is a dedicated basketball trainer and coach with a passion for helping players develop their skills, confidence, and overall understanding of the game. Having experienced the game as both a player and coach, he understands that real development goes beyond simply running through drills. His approach is centered around purposeful training, attention to detail, and teaching players how to translate the skills they develop in workouts into real game situations.",
+      "Through his experience coaching with Rising Stars Youth Foundation, including serving as an AAU head coach, Zain has had the opportunity to work with athletes across a wide range of ages and skill levels. He has trained players from youth basketball through the high school and collegiate levels, allowing him to understand how to adjust his approach to each athlete's individual needs. His training emphasizes ball handling, footwork, finishing, shooting, change of pace, decision-making, basketball IQ, and the physical tools necessary to become a more complete player.",
+      "What sets Zain apart is his ability to build a genuine connection with every athlete he works with. He believes players should understand not only how to perform a skill, but why and when to use it. He creates a positive but competitive environment where players are encouraged to work hard, make mistakes, learn, and build confidence in their abilities. His goal with every session is simple — help each player leave the gym better than they came in.",
+    ],
+  },
+  {
     slug: "steven-papadimitropoulos",
     displayName: "Steven Papadimitropoulos",
     title: "Trainer",
