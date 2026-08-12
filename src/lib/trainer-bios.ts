@@ -1,10 +1,10 @@
 // The site's growing roster of sub-trainers (everyone besides Artemios,
 // whose own founder-specific bio/career sections on /about are hand-built,
 // not data-driven). Add a new entry here for each trainer as they're brought
-// on — sorted below by last name so the About page (and the nav dropdown
+// on — sorted below by first name so the About page (and the nav dropdown
 // that links into it) stay in alphabetical order automatically as the
-// roster grows, matching how the admin dashboard's Groups tab already sorts
-// athletes for the same reason.
+// roster grows. (Unlike the admin dashboard's Groups tab, which sorts by
+// last name to group siblings together — not a concern here.)
 export interface TrainerBio {
   slug: string; // must match the corresponding key in TRAINER_BIO_SLUGS (src/lib/trainers.ts)
   displayName: string; // may differ from the exact schedule-data name (e.g. a nickname)
@@ -42,7 +42,7 @@ export const TRAINERS: TrainerBio[] = [
     title: "Trainer",
     headshot: "/headshot-zain-amjad.jpg",
     headshotPosition: "center",
-    pills: ["AAU Head Coach", "Rising Stars Youth Foundation"],
+    pills: ["AAU Head Coach", "Youth Through Collegiate Levels"],
     photos: ["/zain-amjad-action.jpg"],
     bioParagraphs: [
       "Zain is a dedicated basketball trainer and coach with a passion for helping players develop their skills, confidence, and overall understanding of the game. Having experienced the game as both a player and coach, he understands that real development goes beyond simply running through drills. His approach is centered around purposeful training, attention to detail, and teaching players how to translate the skills they develop in workouts into real game situations.",
@@ -66,13 +66,13 @@ export const TRAINERS: TrainerBio[] = [
   },
 ];
 
-export function trainerLastName(fullName: string): string {
+export function trainerFirstName(fullName: string): string {
   const parts = fullName.trim().split(/\s+/);
-  return parts[parts.length - 1] || fullName;
+  return parts[0] || fullName;
 }
 
 export const sortedTrainers = [...TRAINERS].sort((a, b) =>
-  trainerLastName(a.displayName).localeCompare(trainerLastName(b.displayName))
+  trainerFirstName(a.displayName).localeCompare(trainerFirstName(b.displayName))
 );
 
 // Founder always leads the nav dropdown (matching his fixed position at the

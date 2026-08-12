@@ -198,7 +198,7 @@ export default function AboutPage() {
           </div>
         </section>
 
-        {/* Our Trainers — grows alphabetically by last name as more join.
+        {/* Our Trainers — grows alphabetically by first name as more join.
             Each trainer's header (centered, circular headshot, big name)
             mirrors Artemios's own hero section above exactly; their bio
             reads in the same text-alongside-media layout as his "Why Mesa
