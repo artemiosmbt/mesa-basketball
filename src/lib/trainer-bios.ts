@@ -75,10 +75,12 @@ export const sortedTrainers = [...TRAINERS].sort((a, b) =>
   trainerFirstName(a.displayName).localeCompare(trainerFirstName(b.displayName))
 );
 
-// Founder always leads the nav dropdown (matching his fixed position at the
-// top of the About page itself, ahead of the alphabetically-sorted
-// sub-trainers below him) rather than being sorted in with everyone else.
+// The About nav dropdown stays two items — founder, then a single "Meet
+// the Team" link into the trainer roster section — rather than listing
+// every trainer by name, which would grow unwieldy as the roster does.
+// Individual trainers are still reachable by scrolling (or via their own
+// "Show Bio" link on the schedule page, see TRAINER_BIO_SLUGS).
 export const ABOUT_PAGE_ROSTER: { displayName: string; slug: string }[] = [
   { displayName: "Artemios Gavalas", slug: "artemios-gavalas" },
-  ...sortedTrainers.map((t) => ({ displayName: t.displayName, slug: t.slug })),
+  ...(sortedTrainers.length > 0 ? [{ displayName: "Meet the Team", slug: "meet-the-team" }] : []),
 ];

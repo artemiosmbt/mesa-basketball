@@ -204,7 +204,7 @@ export default function AboutPage() {
             reads in the same text-alongside-media layout as his "Why Mesa
             Exists" section, just with a video slot instead of a photo. */}
         {sortedTrainers.length > 0 && (
-          <div className="relative left-1/2 right-1/2 -mx-[50vw] w-screen overflow-hidden bg-gradient-to-b from-brown-700 via-brown-800 to-brown-900 shadow-[0_8px_20px_-8px_rgba(0,0,0,0.5)]">
+          <div id="meet-the-team" className="relative left-1/2 right-1/2 -mx-[50vw] w-screen overflow-hidden bg-gradient-to-b from-brown-700 via-brown-800 to-brown-900 shadow-[0_8px_20px_-8px_rgba(0,0,0,0.5)] scroll-mt-20">
             {/* Thin top highlight simulates a raised/beveled edge instead of a flat color fill */}
             <div className="absolute inset-x-0 top-0 h-px bg-white/10" />
             <div className="mx-auto max-w-6xl px-6 py-12 text-center">
