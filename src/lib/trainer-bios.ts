@@ -23,6 +23,12 @@ export interface TrainerBio {
   // centered against the bio text). Coach Z's photos were cropped/framed to
   // line up with the top of her text specifically, so she stays "start".
   bioAlign?: "start" | "center";
+  // The side-column photos (the first two in `photos`, shown on the right
+  // of the bio text on desktop) render after the bio text in mobile's
+  // stacked layout by default, so they land at the bottom. Set true to
+  // move them above the bio text on mobile instead, while leaving the
+  // desktop side-by-side layout untouched.
+  photosFirstOnMobile?: boolean;
   bioParagraphs: string[];
   // A trainer has either a video OR a set of photos alongside their bio
   // (never both) — the About page layout only splits into a side-by-side
@@ -55,6 +61,7 @@ export const TRAINERS: TrainerBio[] = [
     headshotSize: "145px 218px",
     headshotPosition: "55% 32%",
     bioAlign: "start",
+    photosFirstOnMobile: true,
     pills: ["Adelphi University Coach", "UNC Wilmington & Wagner College", "Elmont Memorial Alum"],
     photos: [
       "/zhaneia-thybulle-coaching.jpg",
