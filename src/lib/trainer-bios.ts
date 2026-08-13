@@ -140,6 +140,6 @@ export const sortedTrainers = TRAINERS;
 // Individual trainers are still reachable by scrolling (or via their own
 // "Show Bio" link on the schedule page, see TRAINER_BIO_SLUGS).
 export const ABOUT_PAGE_ROSTER: { displayName: string; slug: string }[] = [
-  { displayName: "Artemios Gavalas", slug: "artemios-gavalas" },
+  { displayName: "Founder", slug: "artemios-gavalas" },
   ...(sortedTrainers.length > 0 ? [{ displayName: "Meet the Team", slug: "meet-the-team" }] : []),
 ];
