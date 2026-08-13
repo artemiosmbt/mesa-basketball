@@ -27,7 +27,7 @@ export const TRAINERS: TrainerBio[] = [
     title: "Trainer",
     headshot: "/headshot-joe-owens.jpg",
     headshotPosition: "center",
-    pills: ["5+ Year Trainer", "All Ages Experience"],
+    pills: ["5+ Year Trainer", "All Ages Experience", "Amityville Basketball Alum"],
     videoUrl: "/joe-owens-workout-reel.mp4",
     bioParagraphs: [
       "Joe is a dedicated basketball trainer whose passion for player development was sparked early, shifting his focus to coaching and skill work after injuries redirected his path. A former point guard and four-year varsity player at Amityville Memorial High School, Joe brings a player's perspective to every session he leads.",
