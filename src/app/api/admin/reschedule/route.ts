@@ -11,7 +11,7 @@ import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@
 import { getWeeklySchedule } from "@/lib/sheets";
 import { addAccountCredit, deductAccountCredit, addReferralCredit, addRegistration, cancelRegistration, logLateFeeEvent, logRegistrationTopupCharge, getPackageById, countPackageSessionsUsed, setPackageSessions, checkGroupSessionCapacity } from "@/lib/supabase";
 import { isLateAction, resolveOffSessionPaymentSource, chargeSavedCardOffSession, issueStripeRefund } from "@/lib/booking-finalize";
-import { calcServiceFee, serviceFeeLabel, fmtMoney, calcPrivatePrice, fullPriceForType, getTrainerTier, normalizeTrainerTier } from "@/lib/pricing";
+import { calcServiceFee, serviceFeeLabel, fmtMoney, calcPrivatePrice, fullPriceForType, getTrainerTier, normalizeTrainerTier, effectiveSessionPrice } from "@/lib/pricing";
 import { notifyTrainerOfCancellation, notifyTrainerOfReschedule, notifyTrainerOfNewBooking } from "@/lib/trainer-notify";
 
 
@@ -31,13 +31,11 @@ function isPrivateType(type: string): boolean {
 }
 
 // The DB always stores the FULL (undiscounted) session_price for private
-// sessions — the referral-credit / first-time 50% off is applied at display
+// sessions — the referral-credit / first-time discount is applied at display
 // and billing time via is_free, never baked into the stored price. Mirrors
 // resolvedSessionPrice() in booking/[token]/route.ts and effectivePrice() in
-// the admin dashboard.
-function effectiveAmount(fullPrice: number, isFree: boolean, isPriv: boolean): number {
-  return isFree && isPriv ? Math.round(fullPrice * 0.5 * 100) / 100 : fullPrice;
-}
+// the admin dashboard — both now just call the shared effectiveSessionPrice.
+const effectiveAmount = effectiveSessionPrice;
 
 // Admin-initiated move of a single confirmed booking to a new day/time/location
 // (and optionally a new type, e.g. converting a group booking into a private
@@ -234,8 +232,8 @@ export async function POST(req: NextRequest) {
   // need to reflect what the client actually still owes, not the pre-credit rate.
   const appliedCredit = reg.applied_account_credit || 0;
   const oldFullPrice = reg.session_price ?? fullPriceForType(reg.type, getTrainerTier(reg.booked_trainer));
-  const oldAmount = Math.max(0, effectiveAmount(oldFullPrice, !!reg.is_free, wasPrivate) - appliedCredit);
-  const newAmount = newFullPrice !== undefined ? Math.max(0, effectiveAmount(newFullPrice, newIsFree, isNewPrivate) - appliedCredit) : oldAmount;
+  const oldAmount = Math.max(0, effectiveAmount(oldFullPrice, !!reg.is_free, wasPrivate, !!reg.used_referral_credit) - appliedCredit);
+  const newAmount = newFullPrice !== undefined ? Math.max(0, effectiveAmount(newFullPrice, newIsFree, isNewPrivate, newUsedReferralCredit) - appliedCredit) : oldAmount;
   const priceDelta = newFullPrice !== undefined ? newAmount - oldAmount : 0;
 
   const wasPaid = !!reg.is_paid || !!reg.stripe_payment_intent_id;
@@ -309,7 +307,7 @@ export async function POST(req: NextRequest) {
   // package-covered, so if it's leaving the package, the FULL new price is
   // owed — not a delta off of some prior payment that never actually happened.
   const packageMoveOutCharge = clearPackageId && newFullPrice !== undefined
-    ? Math.max(0, effectiveAmount(newFullPrice, newIsFree, isNewPrivate))
+    ? Math.max(0, effectiveAmount(newFullPrice, newIsFree, isNewPrivate, newUsedReferralCredit))
     : 0;
 
   // Nothing gets confirmed with money still owed — every dollar the client

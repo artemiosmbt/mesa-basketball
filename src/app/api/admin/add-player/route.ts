@@ -10,7 +10,7 @@ import {
 import { sendAdminSMS, sendSMS } from "@/lib/sms";
 import { getWeeklySchedule } from "@/lib/sheets";
 import { resolveOffSessionPaymentSource, chargeSavedCardOffSession, issueStripeRefund } from "@/lib/booking-finalize";
-import { calcServiceFee, serviceFeeLabel, fmtMoney, calcPrivatePrice, fullPriceForType, getTrainerTier } from "@/lib/pricing";
+import { calcServiceFee, serviceFeeLabel, fmtMoney, calcPrivatePrice, fullPriceForType, getTrainerTier, effectiveSessionPrice } from "@/lib/pricing";
 
 
 function parseMinsFromTime(t: string): number {
@@ -28,9 +28,7 @@ function isPrivateType(type: string): boolean {
   return type === "private" || type === "group-private";
 }
 
-function effectiveAmount(fullPrice: number, isFree: boolean, isPriv: boolean): number {
-  return isFree && isPriv ? Math.round(fullPrice * 0.5 * 100) / 100 : fullPrice;
-}
+const effectiveAmount = effectiveSessionPrice;
 
 // Adds one player to an existing confirmed booking. Small, rarely-used admin
 // action — no late fee, and price is recalculated using the same rules as
@@ -132,8 +130,8 @@ export async function POST(req: NextRequest) {
   // still owed, not the pre-credit rate.
   const appliedCredit = reg.applied_account_credit || 0;
   const oldFullPrice = reg.session_price ?? fullPriceForType(reg.type, trainerTier);
-  const oldAmount = Math.max(0, effectiveAmount(oldFullPrice, !!reg.is_free, isPriv) - appliedCredit);
-  const newAmount = newFullPrice !== null ? Math.max(0, effectiveAmount(newFullPrice, !!reg.is_free, isPriv) - appliedCredit) : oldAmount;
+  const oldAmount = Math.max(0, effectiveAmount(oldFullPrice, !!reg.is_free, isPriv, !!reg.used_referral_credit) - appliedCredit);
+  const newAmount = newFullPrice !== null ? Math.max(0, effectiveAmount(newFullPrice, !!reg.is_free, isPriv, !!reg.used_referral_credit) - appliedCredit) : oldAmount;
   const priceDelta = newFullPrice !== null ? newAmount - oldAmount : 0;
 
   // "Already paid" covers both the old manual cash toggle AND a real Stripe

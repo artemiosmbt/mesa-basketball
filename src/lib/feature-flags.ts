@@ -6,9 +6,20 @@
 // New clients' first private session at 50% off.
 export const NEW_CLIENT_DISCOUNT_ENABLED = false;
 
-// Refer-a-friend program: earning new credits by referring, and redeeming
-// credits (new or already-earned) at checkout.
+// Refer-a-friend program: entering a new referral code (either as the new
+// client or on a package) and earning new credits by referring someone.
+// Redeeming an already-earned credit is governed separately below — this
+// flag alone controls whether NEW credits can be created.
 export const REFERRAL_PROGRAM_ENABLED = false;
+
+// Spending an already-earned referral credit for a half-off ($75 flat)
+// session. Only a handful of clients have any balance left (no new ones can
+// be earned while REFERRAL_PROGRAM_ENABLED is off above), and decrementReferralCredit
+// only ever touches an account with credits > 0 regardless of this flag, so
+// turning this on doesn't let anyone new into the program — it just lets
+// existing balances still be spent. Flip off too if those should stop being
+// redeemable as well.
+export const REFERRAL_CREDIT_REDEMPTION_ENABLED = true;
 
 // Whether Artemios himself is currently taking new monthly-package
 // enrollments (he's still shown as an option, just grayed out/disabled,

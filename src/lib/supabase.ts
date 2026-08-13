@@ -1,6 +1,6 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { sendAdminSMS } from "@/lib/sms";
-import { REFERRAL_PROGRAM_ENABLED } from "@/lib/feature-flags";
+import { REFERRAL_PROGRAM_ENABLED, REFERRAL_CREDIT_REDEMPTION_ENABLED } from "@/lib/feature-flags";
 import { trainerNamesMatch } from "@/lib/trainers";
 import { normalizeSessionLabelForComparison as normLabel } from "@/lib/group-matching";
 import { regGroupKey } from "@/lib/weekly-schedule-matching";
@@ -441,9 +441,10 @@ export async function addReferralCredit(email: string): Promise<void> {
 // other request would still confirm its booking as covered even though no
 // credit was ever taken for it.
 export async function decrementReferralCredit(email: string): Promise<boolean> {
-  // Referral program is paused — existing balances are left untouched in the
-  // DB, they just can't be spent while this is off.
-  if (!REFERRAL_PROGRAM_ENABLED) return false;
+  // Earning new credits is paused (REFERRAL_PROGRAM_ENABLED), but spending an
+  // already-earned balance is controlled separately — see
+  // REFERRAL_CREDIT_REDEMPTION_ENABLED's own doc comment.
+  if (!REFERRAL_CREDIT_REDEMPTION_ENABLED) return false;
 
   const supabase = getSupabase();
 

@@ -1,5 +1,5 @@
 import { Resend } from "resend";
-import { calcServiceFee, fmtMoney, PRIVATE_RATE_BY_TIER, GROUP_PRIVATE_RATE_BY_TIER, getTrainerTier } from "./pricing";
+import { calcServiceFee, fmtMoney, PRIVATE_RATE_BY_TIER, GROUP_PRIVATE_RATE_BY_TIER, getTrainerTier, REFERRAL_CREDIT_SESSION_PRICE } from "./pricing";
 import { formatTrainerForDisplay } from "./trainers";
 import { formatMonthYear } from "./sms";
 import { REFERRAL_PROGRAM_ENABLED } from "./feature-flags";
@@ -229,7 +229,7 @@ export async function sendRegistrationNotification(data: {
       ${data.trainer && !data.suppressTrainerAndRateLines ? `<p><strong>Trainer:</strong> ${escapeHtml(data.trainer)}</p>` : ""}
       <p><strong>Total Participants:</strong> ${data.totalParticipants}</p>
       ${isPackageBooking ? `<p><strong>Package:</strong> ${data.packageType}-session monthly plan — ${data.packageSessionsRemaining} session${data.packageSessionsRemaining !== 1 ? "s" : ""} remaining after this booking</p>` : ""}
-      ${data.isFree && !isPackageBooking ? `<p><strong style="color: #d4af37;">${data.isFirstTime ? "First-Time Discount" : "Referral Credit"}: 50% off applied</strong></p>` : ""}
+      ${data.isFree && !isPackageBooking ? `<p><strong style="color: #d4af37;">${data.isFirstTime ? "First-Time Discount: 50% off applied" : `Referral Credit: $${REFERRAL_CREDIT_SESSION_PRICE} flat applied`}</strong></p>` : ""}
       ${data.accountCreditApplied && data.accountCreditApplied > 0 ? `<p><strong style="color: #93c5fd;">Account credit applied: $${fmtMoney(data.accountCreditApplied)}</strong></p>` : ""}
       ${data.amountCharged != null && data.amountCharged > 0 ? `<p><strong>Charged: $${fmtMoney(data.amountCharged + calcServiceFee(data.amountCharged))}</strong></p>` : ""}
       ${data.referredBy ? `<p><strong>Referred by:</strong> ${escapeHtml(data.referredBy)}</p>` : ""}
@@ -269,7 +269,7 @@ export async function sendRegistrationNotification(data: {
   const freeNote = !isPackageBooking && data.isFree && data.isFirstTime
     ? `<p style="background: #162d5a; color: #d4af37; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">First Session Discount Applied — 50% Off!</p>`
     : !isPackageBooking && data.isFree
-    ? `<p style="background: #162d5a; color: #d4af37; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">Referral Credit Applied — 50% Off This Session!</p>`
+    ? `<p style="background: #162d5a; color: #d4af37; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">Referral Credit Applied — $${REFERRAL_CREDIT_SESSION_PRICE} This Session!</p>`
     : "";
 
   // The actual card charge, including the service fee — this is the
@@ -330,7 +330,7 @@ export async function sendRegistrationNotification(data: {
   // everywhere else, not deleted, so this comes back automatically
   // whenever REFERRAL_PROGRAM_ENABLED flips back on.
   const referralSection = REFERRAL_PROGRAM_ENABLED && data.referralCode
-    ? `<p style="background: #162d5a; padding: 12px; border-radius: 8px; margin-top: 12px; color: #ffffff;"><strong style="color: #d4af37;">Your referral code: ${data.referralCode}</strong><br/><span style="font-size: 13px; color: #93c5fd;">Share this code with friends and family — when they book their first session using your code, you'll receive 50% off a private session.</span></p>`
+    ? `<p style="background: #162d5a; padding: 12px; border-radius: 8px; margin-top: 12px; color: #ffffff;"><strong style="color: #d4af37;">Your referral code: ${data.referralCode}</strong><br/><span style="font-size: 13px; color: #93c5fd;">Share this code with friends and family — when they book their first session using your code, you'll receive a $${REFERRAL_CREDIT_SESSION_PRICE} private session.</span></p>`
     : "";
 
   const clientResult = await resend.emails.send({
@@ -375,11 +375,11 @@ export async function sendReferralCreditNotification(data: {
     from: FROM_EMAIL,
     to: data.referrerEmail,
     replyTo: ARTEMI_EMAIL,
-    subject: `You earned a 50% off private session — Mesa Basketball Training`,
+    subject: `You earned a $${REFERRAL_CREDIT_SESSION_PRICE} private session — Mesa Basketball Training`,
     html: `
       <h2>You earned a reward!</h2>
       <p>Hi ${escapeHtml(data.referrerName)},</p>
-      <p>Great news — <strong>${escapeHtml(data.newClientName)}</strong> just booked their first session using your referral code. As a thank you, you've earned <strong>50% off your next private session</strong>.</p>
+      <p>Great news — <strong>${escapeHtml(data.newClientName)}</strong> just booked their first session using your referral code. As a thank you, you've earned a <strong>$${REFERRAL_CREDIT_SESSION_PRICE} private session</strong>.</p>
       <p>Your discount will be applied automatically the next time you book a private session.</p>
       <p><a href="${BASE_URL}/my-bookings" style="color: #d4af37; font-weight: bold;">View My Bookings</a> — check your referral credits anytime.</p>
       <br/>

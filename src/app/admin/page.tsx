@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { authClient, resolveAuthRole, TRAINER_ACCOUNTS, type AuthContext } from "@/lib/auth";
 import type { WeeklySession, Camp, PrivateSlot } from "@/lib/sheets";
-import { fullPriceForType, calcPrivatePrice as calcPrivatePricePreview, getTrainerTier } from "@/lib/pricing";
+import { fullPriceForType, calcPrivatePrice as calcPrivatePricePreview, getTrainerTier, effectiveSessionPrice, REFERRAL_CREDIT_SESSION_PRICE } from "@/lib/pricing";
 import { trainerNamesMatch, normalizeTrainerNameForComparison } from "@/lib/trainers";
 import { type CanonicalGroupId } from "@/lib/athletes";
 import { CANONICAL_GROUPS } from "@/lib/group-matching";
@@ -227,7 +227,7 @@ function preCreditPrice(r: Registration): number {
   } else {
     basePrice = fullPriceForType(r.type, getTrainerTier(r.booked_trainer));
   }
-  return r.is_free && isPrivateType ? Math.round(basePrice * 0.5 * 100) / 100 : basePrice;
+  return effectiveSessionPrice(basePrice, r.is_free, isPrivateType, !!r.used_referral_credit);
 }
 
 // A flat dollar figure would hide that a $0 (or reduced) balance came from
@@ -381,11 +381,9 @@ function isPrivateTypeClient(type: string): boolean {
 }
 
 // The DB stores the FULL (undiscounted) session_price for private sessions —
-// the 50% referral-credit/first-time discount is applied at display time via
+// the referral-credit/first-time discount is applied at display time via
 // is_free, mirroring preCreditPrice() and the server's identical logic.
-function effectiveAmountPreview(fullPrice: number, isFree: boolean, isPriv: boolean): number {
-  return isFree && isPriv ? Math.round(fullPrice * 0.5 * 100) / 100 : fullPrice;
-}
+const effectiveAmountPreview = effectiveSessionPrice;
 
 function uniqueSorted(values: string[]): string[] {
   return Array.from(new Set(values.filter(Boolean))).sort();
@@ -2607,8 +2605,8 @@ export default function AdminPage() {
                   const newIsFreePreview = !targetIsPrivate ? false : (showCreditCheckbox ? rescheduleKeepCredit : !!r.is_free);
 
                   const appliedCredit = r.applied_account_credit || 0;
-                  const oldAmount = Math.max(0, effectiveAmountPreview(r.session_price ?? 0, !!r.is_free, isPrivateTypeClient(r.type)) - appliedCredit);
-                  const newAmount = Math.max(0, effectiveAmountPreview(newFull, newIsFreePreview, targetIsPrivate) - appliedCredit);
+                  const oldAmount = Math.max(0, effectiveAmountPreview(r.session_price ?? 0, !!r.is_free, isPrivateTypeClient(r.type), !!r.used_referral_credit) - appliedCredit);
+                  const newAmount = Math.max(0, effectiveAmountPreview(newFull, newIsFreePreview, targetIsPrivate, !!r.used_referral_credit) - appliedCredit);
                   const delta = newAmount - oldAmount;
 
                   return (
@@ -2725,7 +2723,7 @@ export default function AdminPage() {
                     onChange={(e) => setRescheduleKeepCredit(e.target.checked)}
                     className="mt-0.5"
                   />
-                  <span>Apply the same referral credit used on the original booking (50% off)</span>
+                  <span>{`Apply the same referral credit used on the original booking ($${REFERRAL_CREDIT_SESSION_PRICE} flat)`}</span>
                 </label>
               )}
               {rescheduleError && <p className="text-xs text-red-400 mt-2">{rescheduleError}</p>}

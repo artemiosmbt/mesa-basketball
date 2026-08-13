@@ -3,7 +3,7 @@ import { sendRegistrationNotification, sendReferralCreditNotification, sendResch
 import { addPrivateSessionToCalendar, deletePrivateSessionFromCalendar, upsertGroupSessionCalendarEvent } from "@/lib/calendar";
 import { sendSMS, sendAdminSMS, formatDateWithDay, formatMonthYear, resolveLocationName } from "@/lib/sms";
 import { getStripe } from "@/lib/stripe";
-import { calcServiceFee, fmtMoney, packagePrice, fullPriceForType, calcPrivatePrice, getTrainerTier, normalizeTrainerTier } from "@/lib/pricing";
+import { calcServiceFee, fmtMoney, packagePrice, fullPriceForType, calcPrivatePrice, getTrainerTier, normalizeTrainerTier, effectiveSessionPrice } from "@/lib/pricing";
 import { notifyTrainerOfNewBooking, notifyTrainerOfCancellation } from "@/lib/trainer-notify";
 import { trainerNamesMatch, formatTrainerForDisplay } from "@/lib/trainers";
 import { normalizeSessionLabelForComparison as normLabel } from "@/lib/group-matching";
@@ -87,10 +87,10 @@ function joinWithAnd(parts: string[]): string {
  * every cancellation/reschedule/no-show path that needs to know what a
  * client actually paid or owes.
  */
-export function resolvedSessionPrice(reg: { session_price: number | null; is_free: boolean; type: string; booked_trainer?: string | null }): number {
+export function resolvedSessionPrice(reg: { session_price: number | null; is_free: boolean; used_referral_credit?: boolean | null; type: string; booked_trainer?: string | null }): number {
   const isPrivateType = reg.type === "private" || reg.type === "group-private";
   const basePrice = reg.session_price ?? fullPriceForType(reg.type, getTrainerTier(reg.booked_trainer));
-  return reg.is_free && isPrivateType ? Math.round(basePrice * 0.5 * 100) / 100 : basePrice;
+  return effectiveSessionPrice(basePrice, reg.is_free, isPrivateType, !!reg.used_referral_credit);
 }
 
 /**
@@ -339,6 +339,10 @@ export interface FinalizePrivateBookingParams {
   manageToken: string;
   isFree: boolean;
   isFirstTime: boolean;
+  // Distinguishes which of the two isFree discounts this is — a redeemed
+  // referral credit prices at the flat REFERRAL_CREDIT_SESSION_PRICE,
+  // whereas the first-time discount (isFirstTime) stays 50% of fullPrice.
+  usedReferralCredit?: boolean;
   referralCode: string;
   privateReferrer: { email: string; name: string } | null;
   submittedReferralCode?: string;
@@ -422,7 +426,7 @@ export async function finalizeConfirmedPrivateBooking(params: FinalizePrivateBoo
   // nominal session price for refund/reschedule math.
   const amountCharged = params.packageCovered
     ? 0
-    : Math.max(0, (params.isFree ? Math.round((params.fullPrice ?? 0) * 0.5 * 100) / 100 : (params.fullPrice ?? 0)) - params.accountCreditApplied);
+    : Math.max(0, effectiveSessionPrice(params.fullPrice ?? 0, params.isFree, true, !!params.usedReferralCredit) - params.accountCreditApplied);
 
   try {
     await sendRegistrationNotification({
@@ -807,6 +811,10 @@ export interface FinalizePrivateSeriesBookingParams {
   submittedReferralCode?: string;
   smsConsent: boolean;
   isFirstTime: boolean;
+  // See the identical field on FinalizePrivateBookingParams — at most one
+  // session in the series ever has isFree true, and this says which kind of
+  // discount that one session is.
+  usedReferralCredit?: boolean;
   accountCreditApplied: number;
 }
 
@@ -904,7 +912,7 @@ export async function finalizeConfirmedPrivateSeriesBooking(params: FinalizePriv
   // already itemized in priceNote/sessionDetails below, so it's safe (and
   // more accurate) to omit those two summary lines entirely in that case.
   const allSameTrainer = privateSessions.every((s) => trainerNamesMatch(s.trainer, privateSessions[0]?.trainer));
-  const totalPaid = privateSessions.reduce((sum, s) => sum + (s.packageCovered ? 0 : s.isFree ? Math.round(s.fullPrice * 0.5 * 100) / 100 : s.fullPrice), 0);
+  const totalPaid = privateSessions.reduce((sum, s) => sum + (s.packageCovered ? 0 : effectiveSessionPrice(s.fullPrice, s.isFree, isPrivateType, !!params.usedReferralCredit)), 0);
   const seriesAmountCharged = Math.max(0, totalPaid - params.accountCreditApplied);
   const seriesTotalWithFee = seriesAmountCharged > 0 ? Math.round((seriesAmountCharged + calcServiceFee(seriesAmountCharged)) * 100) / 100 : 0;
   const priceNote = `<p><strong>Total:</strong> $${fmtMoney(totalPaid)}${params.accountCreditApplied > 0 ? ` — $${fmtMoney(params.accountCreditApplied)} account credit applied` : ""}${seriesAmountCharged > 0 ? ` — <strong>Charged:</strong> $${fmtMoney(seriesTotalWithFee)}` : ""}</p>`;
@@ -1964,6 +1972,7 @@ export async function finalizePaidCheckoutSession(session: Stripe.Checkout.Sessi
         submittedReferralCode,
         smsConsent: !!first.sms_consent,
         isFirstTime,
+        usedReferralCredit: !!first.used_referral_credit,
         accountCreditApplied,
       });
     } else {
@@ -1985,6 +1994,7 @@ export async function finalizePaidCheckoutSession(session: Stripe.Checkout.Sessi
           manageToken: reg.manage_token,
           isFree: reg.is_free,
           isFirstTime,
+          usedReferralCredit: !!reg.used_referral_credit,
           referralCode: reg.referral_code || "",
           privateReferrer: referrer,
           submittedReferralCode,

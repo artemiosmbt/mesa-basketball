@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { authClient } from "@/lib/auth";
-import { fmtMoney, packagePrice, calcServiceFee, normalizeTrainerTier } from "@/lib/pricing";
-import { REFERRAL_PROGRAM_ENABLED } from "@/lib/feature-flags";
+import { fmtMoney, packagePrice, calcServiceFee, normalizeTrainerTier, REFERRAL_CREDIT_SESSION_PRICE } from "@/lib/pricing";
+import { REFERRAL_PROGRAM_ENABLED, REFERRAL_CREDIT_REDEMPTION_ENABLED } from "@/lib/feature-flags";
 
 const LOCATION_NAMES: Record<string, string> = {
   "St. Pauls": "St. Paul's Cathedral",
@@ -209,8 +209,8 @@ export default function MyBookings() {
                       </div>
                       <p className={`mt-1 text-xs leading-relaxed ${rewards.referralCredits > 0 ? "text-mesa-accent/80" : "text-brown-600"}`}>
                         {rewards.referralCredits > 0
-                          ? REFERRAL_PROGRAM_ENABLED
-                            ? `${rewards.referralCredits} half-off session${rewards.referralCredits !== 1 ? "s" : ""} ready to use — applied automatically at checkout.`
+                          ? REFERRAL_CREDIT_REDEMPTION_ENABLED
+                            ? `${rewards.referralCredits} $${REFERRAL_CREDIT_SESSION_PRICE} session${rewards.referralCredits !== 1 ? "s" : ""} ready to use — select it at checkout on a private session.`
                             : `${rewards.referralCredits} half-off session${rewards.referralCredits !== 1 ? "s" : ""} saved, but redemption is paused for now — they'll be available again once referrals are back on.`
                           : "No credits yet. Start sharing your code!"}
                       </p>

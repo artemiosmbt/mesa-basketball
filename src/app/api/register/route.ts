@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getStripe, buildCreditDiscount } from "@/lib/stripe";
-import { calcServiceFee, serviceFeeItemName, fmtMoney, calcPrivatePrice, getTrainerTier, normalizeTrainerTier, type TrainerTier } from "@/lib/pricing";
+import { calcServiceFee, serviceFeeItemName, fmtMoney, calcPrivatePrice, getTrainerTier, normalizeTrainerTier, REFERRAL_CREDIT_SESSION_PRICE, type TrainerTier } from "@/lib/pricing";
 import { getWeeklySchedule, getCamps, isPrivateWindowOfferedByTrainer } from "@/lib/sheets";
 import { resolveRequestEmail } from "@/lib/request-email";
 import { NEW_CLIENT_DISCOUNT_ENABLED } from "@/lib/feature-flags";
@@ -867,7 +867,17 @@ export async function POST(req: NextRequest) {
         const packageCovered = packageCoverage[i]?.covered ?? false;
         const packageId = packageCoverage[i]?.packageId ?? null;
         const isFree = !packageCovered && i === 0 && firstIsFree;
-        const effectivePrice = packageCovered ? 0 : isFree ? Math.round(fullPrice * 0.5 * 100) / 100 : fullPrice;
+        // A referral credit always prices at the flat REFERRAL_CREDIT_SESSION_PRICE,
+        // never 50% of this specific session's price (see its own doc comment) —
+        // the first-time new-client discount (the other way firstIsFree gets set)
+        // keeps the proportional 50%-off-this-session math.
+        const effectivePrice = packageCovered
+          ? 0
+          : !isFree
+            ? fullPrice
+            : usedReferralCredit
+              ? REFERRAL_CREDIT_SESSION_PRICE
+              : Math.round(fullPrice * 0.5 * 100) / 100;
         return { ...s, fullPrice, effectivePrice, isFree, packageCovered, packageId };
       });
 
@@ -1006,6 +1016,7 @@ export async function POST(req: NextRequest) {
         submittedReferralCode: submittedReferralCode || undefined,
         smsConsent: !!smsConsent,
         isFirstTime,
+        usedReferralCredit,
         accountCreditApplied,
       };
 
@@ -1127,11 +1138,17 @@ export async function POST(req: NextRequest) {
 
       const privateSessionPrice = calcPrivateSessionPrice(bookedStartTime, bookedEndTime, totalParticipants || 1, bookedTrainer);
 
+      // Same flat-vs-proportional split as the private-series path above:
+      // a referral credit always prices at REFERRAL_CREDIT_SESSION_PRICE,
+      // while the first-time new-client discount stays 50% of this specific
+      // session's price.
       const effectivePrice = packageCovered
         ? 0
-        : isFree && privateSessionPrice != null
-          ? Math.round(privateSessionPrice * 0.5 * 100) / 100
-          : (privateSessionPrice ?? 0);
+        : !isFree
+          ? (privateSessionPrice ?? 0)
+          : usedReferralCredit
+            ? REFERRAL_CREDIT_SESSION_PRICE
+            : (privateSessionPrice != null ? Math.round(privateSessionPrice * 0.5 * 100) / 100 : 0);
 
       // Cap against the DISCOUNTED (effective) price, never the full
       // undiscounted one — otherwise a first-time/referral-discount client
@@ -1207,6 +1224,7 @@ export async function POST(req: NextRequest) {
           manageToken: insertResult.manageToken,
           isFree,
           isFirstTime,
+          usedReferralCredit,
           referralCode,
           privateReferrer,
           submittedReferralCode: submittedReferralCode || undefined,

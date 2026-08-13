@@ -4,9 +4,9 @@ import { useState, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import Image from "next/image";
 import { authClient, ADMIN_EMAIL } from "@/lib/auth";
 import LandingNav from "@/app/LandingNav";
-import { REFERRAL_PROGRAM_ENABLED, NEW_CLIENT_DISCOUNT_ENABLED, ARTEMIOS_PACKAGES_AVAILABLE } from "@/lib/feature-flags";
+import { REFERRAL_PROGRAM_ENABLED, REFERRAL_CREDIT_REDEMPTION_ENABLED, NEW_CLIENT_DISCOUNT_ENABLED, ARTEMIOS_PACKAGES_AVAILABLE } from "@/lib/feature-flags";
 import { getTrainerBioSlug, getTrainerTier, normalizeTrainerTier, formatTrainerForDisplay, type TrainerTier } from "@/lib/trainers";
-import { calcServiceFee, serviceFeeLabel, serviceFeeItemName, isPercentServiceFee, SERVICE_FEE_PERCENT_TEXT, packagePrice, PRIVATE_RATE_BY_TIER, GROUP_PRIVATE_RATE_BY_TIER, calcPrivatePrice as getPrivatePrice } from "@/lib/pricing";
+import { calcServiceFee, serviceFeeLabel, serviceFeeItemName, isPercentServiceFee, SERVICE_FEE_PERCENT_TEXT, packagePrice, PRIVATE_RATE_BY_TIER, GROUP_PRIVATE_RATE_BY_TIER, calcPrivatePrice as getPrivatePrice, REFERRAL_CREDIT_SESSION_PRICE } from "@/lib/pricing";
 import { ALL_GRADES, normalizedAthleteName } from "@/lib/athletes";
 import { getSessionGender, getGradesForGroup } from "@/lib/group-matching";
 
@@ -1847,7 +1847,7 @@ export default function Home() {
         items.push({ label: payableDates > 1 ? `Private Session x${payableDates}` : "Private Session", amount: total });
         return { total, items };
       }
-      const total = useReferralCredit ? Math.round(totalPrice * 0.5 * 100) / 100 : totalPrice;
+      const total = useReferralCredit ? REFERRAL_CREDIT_SESSION_PRICE : totalPrice;
       const upsellNote = upsellExtra > 0 ? ` (+${upsellExtra} min bonus)` : "";
       items.push({ label: `Private Session${upsellNote}${useReferralCredit ? " — referral credit applied" : ""}`, amount: total });
       return { total, items };
@@ -3786,7 +3786,7 @@ export default function Home() {
                 )}
 
                 {/* Referral Credit — shown for returning clients booking private sessions */}
-                {REFERRAL_PROGRAM_ENABLED && isReturningClient && (modal.type === "private" || modal.type === "group-private") && (
+                {REFERRAL_CREDIT_REDEMPTION_ENABLED && isReturningClient && (modal.type === "private" || modal.type === "group-private") && (
                   <div className={`rounded-lg border px-4 py-3 transition ${creditBalance !== null && creditBalance > 0 ? "border-green-700 bg-green-900/20" : "border-brown-700 bg-brown-800/30 opacity-60"}`}>
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
@@ -3797,8 +3797,8 @@ export default function Home() {
                           {creditBalance === null
                             ? "Checking..."
                             : creditBalance === 0
-                            ? "0 credits available — refer a friend to earn one!"
-                            : `${creditBalance} credit${creditBalance !== 1 ? "s" : ""} available — use 1 for 50% off`}
+                            ? (REFERRAL_PROGRAM_ENABLED ? "0 credits available — refer a friend to earn one!" : "0 credits available")
+                            : `${creditBalance} credit${creditBalance !== 1 ? "s" : ""} available — use 1 for a $${REFERRAL_CREDIT_SESSION_PRICE} session`}
                         </p>
                       </div>
                       {creditBalance !== null && creditBalance > 0 && !useReferralCredit && (
@@ -3822,7 +3822,7 @@ export default function Home() {
                     </div>
                     {useReferralCredit && (
                       <div className="mt-2">
-                        <span className="rounded-full bg-green-900/60 px-2 py-0.5 text-xs font-medium text-green-300">✓ Credit applied — 50% off this session</span>
+                        <span className="rounded-full bg-green-900/60 px-2 py-0.5 text-xs font-medium text-green-300">{`✓ Credit applied — $${REFERRAL_CREDIT_SESSION_PRICE} for this session`}</span>
                       </div>
                     )}
                   </div>

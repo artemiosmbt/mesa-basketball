@@ -1009,7 +1009,7 @@ export async function PUT(
   }
   const newPriceKnown = newSessionPrice != null;
   const newEffectivePrice = newPriceKnown
-    ? resolvedSessionPrice({ session_price: newSessionPrice ?? null, is_free: newIsFree, type: newType, booked_trainer: resolvedTrainer })
+    ? resolvedSessionPrice({ session_price: newSessionPrice ?? null, is_free: newIsFree, used_referral_credit: newUsedReferralCredit, type: newType, booked_trainer: resolvedTrainer })
     : undefined;
 
   // Figure out whether real money needs to move. Only bookings actually paid

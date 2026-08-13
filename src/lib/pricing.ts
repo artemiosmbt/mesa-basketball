@@ -89,6 +89,35 @@ export const GROUP_PRIVATE_RATE_BY_TIER: Record<TrainerTier, number> = { artemio
 // the tier-aware functions below instead.
 export const PRIVATE_RATE = PRIVATE_RATE_BY_TIER.artemios;
 export const GROUP_PRIVATE_RATE = GROUP_PRIVATE_RATE_BY_TIER.artemios;
+
+// A redeemed referral credit always prices the session at exactly this flat
+// amount — not 50% of whatever that particular session would normally cost.
+// Credits were earned back when Artemios personally ran every private
+// session (half of his standard 1-hour $150 rate), so this stays fixed
+// regardless of which trainer actually covers the session or how long it
+// runs, rather than fluctuating with the substitute rate or duration.
+export const REFERRAL_CREDIT_SESSION_PRICE = 75;
+
+// The actual price a private session bills at, given its full undiscounted
+// price and which (if either) discount applied — is_free alone doesn't say
+// which, since both the first-time new-client discount and a redeemed
+// referral credit set it. A referral credit always resolves to the flat
+// REFERRAL_CREDIT_SESSION_PRICE; the first-time discount stays proportional
+// (50% of THIS session's own price). Every place that resolves what a
+// discounted private booking actually costs — register, reschedule (admin +
+// client), add-player, no-show fee, payments/revenue reporting — goes
+// through this one function so a referral-credit booking prices identically
+// everywhere, not just at the moment it was first booked.
+export function effectiveSessionPrice(
+  fullPrice: number,
+  isFree: boolean,
+  isPrivate: boolean,
+  usedReferralCredit: boolean
+): number {
+  if (!isFree || !isPrivate) return fullPrice;
+  return usedReferralCredit ? REFERRAL_CREDIT_SESSION_PRICE : Math.round(fullPrice * 0.5 * 100) / 100;
+}
+
 // Rough flat fallback used ONLY when a legacy weekly/camp row has no stored
 // session_price to fall back on — not a real distinct price, just a guess
 // that avoids treating a missing/unset price as $0 (which would understate

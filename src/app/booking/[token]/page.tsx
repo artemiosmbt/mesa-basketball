@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect, useMemo, use, useRef } from "react";
-import { PRIVATE_RATE_BY_TIER, GROUP_PRIVATE_RATE_BY_TIER, calcPrivatePrice as getPrivatePrice, getTrainerTier } from "@/lib/pricing";
+import { PRIVATE_RATE_BY_TIER, GROUP_PRIVATE_RATE_BY_TIER, calcPrivatePrice as getPrivatePrice, getTrainerTier, REFERRAL_CREDIT_SESSION_PRICE } from "@/lib/pricing";
+import { REFERRAL_PROGRAM_ENABLED } from "@/lib/feature-flags";
 import { formatTrainerForDisplay } from "@/lib/trainers";
 import { normalizedAthleteName, type Athlete } from "@/lib/athletes";
 
@@ -1682,8 +1683,8 @@ export default function ManageBooking({
                           {creditBalance === null
                             ? "Checking..."
                             : creditBalance === 0
-                            ? "0 credits available — refer a friend to earn one!"
-                            : `${creditBalance} credit${creditBalance !== 1 ? "s" : ""} available — use 1 for 50% off`}
+                            ? (REFERRAL_PROGRAM_ENABLED ? "0 credits available — refer a friend to earn one!" : "0 credits available")
+                            : `${creditBalance} credit${creditBalance !== 1 ? "s" : ""} available — use 1 for a $${REFERRAL_CREDIT_SESSION_PRICE} session`}
                         </p>
                       </div>
                       {creditBalance !== null && creditBalance > 0 && !useReferralCredit && (
@@ -1701,7 +1702,7 @@ export default function ManageBooking({
                     </div>
                     {useReferralCredit && (
                       <div className="mt-2">
-                        <span className="rounded-full bg-green-900/60 px-2 py-0.5 text-xs font-medium text-green-300">✓ Credit applied — 50% off this session</span>
+                        <span className="rounded-full bg-green-900/60 px-2 py-0.5 text-xs font-medium text-green-300">{`✓ Credit applied — $${REFERRAL_CREDIT_SESSION_PRICE} for this session`}</span>
                       </div>
                     )}
                   </div>

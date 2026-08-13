@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useCallback, type FormEvent } from "react
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { authClient, ADMIN_EMAIL } from "@/lib/auth";
-import { fullPriceForType, getTrainerTier } from "@/lib/pricing";
+import { fullPriceForType, getTrainerTier, effectiveSessionPrice } from "@/lib/pricing";
 
 // Matches the exact column list /api/admin/payments-data selects — this
 // page only ever needed a narrow slice of a registration row, not the
@@ -28,6 +28,7 @@ interface Registration {
   session_price: number | null;
   total_participants: number | null;
   is_free: boolean;
+  used_referral_credit?: boolean;
   is_full_camp: boolean;
   referral_code: string | null;
   camp_day_late_fee: number | null;
@@ -325,7 +326,7 @@ export default function PaymentsPage() {
     } else {
       basePrice = fullPriceForType(r.type, getTrainerTier(r.booked_trainer));
     }
-    const discounted = r.is_free && isPrivateType ? Math.round(basePrice * 0.5 * 100) / 100 : basePrice;
+    const discounted = effectiveSessionPrice(basePrice, r.is_free, isPrivateType, !!r.used_referral_credit);
     // session_price/basePrice is always the full pre-credit rate — account
     // credit applied at booking time is a separate field and has to be
     // subtracted here, or this shows what they'd owe with no credit at all.

@@ -41,7 +41,7 @@ async function refundTrainerCancelledBooking(r: {
   let cancelCredit: number | undefined;
   const wasPaid = !!r.is_paid || !!r.stripe_payment_intent_id;
   if (wasPaid && r.email) {
-    const paidAmount = Math.max(0, resolvedSessionPrice({ session_price: r.session_price, is_free: !!r.is_free, type: r.type, booked_trainer: r.booked_trainer }) - (r.applied_account_credit || 0));
+    const paidAmount = Math.max(0, resolvedSessionPrice({ session_price: r.session_price, is_free: !!r.is_free, used_referral_credit: r.used_referral_credit, type: r.type, booked_trainer: r.booked_trainer }) - (r.applied_account_credit || 0));
     if (paidAmount > 0) {
       if (r.stripe_payment_intent_id) {
         stripeRefundResult = await issueStripeRefund({
