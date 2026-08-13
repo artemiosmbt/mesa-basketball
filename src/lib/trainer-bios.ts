@@ -42,7 +42,12 @@ export const TRAINERS: TrainerBio[] = [
     headshot: "/headshot-zhaneia-thybulle.jpg",
     headshotPosition: "center",
     pills: ["Adelphi University Coach", "UNC Wilmington & Wagner College", "Elmont Memorial Alum"],
-    photos: ["/zhaneia-thybulle-action.jpg", "/zhaneia-thybulle-coaching.jpg"],
+    photos: [
+      "/zhaneia-thybulle-action.jpg",
+      "/zhaneia-thybulle-coaching.jpg",
+      "/zhaneia-thybulle-sideline.jpg",
+      "/zhaneia-thybulle-clinic.jpg",
+    ],
     bioParagraphs: [
       "Zhaneia \"Z\" Thybulle is a college basketball coach and player development specialist. A Long Island native and Elmont Memorial basketball standout, Coach Z built her playing career at the Division I level, competing at both UNC Wilmington and Wagner College. During her time at Wagner, she became a key contributor and leader for the program.",
       "After her playing career, Coach Z transitioned into coaching, bringing her experience as a point guard, competitor, and leader into player development. Going into her 4th year coaching at both the D1 and D2 level, Coach Z continues to focus on player development, relationship building, and creating an environment where athletes are challenged to grow every day.",
