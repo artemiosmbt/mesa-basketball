@@ -68,7 +68,6 @@ const SUB_TRAINERS = [
   "Joseph Owens",
   "Zhaneia Thybulle",
   "Steven Papadimitropoulos",
-  "Tristan Wissemann",
   "Zain Amjad",
 ] as const;
 const OWNER_NAME = "Artemios Gavalas";
@@ -80,7 +79,6 @@ const TRAINER_COLOR: Record<string, RgbColor> = {
   "Joseph Owens": { red: 0.11, green: 0.31, blue: 0.85 },
   "Zhaneia Thybulle": { red: 0.86, green: 0.15, blue: 0.34 },
   "Steven Papadimitropoulos": { red: 0.13, green: 0.55, blue: 0.25 },
-  "Tristan Wissemann": { red: 0.55, green: 0.25, blue: 0.75 },
   "Zain Amjad": { red: 0.9, green: 0.5, blue: 0.05 },
 };
 const CAMP_COLOR: RgbColor = { red: 0.45, green: 0.45, blue: 0.45 };

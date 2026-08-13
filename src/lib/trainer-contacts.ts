@@ -17,7 +17,6 @@ const PHONE_BY_TRAINER_NAME: Record<string, string> = {
   "Zhaneia Thybulle": "347-355-1168",
   "Zain Amjad": "516-303-5963",
   "Steven Papadimitropoulos": "929-465-3066",
-  "Tristan Wissemann": "631-793-4868",
 };
 
 export interface TrainerContact {

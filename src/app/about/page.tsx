@@ -4,7 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 import LandingNav from "../LandingNav";
 import TrainerVideo from "../TrainerVideo";
-import { sortedTrainers } from "@/lib/trainer-bios";
+import { sortedTrainers, trainerFirstName } from "@/lib/trainer-bios";
 
 export const metadata: Metadata = {
   title: "About Us | Mesa Basketball Training",
@@ -264,6 +264,9 @@ export default function AboutPage() {
             </div>
             <div className="flex flex-col md:flex-row gap-10 items-center">
               <div className="space-y-5 text-brown-200 leading-relaxed text-[17px] flex-1">
+                <h3 className="font-[family-name:var(--font-fira-cond)] text-2xl md:text-3xl font-black tracking-wide text-mesa-accent">
+                  About Coach {trainerFirstName(trainer.displayName)}
+                </h3>
                 {trainer.bioParagraphs.map((p, i) => (
                   <p key={i}>{p}</p>
                 ))}

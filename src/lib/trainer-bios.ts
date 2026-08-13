@@ -51,6 +51,20 @@ export const TRAINERS: TrainerBio[] = [
     ],
   },
   {
+    slug: "zhaneia-thybulle",
+    displayName: "Coach Z Thybulle",
+    title: "Coach",
+    headshot: "/headshot-zhaneia-thybulle.jpg",
+    headshotPosition: "center",
+    pills: ["College Coach", "UNC Wilmington & Wagner College", "Elmont Memorial Alum"],
+    photos: ["/zhaneia-thybulle-action.jpg", "/zhaneia-thybulle-coaching.jpg"],
+    bioParagraphs: [
+      "Zhaneia \"Z\" Thybulle is a college basketball coach and player development specialist. A Long Island native and Elmont Memorial basketball standout, Coach Z built her playing career at the Division I level, competing at both UNC Wilmington and Wagner College. During her time at Wagner, she became a key contributor and leader for the program.",
+      "After her playing career, Coach Z transitioned into coaching, bringing her experience as a point guard, competitor, and leader into player development. Going into her 4th year coaching at both the D1 and D2 level, Coach Z continues to focus on player development, relationship building, and creating an environment where athletes are challenged to grow every day.",
+      "Coach Z believes great coaching starts with relationships. Her goal is to challenge athletes, build confidence, develop discipline, and give players the tools to become better basketball players, teammates, leaders, and people.",
+    ],
+  },
+  {
     slug: "steven-papadimitropoulos",
     displayName: "Steven Papadimitropoulos",
     title: "Trainer",
@@ -66,8 +80,13 @@ export const TRAINERS: TrainerBio[] = [
   },
 ];
 
+// Strips a leading "Coach " (e.g. "Coach Z Thybulle") before taking the
+// first word, so alphabetization goes by the trainer's actual first name
+// rather than the literal word "Coach" every such displayName would
+// otherwise share.
 export function trainerFirstName(fullName: string): string {
-  const parts = fullName.trim().split(/\s+/);
+  const name = fullName.trim().replace(/^coach\s+/i, "");
+  const parts = name.trim().split(/\s+/);
   return parts[0] || fullName;
 }
 

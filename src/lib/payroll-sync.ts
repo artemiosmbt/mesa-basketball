@@ -54,7 +54,6 @@ const TRAINERS = [
   "Joseph Owens",
   "Zhaneia Thybulle",
   "Steven Papadimitropoulos",
-  "Tristan Wissemann",
   "Zain Amjad",
 ] as const;
 

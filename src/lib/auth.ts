@@ -53,7 +53,6 @@ export const TRAINER_ACCOUNTS: TrainerAccount[] = [
   { email: "zthybulle@gmail.com", role: "trainer", trainerName: "Zhaneia Thybulle" },
   { email: "zamjadh786@gmail.com", role: "trainer", trainerName: "Zain Amjad" },
   { email: "sjpapadi@gmail.com", role: "trainer", trainerName: "Steven Papadimitropoulos" },
-  { email: "wissemanntristan@gmail.com", role: "trainer", trainerName: "Tristan Wissemann" },
 ];
 
 export type AuthRole = "admin" | "elevated_trainer" | "trainer";

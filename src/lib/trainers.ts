@@ -14,6 +14,7 @@ export const TRAINER_BIO_SLUGS: Record<string, string> = {
   "Joseph Owens": "joe-owens",
   "Steven Papadimitropoulos": "steven-papadimitropoulos",
   "Zain Amjad": "zain-amjad",
+  "Zhaneia Thybulle": "zhaneia-thybulle",
 };
 
 export function getTrainerBioSlug(name: string): string | null {
