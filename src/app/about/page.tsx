@@ -211,7 +211,7 @@ export default function AboutPage() {
               <h2 className="font-[family-name:var(--font-fira-cond)] text-4xl md:text-5xl font-black tracking-wide text-mesa-accent drop-shadow-[0_1px_3px_rgba(0,0,0,0.4)]">
                 MEET THE TEAM
               </h2>
-              <p className="mt-2 text-xs font-semibold uppercase tracking-widest text-brown-300">
+              <p className="mt-2 text-sm md:text-base font-semibold uppercase tracking-widest text-brown-300">
                 The ΜΕΣΑ Family
               </p>
               {/* Roster strip: jumps straight to each trainer's bio section below. */}
@@ -227,7 +227,10 @@ export default function AboutPage() {
                           className="block h-full w-full rounded-full border-2 border-brown-900"
                           style={{
                             backgroundImage: `url(${trainer.headshot})`,
-                            backgroundSize: trainer.headshotSize || "cover",
+                            // Always "cover" here, not trainer.headshotSize — that field is
+                            // tuned in fixed px for the 112px hero circle below, and reused
+                            // verbatim at this strip's much smaller size it over-zooms.
+                            backgroundSize: "cover",
                             backgroundPosition: trainer.headshotPosition || "center",
                           }}
                         />
