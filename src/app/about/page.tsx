@@ -262,7 +262,7 @@ export default function AboutPage() {
                 )}
               </div>
             </div>
-            <div className="flex flex-col md:flex-row gap-10 items-center">
+            <div className="flex flex-col md:flex-row gap-10 items-start">
               <div className="space-y-5 text-brown-200 leading-relaxed text-[17px] flex-1">
                 <h3 className="font-[family-name:var(--font-fira-cond)] text-2xl md:text-3xl font-black tracking-wide text-mesa-accent">
                   About Coach {trainerFirstName(trainer.displayName)}
