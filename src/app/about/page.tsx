@@ -215,7 +215,7 @@ export default function AboutPage() {
                 The ΜΕΣΑ Family
               </p>
               {/* Roster strip: jumps straight to each trainer's bio section below. */}
-              <ul className="mt-9 flex list-none flex-wrap justify-center p-0">
+              <ul className="mt-4 flex list-none flex-wrap justify-center p-0">
                 {sortedTrainers.map((trainer) => (
                   <li key={trainer.slug} className="-mx-[0.55rem]">
                     <a
