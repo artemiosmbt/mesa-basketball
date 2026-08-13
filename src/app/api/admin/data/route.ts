@@ -145,8 +145,15 @@ export async function GET(req: NextRequest) {
       const profileKidNames = profileKids?.length ? profileKids.map((k) => k.name).filter(Boolean) as string[] : null;
       const kidsDisplay = profileKidNames ? (profileKidNames.join(", ") || "—") : athleteNames(r.kids || "");
       const athleteCount = profileKidNames ? profileKidNames.length : (kidsDisplay === "—" ? 0 : kidsDisplay.split(",").length);
+      // Prefer the live profiles.parent_name over this registration's own
+      // (possibly years-stale) parent_name — a client who updates their name
+      // in Settings only writes to profiles, never back onto their past
+      // registration rows, so keying off r.parent_name here would keep
+      // showing whichever name they typed at their very first-ever booking.
+      // Falls back to r.parent_name for a guest client with no profiles row,
+      // same fallback pattern already used for kids/videoConsent below.
       clientMap.set(key, {
-        name: r.parent_name, email: r.email, phone: r.phone, kids: kidsDisplay, athleteCount,
+        name: profile?.parent_name || r.parent_name, email: r.email, phone: r.phone, kids: kidsDisplay, athleteCount,
         count: 1, lastDate: d,
         videoConsent: profile?.video_consent ?? null,
         referralsAvailable: rc?.credits ?? 0,
