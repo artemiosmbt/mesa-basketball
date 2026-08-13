@@ -1318,12 +1318,17 @@ export default function AdminPage() {
     if (!token) return;
     if (!confirm("Permanently delete this registration? This cannot be undone.")) return;
     setDeleting(id);
-    await fetch("/api/admin/delete", {
+    const res = await fetch("/api/admin/delete", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({ id }),
     });
-    setRegistrations((prev) => prev.filter((r) => r.id !== id));
+    if (res.ok) {
+      setRegistrations((prev) => prev.filter((r) => r.id !== id));
+    } else {
+      const data = await res.json().catch(() => null);
+      alert(data?.error || "Failed to delete this registration.");
+    }
     setDeleting(null);
   }
 
