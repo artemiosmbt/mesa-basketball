@@ -23,11 +23,12 @@ export interface TrainerBio {
   // centered against the bio text). Coach Z's photos were cropped/framed to
   // line up with the top of her text specifically, so she stays "start".
   bioAlign?: "start" | "center";
-  // The side-column photos (the first two in `photos`, shown on the right
-  // of the bio text on desktop) render after the bio text in mobile's
-  // stacked layout by default, so they land at the bottom. Set true to
-  // move them above the bio text on mobile instead, while leaving the
-  // desktop side-by-side layout untouched.
+  // On mobile, the side-column photos (the first two in `photos`, shown on
+  // the right of the bio text on desktop) render in DOM order after any
+  // "extra" photos beyond the first two, landing below them instead of
+  // above. Set true to show all photos in one mobile-only grid in natural
+  // `photos` order (side-column photos first) instead, still after the bio
+  // text. Desktop's side-by-side layout is unaffected either way.
   photosFirstOnMobile?: boolean;
   bioParagraphs: string[];
   // A trainer has either a video OR a set of photos alongside their bio

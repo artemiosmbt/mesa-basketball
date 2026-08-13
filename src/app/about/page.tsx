@@ -295,12 +295,28 @@ export default function AboutPage() {
                 {trainer.bioParagraphs.map((p, i) => (
                   <p key={i}>{p}</p>
                 ))}
+                {/* photosFirstOnMobile trainers get one unified grid here, in
+                    natural (desktop side-column-then-rest) photo order, shown
+                    on mobile only — mobile has no separate side column to
+                    split across, so this is the only way to put the side-
+                    column photos above the rest without also putting them
+                    above the bio text itself. Desktop keeps the normal split
+                    below (this block is hidden at md+). */}
+                {!trainer.videoUrl && trainer.photos && trainer.photos.length > 2 && trainer.photosFirstOnMobile && (
+                  <div className="grid grid-cols-2 gap-4 max-w-md md:hidden">
+                    {trainer.photos.map((photo) => (
+                      <div key={photo} className="relative aspect-[3/4] rounded-xl overflow-hidden shadow-xl">
+                        <Image src={photo} alt={`${trainer.displayName} coaching`} fill className="object-cover" />
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {/* Photos beyond the first two sit right under the bio text
                     itself (not the whole row) — the side column can run
                     taller than the text, and this keeps them flush with it
                     either way. */}
                 {!trainer.videoUrl && trainer.photos && trainer.photos.length > 2 && (
-                  <div className="grid grid-cols-2 gap-4 max-w-md">
+                  <div className={`grid grid-cols-2 gap-4 max-w-md ${trainer.photosFirstOnMobile ? "hidden md:grid" : ""}`}>
                     {trainer.photos.slice(2).map((photo) => (
                       <div key={photo} className="relative aspect-[3/4] rounded-xl overflow-hidden shadow-xl">
                         <Image src={photo} alt={`${trainer.displayName} coaching`} fill className="object-cover" />
@@ -321,7 +337,7 @@ export default function AboutPage() {
                   beyond that go in a row below instead of stacking the
                   column ever taller than the bio text beside it. */}
               {!trainer.videoUrl && trainer.photos && trainer.photos.length > 0 && (
-                <div className={`flex flex-row md:flex-col gap-4 w-full md:w-72 flex-shrink-0 ${trainer.photosFirstOnMobile ? "order-first md:order-none" : ""}`}>
+                <div className={`flex flex-row md:flex-col gap-4 w-full md:w-72 flex-shrink-0 ${trainer.photosFirstOnMobile ? "hidden md:flex" : ""}`}>
                   {trainer.photos.slice(0, 2).map((photo) => (
                     <div key={photo} className="relative w-full aspect-[3/4] rounded-xl overflow-hidden shadow-xl">
                       <Image src={photo} alt={`${trainer.displayName} coaching`} fill className="object-cover" />
