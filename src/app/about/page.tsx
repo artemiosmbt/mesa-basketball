@@ -270,6 +270,19 @@ export default function AboutPage() {
                 {trainer.bioParagraphs.map((p, i) => (
                   <p key={i}>{p}</p>
                 ))}
+                {/* Photos beyond the first two sit right under the bio text
+                    itself (not the whole row) — the side column can run
+                    taller than the text, and this keeps them flush with it
+                    either way. */}
+                {!trainer.videoUrl && trainer.photos && trainer.photos.length > 2 && (
+                  <div className="grid grid-cols-2 gap-4 max-w-md">
+                    {trainer.photos.slice(2).map((photo) => (
+                      <div key={photo} className="relative aspect-[3/4] rounded-xl overflow-hidden shadow-xl">
+                        <Image src={photo} alt={`${trainer.displayName} coaching`} fill className="object-cover" />
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
               {trainer.videoUrl && (
                 <div className="relative w-full aspect-[3/4] md:h-auto md:w-72 md:aspect-[3/4] rounded-xl overflow-hidden flex-shrink-0 shadow-xl bg-black pointer-events-none">
@@ -292,15 +305,6 @@ export default function AboutPage() {
                 </div>
               )}
             </div>
-            {!trainer.videoUrl && trainer.photos && trainer.photos.length > 2 && (
-              <div className="mt-6 grid grid-cols-2 gap-4 max-w-md">
-                {trainer.photos.slice(2).map((photo) => (
-                  <div key={photo} className="relative aspect-[3/4] rounded-xl overflow-hidden shadow-xl">
-                    <Image src={photo} alt={`${trainer.displayName} coaching`} fill className="object-cover" />
-                  </div>
-                ))}
-              </div>
-            )}
             </section>
           </Fragment>
         ))}
