@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getStripe, buildCreditDiscount } from "@/lib/stripe";
-import { calcServiceFee, serviceFeeItemName, fmtMoney, calcPrivatePrice, getTrainerTier, normalizeTrainerTier, REFERRAL_CREDIT_SESSION_PRICE, type TrainerTier } from "@/lib/pricing";
+import { calcServiceFee, serviceFeeItemName, fmtMoney, calcPrivatePrice, getTrainerTier, normalizeTrainerTier, packageCoversTrainerTier, REFERRAL_CREDIT_SESSION_PRICE, type TrainerTier } from "@/lib/pricing";
 import { getWeeklySchedule, getCamps, isPrivateWindowOfferedByTrainer } from "@/lib/sheets";
 import { resolveRequestEmail } from "@/lib/request-email";
 import { NEW_CLIENT_DISCOUNT_ENABLED } from "@/lib/feature-flags";
@@ -114,10 +114,11 @@ async function allocatePackageCoverage(
     return entries.map(() => ({ covered: false, packageId: null }));
   }
   // null = no active package that month; otherwise the one active package's
-  // tier + remaining count. A package only ever covers a session whose
-  // trainer matches the tier it was purchased for — an "Any Available
-  // Trainer" package never covers an Artemios session and vice versa (see
-  // the trainer-tier selector on the package modal).
+  // tier + remaining count. Coverage is asymmetric, not a strict tier match
+  // (see packageCoversTrainerTier) — an Artemios-tier package already paid
+  // his premium rate, so it covers a session with him OR a substitute
+  // covering for him; an "Any Available Trainer" package stays restricted to
+  // substitute trainers only, never his own premium sessions.
   const packageByMonth = new Map<string, { packageId: string; tier: TrainerTier; remaining: number } | null>();
   const result: Array<{ covered: boolean; packageId: string | null }> = [];
   for (const entry of entries) {
@@ -146,7 +147,7 @@ async function allocatePackageCoverage(
     }
     const pkgEntry = packageByMonth.get(month) ?? null;
     const sessionTier = getTrainerTier(entry.trainer);
-    if (pkgEntry && pkgEntry.remaining > 0 && pkgEntry.tier === sessionTier) {
+    if (pkgEntry && pkgEntry.remaining > 0 && packageCoversTrainerTier(pkgEntry.tier, sessionTier)) {
       result.push({ covered: true, packageId: pkgEntry.packageId });
       packageByMonth.set(month, { ...pkgEntry, remaining: pkgEntry.remaining - 1 });
     } else {

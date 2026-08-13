@@ -6,7 +6,7 @@ import { authClient, ADMIN_EMAIL } from "@/lib/auth";
 import LandingNav from "@/app/LandingNav";
 import { REFERRAL_PROGRAM_ENABLED, REFERRAL_CREDIT_REDEMPTION_ENABLED, NEW_CLIENT_DISCOUNT_ENABLED, ARTEMIOS_PACKAGES_AVAILABLE } from "@/lib/feature-flags";
 import { getTrainerBioSlug, getTrainerTier, normalizeTrainerTier, formatTrainerForDisplay, type TrainerTier } from "@/lib/trainers";
-import { calcServiceFee, serviceFeeLabel, serviceFeeItemName, isPercentServiceFee, SERVICE_FEE_PERCENT_TEXT, packagePrice, PRIVATE_RATE_BY_TIER, GROUP_PRIVATE_RATE_BY_TIER, calcPrivatePrice as getPrivatePrice, REFERRAL_CREDIT_SESSION_PRICE } from "@/lib/pricing";
+import { calcServiceFee, serviceFeeLabel, serviceFeeItemName, isPercentServiceFee, SERVICE_FEE_PERCENT_TEXT, packagePrice, PRIVATE_RATE_BY_TIER, GROUP_PRIVATE_RATE_BY_TIER, calcPrivatePrice as getPrivatePrice, REFERRAL_CREDIT_SESSION_PRICE, packageCoversTrainerTier } from "@/lib/pricing";
 import { ALL_GRADES, normalizedAthleteName } from "@/lib/athletes";
 import { getSessionGender, getGradesForGroup } from "@/lib/group-matching";
 
@@ -884,15 +884,16 @@ export default function Home() {
         .then((d) => {
           if (cancelled) return;
           const pkg = d.package as { package_type: number; sessions_used: number; trainer_tier?: string } | null;
-          // Only counts as coverage if this package's tier matches the
-          // trainer actually being booked — a package bought for one tier
-          // never covers a session with the other tier's trainer. When
-          // there IS an active package but it's for the OTHER tier, surface
-          // that mismatch separately so the booking form can warn (not
-          // block) instead of just silently showing the full price.
+          // Coverage is asymmetric, not a strict tier match (see
+          // packageCoversTrainerTier) — an Artemios-tier package also covers
+          // a substitute trainer, but an "Any Available Trainer" package
+          // never covers Artemios himself. When there IS an active package
+          // but it doesn't cover the trainer being booked, surface that
+          // mismatch separately so the booking form can warn (not block)
+          // instead of just silently showing the full price.
           const pkgTier: TrainerTier = normalizeTrainerTier(pkg?.trainer_tier);
           const bookedTier = getTrainerTier(modal.bookedTrainer);
-          const covers = !!pkg && pkgTier === bookedTier;
+          const covers = !!pkg && packageCoversTrainerTier(pkgTier, bookedTier);
           setPackageSessionsRemaining(covers && pkg ? Math.max(0, pkg.package_type - pkg.sessions_used) : 0);
           setMismatchedPackageTier(!!pkg && !covers ? pkgTier : null);
         })
@@ -2998,22 +2999,24 @@ export default function Home() {
                             // actually makes a choice.
                             const selectedTrainer = window.trainers.includes(sel.trainer) ? sel.trainer : "";
                             // Only "included in your package" if the active
-                            // package's tier matches whichever trainer is
-                            // currently selected on THIS card — a package
-                            // never covers the other tier's trainer. Before a
+                            // package covers whichever trainer is currently
+                            // selected on THIS card (see packageCoversTrainerTier
+                            // — asymmetric: an Artemios-tier package also covers
+                            // a substitute, but an "Any Available Trainer"
+                            // package never covers Artemios himself). Before a
                             // trainer is picked, getTrainerTier("") would
                             // default to 'other' and could wrongly claim
                             // "included" for a card where the ONLY trainer
                             // actually available (e.g. just Artemios that
                             // day) doesn't match an "Any Available Trainer"
                             // package at all — so instead check whether ANY
-                            // trainer actually offered on this card matches,
-                            // same "actually available" spirit as
+                            // trainer actually offered on this card is
+                            // covered, same "actually available" spirit as
                             // cheapestAvailablePrice just below.
                             const groupPackageRemaining = groupPackageInfo && groupPackageInfo.remaining > 0 && (
                               selectedTrainer
-                                ? groupPackageInfo.trainerTier === getTrainerTier(selectedTrainer)
-                                : window.trainers.some((t) => getTrainerTier(t) === groupPackageInfo.trainerTier)
+                                ? packageCoversTrainerTier(groupPackageInfo.trainerTier, getTrainerTier(selectedTrainer))
+                                : window.trainers.some((t) => packageCoversTrainerTier(groupPackageInfo.trainerTier, getTrainerTier(t)))
                             )
                               ? groupPackageInfo.remaining
                               : 0;
@@ -3302,12 +3305,10 @@ export default function Home() {
           <div className="w-full max-w-sm rounded-2xl border border-yellow-700 bg-brown-900 p-6 shadow-2xl">
             <h3 className="text-lg font-bold text-yellow-400">This Won&apos;t Use Your Package</h3>
             <p className="mt-2 text-sm text-brown-300">
-              {mismatchedPackageTier === "artemios"
-                ? "You have an active package with Artemios, but this session is with a different trainer — it won't be covered. You'd pay the regular rate for this trainer instead."
-                : "You have an active package with one of our other trainers, but this session is with Artemios — it won't be covered. You'd pay Artemios's regular rate instead."}
+              You have an active package with one of our other trainers, but this session is with Artemios — it won&apos;t be covered. You&apos;d pay Artemios&apos;s regular rate instead.
             </p>
             <p className="mt-2 text-xs text-brown-500">
-              To use your package, go back and book with {mismatchedPackageTier === "artemios" ? "Artemios" : "your package trainer"} instead — or continue to book this session at full price.
+              To use your package, go back and book with your package trainer instead — or continue to book this session at full price.
             </p>
             <div className="mt-5 flex gap-3">
               <button

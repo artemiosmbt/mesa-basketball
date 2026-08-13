@@ -11,7 +11,7 @@ import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@
 import { getWeeklySchedule } from "@/lib/sheets";
 import { addAccountCredit, deductAccountCredit, addReferralCredit, addRegistration, cancelRegistration, logLateFeeEvent, logRegistrationTopupCharge, getPackageById, countPackageSessionsUsed, setPackageSessions, checkGroupSessionCapacity } from "@/lib/supabase";
 import { isLateAction, resolveOffSessionPaymentSource, chargeSavedCardOffSession, issueStripeRefund } from "@/lib/booking-finalize";
-import { calcServiceFee, serviceFeeLabel, fmtMoney, calcPrivatePrice, fullPriceForType, getTrainerTier, normalizeTrainerTier, effectiveSessionPrice } from "@/lib/pricing";
+import { calcServiceFee, serviceFeeLabel, fmtMoney, calcPrivatePrice, fullPriceForType, getTrainerTier, normalizeTrainerTier, effectiveSessionPrice, packageCoversTrainerTier } from "@/lib/pricing";
 import { notifyTrainerOfCancellation, notifyTrainerOfReschedule, notifyTrainerOfNewBooking } from "@/lib/trainer-notify";
 
 
@@ -282,12 +282,13 @@ export async function POST(req: NextRequest) {
     }
     // Packages only ever cover a standard private session (up to 3 kids) —
     // never a 4+ kid group-private rate, regardless of remaining capacity.
-    // Also requires the NEW trainer to match the package's own tier — an
-    // admin reschedule can move the session to a different trainer, and
-    // without this check a package bought for one tier could end up
-    // covering the other tier's (possibly pricier) trainer for free.
+    // Also requires the NEW trainer to be covered by the package's own tier
+    // (see packageCoversTrainerTier) — an admin reschedule can move the
+    // session to a different trainer, and without this check an "Any
+    // Available Trainer" package could end up covering an Artemios session
+    // for free.
     const oldPkg = await getPackageById(reg.package_id).catch(() => null);
-    if (oldPkg && effectiveType === "private" && (reg.total_participants || 1) <= 3 && getTrainerTier(resolvedTrainer) === normalizeTrainerTier(oldPkg.trainer_tier)) {
+    if (oldPkg && effectiveType === "private" && (reg.total_participants || 1) <= 3 && packageCoversTrainerTier(normalizeTrainerTier(oldPkg.trainer_tier), getTrainerTier(resolvedTrainer))) {
       const d = new Date(bookedDate);
       if (!isNaN(d.getTime())) {
         const newMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;

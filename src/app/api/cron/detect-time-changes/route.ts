@@ -10,7 +10,7 @@ import { addAccountCredit, addReferralCredit, countPackageSessionsUsed, setPacka
 import { issueStripeRefund, resolvedSessionPrice, type StripeRefundResult } from "@/lib/booking-finalize";
 import { fmtMoney } from "@/lib/pricing";
 import { notifyTrainerOfCancellation, notifyTrainerOfNewBooking } from "@/lib/trainer-notify";
-import { getTrainerTier, normalizeTrainerTier } from "@/lib/trainers";
+import { getTrainerTier, normalizeTrainerTier, packageCoversTrainerTier } from "@/lib/trainers";
 
 // A session the trainer removed from the schedule is never the client's
 // fault — this is always treated as an on-time cancellation (full refund,
@@ -722,18 +722,20 @@ export async function GET(req: NextRequest) {
 
     // A package-covered session (often booked against a "TBD"/Any Available
     // Trainer slot, which always resolves to the cheaper "other" tier —
-    // see getTrainerTier) can end up reassigned to a trainer of a DIFFERENT
-    // tier than what the client's package actually paid for. Unlike admin
-    // reschedule (admin/reschedule/route.ts), which already re-checks tier
-    // match before letting a package keep covering a session, this
-    // automatic reassignment only ever updates booked_trainer — nothing
-    // here reconciles the tier mismatch, so it would otherwise persist
-    // silently forever. Can't safely auto-charge the difference from an
-    // unattended cron, so this alerts for manual review instead, the same
-    // way genuinely ambiguous cases elsewhere in this file already do.
+    // see getTrainerTier) can end up reassigned to a trainer no longer
+    // covered by the client's package (see packageCoversTrainerTier — an
+    // "Any Available Trainer" package reassigned onto Artemios is the only
+    // way this can now happen). Unlike admin reschedule
+    // (admin/reschedule/route.ts), which already re-checks coverage before
+    // letting a package keep covering a session, this automatic
+    // reassignment only ever updates booked_trainer — nothing here
+    // reconciles the mismatch, so it would otherwise persist silently
+    // forever. Can't safely auto-charge the difference from an unattended
+    // cron, so this alerts for manual review instead, the same way
+    // genuinely ambiguous cases elsewhere in this file already do.
     if (r.package_id) {
       const pkg = await getPackageById(r.package_id).catch(() => null);
-      if (pkg && getTrainerTier(newTrainer) !== normalizeTrainerTier(pkg.trainer_tier)) {
+      if (pkg && !packageCoversTrainerTier(normalizeTrainerTier(pkg.trainer_tier), getTrainerTier(newTrainer))) {
         await sendAdminSMS(
           `⚠️ PACKAGE TIER MISMATCH: ${r.parent_name}'s package-covered session on ${r.booked_date} ${r.booked_start_time} was just reassigned from ${oldTrainer} to ${newTrainer} — but their package was paid for at the "${normalizeTrainerTier(pkg.trainer_tier)}" tier, not "${getTrainerTier(newTrainer)}". Review and charge/waive the difference manually.`
         ).catch(() => {});

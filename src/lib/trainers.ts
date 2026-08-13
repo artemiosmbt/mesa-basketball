@@ -90,3 +90,14 @@ export function getTrainerTier(name: string | undefined | null): TrainerTier {
 export function normalizeTrainerTier(value: string | undefined | null): TrainerTier {
   return value === "other" ? "other" : "artemios";
 }
+
+// Whether a package purchased at `packageTier` can cover a session run at
+// `sessionTier`. Deliberately asymmetric, not a simple equality check: a
+// package bought at the "artemios" (premium) tier already paid his higher
+// rate, so it can cover a session with him OR with a substitute covering for
+// him. A package bought at the "other" (cheaper substitute) tier stays
+// restricted to substitute trainers only — it must never let someone who
+// paid the cheaper rate book Artemios's own premium sessions for free.
+export function packageCoversTrainerTier(packageTier: TrainerTier, sessionTier: TrainerTier): boolean {
+  return packageTier === "artemios" || packageTier === sessionTier;
+}

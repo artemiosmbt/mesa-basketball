@@ -1,6 +1,6 @@
-import { getTrainerTier, normalizeTrainerTier, type TrainerTier } from "./trainers";
+import { getTrainerTier, normalizeTrainerTier, packageCoversTrainerTier, type TrainerTier } from "./trainers";
 export type { TrainerTier };
-export { getTrainerTier, normalizeTrainerTier };
+export { getTrainerTier, normalizeTrainerTier, packageCoversTrainerTier };
 
 // Fee added on top of every real Stripe charge (new bookings and reschedule
 // topups) — covers Stripe's own processing cost. Applies uniformly

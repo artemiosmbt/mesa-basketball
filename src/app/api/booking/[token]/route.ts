@@ -22,7 +22,7 @@ import {
 } from "@/lib/supabase";
 import { issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome, isLateAction, parseSessionDateTimeET, computeLateFeeAmounts, settleOldBookingForReschedule, computePlayerEditPricing, parseKidsList } from "@/lib/booking-finalize";
 import { getStripe } from "@/lib/stripe";
-import { calcServiceFee, serviceFeeItemName, fmtMoney, calcPrivatePrice, getTrainerTier, normalizeTrainerTier } from "@/lib/pricing";
+import { calcServiceFee, serviceFeeItemName, fmtMoney, calcPrivatePrice, getTrainerTier, normalizeTrainerTier, packageCoversTrainerTier } from "@/lib/pricing";
 import {
   sendCancellationNotification,
   sendRescheduleNotification,
@@ -1069,13 +1069,12 @@ export async function PUT(
     // Packages only ever cover a standard private session (up to 3 kids) —
     // never a 4+ kid group-private rate, regardless of remaining capacity.
     const oldPkg = await getPackageById(reg.package_id).catch(() => null);
-    // Also requires the NEW trainer to match the package's own tier — a
-    // reschedule can change trainer (resolvedTrainer comes straight from
-    // the client), and without this check a package bought for one tier
-    // could be used to cover a session with the other tier's trainer for
-    // free (e.g. an "Any Available Trainer" package silently covering an
-    // Artemios session, or vice versa).
-    if (oldPkg && newType === "private" && kidCount <= 3 && getTrainerTier(resolvedTrainer) === normalizeTrainerTier(oldPkg.trainer_tier)) {
+    // Also requires the NEW trainer to be covered by the package's own tier
+    // (see packageCoversTrainerTier) — a reschedule can change trainer
+    // (resolvedTrainer comes straight from the client), and without this
+    // check an "Any Available Trainer" package could silently cover an
+    // Artemios session for free.
+    if (oldPkg && newType === "private" && kidCount <= 3 && packageCoversTrainerTier(normalizeTrainerTier(oldPkg.trainer_tier), getTrainerTier(resolvedTrainer))) {
       const d = new Date(bookedDate);
       if (!isNaN(d.getTime())) {
         const newMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
