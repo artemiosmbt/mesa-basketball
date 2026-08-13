@@ -47,8 +47,8 @@ export const TRAINERS: TrainerBio[] = [
     displayName: "Coach Z Thybulle",
     title: "Trainer",
     headshot: "/headshot-zhaneia-thybulle.jpg",
-    headshotSize: "134px 202px",
-    headshotPosition: "60% 38%",
+    headshotSize: "145px 218px",
+    headshotPosition: "55% 32%",
     pills: ["Adelphi University Coach", "UNC Wilmington & Wagner College", "Elmont Memorial Alum"],
     photos: [
       "/zhaneia-thybulle-coaching.jpg",
