@@ -245,7 +245,7 @@ export default function AboutPage() {
                     className="h-28 w-28 rounded-full"
                     style={{
                       backgroundImage: `url(${trainer.headshot})`,
-                      backgroundSize: "cover",
+                      backgroundSize: trainer.headshotSize || "cover",
                       backgroundPosition: trainer.headshotPosition || "center",
                     }}
                   />

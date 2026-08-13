@@ -9,7 +9,14 @@ export interface TrainerBio {
   displayName: string; // may differ from the exact schedule-data name (e.g. a nickname)
   title: string;
   headshot: string;
-  headshotPosition?: string; // CSS object-position; defaults to center
+  headshotPosition?: string; // CSS background-position; defaults to center
+  // CSS background-size; defaults to "cover". A tall/narrow (portrait)
+  // source photo at "cover" inside the square headshot circle already
+  // fills the full width with zero horizontal slack to pan — headshotPosition's
+  // X value has no visible effect until the image is zoomed in past "cover"
+  // via this field (e.g. "300px 450px", figured against the circle's
+  // 112x112px size — see h-28 w-28 on the headshot div).
+  headshotSize?: string;
   pills: string[]; // credential/highlight pills shown under the name, matching Artemios's hero
   bioParagraphs: string[];
   // A trainer has either a video OR a set of photos alongside their bio
