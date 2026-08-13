@@ -4,7 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 import LandingNav from "../LandingNav";
 import TrainerVideo from "../TrainerVideo";
-import { sortedTrainers, trainerFirstName } from "@/lib/trainer-bios";
+import { sortedTrainers, trainerFirstName, headshotSizeAsPercent } from "@/lib/trainer-bios";
 
 export const metadata: Metadata = {
   title: "About Us | Mesa Basketball Training",
@@ -227,10 +227,7 @@ export default function AboutPage() {
                           className="block h-full w-full rounded-full border-2 border-brown-900"
                           style={{
                             backgroundImage: `url(${trainer.headshot})`,
-                            // Always "cover" here, not trainer.headshotSize — that field is
-                            // tuned in fixed px for the 112px hero circle below, and reused
-                            // verbatim at this strip's much smaller size it over-zooms.
-                            backgroundSize: "cover",
+                            backgroundSize: headshotSizeAsPercent(trainer.headshotSize) || "cover",
                             backgroundPosition: trainer.headshotPosition || "center",
                           }}
                         />

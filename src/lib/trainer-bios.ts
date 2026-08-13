@@ -98,6 +98,20 @@ export const TRAINERS: TrainerBio[] = [
   },
 ];
 
+// headshotSize is tuned in fixed px against the 112px hero circle (h-28
+// w-28 on the About page). Reused verbatim at a different circle size (e.g.
+// the roster strip's ~56-72px thumbnails) that fixed px would over- or
+// under-zoom, so this converts it to a % of the box instead — background-size
+// percentages are relative to the element's own box, so the same relative
+// crop/zoom reproduces exactly regardless of how big the circle is.
+const HERO_HEADSHOT_PX = 112;
+export function headshotSizeAsPercent(size: string | undefined): string | undefined {
+  if (!size) return undefined;
+  const [w, h] = size.split(/\s+/).map((v) => parseFloat(v));
+  if (Number.isNaN(w) || Number.isNaN(h)) return undefined;
+  return `${(w / HERO_HEADSHOT_PX) * 100}% ${(h / HERO_HEADSHOT_PX) * 100}%`;
+}
+
 // Strips a leading "Coach " (e.g. "Coach Z Thybulle") before taking the
 // first word — used for the "About Coach X" bio subtitle on the About page,
 // so it reads by the trainer's actual first name rather than the literal
