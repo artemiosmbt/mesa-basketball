@@ -54,6 +54,7 @@ export default function PackagesPage() {
   const [packages, setPackages] = useState<Package[]>([]);
   const [token, setToken] = useState<string | null>(null);
   const [toggling, setToggling] = useState<string | null>(null);
+  const [reassigning, setReassigning] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [expandedPkg, setExpandedPkg] = useState<string | null>(null);
   const [pkgSessionsMap, setPkgSessionsMap] = useState<Record<string, { booked_date: string | null; booked_start_time: string | null; booked_end_time: string | null; booked_location: string | null; kids: string; status: string }[]>>({});
@@ -92,6 +93,34 @@ export default function PackagesPage() {
     });
     setPackages((prev) => prev.map((p) => (p.id === pkg.id ? { ...p, is_paid: newVal } : p)));
     setToggling(null);
+  }
+
+  // Switches which trainer(s) the package's REMAINING sessions can be booked
+  // with — e.g. a client on an Artemios-tier package needs to keep training
+  // with someone else for the rest of the month. Already-booked sessions are
+  // untouched; this only changes what the tier-match check in
+  // allocatePackageCoverage allows going forward.
+  async function toggleTrainerTier(pkg: Package) {
+    if (!token) return;
+    const newTier = pkg.trainer_tier === "other" ? "artemios" : "other";
+    const confirmMsg =
+      newTier === "other"
+        ? "Reassign this package to Any Available Trainer? The client will be able to book their remaining sessions with any trainer, not just Artemios."
+        : "Reassign this package back to Artemios only?";
+    if (!confirm(confirmMsg)) return;
+    setReassigning(pkg.id);
+    const res = await fetch("/api/admin/packages", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ id: pkg.id, trainer_tier: newTier }),
+    });
+    if (res.ok) {
+      setPackages((prev) => prev.map((p) => (p.id === pkg.id ? { ...p, trainer_tier: newTier } : p)));
+    } else {
+      const data = await res.json().catch(() => null);
+      alert(data?.error || "Failed to reassign this package's trainer tier.");
+    }
+    setReassigning(null);
   }
 
   async function deletePackage(id: string) {
@@ -189,9 +218,20 @@ export default function PackagesPage() {
             <span className="rounded-full bg-mesa-accent/20 text-mesa-accent px-2 py-0.5 text-xs font-bold">
               {pkg.package_type}-Session
             </span>
-            <span className="rounded-full bg-brown-800 text-brown-300 px-2 py-0.5 text-xs font-medium">
-              {trainerTierLabel(pkg.trainer_tier)}
-            </span>
+            {authCtx?.role === "admin" ? (
+              <button
+                onClick={() => toggleTrainerTier(pkg)}
+                disabled={reassigning === pkg.id}
+                title="Change which trainer(s) the remaining sessions can be booked with"
+                className="rounded-full bg-brown-800 text-brown-300 hover:text-mesa-accent px-2 py-0.5 text-xs font-medium transition disabled:opacity-50"
+              >
+                {reassigning === pkg.id ? "..." : trainerTierLabel(pkg.trainer_tier)}
+              </button>
+            ) : (
+              <span className="rounded-full bg-brown-800 text-brown-300 px-2 py-0.5 text-xs font-medium">
+                {trainerTierLabel(pkg.trainer_tier)}
+              </span>
+            )}
             <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
               isExpired ? "bg-brown-800 text-brown-400" :
               pkg.status === "active" ? "bg-green-900/40 text-green-400" :
@@ -474,9 +514,20 @@ export default function PackagesPage() {
                           {pkg.package_type}-Session
                         </span>
                         <div className="mt-1">
-                          <span className="rounded-full bg-brown-800 text-brown-300 px-2 py-0.5 text-xs font-medium">
-                            {trainerTierLabel(pkg.trainer_tier)}
-                          </span>
+                          {authCtx?.role === "admin" ? (
+                            <button
+                              onClick={() => toggleTrainerTier(pkg)}
+                              disabled={reassigning === pkg.id}
+                              title="Change which trainer(s) the remaining sessions can be booked with"
+                              className="rounded-full bg-brown-800 text-brown-300 hover:text-mesa-accent px-2 py-0.5 text-xs font-medium transition disabled:opacity-50"
+                            >
+                              {reassigning === pkg.id ? "..." : trainerTierLabel(pkg.trainer_tier)}
+                            </button>
+                          ) : (
+                            <span className="rounded-full bg-brown-800 text-brown-300 px-2 py-0.5 text-xs font-medium">
+                              {trainerTierLabel(pkg.trainer_tier)}
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td className="px-4 py-3 text-brown-300 whitespace-nowrap text-xs">{monthLabel(pkg.month_year)}</td>

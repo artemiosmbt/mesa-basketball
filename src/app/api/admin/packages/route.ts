@@ -95,9 +95,12 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { id, sessions_used } = await req.json();
-  if (!id || typeof sessions_used !== "number") {
-    return NextResponse.json({ error: "Missing id or sessions_used" }, { status: 400 });
+  const { id, sessions_used, trainer_tier } = await req.json();
+  if (!id || (typeof sessions_used !== "number" && trainer_tier === undefined)) {
+    return NextResponse.json({ error: "Missing id and at least one field to update" }, { status: 400 });
+  }
+  if (trainer_tier !== undefined && trainer_tier !== "artemios" && trainer_tier !== "other") {
+    return NextResponse.json({ error: "Invalid trainer_tier" }, { status: 400 });
   }
 
   const supabase = createClient(
@@ -105,9 +108,17 @@ export async function PATCH(req: NextRequest) {
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
 
+  // Reassigning trainer_tier only changes which trainer's sessions the
+  // package's REMAINING balance can cover going forward (see
+  // allocatePackageCoverage in /api/register) — it never touches sessions
+  // already booked against it, so nothing needs to happen to existing rows.
+  const updates: Record<string, number | string> = {};
+  if (typeof sessions_used === "number") updates.sessions_used = sessions_used;
+  if (trainer_tier !== undefined) updates.trainer_tier = trainer_tier;
+
   const { error } = await supabase
     .from("monthly_packages")
-    .update({ sessions_used })
+    .update(updates)
     .eq("id", id);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
