@@ -1,10 +1,9 @@
 // The site's growing roster of sub-trainers (everyone besides Artemios,
 // whose own founder-specific bio/career sections on /about are hand-built,
 // not data-driven). Add a new entry here for each trainer as they're brought
-// on — sorted below by first name so the About page (and the nav dropdown
-// that links into it) stay in alphabetical order automatically as the
-// roster grows. (Unlike the admin dashboard's Groups tab, which sorts by
-// last name to group siblings together — not a concern here.)
+// on. Array order below is the exact display order on the About page (and
+// the nav dropdown that links into it) — deliberately curated, not sorted,
+// so it doesn't need to be alphabetical.
 export interface TrainerBio {
   slug: string; // must match the corresponding key in TRAINER_BIO_SLUGS (src/lib/trainers.ts)
   displayName: string; // may differ from the exact schedule-data name (e.g. a nickname)
@@ -37,20 +36,6 @@ export const TRAINERS: TrainerBio[] = [
     ],
   },
   {
-    slug: "zain-amjad",
-    displayName: "Zain Amjad",
-    title: "Trainer",
-    headshot: "/headshot-zain-amjad.jpg",
-    headshotPosition: "center",
-    pills: ["AAU Head Coach", "Youth Through Collegiate Levels"],
-    photos: ["/zain-amjad-action.jpg"],
-    bioParagraphs: [
-      "Zain is a dedicated basketball trainer and coach with a passion for helping players develop their skills, confidence, and overall understanding of the game. Having experienced the game as both a player and coach, he understands that real development goes beyond simply running through drills. His approach is centered around purposeful training, attention to detail, and teaching players how to translate the skills they develop in workouts into real game situations.",
-      "Through his experience coaching with Rising Stars Youth Foundation, including serving as an AAU head coach, Zain has had the opportunity to work with athletes across a wide range of ages and skill levels. He has trained players from youth basketball through the high school and collegiate levels, allowing him to understand how to adjust his approach to each athlete's individual needs. His training emphasizes ball handling, footwork, finishing, shooting, change of pace, decision-making, basketball IQ, and the physical tools necessary to become a more complete player.",
-      "What sets Zain apart is his ability to build a genuine connection with every athlete he works with. He believes players should understand not only how to perform a skill, but why and when to use it. He creates a positive but competitive environment where players are encouraged to work hard, make mistakes, learn, and build confidence in their abilities. His goal with every session is simple — help each player leave the gym better than they came in.",
-    ],
-  },
-  {
     slug: "zhaneia-thybulle",
     displayName: "Coach Z Thybulle",
     title: "Coach",
@@ -78,21 +63,36 @@ export const TRAINERS: TrainerBio[] = [
       "As a former varsity player at Long Island Lutheran High School, Steven combines firsthand playing experience with years of coaching and training expertise. His passion for teaching, attention to detail, and commitment to helping players improve make him a trusted mentor for athletes looking to elevate their skills, confidence, and understanding of the game.",
     ],
   },
+  {
+    slug: "zain-amjad",
+    displayName: "Zain Amjad",
+    title: "Trainer",
+    headshot: "/headshot-zain-amjad.jpg",
+    headshotPosition: "center",
+    pills: ["AAU Head Coach", "Youth Through Collegiate Levels"],
+    photos: ["/zain-amjad-action.jpg"],
+    bioParagraphs: [
+      "Zain is a dedicated basketball trainer and coach with a passion for helping players develop their skills, confidence, and overall understanding of the game. Having experienced the game as both a player and coach, he understands that real development goes beyond simply running through drills. His approach is centered around purposeful training, attention to detail, and teaching players how to translate the skills they develop in workouts into real game situations.",
+      "Through his experience coaching with Rising Stars Youth Foundation, including serving as an AAU head coach, Zain has had the opportunity to work with athletes across a wide range of ages and skill levels. He has trained players from youth basketball through the high school and collegiate levels, allowing him to understand how to adjust his approach to each athlete's individual needs. His training emphasizes ball handling, footwork, finishing, shooting, change of pace, decision-making, basketball IQ, and the physical tools necessary to become a more complete player.",
+      "What sets Zain apart is his ability to build a genuine connection with every athlete he works with. He believes players should understand not only how to perform a skill, but why and when to use it. He creates a positive but competitive environment where players are encouraged to work hard, make mistakes, learn, and build confidence in their abilities. His goal with every session is simple — help each player leave the gym better than they came in.",
+    ],
+  },
 ];
 
 // Strips a leading "Coach " (e.g. "Coach Z Thybulle") before taking the
-// first word, so alphabetization goes by the trainer's actual first name
-// rather than the literal word "Coach" every such displayName would
-// otherwise share.
+// first word — used for the "About Coach X" bio subtitle on the About page,
+// so it reads by the trainer's actual first name rather than the literal
+// word "Coach".
 export function trainerFirstName(fullName: string): string {
   const name = fullName.trim().replace(/^coach\s+/i, "");
   const parts = name.trim().split(/\s+/);
   return parts[0] || fullName;
 }
 
-export const sortedTrainers = [...TRAINERS].sort((a, b) =>
-  trainerFirstName(a.displayName).localeCompare(trainerFirstName(b.displayName))
-);
+// Kept as its own export (rather than using TRAINERS directly everywhere)
+// since callers historically read the roster through this name — it's just
+// TRAINERS in its already-curated display order now, no sorting applied.
+export const sortedTrainers = TRAINERS;
 
 // The About nav dropdown stays two items — founder, then a single "Meet
 // the Team" link into the trainer roster section — rather than listing
