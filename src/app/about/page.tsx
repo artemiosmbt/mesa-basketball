@@ -214,6 +214,31 @@ export default function AboutPage() {
               <p className="mt-2 text-xs font-semibold uppercase tracking-widest text-brown-300">
                 The ΜΕΣΑ Family
               </p>
+              {/* Roster strip: jumps straight to each trainer's bio section below. */}
+              <ul className="mt-9 flex list-none flex-wrap justify-center p-0">
+                {sortedTrainers.map((trainer) => (
+                  <li key={trainer.slug} className="-mx-[0.55rem]">
+                    <a
+                      href={`#${trainer.slug}`}
+                      className="group flex flex-col items-center gap-2.5 rounded-full px-2 py-1"
+                    >
+                      <span className="block h-14 w-14 rounded-full bg-gradient-to-br from-mesa-accent/30 to-brown-600 p-[3px] shadow-lg shadow-black/40 transition-all duration-200 group-hover:-translate-y-1 group-hover:from-mesa-accent group-hover:to-mesa-accent/70 group-hover:shadow-[0_10px_22px_-6px_rgba(212,175,55,0.45)] md:h-[4.5rem] md:w-[4.5rem]">
+                        <span
+                          className="block h-full w-full rounded-full border-2 border-brown-900"
+                          style={{
+                            backgroundImage: `url(${trainer.headshot})`,
+                            backgroundSize: trainer.headshotSize || "cover",
+                            backgroundPosition: trainer.headshotPosition || "center",
+                          }}
+                        />
+                      </span>
+                      <span className="whitespace-nowrap text-xs font-semibold text-brown-300 transition-colors duration-200 group-hover:text-mesa-accent">
+                        {trainerFirstName(trainer.displayName)}
+                      </span>
+                    </a>
+                  </li>
+                ))}
+              </ul>
             </div>
           </div>
         )}
@@ -262,7 +287,7 @@ export default function AboutPage() {
                 )}
               </div>
             </div>
-            <div className="flex flex-col md:flex-row gap-10 items-start">
+            <div className={`flex flex-col md:flex-row gap-10 ${trainer.bioAlign === "start" ? "items-start" : "items-center"}`}>
               <div className="space-y-5 text-brown-200 leading-relaxed text-[17px] flex-1">
                 <h3 className="font-[family-name:var(--font-fira-cond)] text-2xl md:text-3xl font-black tracking-wide text-mesa-accent">
                   About Coach {trainerFirstName(trainer.displayName)}

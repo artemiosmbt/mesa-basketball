@@ -18,6 +18,11 @@ export interface TrainerBio {
   // 112x112px size — see h-28 w-28 on the headshot div).
   headshotSize?: string;
   pills: string[]; // credential/highlight pills shown under the name, matching Artemios's hero
+  // Vertical alignment of the bio row (text vs. video/photos), matching
+  // Tailwind's items-start / items-center. Defaults to "center" (photo/video
+  // centered against the bio text). Coach Z's photos were cropped/framed to
+  // line up with the top of her text specifically, so she stays "start".
+  bioAlign?: "start" | "center";
   bioParagraphs: string[];
   // A trainer has either a video OR a set of photos alongside their bio
   // (never both) — the About page layout only splits into a side-by-side
@@ -49,6 +54,7 @@ export const TRAINERS: TrainerBio[] = [
     headshot: "/headshot-zhaneia-thybulle.jpg",
     headshotSize: "145px 218px",
     headshotPosition: "55% 32%",
+    bioAlign: "start",
     pills: ["Adelphi University Coach", "UNC Wilmington & Wagner College", "Elmont Memorial Alum"],
     photos: [
       "/zhaneia-thybulle-coaching.jpg",
