@@ -38,9 +38,9 @@ export const TRAINERS: TrainerBio[] = [
   {
     slug: "zhaneia-thybulle",
     displayName: "Coach Z Thybulle",
-    title: "Coach",
+    title: "Trainer",
     headshot: "/headshot-zhaneia-thybulle.jpg",
-    headshotPosition: "42% center",
+    headshotPosition: "35% center",
     pills: ["Adelphi University Coach", "UNC Wilmington & Wagner College", "Elmont Memorial Alum"],
     photos: [
       "/zhaneia-thybulle-action.jpg",

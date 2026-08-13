@@ -279,21 +279,12 @@ export default function AboutPage() {
                   />
                 </div>
               )}
-              {/* 3+ photos lay out as a 2x2-style grid instead of one tall
-                  stack — stacking would make the photo column far taller
-                  than the bio text beside it. */}
-              {!trainer.videoUrl && trainer.photos && trainer.photos.length > 2 && (
-                <div className="grid grid-cols-2 gap-4 w-full md:w-96 flex-shrink-0">
-                  {trainer.photos.map((photo) => (
-                    <div key={photo} className="relative aspect-[3/4] rounded-xl overflow-hidden shadow-xl">
-                      <Image src={photo} alt={`${trainer.displayName} coaching`} fill className="object-cover" />
-                    </div>
-                  ))}
-                </div>
-              )}
-              {!trainer.videoUrl && trainer.photos && trainer.photos.length > 0 && trainer.photos.length <= 2 && (
+              {/* Only the first two photos go in the side column — any
+                  beyond that go in a row below instead of stacking the
+                  column ever taller than the bio text beside it. */}
+              {!trainer.videoUrl && trainer.photos && trainer.photos.length > 0 && (
                 <div className="flex flex-row md:flex-col gap-4 w-full md:w-72 flex-shrink-0">
-                  {trainer.photos.map((photo) => (
+                  {trainer.photos.slice(0, 2).map((photo) => (
                     <div key={photo} className="relative w-full aspect-[3/4] rounded-xl overflow-hidden shadow-xl">
                       <Image src={photo} alt={`${trainer.displayName} coaching`} fill className="object-cover" />
                     </div>
@@ -301,6 +292,15 @@ export default function AboutPage() {
                 </div>
               )}
             </div>
+            {!trainer.videoUrl && trainer.photos && trainer.photos.length > 2 && (
+              <div className="mt-6 grid grid-cols-2 gap-4 max-w-md">
+                {trainer.photos.slice(2).map((photo) => (
+                  <div key={photo} className="relative aspect-[3/4] rounded-xl overflow-hidden shadow-xl">
+                    <Image src={photo} alt={`${trainer.displayName} coaching`} fill className="object-cover" />
+                  </div>
+                ))}
+              </div>
+            )}
             </section>
           </Fragment>
         ))}
