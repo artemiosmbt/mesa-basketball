@@ -211,7 +211,7 @@ export default function AboutPage() {
               <h2 className="font-[family-name:var(--font-fira-cond)] text-4xl md:text-5xl font-black tracking-wide text-mesa-accent drop-shadow-[0_1px_3px_rgba(0,0,0,0.4)]">
                 MEET THE TEAM
               </h2>
-              <p className="mt-2 text-sm md:text-base font-semibold uppercase tracking-widest text-brown-300">
+              <p className="mt-2 text-sm md:text-base font-semibold uppercase tracking-widest text-white">
                 The ΜΕΣΑ Family
               </p>
               {/* Roster strip: jumps straight to each trainer's bio section below. */}
@@ -222,7 +222,7 @@ export default function AboutPage() {
                       href={`#${trainer.slug}`}
                       className="group flex flex-col items-center gap-2.5 rounded-full px-2 py-1"
                     >
-                      <span className="block h-14 w-14 rounded-full bg-mesa-accent p-[3px] shadow-lg shadow-black/40 transition-all duration-200 group-hover:-translate-y-1 group-hover:shadow-[0_10px_22px_-6px_rgba(212,175,55,0.45)] md:h-[4.5rem] md:w-[4.5rem]">
+                      <span className="block h-14 w-14 rounded-full bg-mesa-accent p-[1.5px] shadow-lg shadow-black/40 transition-all duration-200 group-hover:-translate-y-1 group-hover:shadow-[0_10px_22px_-6px_rgba(212,175,55,0.45)] md:h-[4.5rem] md:w-[4.5rem]">
                         <span
                           className="block h-full w-full rounded-full border-2 border-brown-900"
                           style={{
