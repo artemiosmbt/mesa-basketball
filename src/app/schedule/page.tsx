@@ -808,6 +808,7 @@ export default function Home() {
   const [hideUpsell, setHideUpsell] = useState(false);
   const [filterDays, setFilterDays] = useState<Set<number>>(new Set());
   const [filterMonth, setFilterMonth] = useState<string>("");
+  const [filterTrainer, setFilterTrainer] = useState<string>("");
   const [calendarMonth, setCalendarMonth] = useState<Date>(() => {
     const now = new Date();
     return new Date(Date.UTC(now.getFullYear(), now.getMonth(), 1));
@@ -1939,20 +1940,43 @@ export default function Home() {
     return dates;
   }, [timeWindows]);
 
-  // Filter time windows by day of week, month, and calendar date (no client-side time logic needed).
+  // Filter time windows by day of week, month, trainer, and calendar date
+  // (no client-side time logic needed). When a specific trainer is picked,
+  // each surviving window's trainers list is narrowed down to just that
+  // trainer — same effect as the client picking them from the per-window
+  // dropdown, just pre-filtered — rather than only hiding windows where
+  // they're not offered at all.
   const filteredWindows = useMemo(() => {
-    return timeWindows.filter((w) => {
-      if (w.endMins - w.startMins < 60) return false;
-      if (calendarSelectedDate && w.date !== calendarSelectedDate) return false;
-      const dUtc = new Date(w.date);
-      if (filterDays.size > 0 && !filterDays.has(dUtc.getUTCDay())) return false;
-      if (filterMonth) {
-        const monthStr = dUtc.toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
-        if (monthStr !== filterMonth) return false;
-      }
-      return true;
+    return timeWindows
+      .filter((w) => {
+        if (w.endMins - w.startMins < 60) return false;
+        if (calendarSelectedDate && w.date !== calendarSelectedDate) return false;
+        const dUtc = new Date(w.date);
+        if (filterDays.size > 0 && !filterDays.has(dUtc.getUTCDay())) return false;
+        if (filterMonth) {
+          const monthStr = dUtc.toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+          if (monthStr !== filterMonth) return false;
+        }
+        if (filterTrainer && !w.trainers.some((t) => trainerNamesMatch(t, filterTrainer))) return false;
+        return true;
+      })
+      .map((w) => (filterTrainer ? { ...w, trainers: w.trainers.filter((t) => trainerNamesMatch(t, filterTrainer)) } : w));
+  }, [timeWindows, filterDays, filterMonth, filterTrainer, calendarSelectedDate]);
+
+  // Distinct trainers offered across all (non-empty) private windows, deduped
+  // case/whitespace-insensitively like every other trainer-name comparison —
+  // the sheet can have the same trainer typed slightly differently across
+  // rows. Owner-first-then-alphabetical, "Any Available Trainer" last.
+  const availableTrainers = useMemo(() => {
+    const names: string[] = [];
+    timeWindows.forEach((w) => {
+      if (w.endMins - w.startMins < 60) return;
+      w.trainers.forEach((t) => {
+        if (!names.some((n) => trainerNamesMatch(n, t))) names.push(t);
+      });
     });
-  }, [timeWindows, filterDays, filterMonth, calendarSelectedDate]);
+    return sortTrainerNames(names);
+  }, [timeWindows]);
 
   // Available months from time windows
   const availableMonths = useMemo(() => {
@@ -2916,6 +2940,22 @@ export default function Home() {
                     ))}
                   </select>
                 </div>
+                {/* Trainer dropdown */}
+                {availableTrainers.length > 1 && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-brown-500">Trainer:</span>
+                    <select
+                      value={filterTrainer}
+                      onChange={(e) => setFilterTrainer(e.target.value)}
+                      className="rounded-lg border border-brown-700 bg-brown-800 px-3 py-1 text-sm text-white focus:border-mesa-accent focus:outline-none"
+                    >
+                      <option value="">All Trainers</option>
+                      {availableTrainers.map((t) => (
+                        <option key={t} value={t}>{formatTrainerForDisplay(t)}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
                 {/* Calendar toggle button */}
                 <button
                   onClick={() => setShowCalendar((v) => !v)}
@@ -2950,7 +2990,7 @@ export default function Home() {
             </div>
           )}
 
-          {filteredWindows.length === 0 && timeWindows.length > 0 && (filterDays.size > 0 || filterMonth) && (
+          {filteredWindows.length === 0 && timeWindows.length > 0 && (filterDays.size > 0 || filterMonth || filterTrainer) && (
             <p className="mt-6 text-center text-sm text-brown-500">
               No sessions match your filters. Try adjusting your selection.
             </p>
