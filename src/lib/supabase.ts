@@ -1625,19 +1625,20 @@ function parseTimeToMins(t: string): number {
 
 /**
  * True if this trainer already has a confirmed/recent-pending private
- * booking that overlaps the requested time range at this date+location.
- * Private sessions have no "capacity" like a group session does — a
- * trainer can only run one at a time — so any overlap at all (not just an
- * exact date/time match) means the slot is taken. This is the server-side
- * guard that was missing entirely before: the schedule page only ever
- * HID an already-booked window client-side, so a stale tab or a request
- * built by hand could still book a trainer who was already taken.
+ * booking that overlaps the requested time range on this date, at ANY
+ * location. Private sessions have no "capacity" like a group session does —
+ * a trainer can only run one at a time, in one place, regardless of which
+ * location each booking happens to list — so any time overlap at all (not
+ * just an exact date/time/location match) means the trainer is taken. This
+ * is the server-side guard that was missing entirely before: the schedule
+ * page only ever HID an already-booked window client-side, so a stale tab
+ * or a request built by hand could still book a trainer who was already
+ * taken (including at a different location for the same time).
  */
 export async function hasConflictingPrivateBooking(
   date: string,
   startTime: string,
   endTime: string,
-  location: string,
   trainer: string
 ): Promise<boolean> {
   const supabase = getSupabase();
@@ -1650,8 +1651,7 @@ export async function hasConflictingPrivateBooking(
     .select("booked_start_time, booked_end_time, booked_trainer")
     .in("type", ["private", "group-private"])
     .or(pendingPaymentGraceFilter())
-    .eq("booked_date", date)
-    .eq("booked_location", location);
+    .eq("booked_date", date);
   if (error || !data) return false;
   const wantStart = parseTimeToMins(startTime);
   const wantEnd = parseTimeToMins(endTime);
@@ -1683,13 +1683,15 @@ export async function alertIfPrivateDoubleBooked(
   parentName: string
 ): Promise<void> {
   const supabase = getSupabase();
+  // No .eq("booked_location", ...) — a trainer double-booked across two
+  // different locations at the same time is exactly as much a problem as
+  // being double-booked at the same location, so this must catch both.
   const { data } = await supabase
     .from("registrations")
-    .select("booked_start_time, booked_end_time, booked_trainer, parent_name")
+    .select("booked_start_time, booked_end_time, booked_location, booked_trainer, parent_name")
     .in("type", ["private", "group-private"])
     .eq("status", "confirmed")
-    .eq("booked_date", date)
-    .eq("booked_location", location);
+    .eq("booked_date", date);
   if (!data) return;
   const wantStart = parseTimeToMins(startTime);
   const wantEnd = parseTimeToMins(endTime);
@@ -1700,8 +1702,10 @@ export async function alertIfPrivateDoubleBooked(
     return rowStart < wantEnd && rowEnd > wantStart;
   });
   if (overlapping.length > 1) {
+    const locations = Array.from(new Set(overlapping.map((r) => r.booked_location).filter(Boolean)));
+    const locationNote = locations.length > 1 ? ` across ${locations.join(" & ")}` : ` at ${location}`;
     await sendAdminSMS(
-      `⚠️ DOUBLE-BOOKED: ${trainer} has ${overlapping.length} overlapping private sessions on ${date} ${startTime}-${endTime} at ${location} (incl. ${parentName}'s just-confirmed booking) — likely two bookings raced each other. Review and reschedule one manually.`
+      `⚠️ DOUBLE-BOOKED: ${trainer} has ${overlapping.length} overlapping private sessions on ${date} ${startTime}-${endTime}${locationNote} (incl. ${parentName}'s just-confirmed booking) — likely two bookings raced each other. Review and reschedule one manually.`
     ).catch(() => {});
   }
 }

@@ -927,7 +927,7 @@ export async function PUT(
     }
     const [slotOffered, slotConflicting] = await Promise.all([
       isPrivateWindowOfferedByTrainer(bookedDate, bookedStartTime, bookedEndTime, bookedLocation, resolvedTrainer),
-      hasConflictingPrivateBooking(bookedDate, bookedStartTime, bookedEndTime, bookedLocation, resolvedTrainer),
+      hasConflictingPrivateBooking(bookedDate, bookedStartTime, bookedEndTime, resolvedTrainer),
     ]);
     if (!slotOffered || slotConflicting) {
       return NextResponse.json({ error: "That session is no longer available. Please refresh and try again." }, { status: 400 });

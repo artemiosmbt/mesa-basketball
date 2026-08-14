@@ -5,7 +5,7 @@ import Image from "next/image";
 import { authClient, ADMIN_EMAIL } from "@/lib/auth";
 import LandingNav from "@/app/LandingNav";
 import { REFERRAL_PROGRAM_ENABLED, REFERRAL_CREDIT_REDEMPTION_ENABLED, NEW_CLIENT_DISCOUNT_ENABLED, ARTEMIOS_PACKAGES_AVAILABLE } from "@/lib/feature-flags";
-import { getTrainerBioSlug, getTrainerTier, normalizeTrainerTier, formatTrainerForDisplay, isTrainerRestrictedForAthlete, HS_GIRLS_PRIVATE_RESTRICTION_MESSAGE, type TrainerTier } from "@/lib/trainers";
+import { getTrainerBioSlug, getTrainerTier, normalizeTrainerTier, formatTrainerForDisplay, isTrainerRestrictedForAthlete, HS_GIRLS_PRIVATE_RESTRICTION_MESSAGE, trainerNamesMatch, type TrainerTier } from "@/lib/trainers";
 import { calcServiceFee, serviceFeeLabel, serviceFeeItemName, isPercentServiceFee, SERVICE_FEE_PERCENT_TEXT, packagePrice, PRIVATE_RATE_BY_TIER, GROUP_PRIVATE_RATE_BY_TIER, calcPrivatePrice as getPrivatePrice, REFERRAL_CREDIT_SESSION_PRICE, packageCoversTrainerTier } from "@/lib/pricing";
 import { ALL_GRADES, normalizedAthleteName } from "@/lib/athletes";
 import { getSessionGender, getGradesForGroup } from "@/lib/group-matching";
@@ -522,15 +522,20 @@ function buildTimeWindows(slots: PrivateSlot[]): TimeWindow[] {
 // sub-range they're actually booked in — splitting the window into pieces
 // with different remaining trainer sets where needed, and dropping a piece
 // entirely once no trainer is left available for it.
+// Deliberately NOT filtered by location: a trainer can only be in one place
+// at a time, so a booking at any location blocks that trainer's other
+// locations for the same overlapping time too.
 function subtractBookingsFromWindow(
   w: TimeWindow,
   bookedSlots: { date: string; startTime: string; endTime: string; location: string; trainer: string }[]
 ): TimeWindow[] {
+  // Trainer compared via trainerNamesMatch, not exact string equality — see
+  // trainers.ts for why (hand-typed sheet cell casing/whitespace drift must
+  // never make this miss a real conflict for the same trainer).
   const relevant = bookedSlots.filter(
     (b) =>
       b.date === w.date &&
-      b.location === w.location &&
-      w.trainers.includes(b.trainer) &&
+      w.trainers.some((t) => trainerNamesMatch(t, b.trainer)) &&
       parseTime(b.startTime) < w.endMins &&
       parseTime(b.endTime) > w.startMins
   );
@@ -547,12 +552,10 @@ function subtractBookingsFromWindow(
   for (let i = 0; i < sortedBounds.length - 1; i++) {
     const segStart = sortedBounds[i];
     const segEnd = sortedBounds[i + 1];
-    const bookedTrainersHere = new Set(
-      relevant
-        .filter((b) => parseTime(b.startTime) <= segStart && parseTime(b.endTime) >= segEnd)
-        .map((b) => b.trainer)
-    );
-    const remaining = w.trainers.filter((t) => !bookedTrainersHere.has(t));
+    const bookedTrainersHere = relevant
+      .filter((b) => parseTime(b.startTime) <= segStart && parseTime(b.endTime) >= segEnd)
+      .map((b) => b.trainer);
+    const remaining = w.trainers.filter((t) => !bookedTrainersHere.some((bt) => trainerNamesMatch(t, bt)));
     if (remaining.length > 0) segments.push({ start: segStart, end: segEnd, trainers: remaining });
   }
   return segmentsToWindows(w.date, w.location, segments);

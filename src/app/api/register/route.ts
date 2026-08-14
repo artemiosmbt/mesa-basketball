@@ -794,7 +794,7 @@ export async function POST(req: NextRequest) {
         privateSessions.map(async (s: { date: string; startTime: string; endTime: string; location: string; trainer: string }) => {
           const [offered, conflicting] = await Promise.all([
             isPrivateWindowOfferedByTrainer(s.date, s.startTime, s.endTime, s.location, s.trainer),
-            hasConflictingPrivateBooking(s.date, s.startTime, s.endTime, s.location, s.trainer),
+            hasConflictingPrivateBooking(s.date, s.startTime, s.endTime, s.trainer),
           ]);
           return offered && !conflicting;
         })
@@ -1098,7 +1098,7 @@ export async function POST(req: NextRequest) {
       // path above — see the comment there.
       const [slotOffered, slotConflicting] = await Promise.all([
         isPrivateWindowOfferedByTrainer(bookedDate, bookedStartTime, bookedEndTime, bookedLocation, bookedTrainer),
-        hasConflictingPrivateBooking(bookedDate, bookedStartTime, bookedEndTime, bookedLocation, bookedTrainer),
+        hasConflictingPrivateBooking(bookedDate, bookedStartTime, bookedEndTime, bookedTrainer),
       ]);
       if (!slotOffered || slotConflicting) {
         return NextResponse.json({ error: "That session is no longer available. Please refresh and try again." }, { status: 400 });
