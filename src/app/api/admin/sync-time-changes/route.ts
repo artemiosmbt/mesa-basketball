@@ -2,10 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { verifyAdmin } from "@/lib/auth";
 import { getWeeklySchedule, getPrivateSlots } from "@/lib/sheets";
+import { addPrivateSessionToCalendar, deletePrivateSessionFromCalendar } from "@/lib/calendar";
 import { sendTimeChangeNotification } from "@/lib/email";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import { buildWeeklyPlan, claimWeeklyTimeChange, findWeeklyTrainerReassignments, claimWeeklyTrainerReassignment, regGroupKey, type WeeklyRegKeyFields } from "@/lib/weekly-schedule-matching";
-import { findPrivateTrainerReassignments, claimPrivateTrainerReassignment } from "@/lib/private-schedule-matching";
+import { findPrivateTrainerReassignments, claimPrivateTrainerReassignment, findPrivateLocationChanges, claimPrivateLocationChange } from "@/lib/private-schedule-matching";
 import { notifyTrainerOfCancellation, notifyTrainerOfNewBooking } from "@/lib/trainer-notify";
 import { getPackageById } from "@/lib/supabase";
 import { getTrainerTier, normalizeTrainerTier, packageCoversTrainerTier } from "@/lib/trainers";
@@ -28,6 +29,10 @@ interface PrivateRegistration {
   booked_location: string | null;
   booked_trainer: string | null;
   parent_name: string;
+  email: string;
+  phone: string;
+  sms_consent: boolean | null;
+  session_details: string | null;
   kids: string;
   type: string;
   package_id: string | null;
@@ -289,6 +294,90 @@ export async function POST(req: NextRequest) {
   const privateRegsUpcoming: PrivateRegistration[] = (allPrivateRegs || []).filter(
     (r) => r.booked_date && sessionIsUpcoming(r.booked_date, r.booked_start_time || "")
   );
+
+  // Private-session counterpart to the weekly location/time-change sync
+  // above — a client's private booking follows its trainer's availability
+  // window if that window's LOCATION moves on the sheet (same date/time,
+  // different location), same reasoning as the cron's identical block (see
+  // detect-time-changes/route.ts). No double-read confirmation here, same as
+  // everywhere else in this dashboard-triggered route — that safety net only
+  // matters for the cron's unattended, scheduled runs.
+  const privateLocationChanges = findPrivateLocationChanges(privateRegsUpcoming, privateSlots);
+  const privateLocationSyncSummary: string[] = [];
+  let privateLocationEmailsSent = 0;
+  let privateLocationSmsSent = 0;
+  for (const { reg: r, newLocation } of privateLocationChanges) {
+    const oldLocation = r.booked_location || "";
+    const newDetails = (r.session_details || "").replace(`at ${oldLocation}`, `at ${newLocation}`);
+
+    const won = await claimPrivateLocationChange(supabase, r, {
+      booked_location: newLocation,
+      session_details: newDetails,
+    });
+    if (!won) continue; // the cron already caught and notified this one
+
+    privateLocationSyncSummary.push(`• ${r.booked_date} ${r.booked_start_time} — ${resolveLocationName(oldLocation)} → ${resolveLocationName(newLocation)} (${r.parent_name})`);
+
+    try {
+      await sendTimeChangeNotification({
+        parentName: r.parent_name,
+        email: r.email,
+        kids: r.kids,
+        date: r.booked_date!,
+        sessionLabel: r.type === "group-private" ? "Group Private Session" : "Private Session",
+        oldStartTime: r.booked_start_time!,
+        oldEndTime: r.booked_end_time || r.booked_start_time!,
+        newStartTime: r.booked_start_time!,
+        newEndTime: r.booked_end_time || r.booked_start_time!,
+        location: newLocation,
+        changeType: "location",
+        oldLocation,
+      });
+      privateLocationEmailsSent++;
+    } catch (err) {
+      console.error("Private location-change email failed for", r.email, err);
+    }
+
+    if (r.sms_consent && r.phone) {
+      const dateStr = formatDateWithDay(r.booked_date!);
+      const locName = resolveLocationName(newLocation);
+      const oldLocName = resolveLocationName(oldLocation);
+      const timeStr = `${r.booked_start_time}${r.booked_end_time ? `-${r.booked_end_time}` : ""}`;
+      try {
+        await sendSMS(
+          r.phone,
+          `LOCATION CHANGE\nMesa Basketball: Private Session on ${dateStr}\nLocation: ${oldLocName} → ${locName}\nTime: ${timeStr}\nQuestions? (631) 599-1280. Reply STOP to opt out.`
+        );
+        privateLocationSmsSent++;
+      } catch (err) {
+        console.error("Private location-change SMS failed for", r.phone, err);
+      }
+    }
+
+    if (r.booked_date && r.booked_start_time) {
+      try {
+        await deletePrivateSessionFromCalendar({ email: r.email, bookedDate: r.booked_date, bookedStartTime: r.booked_start_time });
+        await addPrivateSessionToCalendar({
+          parentName: r.parent_name,
+          email: r.email,
+          phone: r.phone,
+          kids: r.kids,
+          bookedDate: r.booked_date,
+          bookedStartTime: r.booked_start_time,
+          bookedEndTime: r.booked_end_time || r.booked_start_time,
+          bookedLocation: newLocation,
+          trainer: r.booked_trainer || undefined,
+        });
+      } catch (err) {
+        console.error("Calendar sync error (private location change):", err);
+      }
+    }
+  }
+  if (privateLocationSyncSummary.length > 0) {
+    await sendAdminSMS(
+      `PRIVATE LOCATION CHANGED:\n${privateLocationSyncSummary.join("\n")}\n${privateLocationEmailsSent} email${privateLocationEmailsSent !== 1 ? "s" : ""}, ${privateLocationSmsSent} SMS sent`
+    ).catch(() => {});
+  }
 
   const privateReassignments = findPrivateTrainerReassignments(privateRegsUpcoming, privateSlots);
   const privateTrainerSyncSummary: string[] = [];

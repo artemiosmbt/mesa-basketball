@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifyCronSecret } from "@/lib/auth";
 import { createClient } from "@supabase/supabase-js";
 import { getWeeklySchedule, getPrivateSlots, type WeeklySession } from "@/lib/sheets";
-import { deletePrivateSessionFromCalendar } from "@/lib/calendar";
+import { addPrivateSessionToCalendar, deletePrivateSessionFromCalendar } from "@/lib/calendar";
 import { buildWeeklyPlan, claimWeeklyTimeChange, findWeeklyTrainerReassignments, claimWeeklyTrainerReassignment, regGroupKey, type WeeklyRegKeyFields } from "@/lib/weekly-schedule-matching";
-import { parseTimeMins, intervalsCoverRange, findPrivateTrainerReassignments, claimPrivateTrainerReassignment } from "@/lib/private-schedule-matching";
+import { parseTimeMins, intervalsCoverRange, findPrivateTrainerReassignments, claimPrivateTrainerReassignment, findPrivateLocationChanges, claimPrivateLocationChange } from "@/lib/private-schedule-matching";
 import { sendTimeChangeNotification, sendCancellationNotification } from "@/lib/email";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import { addAccountCredit, addReferralCredit, countPackageSessionsUsed, setPackageSessions, getPackageById } from "@/lib/supabase";
@@ -512,6 +512,103 @@ export async function GET(req: NextRequest) {
     .select("*")
     .in("type", ["private", "group-private"])
     .eq("status", "confirmed");
+  const privateRegsUpcoming = (allPrivateRegs || []).filter(
+    (r) => r.booked_date && sessionIsUpcoming(r.booked_date, r.booked_start_time || "")
+  );
+
+  // === LOCATION CHANGE DETECTION — PRIVATE SESSIONS ===
+  // Unlike weekly sessions, a private booking has no "group name" to match
+  // on — the sheet only tracks trainer availability windows, not per-client
+  // bookings, so buildWeeklyPlan's approach doesn't apply here. Instead this
+  // looks for a registration whose exact date/start/end interval moved from
+  // its stored booked_location to exactly one other location on the sheet
+  // (see findPrivateLocationChanges) — the same double-read-agreement safety
+  // net as the deletion check below, since a torn read here would otherwise
+  // risk relocating (and texting) a client based on a transient glitch.
+  const firstLocationChanges = findPrivateLocationChanges(privateRegsUpcoming, privateSlots);
+  const confirmLocationChangeMap = privateSlotsConfirm === null
+    ? new Map<string, string>()
+    : new Map(findPrivateLocationChanges(privateRegsUpcoming, privateSlotsConfirm).map((c) => [c.reg.id, c.newLocation]));
+  const confirmedLocationChanges = firstLocationChanges.filter((c) => confirmLocationChangeMap.get(c.reg.id) === c.newLocation);
+
+  const privateLocationSyncSummary: string[] = [];
+  let privateLocationEmailsSent = 0;
+  let privateLocationSmsSent = 0;
+  for (const { reg: r, newLocation } of confirmedLocationChanges) {
+    const oldLocation = r.booked_location || "";
+    const newDetails = (r.session_details || "").replace(`at ${oldLocation}`, `at ${newLocation}`);
+
+    // Same claim-before-notify pattern as claimWeeklyTimeChange — whichever
+    // request's UPDATE lands first wins; the loser's WHERE clause matches
+    // zero rows and skips notifying entirely.
+    const won = await claimPrivateLocationChange(supabase, r, {
+      booked_location: newLocation,
+      session_details: newDetails,
+    });
+    if (!won) continue;
+
+    privateLocationSyncSummary.push(`• ${r.booked_date} ${r.booked_start_time} — ${resolveLocationName(oldLocation)} → ${resolveLocationName(newLocation)} (${r.parent_name})`);
+
+    try {
+      await sendTimeChangeNotification({
+        parentName: r.parent_name,
+        email: r.email,
+        kids: r.kids,
+        date: r.booked_date!,
+        sessionLabel: r.type === "group-private" ? "Group Private Session" : "Private Session",
+        oldStartTime: r.booked_start_time!,
+        oldEndTime: r.booked_end_time || r.booked_start_time!,
+        newStartTime: r.booked_start_time!,
+        newEndTime: r.booked_end_time || r.booked_start_time!,
+        location: newLocation,
+        changeType: "location",
+        oldLocation,
+      });
+      privateLocationEmailsSent++;
+    } catch (err) {
+      console.error("Private location-change email failed for", r.email, err);
+    }
+
+    if (r.sms_consent && r.phone) {
+      const dateStr = formatDateWithDay(r.booked_date!);
+      const locName = resolveLocationName(newLocation);
+      const oldLocName = resolveLocationName(oldLocation);
+      const timeStr = `${r.booked_start_time}${r.booked_end_time ? `-${r.booked_end_time}` : ""}`;
+      try {
+        await sendSMS(
+          r.phone,
+          `LOCATION CHANGE\nMesa Basketball: Private Session on ${dateStr}\nLocation: ${oldLocName} → ${locName}\nTime: ${timeStr}\nQuestions? (631) 599-1280. Reply STOP to opt out.`
+        );
+        privateLocationSmsSent++;
+      } catch (err) {
+        console.error("Private location-change SMS failed for", r.phone, err);
+      }
+    }
+
+    if (r.booked_date && r.booked_start_time) {
+      try {
+        await deletePrivateSessionFromCalendar({ email: r.email, bookedDate: r.booked_date, bookedStartTime: r.booked_start_time });
+        await addPrivateSessionToCalendar({
+          parentName: r.parent_name,
+          email: r.email,
+          phone: r.phone,
+          kids: r.kids,
+          bookedDate: r.booked_date,
+          bookedStartTime: r.booked_start_time,
+          bookedEndTime: r.booked_end_time || r.booked_start_time,
+          bookedLocation: newLocation,
+          trainer: r.booked_trainer || undefined,
+        });
+      } catch (err) {
+        console.error("Calendar sync error (private location change):", err);
+      }
+    }
+  }
+  if (privateLocationSyncSummary.length > 0) {
+    await sendAdminSMS(
+      `PRIVATE LOCATION CHANGED:\n${privateLocationSyncSummary.join("\n")}\n${privateLocationEmailsSent} email${privateLocationEmailsSent !== 1 ? "s" : ""}, ${privateLocationSmsSent} SMS sent`
+    ).catch((err) => console.error("Private location-change admin SMS failed:", err));
+  }
 
   const cancelledPrivateIds = new Set<string>();
   for (const r of (allPrivateRegs || [])) {

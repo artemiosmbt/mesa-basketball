@@ -80,6 +80,75 @@ export function findPrivateTrainerReassignments<
   return result;
 }
 
+// Private-session counterpart to the weekly LOCATION-only branch of
+// buildWeeklyPlan — detects a confirmed private/group-private registration
+// whose exact booked date/start/end interval is no longer covered at its
+// OWN stored booked_location, but is still covered (as the exact same
+// interval) at exactly one OTHER location on the sheet. That's what it looks
+// like when a trainer's availability window itself moves location (e.g. "I'm
+// actually at Cherry Valley instead of St. Paul's that day") — the client's
+// booking should follow the window, not be silently orphaned or treated as
+// cancelled (privateBookingStillOnSheet already avoids the latter, but until
+// this ran, nothing ever picked up on the former: booked_location stayed
+// stale and the client was never told).
+//
+// Only acts when EXACTLY one other location covers the interval — if none
+// do, it's a genuine deletion (handled separately); if more than one do,
+// guessing which location the client's session actually followed to would
+// risk sending a wrong-location text, so it's left for manual review instead.
+export function findPrivateLocationChanges<
+  T extends { id: string; booked_date: string | null; booked_start_time: string | null; booked_end_time: string | null; booked_location: string | null }
+>(
+  regs: T[],
+  slots: { date: string; startTime: string; endTime: string; location: string; trainer: string }[]
+): { reg: T; newLocation: string }[] {
+  const result: { reg: T; newLocation: string }[] = [];
+  for (const r of regs) {
+    const regStart = parseTimeMins(r.booked_start_time || "");
+    const regEnd = parseTimeMins(r.booked_end_time || "");
+    if (regStart === null || regEnd === null) continue;
+    const oldLocation = r.booked_location || "";
+
+    const byLocation: Record<string, { start: number; end: number }[]> = {};
+    slots
+      .filter((s) => s.date === r.booked_date)
+      .forEach((s) => {
+        const start = parseTimeMins(s.startTime);
+        const end = parseTimeMins(s.endTime);
+        if (start === null || end === null) return;
+        if (!byLocation[s.location]) byLocation[s.location] = [];
+        byLocation[s.location].push({ start, end });
+      });
+
+    if (byLocation[oldLocation] && intervalsCoverRange(byLocation[oldLocation], regStart, regEnd)) continue;
+
+    const coveringLocations = Object.keys(byLocation).filter((loc) => intervalsCoverRange(byLocation[loc], regStart, regEnd));
+    if (coveringLocations.length === 1 && coveringLocations[0] !== oldLocation) {
+      result.push({ reg: r, newLocation: coveringLocations[0] });
+    }
+  }
+  return result;
+}
+
+// Same optimistic-concurrency pattern as claimWeeklyTimeChange, scoped to
+// booked_location (date/time are unchanged in this scenario — only the
+// window's location moved) — whichever of the cron/admin-sync routes' UPDATE
+// actually lands first "wins"; the loser's WHERE clause matches zero rows
+// and it's a silent no-op, not a duplicate write/notification.
+export async function claimPrivateLocationChange(
+  supabase: SupabaseClient,
+  reg: { id: string; booked_location: string | null },
+  updates: { booked_location: string; session_details: string }
+): Promise<boolean> {
+  let query = supabase
+    .from("registrations")
+    .update({ ...updates, admin_change_at: new Date().toISOString() })
+    .eq("id", reg.id);
+  query = reg.booked_location === null ? query.is("booked_location", null) : query.eq("booked_location", reg.booked_location);
+  const { data } = await query.select("id");
+  return !!data && data.length > 0;
+}
+
 // Same optimistic-concurrency pattern as claimWeeklyTrainerReassignment —
 // whichever of the cron/admin-sync routes' UPDATE actually lands first
 // "wins"; the loser's WHERE clause matches zero rows and it's a silent

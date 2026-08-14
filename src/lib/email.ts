@@ -860,9 +860,9 @@ export async function sendTimeChangeNotification(data: {
     "Session Time Update";
 
   const descText =
-    changeType === "both" ? "Your upcoming group session time and location have changed." :
-    changeType === "location" ? "Your upcoming group session location has changed. The time stays the same." :
-    "Your upcoming group session time has changed. Everything else stays the same.";
+    changeType === "both" ? "Your upcoming session time and location have changed." :
+    changeType === "location" ? "Your upcoming session location has changed. The time stays the same." :
+    "Your upcoming session time has changed. Everything else stays the same.";
 
   const td = (bg: string, label: string, value: string, extraStyle = "") =>
     `<tr><td style="padding:10px 14px;background:${bg};color:#9ca3af;font-size:13px;width:110px;">${label}</td><td style="padding:10px 14px;background:${bg};color:#ffffff;${extraStyle}">${value}</td></tr>`;
