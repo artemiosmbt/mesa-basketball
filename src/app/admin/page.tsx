@@ -2205,6 +2205,15 @@ export default function AdminPage() {
               const todayLabel = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
               const todaySessions = displayedUpcoming.filter(r => r.booked_date && toDateKey(new Date(r.booked_date)) === todayKey);
               const futureSessions = displayedUpcoming.filter(r => !r.booked_date || toDateKey(new Date(r.booked_date)) !== todayKey);
+              // visibleRegistrations (unlike displayedUpcoming/upcoming) isn't cut
+              // by "has this session's start time already passed" — the server's
+              // ?view=upcoming query only bounds by date (today-or-later), so a
+              // today-dated row whose time already passed is still in here. That
+              // makes this the right source to tell "genuinely nothing was ever
+              // scheduled today" apart from "today's sessions already happened."
+              const hadSessionsToday = applyFilters(
+                visibleRegistrations.filter(r => r.booked_date && toDateKey(new Date(r.booked_date)) === todayKey)
+              ).length > 0;
               return (
                 <>
                   <p className="text-xs text-brown-500 mb-3">{displayedUpcoming.length} session{displayedUpcoming.length !== 1 ? "s" : ""}</p>
@@ -2212,7 +2221,7 @@ export default function AdminPage() {
                     <div>
                       <div className="text-xs font-semibold text-mesa-accent border-b border-brown-700 pb-1.5 mb-2">Today — {todayLabel}</div>
                       {todaySessions.length === 0
-                        ? <p className="text-xs text-brown-500 italic py-1">No sessions scheduled for today.</p>
+                        ? <p className="text-xs text-brown-500 italic py-1">{hadSessionsToday ? "No more sessions scheduled for today." : "No sessions scheduled for today."}</p>
                         : <FolderAwareCardList list={todaySessions} />
                       }
                     </div>
