@@ -638,6 +638,19 @@ function renderManualRescheduleFields(form: RescheduleForm, setForm: (f: Resched
   );
 }
 
+// For sorting the Schedule tab's group-session/private-window cards into a
+// single earliest-to-latest list within a day (they come back as two
+// separate arrays from api/admin/data's ?view=roster).
+function timeMins(t: string): number {
+  const m = t.match(/(\d+):(\d+)\s*(AM|PM)/i);
+  if (!m) return 0;
+  let h = parseInt(m[1]);
+  const min = parseInt(m[2]);
+  if (m[3].toUpperCase() === "PM" && h !== 12) h += 12;
+  if (m[3].toUpperCase() === "AM" && h === 12) h = 0;
+  return h * 60 + min;
+}
+
 function formatDateHeader(d: string | null): string {
   if (!d) return "No Date";
   const date = new Date(d);
@@ -2278,18 +2291,22 @@ export default function AdminPage() {
             {rosterLoading && rosterGroupSessions === null ? (
               <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-8 text-center text-brown-500 text-sm">Loading…</div>
             ) : (() => {
+              type RosterEntry =
+                | ({ kind: "group" } & RosterGroupSession)
+                | ({ kind: "private" } & RosterPrivateWindow);
               const groups = rosterGroupSessions || [];
               const privates = rosterPrivateWindows || [];
-              const dayMap = new Map<string, { label: string; ms: number; groups: RosterGroupSession[]; privates: RosterPrivateWindow[] }>();
+              const dayMap = new Map<string, { label: string; ms: number; entries: RosterEntry[] }>();
               const ensureDay = (date: string) => {
                 if (!dayMap.has(date)) {
-                  dayMap.set(date, { label: formatDateHeader(date), ms: new Date(date).getTime() || 0, groups: [], privates: [] });
+                  dayMap.set(date, { label: formatDateHeader(date), ms: new Date(date).getTime() || 0, entries: [] });
                 }
                 return dayMap.get(date)!;
               };
-              groups.forEach((g) => ensureDay(g.date).groups.push(g));
-              privates.forEach((p) => ensureDay(p.date).privates.push(p));
+              groups.forEach((g) => ensureDay(g.date).entries.push({ kind: "group", ...g }));
+              privates.forEach((p) => ensureDay(p.date).entries.push({ kind: "private", ...p }));
               const days = Array.from(dayMap.values()).sort((a, b) => a.ms - b.ms);
+              days.forEach((day) => day.entries.sort((a, b) => timeMins(a.startTime) - timeMins(b.startTime)));
               const showTrainerLabel = trainerFilter === "all" && (authCtx?.role === "admin" || authCtx?.role === "elevated_trainer");
 
               if (days.length === 0) {
@@ -2302,21 +2319,34 @@ export default function AdminPage() {
                     <div key={day.label}>
                       <div className="text-xs font-semibold text-mesa-accent border-b border-brown-700 pb-1.5 mb-2">{day.label}</div>
                       <div className="space-y-2">
-                        {day.groups.map((g, i) => (
-                          <div key={`g-${i}`} className="rounded-lg border border-brown-700 bg-brown-800/40 px-3 py-2 flex flex-wrap items-center justify-between gap-2">
-                            <div>
-                              <span className="text-sm font-semibold text-white">{g.group}</span>
-                              <span className="text-xs text-brown-400 ml-2">{g.startTime}–{g.endTime} • {g.location}{showTrainerLabel ? ` • ${g.trainer}` : ""}</span>
+                        {day.entries.map((entry, i) => entry.kind === "group" ? (
+                          <div key={i} className="rounded-xl border-2 border-brown-600 bg-brown-900/40 shadow-lg shadow-black/30 px-4 py-3 flex flex-wrap items-center justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                                <span className="font-medium text-sm">{entry.group}</span>
+                                <span className="rounded-full px-2 py-0.5 text-xs font-semibold bg-amber-400 text-blue-900">Group</span>
+                              </div>
+                              <div className="flex flex-wrap gap-x-3 mt-1 text-xs text-brown-500">
+                                <span>{entry.startTime}–{entry.endTime}</span>
+                                <span>{entry.location}</span>
+                                {showTrainerLabel && <span className="text-mesa-accent">{entry.trainer}</span>}
+                              </div>
                             </div>
-                            <span className={`text-xs font-semibold rounded-full px-2 py-0.5 ${g.enrolled === 0 ? "bg-brown-700 text-brown-300" : "bg-mesa-accent/20 text-mesa-accent"}`}>
-                              {g.enrolled}/{g.maxSpots} signed up
+                            <span className={`shrink-0 text-xs font-semibold rounded-full px-2 py-0.5 ${entry.enrolled === 0 ? "bg-brown-700 text-brown-300" : "bg-mesa-accent/20 text-mesa-accent"}`}>
+                              {entry.enrolled}/{entry.maxSpots} signed up
                             </span>
                           </div>
-                        ))}
-                        {day.privates.map((p, i) => (
-                          <div key={`p-${i}`} className="rounded-lg border border-brown-700 bg-brown-800/20 px-3 py-2 text-sm text-brown-300">
-                            <span className="font-semibold text-white">Private availability</span>
-                            <span className="text-xs text-brown-400 ml-2">{p.startTime}–{p.endTime} • {p.location}{showTrainerLabel ? ` • ${p.trainer}` : ""}</span>
+                        ) : (
+                          <div key={i} className="rounded-xl border-2 border-brown-600 bg-brown-900/40 shadow-lg shadow-black/30 px-4 py-3">
+                            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                              <span className="font-medium text-sm">Private Availability</span>
+                              <span className="rounded-full px-2 py-0.5 text-xs font-semibold bg-teal-900/40 text-teal-400">Private</span>
+                            </div>
+                            <div className="flex flex-wrap gap-x-3 mt-1 text-xs text-brown-500">
+                              <span>{entry.startTime}–{entry.endTime}</span>
+                              <span>{entry.location}</span>
+                              {showTrainerLabel && <span className="text-mesa-accent">{entry.trainer}</span>}
+                            </div>
                           </div>
                         ))}
                       </div>
