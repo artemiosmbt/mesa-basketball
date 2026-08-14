@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo, use, useRef } from "react";
 import { PRIVATE_RATE_BY_TIER, GROUP_PRIVATE_RATE_BY_TIER, calcPrivatePrice as getPrivatePrice, getTrainerTier, REFERRAL_CREDIT_SESSION_PRICE } from "@/lib/pricing";
 import { REFERRAL_PROGRAM_ENABLED } from "@/lib/feature-flags";
-import { formatTrainerForDisplay } from "@/lib/trainers";
+import { formatTrainerForDisplay, trainerNamesMatch, athleteTriggersCoachZNcaaNotice, kidsTriggerCoachZNcaaNotice, COACH_Z_NCAA_NOTICE_MESSAGE } from "@/lib/trainers";
 import { normalizedAthleteName, type Athlete } from "@/lib/athletes";
 
 const LOCATION_LINKS: Record<string, { name: string; url: string }> = {
@@ -242,6 +242,12 @@ export default function ManageBooking({
   const [newPlayerGrade, setNewPlayerGrade] = useState("");
   const [newPlayerGender, setNewPlayerGender] = useState("");
   const [showPlayerConfirm, setShowPlayerConfirm] = useState(false);
+  // Not a block — Coach Z can still be booked for a grades-9-12 female
+  // athlete, this just surfaces the NCAA heads-up before the change goes
+  // through, whichever flow triggered it, so "Continue Anyway" knows which
+  // action to resume.
+  const [showCoachZNotice, setShowCoachZNotice] = useState(false);
+  const [coachZNoticeContext, setCoachZNoticeContext] = useState<"reschedule" | "players" | null>(null);
   const [savingPlayers, setSavingPlayers] = useState(false);
   const [playerSaveError, setPlayerSaveError] = useState("");
   const [playerSaveSuccess, setPlayerSaveSuccess] = useState(false);
@@ -466,15 +472,18 @@ export default function ManageBooking({
           b.startTime === booking?.bookedStartTime &&
           b.endTime === booking?.bookedEndTime &&
           b.location === booking?.bookedLocation &&
-          b.trainer === (booking?.bookedTrainer || "Artemios Gavalas")
+          trainerNamesMatch(b.trainer, booking?.bookedTrainer || "Artemios Gavalas")
         )
     );
 
-    // Subtract booked slots
+    // Subtract booked slots — NOT filtered by location: a trainer can only
+    // be in one place at a time, so a booking at any location blocks that
+    // trainer's other locations for the same overlapping time too (see the
+    // same fix in schedule/page.tsx's subtractBookingsFromWindow).
     const result: TimeWindow[] = [];
     for (const w of windows) {
       const overlaps = otherBookedSlots.filter(
-        (b) => b.date === w.date && b.location === w.location && b.trainer === w.trainer
+        (b) => b.date === w.date && trainerNamesMatch(b.trainer, w.trainer)
       );
       if (overlaps.length === 0) {
         result.push(w);
@@ -579,7 +588,12 @@ export default function ManageBooking({
     return () => { cancelled = true; };
   }, [showEditPlayers, editedPlayers, booking, token]);
 
-  async function handleSavePlayers() {
+  async function handleSavePlayers(skipCoachZCheck = false) {
+    if (!skipCoachZCheck && kidsTriggerCoachZNcaaNotice(booking?.bookedTrainer, editedPlayers.join(", "))) {
+      setCoachZNoticeContext("players");
+      setShowCoachZNotice(true);
+      return;
+    }
     setSavingPlayers(true);
     setPlayerSaveError("");
     const res = await fetch(`/api/booking/${token}`, {
@@ -658,7 +672,20 @@ export default function ManageBooking({
     setCancellingDayToken(null);
   }
 
-  async function handleReschedule() {
+  async function handleReschedule(skipCoachZCheck = false) {
+    if (rescheduleType === "private" && !skipCoachZCheck) {
+      const w = selectedWindow >= 0 ? timeWindows[selectedWindow] : null;
+      // reschedulePlayers stores gender as "Male"/"Female" (the form's option
+      // values) — lowercase before comparing, since athleteTriggersCoachZNcaaNotice
+      // expects the same lowercase "female"/"male" convention kids-string
+      // parsing already normalizes to.
+      const needsCoachZNotice = !!w && reschedulePlayers.some((p) => athleteTriggersCoachZNcaaNotice(w.trainer, p.grade, p.gender.toLowerCase()));
+      if (needsCoachZNotice) {
+        setCoachZNoticeContext("reschedule");
+        setShowCoachZNotice(true);
+        return;
+      }
+    }
     setRescheduling(true);
     const kidsStr = reschedulePlayers.map(p => buildPlayerString(p.name, p.dob, p.grade, p.gender)).join(", ");
     let body: Record<string, unknown>;
@@ -1226,7 +1253,7 @@ export default function ManageBooking({
                             )}
                             <div className="mt-3 flex gap-3">
                               <button
-                                onClick={handleSavePlayers}
+                                onClick={() => handleSavePlayers()}
                                 disabled={savingPlayers}
                                 className="rounded bg-mesa-accent px-4 py-2 text-sm font-semibold text-white hover:bg-yellow-600 disabled:opacity-50"
                               >
@@ -1712,7 +1739,7 @@ export default function ManageBooking({
 
                 <button
                   type="button"
-                  onClick={handleReschedule}
+                  onClick={() => handleReschedule()}
                   disabled={rescheduling || !canSubmit}
                   className="w-full rounded-lg bg-mesa-accent py-3 font-semibold text-white transition hover:bg-yellow-600 disabled:opacity-50"
                 >
@@ -1723,6 +1750,35 @@ export default function ManageBooking({
           </div>
         );
       })()}
+
+      {/* Coach Z NCAA Notice — informational only, never blocks the change */}
+      {showCoachZNotice && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-sm rounded-2xl border border-yellow-700 bg-brown-900 p-6 shadow-2xl">
+            <h3 className="text-lg font-bold text-yellow-400">A Quick Note About Coach Z</h3>
+            <p className="mt-2 text-sm text-brown-300">{COACH_Z_NCAA_NOTICE_MESSAGE}</p>
+            <div className="mt-5 flex gap-3">
+              <button
+                onClick={() => { setShowCoachZNotice(false); setCoachZNoticeContext(null); }}
+                className="flex-1 rounded-lg bg-brown-700 px-4 py-2 text-sm text-brown-300 hover:bg-brown-600"
+              >
+                Choose a Different Trainer
+              </button>
+              <button
+                onClick={() => {
+                  setShowCoachZNotice(false);
+                  if (coachZNoticeContext === "reschedule") handleReschedule(true);
+                  else if (coachZNoticeContext === "players") handleSavePlayers(true);
+                  setCoachZNoticeContext(null);
+                }}
+                className="flex-1 rounded-lg bg-yellow-700 px-4 py-2 text-sm font-semibold text-white hover:bg-yellow-600"
+              >
+                Continue Anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

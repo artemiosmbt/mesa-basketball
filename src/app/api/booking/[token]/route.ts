@@ -23,7 +23,6 @@ import {
 import { issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome, isLateAction, parseSessionDateTimeET, computeLateFeeAmounts, settleOldBookingForReschedule, computePlayerEditPricing, parseKidsList } from "@/lib/booking-finalize";
 import { getStripe } from "@/lib/stripe";
 import { calcServiceFee, serviceFeeItemName, fmtMoney, calcPrivatePrice, getTrainerTier, normalizeTrainerTier, packageCoversTrainerTier } from "@/lib/pricing";
-import { HS_GIRLS_PRIVATE_RESTRICTION_MESSAGE, violatesHsGirlsPrivateRestriction } from "@/lib/trainers";
 import {
   sendCancellationNotification,
   sendRescheduleNotification,
@@ -691,13 +690,6 @@ export async function PATCH(
     return NextResponse.json({ error: "At least one player is required" }, { status: 400 });
   }
 
-  // Same restriction as booking/rescheduling with her — an already-booked
-  // private session's roster can't be edited to ADD a grades-9-12 female
-  // athlete either, even though the trainer/date aren't changing here.
-  if (violatesHsGirlsPrivateRestriction(reg.booked_trainer, players.filter((p) => p.trim()).join(", "))) {
-    return NextResponse.json({ error: HS_GIRLS_PRIVATE_RESTRICTION_MESSAGE }, { status: 400 });
-  }
-
   const pricing = await computePlayerEditPricing(reg, players);
   const {
     newKidsStr, newCount, removedPlayers, addedPlayers, isLate, newPrice,
@@ -921,9 +913,6 @@ export async function PUT(
   if (newType !== "weekly" && !isSameSlotAsBefore) {
     if (!resolvedTrainer) {
       return NextResponse.json({ error: "Missing trainer for the new session" }, { status: 400 });
-    }
-    if (violatesHsGirlsPrivateRestriction(resolvedTrainer, kidsToUse)) {
-      return NextResponse.json({ error: HS_GIRLS_PRIVATE_RESTRICTION_MESSAGE }, { status: 400 });
     }
     const [slotOffered, slotConflicting] = await Promise.all([
       isPrivateWindowOfferedByTrainer(bookedDate, bookedStartTime, bookedEndTime, bookedLocation, resolvedTrainer),

@@ -5,7 +5,7 @@ import Image from "next/image";
 import { authClient, ADMIN_EMAIL } from "@/lib/auth";
 import LandingNav from "@/app/LandingNav";
 import { REFERRAL_PROGRAM_ENABLED, REFERRAL_CREDIT_REDEMPTION_ENABLED, NEW_CLIENT_DISCOUNT_ENABLED, ARTEMIOS_PACKAGES_AVAILABLE } from "@/lib/feature-flags";
-import { getTrainerBioSlug, getTrainerTier, normalizeTrainerTier, formatTrainerForDisplay, isTrainerRestrictedForAthlete, HS_GIRLS_PRIVATE_RESTRICTION_MESSAGE, trainerNamesMatch, type TrainerTier } from "@/lib/trainers";
+import { getTrainerBioSlug, getTrainerTier, normalizeTrainerTier, formatTrainerForDisplay, athleteTriggersCoachZNcaaNotice, COACH_Z_NCAA_NOTICE_MESSAGE, trainerNamesMatch, type TrainerTier } from "@/lib/trainers";
 import { calcServiceFee, serviceFeeLabel, serviceFeeItemName, isPercentServiceFee, SERVICE_FEE_PERCENT_TEXT, packagePrice, PRIVATE_RATE_BY_TIER, GROUP_PRIVATE_RATE_BY_TIER, calcPrivatePrice as getPrivatePrice, REFERRAL_CREDIT_SESSION_PRICE, packageCoversTrainerTier } from "@/lib/pricing";
 import { ALL_GRADES, normalizedAthleteName } from "@/lib/athletes";
 import { getSessionGender, getGradesForGroup } from "@/lib/group-matching";
@@ -800,6 +800,10 @@ export default function Home() {
   // informational heads-up before that happens.
   const [mismatchedPackageTier, setMismatchedPackageTier] = useState<TrainerTier | null>(null);
   const [showPackageTierWarning, setShowPackageTierWarning] = useState(false);
+  // Not a block — Coach Z can still be booked for a grades-9-12 female
+  // athlete, this just surfaces the NCAA heads-up before checkout so the
+  // client can make an informed call (same shape as the warnings above).
+  const [showCoachZNotice, setShowCoachZNotice] = useState(false);
   const [isGroupRate, setIsGroupRate] = useState(false);
   const [hideUpsell, setHideUpsell] = useState(false);
   const [filterDays, setFilterDays] = useState<Set<number>>(new Set());
@@ -1553,19 +1557,6 @@ export default function Home() {
         })),
       ];
 
-      // Server-side (/api/register) is the authoritative guard, but check
-      // here too so a restricted booking never even reaches Stripe/network —
-      // Coach Thybulle can't personally train grades 9-12 female athletes
-      // one-on-one (NCAA rule), across every date in this booking.
-      const restrictedDate = datesToBook.find((d) =>
-        kids.some((k) => isTrainerRestrictedForAthlete(d.trainer, k.grade, k.gender))
-      );
-      if (restrictedDate) {
-        setSubmitResult({ success: false, message: HS_GIRLS_PRIVATE_RESTRICTION_MESSAGE });
-        setSubmitting(false);
-        return;
-      }
-
       const isRecurring = datesToBook.length > 1;
       const applyCredit = accountCreditBalance !== null && accountCreditBalance > 0 && applyAccountCredit;
 
@@ -1719,6 +1710,17 @@ export default function Home() {
     if (mismatchedPackageTier) {
       setShowPackageTierWarning(true);
       return;
+    }
+
+    if (modal.type === "private" || modal.type === "group-private") {
+      const trainersInvolved = [modal.bookedTrainer, ...recurringWeeks.filter((w) => w.selected).map((w) => w.trainer)];
+      const needsCoachZNotice = kids.some((k) =>
+        trainersInvolved.some((t) => athleteTriggersCoachZNcaaNotice(t, k.grade, k.gender))
+      );
+      if (needsCoachZNotice) {
+        setShowCoachZNotice(true);
+        return;
+      }
     }
 
     // Re-validate the referral code at submit time — a blur check may never have
@@ -3335,6 +3337,30 @@ export default function Home() {
               </button>
               <button
                 onClick={() => { setShowPackageTierWarning(false); performSubmit(); }}
+                className="flex-1 rounded-lg bg-yellow-700 px-4 py-2 text-sm font-semibold text-white hover:bg-yellow-600"
+              >
+                Continue Anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Coach Z NCAA Notice — informational only, never blocks booking */}
+      {showCoachZNotice && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-sm rounded-2xl border border-yellow-700 bg-brown-900 p-6 shadow-2xl">
+            <h3 className="text-lg font-bold text-yellow-400">A Quick Note About Coach Z</h3>
+            <p className="mt-2 text-sm text-brown-300">{COACH_Z_NCAA_NOTICE_MESSAGE}</p>
+            <div className="mt-5 flex gap-3">
+              <button
+                onClick={() => setShowCoachZNotice(false)}
+                className="flex-1 rounded-lg bg-brown-700 px-4 py-2 text-sm text-brown-300 hover:bg-brown-600"
+              >
+                Choose a Different Trainer
+              </button>
+              <button
+                onClick={() => { setShowCoachZNotice(false); performSubmit(); }}
                 className="flex-1 rounded-lg bg-yellow-700 px-4 py-2 text-sm font-semibold text-white hover:bg-yellow-600"
               >
                 Continue Anyway

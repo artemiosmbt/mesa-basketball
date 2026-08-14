@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getStripe, buildCreditDiscount } from "@/lib/stripe";
 import { calcServiceFee, serviceFeeItemName, fmtMoney, calcPrivatePrice, getTrainerTier, normalizeTrainerTier, packageCoversTrainerTier, REFERRAL_CREDIT_SESSION_PRICE, type TrainerTier } from "@/lib/pricing";
-import { HS_GIRLS_PRIVATE_RESTRICTION_MESSAGE, violatesHsGirlsPrivateRestriction } from "@/lib/trainers";
 import { getWeeklySchedule, getCamps, isPrivateWindowOfferedByTrainer } from "@/lib/sheets";
 import { resolveRequestEmail } from "@/lib/request-email";
 import { NEW_CLIENT_DISCOUNT_ENABLED } from "@/lib/feature-flags";
@@ -778,10 +777,6 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "Missing session details" }, { status: 400 });
       }
 
-      if (privateSessions.some((s: { trainer?: string }) => violatesHsGirlsPrivateRestriction(s.trainer, kids))) {
-        return NextResponse.json({ error: HS_GIRLS_PRIVATE_RESTRICTION_MESSAGE }, { status: 400 });
-      }
-
       // Each date/time/location/trainer combination must be a real,
       // currently-offered slot from the live schedule sheet, with no
       // conflicting booking already against that trainer — never trust the
@@ -1088,10 +1083,6 @@ export async function POST(req: NextRequest) {
     if (isPrivateType && !privateSessions) {
       if (!bookedDate || !bookedStartTime || !bookedEndTime || !bookedLocation || !bookedTrainer) {
         return NextResponse.json({ error: "Missing session details" }, { status: 400 });
-      }
-
-      if (violatesHsGirlsPrivateRestriction(bookedTrainer, kids)) {
-        return NextResponse.json({ error: HS_GIRLS_PRIVATE_RESTRICTION_MESSAGE }, { status: 400 });
       }
 
       // Same authoritative slot+trainer+conflict check as the multi-date

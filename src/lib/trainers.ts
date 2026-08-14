@@ -102,25 +102,28 @@ export function packageCoversTrainerTier(packageTier: TrainerTier, sessionTier: 
   return packageTier === "artemios" || packageTier === sessionTier;
 }
 
-// Coach Thybulle is also a college women's basketball coach — NCAA/coaching
-// rules bar her from personally training high-school-age girls one-on-one.
-// She's never scheduled as the trainer on the HS Girls group session (that's
-// controlled directly on the schedule sheet), so this only needs to guard
+// Coach Thybulle ("Coach Z") is also a college women's basketball coach —
+// NCAA recruiting rules bar her from personally training high-school-age
+// female prospects one-on-one. This is no longer an enforced block (the
+// business decided clients can make this call for themselves) — it's just
+// used to decide when to surface a heads-up notice before checkout. She's
+// never scheduled as the trainer on the HS Girls group session (that's
+// controlled directly on the schedule sheet), so this only needs to cover
 // PRIVATE bookings, where a client picks the trainer themselves.
-const HS_GIRLS_PRIVATE_RESTRICTED_TRAINER = "Zhaneia Thybulle";
-const HS_GIRLS_PRIVATE_RESTRICTED_GRADES = new Set(["9", "10", "11", "12"]);
+const COACH_Z_NCAA_NOTICE_TRAINER = "Zhaneia Thybulle";
+const COACH_Z_NCAA_NOTICE_GRADES = new Set(["9", "10", "11", "12"]);
 
-export function isTrainerRestrictedForAthlete(
+export function athleteTriggersCoachZNcaaNotice(
   trainer: string | undefined | null,
   grade: string | undefined | null,
   gender: string | undefined | null
 ): boolean {
-  if (!trainerNamesMatch(trainer, HS_GIRLS_PRIVATE_RESTRICTED_TRAINER)) return false;
-  return !!grade && HS_GIRLS_PRIVATE_RESTRICTED_GRADES.has(grade) && gender === "female";
+  if (!trainerNamesMatch(trainer, COACH_Z_NCAA_NOTICE_TRAINER)) return false;
+  return !!grade && COACH_Z_NCAA_NOTICE_GRADES.has(grade) && gender === "female";
 }
 
-export const HS_GIRLS_PRIVATE_RESTRICTION_MESSAGE =
-  "Coach Z isn't able to take sessions with high school (grades 9-12) female athletes due to NCAA coaching rules. Please pick a different trainer for this session — thanks for understanding!";
+export const COACH_Z_NCAA_NOTICE_MESSAGE =
+  "Just a heads-up: due to NCAA recruiting rules, Coach Z isn't permitted to personally coach high school (grade 9 and up) female athletes who are prospects for college-level play. If that describes your athlete, we'd recommend picking a different trainer for this session. If it doesn't apply, no worries — feel free to continue!";
 
 // Parses a kids string like "Jane (DOB: 2010-01-01, Grade: 10, Gender: Female)"
 // into {grade, gender} pairs — the format every booking/reschedule endpoint
@@ -136,10 +139,10 @@ export function parseKidsGradeGenderPairs(kids: string): { grade: string; gender
   return out;
 }
 
-// Never trust a client-editable trainer name alone for this restriction
-// without also re-deriving grade/gender straight from the kids string that's
-// actually saved to the registration row — used by both a fresh booking
-// (register/route.ts) and a self-service reschedule (booking/[token]/route.ts).
-export function violatesHsGirlsPrivateRestriction(trainer: string | undefined | null, kids: string): boolean {
-  return parseKidsGradeGenderPairs(kids).some((a) => isTrainerRestrictedForAthlete(trainer, a.grade, a.gender));
+// Same notice trigger as athleteTriggersCoachZNcaaNotice above, but re-derives
+// grade/gender straight from a saved kids string instead of a single
+// already-parsed athlete — used wherever only the stored string is on hand
+// (e.g. editing an existing booking's player roster).
+export function kidsTriggerCoachZNcaaNotice(trainer: string | undefined | null, kids: string): boolean {
+  return parseKidsGradeGenderPairs(kids).some((a) => athleteTriggersCoachZNcaaNotice(trainer, a.grade, a.gender));
 }
