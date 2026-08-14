@@ -3,6 +3,9 @@ import { createClient } from "@supabase/supabase-js";
 import { verifyDashboardAccess } from "@/lib/auth";
 import { requireTrainerNameConfigured, trainerScopeFilter, normalizeDropdownTrainer, deriveOwnClientEmails, scopeToOwnClients } from "@/lib/admin-data-scope";
 import { attachComputedFields } from "@/lib/admin-registration-enrichment";
+import { getWeeklySchedule, getPrivateSlots, parseTimeToMins } from "@/lib/sheets";
+import { getGroupSessionEnrollment } from "@/lib/supabase";
+import { trainerNamesMatch } from "@/lib/trainers";
 
 // Mirrors admin/page.tsx's identical client-side helpers exactly — moved
 // here too since ?view=clients now does this aggregation server-side.
@@ -259,6 +262,94 @@ export async function GET(req: NextRequest) {
     ]);
     const enrichedUpcoming = await attachComputedFields(supabase, upcomingRegs || [], upcomingPackages || []);
     return NextResponse.json({ registrations: enrichedUpcoming });
+  }
+
+  // "What am I actually scheduled to run" — read straight from the
+  // schedule sheet, independent of whether anyone's booked yet, so a
+  // trainer with zero bookings still sees "you're on the hook for HS Boys
+  // tomorrow at 6pm" instead of an empty dashboard. Deliberately separate
+  // from ?view=upcoming (real bookings only) — see admin/page.tsx's
+  // "Schedule" tab.
+  if (view === "roster") {
+    const rosterScopeError = requireTrainerNameConfigured(ctx);
+    if (rosterScopeError) return rosterScopeError;
+
+    const dropdownTrainer = searchParams.get("trainer");
+    const scopeTrainer = ctx.role === "trainer"
+      ? ctx.trainerName!
+      : (dropdownTrainer && dropdownTrainer !== "all" ? dropdownTrainer : null);
+
+    const etParts = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/New_York",
+      year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
+    }).formatToParts(new Date());
+    const getP = (t: string) => etParts.find((p) => p.type === t)?.value ?? "0";
+    const todayISO = `${getP("year")}-${getP("month")}-${getP("day")}`;
+    const nowMins = parseInt(getP("hour")) * 60 + parseInt(getP("minute"));
+
+    // Same "today or later, and if today then not-yet-started" rule as
+    // /api/schedule's own isUpcoming — computed in ET, not the server's UTC
+    // local time (the same class of bug already found and fixed twice
+    // elsewhere in this codebase if this used raw server local time).
+    function rowIsUpcoming(dateStr: string, startTime: string): boolean {
+      const d = new Date(dateStr + " 12:00:00");
+      if (isNaN(d.getTime())) return false;
+      const rowISO = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      if (rowISO > todayISO) return true;
+      if (rowISO < todayISO) return false;
+      return parseTimeToMins(startTime) > nowMins;
+    }
+
+    const [weeklySessions, privateSlotsAll, enrollment] = await Promise.all([
+      getWeeklySchedule(),
+      getPrivateSlots(),
+      getGroupSessionEnrollment(),
+    ]);
+
+    const groupSessions = weeklySessions
+      .filter((s) => s.date && s.startTime && rowIsUpcoming(s.date, s.startTime))
+      .filter((s) => !scopeTrainer || trainerNamesMatch(s.trainer, scopeTrainer))
+      .map((s) => {
+        const trainer = s.trainer || "Artemios Gavalas";
+        // Matches getGroupSessionEnrollment's own key exactly (see its
+        // comment on why weekly rows key on trainer too — two same-named
+        // groups run by different trainers at the same date+time never
+        // share a capacity pool).
+        const key = `${s.date}|${s.startTime}|${s.group}|${trainer}`;
+        return {
+          date: s.date, startTime: s.startTime, endTime: s.endTime, location: s.location,
+          group: s.group, trainer, maxSpots: s.maxSpots, enrolled: enrollment[key] || 0,
+        };
+      })
+      .sort((a, b) => dateMs(a.date) - dateMs(b.date) || parseTimeToMins(a.startTime) - parseTimeToMins(b.startTime));
+
+    const relevantPrivateSlots = privateSlotsAll
+      .filter((s) => s.available && s.date && s.startTime && rowIsUpcoming(s.date, s.startTime))
+      .filter((s) => !scopeTrainer || trainerNamesMatch(s.trainer, scopeTrainer))
+      .sort((a, b) => {
+        const dm = dateMs(a.date) - dateMs(b.date);
+        if (dm !== 0) return dm;
+        if (a.location !== b.location) return a.location.localeCompare(b.location);
+        const tA = a.trainer || "Artemios Gavalas", tB = b.trainer || "Artemios Gavalas";
+        if (tA !== tB) return tA.localeCompare(tB);
+        return parseTimeToMins(a.startTime) - parseTimeToMins(b.startTime);
+      });
+
+    // Merge consecutive (touching) same date/location/trainer rows into one
+    // readable window instead of a wall of individual 1-hour cards — same
+    // idea as the public booking page's own private-slot window merging.
+    const privateWindows: { date: string; startTime: string; endTime: string; location: string; trainer: string }[] = [];
+    for (const s of relevantPrivateSlots) {
+      const trainer = s.trainer || "Artemios Gavalas";
+      const last = privateWindows[privateWindows.length - 1];
+      if (last && last.date === s.date && last.location === s.location && last.trainer === trainer && last.endTime === s.startTime) {
+        last.endTime = s.endTime;
+      } else {
+        privateWindows.push({ date: s.date, startTime: s.startTime, endTime: s.endTime, location: s.location, trainer });
+      }
+    }
+
+    return NextResponse.json({ groupSessions, privateWindows });
   }
 
   // Past loads on-demand (first click into the tab), last 30 days by
