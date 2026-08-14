@@ -101,3 +101,45 @@ export function normalizeTrainerTier(value: string | undefined | null): TrainerT
 export function packageCoversTrainerTier(packageTier: TrainerTier, sessionTier: TrainerTier): boolean {
   return packageTier === "artemios" || packageTier === sessionTier;
 }
+
+// Coach Thybulle is also a college women's basketball coach — NCAA/coaching
+// rules bar her from personally training high-school-age girls one-on-one.
+// She's never scheduled as the trainer on the HS Girls group session (that's
+// controlled directly on the schedule sheet), so this only needs to guard
+// PRIVATE bookings, where a client picks the trainer themselves.
+const HS_GIRLS_PRIVATE_RESTRICTED_TRAINER = "Zhaneia Thybulle";
+const HS_GIRLS_PRIVATE_RESTRICTED_GRADES = new Set(["9", "10", "11", "12"]);
+
+export function isTrainerRestrictedForAthlete(
+  trainer: string | undefined | null,
+  grade: string | undefined | null,
+  gender: string | undefined | null
+): boolean {
+  if (!trainerNamesMatch(trainer, HS_GIRLS_PRIVATE_RESTRICTED_TRAINER)) return false;
+  return !!grade && HS_GIRLS_PRIVATE_RESTRICTED_GRADES.has(grade) && gender === "female";
+}
+
+export const HS_GIRLS_PRIVATE_RESTRICTION_MESSAGE =
+  "Coach Z isn't able to take sessions with high school (grades 9-12) female athletes due to NCAA coaching rules. Please pick a different trainer for this session — thanks for understanding!";
+
+// Parses a kids string like "Jane (DOB: 2010-01-01, Grade: 10, Gender: Female)"
+// into {grade, gender} pairs — the format every booking/reschedule endpoint
+// stores kids in (see e.g. extractGradesFromKids in the camp-notifications
+// cron, which parses the same string for grade alone).
+export function parseKidsGradeGenderPairs(kids: string): { grade: string; gender: string }[] {
+  const out: { grade: string; gender: string }[] = [];
+  const regex = /Grade:\s*([^,)]+)(?:,\s*Gender:\s*([^,)]+))?/gi;
+  let match;
+  while ((match = regex.exec(kids)) !== null) {
+    out.push({ grade: match[1].trim(), gender: (match[2] || "").trim().toLowerCase() });
+  }
+  return out;
+}
+
+// Never trust a client-editable trainer name alone for this restriction
+// without also re-deriving grade/gender straight from the kids string that's
+// actually saved to the registration row — used by both a fresh booking
+// (register/route.ts) and a self-service reschedule (booking/[token]/route.ts).
+export function violatesHsGirlsPrivateRestriction(trainer: string | undefined | null, kids: string): boolean {
+  return parseKidsGradeGenderPairs(kids).some((a) => isTrainerRestrictedForAthlete(trainer, a.grade, a.gender));
+}

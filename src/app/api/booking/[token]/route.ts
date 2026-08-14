@@ -23,6 +23,7 @@ import {
 import { issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome, isLateAction, parseSessionDateTimeET, computeLateFeeAmounts, settleOldBookingForReschedule, computePlayerEditPricing, parseKidsList } from "@/lib/booking-finalize";
 import { getStripe } from "@/lib/stripe";
 import { calcServiceFee, serviceFeeItemName, fmtMoney, calcPrivatePrice, getTrainerTier, normalizeTrainerTier, packageCoversTrainerTier } from "@/lib/pricing";
+import { HS_GIRLS_PRIVATE_RESTRICTION_MESSAGE, violatesHsGirlsPrivateRestriction } from "@/lib/trainers";
 import {
   sendCancellationNotification,
   sendRescheduleNotification,
@@ -913,6 +914,9 @@ export async function PUT(
   if (newType !== "weekly" && !isSameSlotAsBefore) {
     if (!resolvedTrainer) {
       return NextResponse.json({ error: "Missing trainer for the new session" }, { status: 400 });
+    }
+    if (violatesHsGirlsPrivateRestriction(resolvedTrainer, kidsToUse)) {
+      return NextResponse.json({ error: HS_GIRLS_PRIVATE_RESTRICTION_MESSAGE }, { status: 400 });
     }
     const [slotOffered, slotConflicting] = await Promise.all([
       isPrivateWindowOfferedByTrainer(bookedDate, bookedStartTime, bookedEndTime, bookedLocation, resolvedTrainer),

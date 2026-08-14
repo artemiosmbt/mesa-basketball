@@ -5,7 +5,7 @@ import Image from "next/image";
 import { authClient, ADMIN_EMAIL } from "@/lib/auth";
 import LandingNav from "@/app/LandingNav";
 import { REFERRAL_PROGRAM_ENABLED, REFERRAL_CREDIT_REDEMPTION_ENABLED, NEW_CLIENT_DISCOUNT_ENABLED, ARTEMIOS_PACKAGES_AVAILABLE } from "@/lib/feature-flags";
-import { getTrainerBioSlug, getTrainerTier, normalizeTrainerTier, formatTrainerForDisplay, type TrainerTier } from "@/lib/trainers";
+import { getTrainerBioSlug, getTrainerTier, normalizeTrainerTier, formatTrainerForDisplay, isTrainerRestrictedForAthlete, HS_GIRLS_PRIVATE_RESTRICTION_MESSAGE, type TrainerTier } from "@/lib/trainers";
 import { calcServiceFee, serviceFeeLabel, serviceFeeItemName, isPercentServiceFee, SERVICE_FEE_PERCENT_TEXT, packagePrice, PRIVATE_RATE_BY_TIER, GROUP_PRIVATE_RATE_BY_TIER, calcPrivatePrice as getPrivatePrice, REFERRAL_CREDIT_SESSION_PRICE, packageCoversTrainerTier } from "@/lib/pricing";
 import { ALL_GRADES, normalizedAthleteName } from "@/lib/athletes";
 import { getSessionGender, getGradesForGroup } from "@/lib/group-matching";
@@ -1549,6 +1549,19 @@ export default function Home() {
           trainer: w.trainer,
         })),
       ];
+
+      // Server-side (/api/register) is the authoritative guard, but check
+      // here too so a restricted booking never even reaches Stripe/network —
+      // Coach Thybulle can't personally train grades 9-12 female athletes
+      // one-on-one (NCAA rule), across every date in this booking.
+      const restrictedDate = datesToBook.find((d) =>
+        kids.some((k) => isTrainerRestrictedForAthlete(d.trainer, k.grade, k.gender))
+      );
+      if (restrictedDate) {
+        setSubmitResult({ success: false, message: HS_GIRLS_PRIVATE_RESTRICTION_MESSAGE });
+        setSubmitting(false);
+        return;
+      }
 
       const isRecurring = datesToBook.length > 1;
       const applyCredit = accountCreditBalance !== null && accountCreditBalance > 0 && applyAccountCredit;
