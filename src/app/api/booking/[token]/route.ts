@@ -691,6 +691,13 @@ export async function PATCH(
     return NextResponse.json({ error: "At least one player is required" }, { status: 400 });
   }
 
+  // Same restriction as booking/rescheduling with her — an already-booked
+  // private session's roster can't be edited to ADD a grades-9-12 female
+  // athlete either, even though the trainer/date aren't changing here.
+  if (violatesHsGirlsPrivateRestriction(reg.booked_trainer, players.filter((p) => p.trim()).join(", "))) {
+    return NextResponse.json({ error: HS_GIRLS_PRIVATE_RESTRICTION_MESSAGE }, { status: 400 });
+  }
+
   const pricing = await computePlayerEditPricing(reg, players);
   const {
     newKidsStr, newCount, removedPlayers, addedPlayers, isLate, newPrice,
