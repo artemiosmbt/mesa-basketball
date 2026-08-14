@@ -51,7 +51,7 @@ export const TRAINER_ACCOUNTS: TrainerAccount[] = [
   // { email: "coach@example.com", role: "trainer", trainerName: "John Smith" },
   { email: "giftedtraining24@gmail.com", role: "trainer", trainerName: "Joseph Owens" },
   { email: "zthybulle@gmail.com", role: "trainer", trainerName: "Zhaneia Thybulle" },
-  { email: "zamjadh786@gmail.com", role: "trainer", trainerName: "Zain Amjad" },
+  { email: "786develops@gmail.com", role: "trainer", trainerName: "Zain Amjad" },
   { email: "sjpapadi@gmail.com", role: "trainer", trainerName: "Steven Papadimitropoulos" },
 ];
 

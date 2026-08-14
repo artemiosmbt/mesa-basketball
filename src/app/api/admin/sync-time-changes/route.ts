@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { verifyAdmin } from "@/lib/auth";
-import { getWeeklySchedule } from "@/lib/sheets";
+import { getWeeklySchedule, getPrivateSlots } from "@/lib/sheets";
 import { sendTimeChangeNotification } from "@/lib/email";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import { buildWeeklyPlan, claimWeeklyTimeChange, findWeeklyTrainerReassignments, claimWeeklyTrainerReassignment, regGroupKey, type WeeklyRegKeyFields } from "@/lib/weekly-schedule-matching";
+import { findPrivateTrainerReassignments, claimPrivateTrainerReassignment } from "@/lib/private-schedule-matching";
 import { notifyTrainerOfCancellation, notifyTrainerOfNewBooking } from "@/lib/trainer-notify";
+import { getPackageById } from "@/lib/supabase";
+import { getTrainerTier, normalizeTrainerTier, packageCoversTrainerTier } from "@/lib/trainers";
 
 
 interface WeeklyRegistration extends WeeklyRegKeyFields {
@@ -15,6 +18,19 @@ interface WeeklyRegistration extends WeeklyRegKeyFields {
   kids: string;
   sms_consent: boolean;
   booked_trainer: string | null;
+}
+
+interface PrivateRegistration {
+  id: string;
+  booked_date: string | null;
+  booked_start_time: string | null;
+  booked_end_time: string | null;
+  booked_location: string | null;
+  booked_trainer: string | null;
+  parent_name: string;
+  kids: string;
+  type: string;
+  package_id: string | null;
 }
 
 function sessionIsUpcoming(dateStr: string, startTimeStr: string): boolean {
@@ -249,6 +265,73 @@ export async function POST(req: NextRequest) {
   }
   if (trainerSyncSummary.length > 0) {
     await sendAdminSMS(`TRAINER REASSIGNED:\n${trainerSyncSummary.join("\n")}`);
+  }
+
+  // Private-session counterpart to the weekly block above — was previously
+  // only handled by the cron (fires on sheet edit), not here (fires on
+  // dashboard load), so a coach swap on an already-booked private session
+  // only got picked up on the next sheet edit rather than the next time
+  // someone opened the dashboard. Mirrors the cron's version exactly,
+  // sharing the matching/claim logic via private-schedule-matching.ts so
+  // the two can't drift apart the way the weekly side already did once.
+  let privateSlots: Awaited<ReturnType<typeof getPrivateSlots>> = [];
+  try {
+    privateSlots = await getPrivateSlots({ noCache: true });
+  } catch (err) {
+    console.error("sync-time-changes: failed to fetch private slots", err);
+  }
+
+  const { data: allPrivateRegs } = await supabase
+    .from("registrations")
+    .select("*")
+    .in("type", ["private", "group-private"])
+    .eq("status", "confirmed");
+  const privateRegsUpcoming: PrivateRegistration[] = (allPrivateRegs || []).filter(
+    (r) => r.booked_date && sessionIsUpcoming(r.booked_date, r.booked_start_time || "")
+  );
+
+  const privateReassignments = findPrivateTrainerReassignments(privateRegsUpcoming, privateSlots);
+  const privateTrainerSyncSummary: string[] = [];
+  for (const { reg: r, newTrainer } of privateReassignments) {
+    const oldTrainer = r.booked_trainer || "Artemios Gavalas";
+    const won = await claimPrivateTrainerReassignment(supabase, r, newTrainer);
+    if (!won) continue; // the cron already caught and applied this one
+    privateTrainerSyncSummary.push(`• ${r.booked_date} ${r.booked_start_time} — ${oldTrainer} → ${newTrainer} (${r.parent_name})`);
+
+    if (r.package_id) {
+      const pkg = await getPackageById(r.package_id).catch(() => null);
+      if (pkg && !packageCoversTrainerTier(normalizeTrainerTier(pkg.trainer_tier), getTrainerTier(newTrainer))) {
+        await sendAdminSMS(
+          `⚠️ PACKAGE TIER MISMATCH: ${r.parent_name}'s package-covered session on ${r.booked_date} ${r.booked_start_time} was just reassigned from ${oldTrainer} to ${newTrainer} — but their package was paid for at the "${normalizeTrainerTier(pkg.trainer_tier)}" tier, not "${getTrainerTier(newTrainer)}". Review and charge/waive the difference manually.`
+        ).catch(() => {});
+      }
+    }
+
+    const sessionLabel = r.type === "group-private" ? "Group Private Session" : "Private Session";
+    if (r.booked_date && r.booked_start_time) {
+      await notifyTrainerOfCancellation({
+        trainer: oldTrainer,
+        parentName: r.parent_name,
+        sessionLabel,
+        date: r.booked_date,
+        startTime: r.booked_start_time,
+        endTime: r.booked_end_time || r.booked_start_time,
+        location: r.booked_location || "",
+      }).catch((err) => console.error("Trainer reassignment-cancel notify failed (private):", err));
+      await notifyTrainerOfNewBooking({
+        trainer: newTrainer,
+        parentName: r.parent_name,
+        kids: r.kids,
+        sessionLabel,
+        date: r.booked_date,
+        startTime: r.booked_start_time,
+        endTime: r.booked_end_time || r.booked_start_time,
+        location: r.booked_location || "",
+      }).catch((err) => console.error("Trainer reassignment-newbooking notify failed (private):", err));
+    }
+  }
+  if (privateTrainerSyncSummary.length > 0) {
+    await sendAdminSMS(`TRAINER REASSIGNED (private):\n${privateTrainerSyncSummary.join("\n")}`).catch(() => {});
   }
 
   return NextResponse.json({

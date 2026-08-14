@@ -4,6 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 import { getWeeklySchedule, getPrivateSlots, type WeeklySession } from "@/lib/sheets";
 import { deletePrivateSessionFromCalendar } from "@/lib/calendar";
 import { buildWeeklyPlan, claimWeeklyTimeChange, findWeeklyTrainerReassignments, claimWeeklyTrainerReassignment, regGroupKey, type WeeklyRegKeyFields } from "@/lib/weekly-schedule-matching";
+import { parseTimeMins, intervalsCoverRange, findPrivateTrainerReassignments, claimPrivateTrainerReassignment } from "@/lib/private-schedule-matching";
 import { sendTimeChangeNotification, sendCancellationNotification } from "@/lib/email";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import { addAccountCredit, addReferralCredit, countPackageSessionsUsed, setPackageSessions, getPackageById } from "@/lib/supabase";
@@ -89,39 +90,6 @@ function refundSmsLine(result: { stripeRefundResult?: StripeRefundResult; cancel
   return "";
 }
 
-function parseTimeMins(t: string): number | null {
-  const m = t.match(/(\d+):(\d+)\s*(AM|PM)/i);
-  if (!m) return null;
-  let h = parseInt(m[1]);
-  const min = parseInt(m[2]);
-  const period = m[3].toUpperCase();
-  if (period === "PM" && h !== 12) h += 12;
-  if (period === "AM" && h === 12) h = 0;
-  return h * 60 + min;
-}
-
-// Merges consecutive (touching) intervals and reports whether the resulting
-// union fully covers [rangeStart, rangeEnd) — shared by
-// privateBookingStillOnSheet (does this exact range exist at all, across
-// any trainer) and findPrivateTrainerReassignments (does THIS SPECIFIC
-// trainer's own slots cover it) below.
-function intervalsCoverRange(intervals: { start: number; end: number }[], rangeStart: number, rangeEnd: number): boolean {
-  if (intervals.length === 0) return false;
-  const sorted = [...intervals].sort((a, b) => a.start - b.start);
-  let windowStart = sorted[0].start;
-  let windowEnd = sorted[0].end;
-  for (let i = 1; i < sorted.length; i++) {
-    if (sorted[i].start === windowEnd) {
-      windowEnd = sorted[i].end;
-    } else {
-      if (rangeStart >= windowStart && rangeEnd <= windowEnd) return true;
-      windowStart = sorted[i].start;
-      windowEnd = sorted[i].end;
-    }
-  }
-  return rangeStart >= windowStart && rangeEnd <= windowEnd;
-}
-
 // A private booking's start/end time is NOT guaranteed to match any single
 // raw sheet row — the booking page merges consecutive same-day/location/
 // trainer rows into one bigger window (see buildTimeWindows in
@@ -170,49 +138,6 @@ function privateBookingStillOnSheet(
     });
 
   return Object.values(byLocation).some((rows) => intervalsCoverRange(rows, regStart, regEnd));
-}
-
-// Private-session counterpart to findWeeklyTrainerReassignments — detects
-// confirmed private/group-private registrations whose stored booked_trainer
-// no longer matches whichever trainer's sheet slots actually cover that
-// EXACT date/time/location. Quiet, internal-only reconciliation (like the
-// weekly version): no client notification, but the assigned trainer(s) do
-// still get notified — see the call site below.
-function findPrivateTrainerReassignments<
-  T extends { id: string; booked_date: string | null; booked_start_time: string | null; booked_end_time: string | null; booked_location: string | null; booked_trainer: string | null }
->(
-  regs: T[],
-  slots: { date: string; startTime: string; endTime: string; location: string; trainer: string }[]
-): { reg: T; newTrainer: string }[] {
-  const result: { reg: T; newTrainer: string }[] = [];
-  for (const r of regs) {
-    const regStart = parseTimeMins(r.booked_start_time || "");
-    const regEnd = parseTimeMins(r.booked_end_time || "");
-    if (regStart === null || regEnd === null) continue;
-
-    const sameDayLocation = slots.filter((s) => s.date === r.booked_date && s.location === (r.booked_location || ""));
-    const trainersHere = [...new Set(sameDayLocation.map((s) => s.trainer))];
-    const covered: { start: number; end: number }[] = sameDayLocation
-      .map((s) => ({ start: parseTimeMins(s.startTime), end: parseTimeMins(s.endTime) }))
-      .filter((s): s is { start: number; end: number } => s.start !== null && s.end !== null);
-    // Only act when the registration's exact range still genuinely exists
-    // somewhere on the sheet — if it doesn't, that's a real deletion,
-    // handled entirely separately below, not a trainer swap.
-    if (!intervalsCoverRange(covered, regStart, regEnd)) continue;
-
-    const currentTrainer = r.booked_trainer || "Artemios Gavalas";
-    const coveringTrainer = trainersHere.find((t) => {
-      const trainerIntervals = sameDayLocation
-        .filter((s) => s.trainer === t)
-        .map((s) => ({ start: parseTimeMins(s.startTime), end: parseTimeMins(s.endTime) }))
-        .filter((s): s is { start: number; end: number } => s.start !== null && s.end !== null);
-      return intervalsCoverRange(trainerIntervals, regStart, regEnd);
-    });
-    if (coveringTrainer && coveringTrainer !== currentTrainer) {
-      result.push({ reg: r, newTrainer: coveringTrainer });
-    }
-  }
-  return result;
 }
 
 interface WeeklyRegLike extends WeeklyRegKeyFields {
@@ -707,17 +632,8 @@ export async function GET(req: NextRequest) {
   const privateTrainerSyncSummary: string[] = [];
   for (const { reg: r, newTrainer } of privateReassignments) {
     const oldTrainer = r.booked_trainer || "Artemios Gavalas";
-    // .eq("booked_trainer", null) would never match in Postgres (NULL = NULL
-    // is never true) — a legacy row with no stored trainer would silently
-    // never win this compare-and-swap without the .is() branch, same
-    // pattern as claimWeeklyTrainerReassignment/claimWeeklyTimeChange.
-    let updateQuery = supabase
-      .from("registrations")
-      .update({ booked_trainer: newTrainer })
-      .eq("id", r.id);
-    updateQuery = r.booked_trainer === null ? updateQuery.is("booked_trainer", null) : updateQuery.eq("booked_trainer", r.booked_trainer);
-    const { data: won } = await updateQuery.select("id");
-    if (!won || won.length === 0) continue; // a concurrent run already applied this
+    const won = await claimPrivateTrainerReassignment(supabase, r, newTrainer);
+    if (!won) continue; // the admin-dashboard sync already caught and applied this one
     privateTrainerSyncSummary.push(`• ${r.booked_date} ${r.booked_start_time} — ${oldTrainer} → ${newTrainer} (${r.parent_name})`);
 
     // A package-covered session (often booked against a "TBD"/Any Available
