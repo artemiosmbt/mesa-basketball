@@ -4,6 +4,12 @@ import { Resend } from "resend";
 import twilio from "twilio";
 import { verifyAdmin } from "@/lib/auth";
 
+// A full client list sent with the rate-limit-safe delay below can run past
+// Vercel's default function timeout (a 77-email run at 550ms apart alone is
+// ~42s) — 60s is the max available without a paid plan's higher tier, and
+// comfortably covers what this one-off broadcast needs.
+export const maxDuration = 60;
+
 // One-off broadcast to every past/present client — Artemios heading overseas
 // to continue his pro career, handing day-to-day training off to 4 sub-
 // trainers he's hand-picked. Not a reusable newsletter tool: the message is
@@ -28,6 +34,10 @@ function formatPhone(phone: string): string {
 }
 function normalizePhone(phone: string): string {
   return phone.replace(/\D/g, "").slice(-10);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 const SUBJECT = "A Message From Coach Artemios — Mesa Basketball";
@@ -141,7 +151,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { mode, channel, dryRun } = await req.json();
+  const { mode, channel, dryRun, onlyEmails, onlyPhones } = await req.json();
   if (mode !== "test" && mode !== "send") {
     return NextResponse.json({ error: "mode must be \"test\" or \"send\"" }, { status: 400 });
   }
@@ -212,9 +222,9 @@ export async function POST(req: NextRequest) {
   }
 
   const seenEmails = new Set<string>();
-  const emails: string[] = [];
+  let emails: string[] = [];
   const seenPhones = new Set<string>();
-  const phones: string[] = [];
+  let phones: string[] = [];
   for (const r of regs || []) {
     const emailKey = (r.email || "").trim().toLowerCase();
     if (emailKey && !seenEmails.has(emailKey)) {
@@ -230,6 +240,20 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Retry pass: restrict to a specific subset (e.g. exactly the addresses/
+  // numbers that came back failed from a previous run, after a rate-limit
+  // hit) — intersected against the real deduped client list above, not
+  // trusted as arbitrary input, so this can never become a way to send to
+  // an address that isn't actually a client's.
+  if (Array.isArray(onlyEmails)) {
+    const only = new Set(onlyEmails.map((e: string) => (e || "").trim().toLowerCase()));
+    emails = emails.filter((e) => only.has(e.trim().toLowerCase()));
+  }
+  if (Array.isArray(onlyPhones)) {
+    const only = new Set(onlyPhones.map((p: string) => normalizePhone(p || "")));
+    phones = phones.filter((p) => only.has(normalizePhone(p)));
+  }
+
   // dryRun: report exactly who this WOULD reach, without sending anything —
   // meant to be checked once before the real broadcast, given how
   // irreversible sending to every past/present client actually is.
@@ -243,7 +267,13 @@ export async function POST(req: NextRequest) {
 
   if (wantsEmail && resend) {
     emailResult.attempted = emails.length;
-    for (const email of emails) {
+    // Resend's default rate limit is 2 requests/second — the first full
+    // send fired all 77 sequentially with no delay and 17 came back 429
+    // (confirmed via Resend's own request logs, not a data/content issue).
+    // 550ms keeps every request comfortably under that limit.
+    for (let i = 0; i < emails.length; i++) {
+      const email = emails[i];
+      if (i > 0) await sleep(550);
       try {
         await sendOneEmail(resend, email);
         emailResult.sent++;
@@ -257,7 +287,9 @@ export async function POST(req: NextRequest) {
 
   if (wantsSms && smsClient) {
     smsResult.attempted = phones.length;
-    for (const phone of phones) {
+    for (let i = 0; i < phones.length; i++) {
+      const phone = phones[i];
+      if (i > 0) await sleep(150);
       try {
         await sendOneSms(smsClient, phone);
         smsResult.sent++;
