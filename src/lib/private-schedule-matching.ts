@@ -95,14 +95,18 @@ export function findPrivateTrainerReassignments<
 // Only acts when EXACTLY one other location covers the interval — if none
 // do, it's a genuine deletion (handled separately); if more than one do,
 // guessing which location the client's session actually followed to would
-// risk sending a wrong-location text, so it's left for manual review instead.
+// risk sending a wrong-location text, so those come back in `ambiguous`
+// instead — same "flag for manual review rather than guess" reasoning as
+// buildWeeklyPlan's own ambiguous bucket, which the caller alerts the admin
+// about the same way.
 export function findPrivateLocationChanges<
   T extends { id: string; booked_date: string | null; booked_start_time: string | null; booked_end_time: string | null; booked_location: string | null }
 >(
   regs: T[],
   slots: { date: string; startTime: string; endTime: string; location: string; trainer: string }[]
-): { reg: T; newLocation: string }[] {
-  const result: { reg: T; newLocation: string }[] = [];
+): { changes: { reg: T; newLocation: string }[]; ambiguous: T[] } {
+  const changes: { reg: T; newLocation: string }[] = [];
+  const ambiguous: T[] = [];
   for (const r of regs) {
     const regStart = parseTimeMins(r.booked_start_time || "");
     const regEnd = parseTimeMins(r.booked_end_time || "");
@@ -124,17 +128,23 @@ export function findPrivateLocationChanges<
 
     const coveringLocations = Object.keys(byLocation).filter((loc) => intervalsCoverRange(byLocation[loc], regStart, regEnd));
     if (coveringLocations.length === 1 && coveringLocations[0] !== oldLocation) {
-      result.push({ reg: r, newLocation: coveringLocations[0] });
+      changes.push({ reg: r, newLocation: coveringLocations[0] });
+    } else if (coveringLocations.length > 1) {
+      ambiguous.push(r);
     }
   }
-  return result;
+  return { changes, ambiguous };
 }
 
 // Same optimistic-concurrency pattern as claimWeeklyTimeChange, scoped to
 // booked_location (date/time are unchanged in this scenario — only the
 // window's location moved) — whichever of the cron/admin-sync routes' UPDATE
 // actually lands first "wins"; the loser's WHERE clause matches zero rows
-// and it's a silent no-op, not a duplicate write/notification.
+// and it's a silent no-op, not a duplicate write/notification. Also guarded
+// on status still being "confirmed" — same reasoning as every deletion/
+// cancellation claim elsewhere in this codebase: a client cancelling this
+// exact booking at the same moment this runs must not have it silently
+// rewritten (and a "LOCATION CHANGE" text sent) after it's already cancelled.
 export async function claimPrivateLocationChange(
   supabase: SupabaseClient,
   reg: { id: string; booked_location: string | null },
@@ -143,7 +153,8 @@ export async function claimPrivateLocationChange(
   let query = supabase
     .from("registrations")
     .update({ ...updates, admin_change_at: new Date().toISOString() })
-    .eq("id", reg.id);
+    .eq("id", reg.id)
+    .eq("status", "confirmed");
   query = reg.booked_location === null ? query.is("booked_location", null) : query.eq("booked_location", reg.booked_location);
   const { data } = await query.select("id");
   return !!data && data.length > 0;

@@ -24,6 +24,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { normalizeDate } from "./calendar";
 import { parseSessionDateTimeET } from "./booking-finalize";
+import { getWeeklySchedule } from "./sheets";
 import {
   a1Quote,
   appendValues,
@@ -76,7 +77,12 @@ const PSL_NUM_COLS = 9; // A:I
 
 const SYNC_LOG_TAB = "_SyncLog";
 
-const GROUP_CLIENT_RATE = 50; // $/participant/hour, "weekly" group sessions
+// Fallback $/participant/hour for a "weekly" group row whose exact sheet
+// entry (date+group+startTime) can no longer be found — e.g. deleted/moved
+// since it was booked. The real rate for a still-findable row is always
+// looked up live instead (see lookupGroupRate in runPayrollSync), since
+// different weekly groups can have different rates (e.g. a Pickup slot).
+const GROUP_CLIENT_RATE = 50;
 const DISCOUNT_TIERS = [0.15, 0.1, 0]; // checked in this order (largest first)
 
 // Per-run safety cap so a large historical backlog on the very first run
@@ -362,7 +368,8 @@ interface DerivedRow {
 function deriveRow(
   reg: RegistrationRow,
   lateFeeAction: "cancel" | "reschedule" | undefined,
-  packageType: number | null
+  packageType: number | null,
+  groupRate: number
 ): DerivedRow | null {
   const cancellationFlag = deriveCancellationFlag(reg, lateFeeAction);
   if (!cancellationFlag) return null;
@@ -395,12 +402,18 @@ function deriveRow(
     ? 0
     : Math.max(price - credit, 0);
 
-  // Discount only applies to non-package Group (pay-as-you-go weekly) rows —
-  // inferred by comparing the sheet's own pre-discount formula against what
-  // was actually charged, since the live discount % isn't stored anywhere.
+  // Discount only applies to non-package Group/Pickup (pay-as-you-go weekly)
+  // rows — inferred by comparing the sheet's own pre-discount formula
+  // against what was actually charged, since the live discount % isn't
+  // stored anywhere. Uses this specific session's OWN live rate (groupRate,
+  // looked up by the caller from the current schedule sheet) rather than
+  // the flat GROUP_CLIENT_RATE constant — different weekly groups can have
+  // different per-hour rates (e.g. a Pickup slot priced lower than a regular
+  // group), and assuming everyone bills at $50/hr would silently misinfer
+  // the discount % for any group that doesn't.
   let discount = 0;
-  if (sessionType === "Group" && paymentType !== "Package (Prepaid)" && hours > 0) {
-    const undiscounted = GROUP_CLIENT_RATE * participants * hours;
+  if ((sessionType === "Group" || sessionType === "Pickup") && paymentType !== "Package (Prepaid)" && hours > 0) {
+    const undiscounted = groupRate * participants * hours;
     if (undiscounted > 0) {
       const impliedPct = 1 - price / undiscounted;
       for (const tier of DISCOUNT_TIERS) {
@@ -593,6 +606,20 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
     }
   }
 
+  // Per-group live rate lookup (date|group|startTime -> $/participant/hour),
+  // used for the discount inference in deriveRow — GROUP_CLIENT_RATE is only
+  // the fallback for a row whose exact sheet entry can't be found anymore
+  // (deleted/moved since it was booked), not the assumed rate for everyone.
+  const weeklySessions = await getWeeklySchedule().catch(() => []);
+  const groupRateByKey = new Map<string, number>();
+  for (const s of weeklySessions) {
+    groupRateByKey.set(`${s.date}|${s.group}|${s.startTime}`, s.price);
+  }
+  function lookupGroupRate(reg: RegistrationRow): number {
+    if (!reg.booked_date || !reg.booked_group || !reg.booked_start_time) return GROUP_CLIENT_RATE;
+    return groupRateByKey.get(`${reg.booked_date}|${reg.booked_group}|${reg.booked_start_time}`) ?? GROUP_CLIENT_RATE;
+  }
+
   // Pass 1: derive every in-scope row first (no Stripe calls, no writes) —
   // needed before the fee post-pass below, since a real Processing/Stripe
   // Fee depends on cross-row (checkout-session grouping) and external
@@ -614,7 +641,8 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
     const derived = deriveRow(
       reg,
       lateFeeByReg.get(reg.id),
-      reg.package_id ? packageTypeById.get(reg.package_id) ?? null : null
+      reg.package_id ? packageTypeById.get(reg.package_id) ?? null : null,
+      lookupGroupRate(reg)
     );
     if (!derived) {
       result.sessionsSkippedNoLoggableStatus++;

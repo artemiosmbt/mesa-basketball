@@ -2,11 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { verifyAdmin } from "@/lib/auth";
 import { getWeeklySchedule, getPrivateSlots } from "@/lib/sheets";
-import { addPrivateSessionToCalendar, deletePrivateSessionFromCalendar } from "@/lib/calendar";
 import { sendTimeChangeNotification } from "@/lib/email";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import { buildWeeklyPlan, claimWeeklyTimeChange, findWeeklyTrainerReassignments, claimWeeklyTrainerReassignment, regGroupKey, type WeeklyRegKeyFields } from "@/lib/weekly-schedule-matching";
 import { findPrivateTrainerReassignments, claimPrivateTrainerReassignment, findPrivateLocationChanges, claimPrivateLocationChange } from "@/lib/private-schedule-matching";
+import { notifyPrivateLocationChange } from "@/lib/private-location-notify";
 import { notifyTrainerOfCancellation, notifyTrainerOfNewBooking } from "@/lib/trainer-notify";
 import { getPackageById } from "@/lib/supabase";
 import { getTrainerTier, normalizeTrainerTier, packageCoversTrainerTier } from "@/lib/trainers";
@@ -302,11 +302,19 @@ export async function POST(req: NextRequest) {
   // detect-time-changes/route.ts). No double-read confirmation here, same as
   // everywhere else in this dashboard-triggered route — that safety net only
   // matters for the cron's unattended, scheduled runs.
-  const privateLocationChanges = findPrivateLocationChanges(privateRegsUpcoming, privateSlots);
+  const privateLocationPlan = findPrivateLocationChanges(privateRegsUpcoming, privateSlots);
+  if (privateLocationPlan.ambiguous.length > 0) {
+    const summary = privateLocationPlan.ambiguous
+      .map((r) => `• ${r.booked_date} ${r.booked_start_time} — ${r.parent_name} (was at ${resolveLocationName(r.booked_location || "")})`)
+      .join("\n");
+    await sendAdminSMS(
+      `NEEDS MANUAL REVIEW:\nA private session's booked location no longer matches the sheet, but 2+ other locations now cover the same date/time — can't tell which one it actually followed without guessing:\n${summary}\nPlease check these manually and update the booking's location yourself.`
+    ).catch((err) => console.error("Ambiguous-private-location-change admin SMS failed:", err));
+  }
   const privateLocationSyncSummary: string[] = [];
   let privateLocationEmailsSent = 0;
   let privateLocationSmsSent = 0;
-  for (const { reg: r, newLocation } of privateLocationChanges) {
+  for (const { reg: r, newLocation } of privateLocationPlan.changes) {
     const oldLocation = r.booked_location || "";
     const newDetails = (r.session_details || "").replace(`at ${oldLocation}`, `at ${newLocation}`);
 
@@ -315,63 +323,31 @@ export async function POST(req: NextRequest) {
       session_details: newDetails,
     });
     if (!won) continue; // the cron already caught and notified this one
+    // Mutate the in-memory row too — findPrivateTrainerReassignments below
+    // reuses this same privateRegsUpcoming array, and without this it would
+    // still evaluate trainer coverage against the OLD location for any reg
+    // that just moved here, missing a same-run trainer reassignment.
+    r.booked_location = newLocation;
+    r.session_details = newDetails;
 
     privateLocationSyncSummary.push(`• ${r.booked_date} ${r.booked_start_time} — ${resolveLocationName(oldLocation)} → ${resolveLocationName(newLocation)} (${r.parent_name})`);
 
-    try {
-      await sendTimeChangeNotification({
-        parentName: r.parent_name,
-        email: r.email,
-        kids: r.kids,
-        date: r.booked_date!,
-        sessionLabel: r.type === "group-private" ? "Group Private Session" : "Private Session",
-        oldStartTime: r.booked_start_time!,
-        oldEndTime: r.booked_end_time || r.booked_start_time!,
-        newStartTime: r.booked_start_time!,
-        newEndTime: r.booked_end_time || r.booked_start_time!,
-        location: newLocation,
-        changeType: "location",
-        oldLocation,
-      });
-      privateLocationEmailsSent++;
-    } catch (err) {
-      console.error("Private location-change email failed for", r.email, err);
-    }
-
-    if (r.sms_consent && r.phone) {
-      const dateStr = formatDateWithDay(r.booked_date!);
-      const locName = resolveLocationName(newLocation);
-      const oldLocName = resolveLocationName(oldLocation);
-      const timeStr = `${r.booked_start_time}${r.booked_end_time ? `-${r.booked_end_time}` : ""}`;
-      try {
-        await sendSMS(
-          r.phone,
-          `LOCATION CHANGE\nMesa Basketball: Private Session on ${dateStr}\nLocation: ${oldLocName} → ${locName}\nTime: ${timeStr}\nQuestions? (631) 599-1280. Reply STOP to opt out.`
-        );
-        privateLocationSmsSent++;
-      } catch (err) {
-        console.error("Private location-change SMS failed for", r.phone, err);
-      }
-    }
-
-    if (r.booked_date && r.booked_start_time) {
-      try {
-        await deletePrivateSessionFromCalendar({ email: r.email, bookedDate: r.booked_date, bookedStartTime: r.booked_start_time });
-        await addPrivateSessionToCalendar({
-          parentName: r.parent_name,
-          email: r.email,
-          phone: r.phone,
-          kids: r.kids,
-          bookedDate: r.booked_date,
-          bookedStartTime: r.booked_start_time,
-          bookedEndTime: r.booked_end_time || r.booked_start_time,
-          bookedLocation: newLocation,
-          trainer: r.booked_trainer || undefined,
-        });
-      } catch (err) {
-        console.error("Calendar sync error (private location change):", err);
-      }
-    }
+    const { emailSent, smsSent } = await notifyPrivateLocationChange({
+      parent_name: r.parent_name,
+      email: r.email,
+      phone: r.phone,
+      kids: r.kids,
+      type: r.type,
+      booked_date: r.booked_date!,
+      booked_start_time: r.booked_start_time!,
+      booked_end_time: r.booked_end_time,
+      booked_trainer: r.booked_trainer,
+      sms_consent: r.sms_consent,
+      oldLocation,
+      newLocation,
+    });
+    if (emailSent) privateLocationEmailsSent++;
+    if (smsSent) privateLocationSmsSent++;
   }
   if (privateLocationSyncSummary.length > 0) {
     await sendAdminSMS(
