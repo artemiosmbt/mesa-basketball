@@ -5,6 +5,7 @@ import { PRIVATE_RATE_BY_TIER, GROUP_PRIVATE_RATE_BY_TIER, calcPrivatePrice as g
 import { REFERRAL_PROGRAM_ENABLED } from "@/lib/feature-flags";
 import { formatTrainerForDisplay, trainerNamesMatch, athleteTriggersCoachZNcaaNotice, kidsTriggerCoachZNcaaNotice, COACH_Z_NCAA_NOTICE_MESSAGE } from "@/lib/trainers";
 import { normalizedAthleteName, type Athlete } from "@/lib/athletes";
+import { etWallClockToMs, parseTimeOfDay, todayET } from "@/lib/et-time";
 
 const LOCATION_LINKS: Record<string, { name: string; url: string }> = {
   "St. Pauls": { name: "St. Paul's Cathedral", url: "https://share.google/kVGkfSgr6SaShDWF7" },
@@ -18,18 +19,21 @@ function formatPrice(amount: number): string {
   return amount % 1 === 0 ? `$${amount}` : `$${amount.toFixed(2)}`;
 }
 
+// Session date/time is always America/New_York wall-clock — resolved via
+// etWallClockToMs so this is correct regardless of what timezone the
+// viewer's own browser happens to be in (see src/lib/et-time.ts).
+function sessionInstantMs(dateStr: string | null, timeStr: string | null): number | null {
+  if (!dateStr || !timeStr) return null;
+  const t = parseTimeOfDay(timeStr);
+  if (!t) return null;
+  const d = parseDateSafe(dateStr);
+  if (isNaN(d.getTime())) return null;
+  return etWallClockToMs(d.getFullYear(), d.getMonth() + 1, d.getDate(), t.hours, t.mins);
+}
+
 function isDateTimePassed(dateStr: string | null, timeStr: string | null): boolean {
-  if (!dateStr || !timeStr) return false;
-  const timeMatch = timeStr.match(/(\d+):(\d+)\s*(AM|PM)/i);
-  if (!timeMatch) return false;
-  let hours = parseInt(timeMatch[1]);
-  const mins = parseInt(timeMatch[2]);
-  const period = timeMatch[3].toUpperCase();
-  if (period === "PM" && hours !== 12) hours += 12;
-  if (period === "AM" && hours === 12) hours = 0;
-  const dateTime = new Date(dateStr);
-  dateTime.setHours(hours, mins, 0, 0);
-  return Date.now() >= dateTime.getTime();
+  const ms = sessionInstantMs(dateStr, timeStr);
+  return ms !== null && Date.now() >= ms;
 }
 
 function formatSessionDetails(details: string, bookedDate?: string | null): string {
@@ -364,35 +368,20 @@ export default function ManageBooking({
 
   // True when the session is within 24 hours
   const within24Hours = useMemo(() => {
-    if (!booking?.bookedDate || !booking?.bookedStartTime) return false;
-    const timeMatch = booking.bookedStartTime.match(/(\d+):(\d+)\s*(AM|PM)/i);
-    if (!timeMatch) return false;
-    let hours = parseInt(timeMatch[1]);
-    const mins = parseInt(timeMatch[2]);
-    const period = timeMatch[3].toUpperCase();
-    if (period === "PM" && hours !== 12) hours += 12;
-    if (period === "AM" && hours === 12) hours = 0;
-    const sessionDateTime = new Date(booking.bookedDate);
-    sessionDateTime.setHours(hours, mins, 0, 0);
-    const hoursUntil = (sessionDateTime.getTime() - Date.now()) / (1000 * 60 * 60);
+    const ms = sessionInstantMs(booking?.bookedDate ?? null, booking?.bookedStartTime ?? null);
+    if (ms === null) return false;
+    const hoursUntil = (ms - Date.now()) / (1000 * 60 * 60);
     return hoursUntil >= 0 && hoursUntil < 24;
   }, [booking]);
 
   // True when within the 15-min grace period after booking (capped at session start)
   const withinGracePeriod = useMemo(() => {
-    if (!within24Hours || !booking?.bookedDate || !booking?.bookedStartTime || !booking?.createdAt) return false;
-    const timeMatch = booking.bookedStartTime.match(/(\d+):(\d+)\s*(AM|PM)/i);
-    if (!timeMatch) return false;
-    let hours = parseInt(timeMatch[1]);
-    const mins = parseInt(timeMatch[2]);
-    const period = timeMatch[3].toUpperCase();
-    if (period === "PM" && hours !== 12) hours += 12;
-    if (period === "AM" && hours === 12) hours = 0;
-    const sessionDateTime = new Date(booking.bookedDate);
-    sessionDateTime.setHours(hours, mins, 0, 0);
+    if (!within24Hours || !booking?.createdAt) return false;
+    const ms = sessionInstantMs(booking?.bookedDate ?? null, booking?.bookedStartTime ?? null);
+    if (ms === null) return false;
     const graceEnd = Math.min(
       new Date(booking.createdAt).getTime() + 15 * 60 * 1000,
-      sessionDateTime.getTime()
+      ms
     );
     return Date.now() < graceEnd;
   }, [booking, within24Hours]);
@@ -507,10 +496,14 @@ export default function ManageBooking({
     const now = new Date();
     return result.filter((w) => {
       if (w.endMins - w.startMins < 60) return false;
-      const baseDate = new Date(w.date);
+      const baseDate = parseDateSafe(w.date);
       if (isNaN(baseDate.getTime())) return true;
-      const windowStart = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate(), Math.floor(w.startMins / 60), w.startMins % 60);
-      return windowStart > now;
+      // w.startMins is minutes since midnight ET (same wall-clock frame as
+      // every other session time in this app) — etWallClockToMs resolves it
+      // to a real instant instead of treating it as the viewer's own local
+      // time (see src/lib/et-time.ts).
+      const windowStartMs = etWallClockToMs(baseDate.getFullYear(), baseDate.getMonth() + 1, baseDate.getDate(), Math.floor(w.startMins / 60), w.startMins % 60);
+      return windowStartMs > now.getTime();
     });
   }, [privateSlots, bookedSlots, booking?.bookedDate, booking?.bookedStartTime, booking?.bookedEndTime, booking?.bookedLocation, booking?.bookedTrainer]);
 
@@ -1359,7 +1352,12 @@ export default function ManageBooking({
 
                   {/* ── GROUP ── */}
                   {rescheduleType === "weekly" && (() => {
-                    const today = new Date(); today.setHours(0, 0, 0, 0);
+                    // "Today" follows the business's ET calendar day, not
+                    // the viewer's own — a client rescheduling from outside
+                    // US time zones must see the same "today" cutoff every
+                    // other client sees.
+                    const todayY = todayET();
+                    const today = new Date(todayY.year, todayY.month - 1, todayY.day);
                     const futureSessions = weeklySessions.filter(s => { const d = parseDateSafe(s.date); d.setHours(0, 0, 0, 0); return d >= today; });
                     const uniqueGroups = [...new Set(futureSessions.map(s => s.group))];
                     if (uniqueGroups.length === 0) {

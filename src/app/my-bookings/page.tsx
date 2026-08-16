@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { authClient } from "@/lib/auth";
 import { fmtMoney, packagePrice, calcServiceFee, normalizeTrainerTier, REFERRAL_CREDIT_SESSION_PRICE } from "@/lib/pricing";
 import { REFERRAL_PROGRAM_ENABLED, REFERRAL_CREDIT_REDEMPTION_ENABLED } from "@/lib/feature-flags";
+import { etWallClockToMs, parseTimeOfDay } from "@/lib/et-time";
 
 const LOCATION_NAMES: Record<string, string> = {
   "St. Pauls": "St. Paul's Cathedral",
@@ -322,19 +323,25 @@ export default function MyBookings() {
           const now = new Date();
           const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
 
-          // Parse a booking's session datetime (date + start time if available)
+          // Parse a booking's session datetime (date + start time if
+          // available). Session times are always America/New_York
+          // wall-clock — resolved via etWallClockToMs so "upcoming" vs
+          // "past" is correct no matter what timezone the viewer's own
+          // browser is in. Same bug class confirmed live elsewhere in this
+          // sweep (admin dashboard, public schedule page): this previously
+          // used new Date(bookedDate) + d.setHours(...), which sets the
+          // hour in the BROWSER's timezone rather than Eastern, silently
+          // mis-sorting bookings for anyone outside US time zones.
           function sessionDateTime(b: BookingRecord): Date | null {
             if (!b.bookedDate) return null;
-            const d = new Date(b.bookedDate);
+            const d = /^\d{4}-\d{2}-\d{2}$/.test(b.bookedDate)
+              ? new Date(b.bookedDate + "T12:00:00")
+              : new Date(b.bookedDate + " 12:00:00");
+            if (isNaN(d.getTime())) return null;
             if (b.bookedStartTime) {
-              const m = b.bookedStartTime.match(/(\d+):(\d+)\s*(AM|PM)/i);
-              if (m) {
-                let h = parseInt(m[1]);
-                const min = parseInt(m[2]);
-                const period = m[3].toUpperCase();
-                if (period === "PM" && h !== 12) h += 12;
-                if (period === "AM" && h === 12) h = 0;
-                d.setHours(h, min, 0, 0);
+              const t = parseTimeOfDay(b.bookedStartTime);
+              if (t) {
+                return new Date(etWallClockToMs(d.getFullYear(), d.getMonth() + 1, d.getDate(), t.hours, t.mins));
               }
             }
             return d;
