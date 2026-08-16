@@ -32,14 +32,19 @@ function normalizePhone(phone: string): string {
 
 const SUBJECT = "A Message From Coach Artemios — Mesa Basketball";
 
-// Same navy/gold/cream branded shell as sendReminderEmail in src/lib/
-// email.ts (see its comments for why: full HTML document, color-scheme
-// meta opt-out, [data-ogsc] + prefers-color-scheme dark-mode overrides, and
-// a logo with the cream backing circle baked into the PNG's own pixels
-// rather than a CSS background-color, since Gmail/Outlook dark mode was
-// previously confirmed (real screenshot) to recolor a CSS-driven backing
-// black). Kept as one intentionally duplicated template rather than
-// factored into a shared helper — this file is meant to be short-lived.
+// Navy top-to-bottom with gold lettering throughout, per Artemios's
+// explicit spec — no light "content card" section (an earlier draft used
+// one and the gold/navy text read as too faint against it; this version
+// keeps every text color at the same gold (#d4af37) already confirmed
+// legible in the "Mesa Basketball Training" caption under the logo, or
+// the light cream (#fffbeb) used for the footer contact line). Only the
+// logo's backing circle is a light color — and that's baked directly into
+// logo-circle.png's own pixels, not a CSS background-color, so no client's
+// dark-mode recoloring can touch it (previously confirmed via a real
+// screenshot that Outlook/Gmail dark mode will recolor a CSS-driven light
+// background). [data-ogsc] + prefers-color-scheme overrides below re-assert
+// the same navy/gold either way, same belt-and-suspenders approach as
+// sendReminderEmail in src/lib/email.ts.
 function buildEmailHtml(): string {
   return `<!doctype html>
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
@@ -52,20 +57,14 @@ function buildEmailHtml(): string {
 <style>
   [data-ogsc] .mesa-outer-bg, [data-ogsc] .mesa-outer-bg td { background-color: #091530 !important; }
   [data-ogsc] .mesa-card-bg { background-color: #0f1f42 !important; }
-  [data-ogsc] .mesa-content-bg { background-color: #fffbeb !important; }
-  [data-ogsc] .mesa-cta-bg { background-color: #d4af37 !important; }
   [data-ogsc] .mesa-gold-text { color: #d4af37 !important; }
-  [data-ogsc] .mesa-navy-text { color: #091530 !important; }
-  [data-ogsc] .mesa-body-text { color: #3a3a3a !important; }
+  [data-ogsc] .mesa-cream-text { color: #fffbeb !important; }
   [data-ogsc] .mesa-muted-text { color: #7d8bab !important; }
   @media (prefers-color-scheme: dark) {
     .mesa-outer-bg, .mesa-outer-bg td { background-color: #091530 !important; }
     .mesa-card-bg { background-color: #0f1f42 !important; }
-    .mesa-content-bg { background-color: #fffbeb !important; }
-    .mesa-cta-bg { background-color: #d4af37 !important; }
     .mesa-gold-text { color: #d4af37 !important; }
-    .mesa-navy-text { color: #091530 !important; }
-    .mesa-body-text { color: #3a3a3a !important; }
+    .mesa-cream-text { color: #fffbeb !important; }
     .mesa-muted-text { color: #7d8bab !important; }
   }
 </style>
@@ -80,24 +79,24 @@ function buildEmailHtml(): string {
         </td>
       </tr>
       <tr>
-        <td class="mesa-content-bg" style="padding: 36px 32px; background: #fffbeb;">
-          <h1 class="mesa-navy-text" style="margin: 0 0 24px; color: #091530; font-size: 22px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.5px; font-family: Arial, Helvetica, sans-serif;">
+        <td class="mesa-card-bg" style="padding: 36px 32px; background: #0f1f42;">
+          <h1 class="mesa-gold-text" style="margin: 0 0 24px; color: #d4af37; font-size: 22px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.5px; font-family: Arial, Helvetica, sans-serif;">
             To The MEΣΑ Family
           </h1>
-          <p class="mesa-body-text" style="margin: 0 0 18px; color: #3a3a3a; font-size: 15px; line-height: 1.7;">
+          <p class="mesa-gold-text" style="margin: 0 0 18px; color: #d4af37; font-size: 15px; line-height: 1.7;">
             As some of you already know I will be heading off to continue my professional playing career in Greece for some time. Before I leave, I wanted to make sure that I thank each and everyone for your continuous support of the program. None of this would be possible without you guys and I&rsquo;m truly forever grateful for the trust, loyalty, and commitment you have brought to MEΣΑ. Continuing to believe in what I&rsquo;ve been building from the start means everything to me.
           </p>
-          <p class="mesa-body-text" style="margin: 0 0 18px; color: #3a3a3a; font-size: 15px; line-height: 1.7;">
-            Although I won&rsquo;t physically be present, MEΣA isn&rsquo;t going anywhere. If you don&rsquo;t know yet, I have hand picked a team of 4 additional trainers with a high level of experience, who I trust and know will continue to share the same values, standards, and passion for developing your kids the right way. I encourage everyone to explore what each of them bring to the table and give your athletes the ability to learn from different basketball minds that still share the same values. You can find out more about each of them specifically in the <a href="${BASE_URL}/about" class="mesa-gold-text" style="color: #d4af37; font-weight: bold;">&ldquo;About&rdquo; section</a> of the website. The quality and care you have come to expect from MEΣA will not change.
+          <p class="mesa-gold-text" style="margin: 0 0 18px; color: #d4af37; font-size: 15px; line-height: 1.7;">
+            Although I won&rsquo;t physically be present, MEΣA isn&rsquo;t going anywhere. If you don&rsquo;t know yet, I have hand picked a team of 4 additional trainers with a high level of experience, who I trust and know will continue to share the same values, standards, and passion for developing your kids the right way. I encourage everyone to explore what each of them bring to the table and give your athletes the ability to learn from different basketball minds that still share the same values. You can find out more about each of them specifically in the <a href="${BASE_URL}/about" class="mesa-gold-text" style="color: #d4af37; font-weight: bold; text-decoration: underline;">&ldquo;About&rdquo; section</a> of the website. The quality and care you have come to expect from MEΣA will not change.
           </p>
-          <p class="mesa-body-text" style="margin: 0 0 18px; color: #3a3a3a; font-size: 15px; line-height: 1.7;">
+          <p class="mesa-gold-text" style="margin: 0; color: #d4af37; font-size: 15px; line-height: 1.7;">
             As for me, I will still be involved remotely and MEΣΑ will continue to grow while I&rsquo;m away. This is not goodbye, but another step that I&rsquo;m grateful to bring everyone along with me in. I cannot wait and hope to see you all when I return. Please do not ever hesitate to reach out for any questions about anything basketball related, even outside of our program. Thank you from the bottom of my heart for continuing to trust MEΣA.
           </p>
         </td>
       </tr>
       <tr>
-        <td class="mesa-outer-bg" style="background: #091530; padding: 20px 24px; text-align: center;">
-          <p style="margin: 0 0 6px; color: #fffbeb; font-size: 13px;">
+        <td class="mesa-outer-bg" style="background: #091530; padding: 20px 24px; text-align: center; border-top: 2px solid #d4af37;">
+          <p class="mesa-cream-text" style="margin: 0 0 6px; color: #fffbeb; font-size: 13px;">
             Questions? Call/text (631) 599-1280 or email <a href="mailto:artemios@mesabasketballtraining.com" class="mesa-gold-text" style="color: #d4af37;">artemios@mesabasketballtraining.com</a>
           </p>
           <p class="mesa-muted-text" style="margin: 0; color: #7d8bab; font-size: 11px;">
@@ -111,13 +110,13 @@ function buildEmailHtml(): string {
 </html>`;
 }
 
-// Plain ASCII on purpose ("MESA" not "MEΣΑ") — a single non-GSM-7 character
-// anywhere in the body forces Twilio to encode the WHOLE message as UCS-2,
-// cutting the per-segment length from 153 down to 67 characters and roughly
-// tripling the segment (cost) count for a message this length. The branded
-// email keeps the real "MEΣΑ" styling; SMS doesn't have that luxury.
+// A short teaser pointing to the email rather than trying to compress the
+// whole letter into a text — plain ASCII on purpose ("MESA" not "MEΣΑ"): a
+// single non-GSM-7 character anywhere in the body forces Twilio to encode
+// the WHOLE message as UCS-2, cutting the per-segment length from 153 down
+// to 67 characters and roughly tripling the segment (cost) count.
 const SMS_BODY =
-  "MESA: I'm heading to Greece to continue my pro playing career. Thank you for trusting me with your kids these past years - none of this was possible without you. MESA isn't going anywhere: 4 trainers I've hand-picked will keep the same standards while I'm away. Not goodbye! Reply STOP to opt out.";
+  "MESA: I have a special message for all my MESA families - it's in your email inbox. Please take a moment to read it. Thank you for everything. - Coach Artemios. Reply STOP to opt out.";
 
 async function sendOneEmail(resend: Resend, to: string): Promise<void> {
   const result = await resend.emails.send({
