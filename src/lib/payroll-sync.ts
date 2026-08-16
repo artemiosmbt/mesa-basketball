@@ -232,6 +232,15 @@ interface SyncLogEntry {
 function deriveRowFingerprint(r: DerivedRow): string {
   return JSON.stringify([
     r.cancellationFlag, r.participants, r.startTime, r.endTime,
+    // sessionType wasn't previously included — it used to be a pure function
+    // of reg.type, which never changes after booking, so it was safe to
+    // leave out. Now that it also depends on booked_group (Group vs Pickup),
+    // an admin reschedule that only changes the group name (e.g. onto/off of
+    // a Pickup slot) needs to be enough to trigger a re-write on its own —
+    // otherwise an already-synced row stays mis-tagged in the sheet forever
+    // with no visible sign anything's wrong, same class of gap this whole
+    // function's doc comment above already warns about.
+    r.sessionType,
     r.paymentType, r.packageSize, r.discount, r.creditApplied,
     // processingFee/stripeFee are filled in by a later pass (checkout-session
     // grouping, top-up folding) — including them here means a fee correction
