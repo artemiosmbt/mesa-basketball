@@ -132,23 +132,46 @@ function typePillLabel(type: string, sessionDetails?: string) {
   return TYPE_LABELS[type] || type;
 }
 
+// Session wall-clock times are always America/New_York (the business's own
+// timezone), never the browser's — this admin dashboard gets opened from
+// wherever the admin happens to be (including well outside US time zones).
+// "Double conversion" trick to get the ET offset without a timezone
+// database: guess the UTC instant as if the wall-clock numbers WERE UTC,
+// check what ET wall-clock time that guess actually renders as, then shift
+// by the difference. Naturally picks up EDT vs EST for the date in question.
+function etWallClockToMs(y: number, m: number, d: number, h: number, min: number): number {
+  const guessMs = Date.UTC(y, m - 1, d, h, min);
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
+  }).formatToParts(new Date(guessMs));
+  const get = (t: string) => parseInt(parts.find((p) => p.type === t)?.value || "0", 10);
+  const seenAsUTC = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour") % 24, get("minute"));
+  return guessMs + (guessMs - seenAsUTC);
+}
+
+// Absolute instant (real UTC ms, safe to compare against Date.now()) that a
+// session's booked date/time falls at, interpreting the date/time as
+// America/New_York wall-clock — see etWallClockToMs above. Previously used
+// new Date(date) + d.setHours(...), which set the hour in the BROWSER's
+// local timezone; from outside US time zones that silently mis-timed every
+// upcoming/past cutoff by the offset between the browser's zone and Eastern.
 function sessionMs(date: string | null, startTime: string | null): number {
   if (!date) return 0;
-  const d = new Date(date);
-  if (isNaN(d.getTime())) return 0;
+  const key = parseDateKey(date);
+  if (!key) return 0;
+  const [y, m, d] = key.split("-").map(Number);
+  let h = 0, min = 0;
   if (startTime) {
-    const m = startTime.match(/(\d+):(\d+)\s*(AM|PM)/i);
-    if (m) {
-      let h = parseInt(m[1]);
-      const min = parseInt(m[2]);
-      if (m[3].toUpperCase() === "PM" && h !== 12) h += 12;
-      if (m[3].toUpperCase() === "AM" && h === 12) h = 0;
-      d.setHours(h, min, 0, 0);
-      return d.getTime();
+    const match = startTime.match(/(\d+):(\d+)\s*(AM|PM)/i);
+    if (match) {
+      h = parseInt(match[1]);
+      min = parseInt(match[2]);
+      if (match[3].toUpperCase() === "PM" && h !== 12) h += 12;
+      if (match[3].toUpperCase() === "AM" && h === 12) h = 0;
     }
   }
-  d.setHours(0, 0, 0, 0);
-  return d.getTime();
+  return etWallClockToMs(y, m, d, h, min);
 }
 
 function formatDate(d: string | null): string {
@@ -245,11 +268,12 @@ function priceDisplay(r: Registration): string {
 
 function daysAway(dateStr: string | null): { label: string; cls: string } | null {
   if (!dateStr) return null;
-  const d = new Date(dateStr);
-  if (isNaN(d.getTime())) return null;
-  const today = new Date();
-  const sessionDay = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
-  const todayDay = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+  const sessionKey = parseDateKey(dateStr);
+  if (!sessionKey) return null;
+  const [sy, sm, sd] = sessionKey.split("-").map(Number);
+  const [ty, tm, td] = todayKeyET().split("-").map(Number);
+  const sessionDay = Date.UTC(sy, sm - 1, sd);
+  const todayDay = Date.UTC(ty, tm - 1, td);
   const diff = Math.round((sessionDay - todayDay) / 86400000);
   if (diff === 0) return { label: "today", cls: "bg-green-900/40 text-green-400" };
   if (diff === 1) return { label: "tomorrow", cls: "bg-blue-900/40 text-blue-400" };
@@ -287,6 +311,32 @@ function isDeletablePending(r: Registration): boolean {
 
 function toDateKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// The business runs on US Eastern time, but the admin dashboard can be
+// opened from anywhere (e.g. while traveling) — "today" has to reflect
+// Mesa's calendar date, not whatever timezone the browser/device happens to
+// be in, or every "Today" bucket and days-away label silently goes stale the
+// moment someone opens this from outside US time zones. Mirrors the exact
+// same America/New_York computation admin/data/route.ts already uses
+// server-side (see its "Today is computed in America/New_York" comment) —
+// this is that same fix applied to the client-side re-bucketing that happens
+// on top of the server's response.
+function todayKeyET(): string {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+}
+
+// Session date strings get parsed the same defensive way used elsewhere in
+// this codebase (see formatDateWithDay in sms.ts, sessionIsUpcoming in the
+// cron routes): anchored at noon via a LOCAL (no "Z"/offset) time literal,
+// never bare "YYYY-MM-DD" — the latter parses as UTC midnight, which
+// getFullYear/getMonth/getDate then read back in whatever timezone the code
+// happens to run in, silently shifting the calendar day by one in timezones
+// on the other side of UTC from wherever the string was generated.
+function parseDateKey(dateStr: string): string {
+  const anchored = /^\d{4}-\d{2}-\d{2}$/.test(dateStr) ? `${dateStr}T12:00:00` : `${dateStr} 12:00:00`;
+  const d = new Date(anchored);
+  return isNaN(d.getTime()) ? "" : toDateKey(d);
 }
 
 // --- Reschedule dropdown helpers -------------------------------------------
@@ -775,8 +825,8 @@ interface CalendarViewProps {
 
 function CalendarView({ token, trainerFilter, weeklyCapacity, campCapacity, canEdit, cancelRegistration, markNoShow, openReschedule, deleteRegistration, cancelling, noShowing, noShowConfirm, setNoShowConfirm, deleting }: CalendarViewProps) {
   const [currentMonth, setCurrentMonth] = useState(() => {
-    const n = new Date();
-    return new Date(n.getFullYear(), n.getMonth(), 1);
+    const [y, m] = todayKeyET().split("-").map(Number);
+    return new Date(y, m - 1, 1);
   });
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
@@ -964,9 +1014,8 @@ function CalendarView({ token, trainerFilter, weeklyCapacity, campCapacity, canE
     const map = new Map<string, Registration[]>();
     for (const r of (cached ?? [])) {
       if (!r.booked_date) continue;
-      const d = new Date(r.booked_date);
-      if (isNaN(d.getTime())) continue;
-      const key = toDateKey(d);
+      const key = parseDateKey(r.booked_date);
+      if (!key) continue;
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(r);
     }
@@ -995,8 +1044,7 @@ function CalendarView({ token, trainerFilter, weeklyCapacity, campCapacity, canE
     return cells;
   }, [currentMonth]);
 
-  const today = new Date();
-  const todayKey = toDateKey(today);
+  const todayKey = todayKeyET();
   const monthLabel = currentMonth.toLocaleDateString("en-US", { month: "long", year: "numeric" });
   const selectedSessions = selectedDay ? (sessionsByDay.get(selectedDay) ?? []) : [];
 
@@ -2247,10 +2295,10 @@ export default function AdminPage() {
         {tab === "upcoming" && (
           <>
             {(() => {
-              const todayKey = toDateKey(new Date());
-              const todayLabel = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
-              const todaySessions = displayedUpcoming.filter(r => r.booked_date && toDateKey(new Date(r.booked_date)) === todayKey);
-              const futureSessions = displayedUpcoming.filter(r => !r.booked_date || toDateKey(new Date(r.booked_date)) !== todayKey);
+              const todayKey = todayKeyET();
+              const todayLabel = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", timeZone: "America/New_York" });
+              const todaySessions = displayedUpcoming.filter(r => r.booked_date && parseDateKey(r.booked_date) === todayKey);
+              const futureSessions = displayedUpcoming.filter(r => !r.booked_date || parseDateKey(r.booked_date) !== todayKey);
               // visibleRegistrations (unlike displayedUpcoming/upcoming) isn't cut
               // by "has this session's start time already passed" — the server's
               // ?view=upcoming query only bounds by date (today-or-later), so a
@@ -2258,7 +2306,7 @@ export default function AdminPage() {
               // makes this the right source to tell "genuinely nothing was ever
               // scheduled today" apart from "today's sessions already happened."
               const hadSessionsToday = applyFilters(
-                visibleRegistrations.filter(r => r.booked_date && toDateKey(new Date(r.booked_date)) === todayKey)
+                visibleRegistrations.filter(r => r.booked_date && parseDateKey(r.booked_date) === todayKey)
               ).length > 0;
               return (
                 <>
