@@ -89,6 +89,18 @@ function parseDateForDisplay(dateStr: string): Date {
     : new Date(dateStr + " 12:00:00");
 }
 
+// Day-of-week for a sheet date string, safe from anywhere in the world.
+// parseDateForDisplay anchors at LOCAL noon (see above), so reading it back
+// with the LOCAL .getDay() (not .getUTCDay()) never crosses a midnight
+// boundary. new Date(dateStr).getUTCDay() — the pattern this replaces —
+// parses non-ISO strings ("August 16, 2026") at LOCAL midnight and then
+// reads the UTC day back, silently rolling to the previous day for anyone
+// in a timezone ahead of UTC (confirmed from Athens: a real Sunday session
+// was showing as Saturday).
+function dayOfWeekFor(dateStr: string): number {
+  return parseDateForDisplay(dateStr).getDay();
+}
+
 function fmtPrice(price: string): string {
   const trimmed = price.trim();
   return trimmed.startsWith("$") ? trimmed : `$${trimmed}`;
@@ -1094,7 +1106,13 @@ export default function Home() {
     const options = [];
     for (let i = 0; i < 2; i++) {
       const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
-      const value = d.toISOString().substring(0, 7);
+      // toISOString() is always UTC — for anyone in a timezone ahead of UTC,
+      // local midnight on the 1st converts to the LAST day of the PREVIOUS
+      // month in UTC, so d.toISOString().substring(0,7) silently sent the
+      // wrong monthYear to the backend (confirmed from Athens: label said
+      // "August 2026", value was "2026-07"). Build the value from the same
+      // local Y/M the label already uses instead.
+      const value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
       const label = d.toLocaleDateString("en-US", { month: "long", year: "numeric" });
       options.push({ value, label });
     }
@@ -1200,13 +1218,13 @@ export default function Home() {
     // pre-filled automatically, multiple options are left for the parent to
     // choose via a dropdown, same as the primary slot's own trainer picker.
     const selectedDate = new Date(window.date);
-    const dayOfWeek = selectedDate.getUTCDay();
+    const dayOfWeek = dayOfWeekFor(window.date);
     const futureWeeks: typeof recurringWeeks = [];
 
     for (const w of timeWindows) {
       if (w.date === window.date) continue; // skip current
       const wDate = new Date(w.date);
-      if (wDate.getUTCDay() !== dayOfWeek) continue;
+      if (dayOfWeekFor(w.date) !== dayOfWeek) continue;
       if (wDate <= selectedDate) continue;
       // Check if the selected time range fits in this window
       if (sel.start >= w.startMins && endMins <= w.endMins) {
@@ -1951,10 +1969,9 @@ export default function Home() {
       .filter((w) => {
         if (w.endMins - w.startMins < 60) return false;
         if (calendarSelectedDate && w.date !== calendarSelectedDate) return false;
-        const dUtc = new Date(w.date);
-        if (filterDays.size > 0 && !filterDays.has(dUtc.getUTCDay())) return false;
+        if (filterDays.size > 0 && !filterDays.has(dayOfWeekFor(w.date))) return false;
         if (filterMonth) {
-          const monthStr = dUtc.toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
+          const monthStr = parseDateForDisplay(w.date).toLocaleDateString("en-US", { month: "long", year: "numeric" });
           if (monthStr !== filterMonth) return false;
         }
         if (filterTrainer && !w.trainers.some((t) => trainerNamesMatch(t, filterTrainer))) return false;
@@ -1983,8 +2000,7 @@ export default function Home() {
     const months = new Set<string>();
     timeWindows.forEach((w) => {
       if (w.endMins - w.startMins < 60) return;
-      const d = new Date(w.date);
-      months.add(d.toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" }));
+      months.add(parseDateForDisplay(w.date).toLocaleDateString("en-US", { month: "long", year: "numeric" }));
     });
     return Array.from(months);
   }, [timeWindows]);
@@ -1994,7 +2010,7 @@ export default function Home() {
     const days = new Set<number>();
     timeWindows.forEach((w) => {
       if (w.endMins - w.startMins < 60) return;
-      days.add(new Date(w.date).getUTCDay());
+      days.add(dayOfWeekFor(w.date));
     });
     return Array.from(days).sort();
   }, [timeWindows]);
@@ -2348,10 +2364,10 @@ export default function Home() {
                     const visiblePickupSessions = showAllPickup ? pickupSessions : pickupSessions.slice(0, 5);
 
                     const availDays = Array.from(
-                      new Set(futureSessions.map((s) => new Date(s.date).getUTCDay()))
+                      new Set(futureSessions.map((s) => dayOfWeekFor(s.date)))
                     ).sort();
                     const filteredSessions = groupDayFilter.size > 0
-                      ? futureSessions.filter((s) => groupDayFilter.has(new Date(s.date).getUTCDay()))
+                      ? futureSessions.filter((s) => groupDayFilter.has(dayOfWeekFor(s.date)))
                       : futureSessions;
                     const showAll = showAllGroups.has(group);
                     const visibleSessions = showAll ? filteredSessions : filteredSessions.slice(0, 5);
@@ -2413,7 +2429,7 @@ export default function Home() {
                                 const dayNum = Array.from(groupDayFilter)[0];
                                 const dayName = DAY_LABELS[dayNum];
                                 const daySessions = futureSessions.filter(
-                                  (s) => new Date(s.date).getUTCDay() === dayNum && !isSessionFull(s)
+                                  (s) => dayOfWeekFor(s.date) === dayNum && !isSessionFull(s)
                                 );
                                 const allSelected = daySessions.every((s) => selectedGroupKeys.has(getGroupSessionKey(s)));
                                 return (
