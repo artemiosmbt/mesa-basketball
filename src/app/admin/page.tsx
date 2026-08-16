@@ -174,11 +174,15 @@ function sessionMs(date: string | null, startTime: string | null): number {
   return etWallClockToMs(y, m, d, h, min);
 }
 
+// Same non-ISO-date-string hazard as formatDateHeader below — see its
+// comment. Same fix: route through parseDateKey, build the label from an
+// unambiguous local three-arg Date.
 function formatDate(d: string | null): string {
   if (!d) return "—";
-  const date = new Date(d);
-  if (isNaN(date.getTime())) return d;
-  return date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
+  const key = parseDateKey(d);
+  if (!key) return d;
+  const [y, m, day] = key.split("-").map(Number);
+  return new Date(y, m - 1, day).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 }
 
 // Kids are stored as "Name (DOB: ..., Grade: ..., Gender: ...), Name2 (...)"
@@ -701,11 +705,22 @@ function timeMins(t: string): number {
   return h * 60 + min;
 }
 
+// booked_date isn't guaranteed to be ISO "YYYY-MM-DD" — it can come straight
+// from the sheet's raw CSV cell (often "M/D/YYYY") or, in the manual-
+// reschedule fallback, free text like "July 20, 2026". new Date(d) on a
+// non-ISO date-only string parses at LOCAL midnight (not UTC), so formatting
+// it back with timeZone:"UTC" silently shifted the day (and weekday) by one
+// whenever the browser's timezone was ahead of UTC — e.g. from Greece, a
+// session's own date header disagreed with what "Today" showed. Routes
+// through the same safe parseDateKey used everywhere else, then builds the
+// label from an unambiguous local three-arg Date (matches how the mini
+// calendar's own day cells are built).
 function formatDateHeader(d: string | null): string {
   if (!d) return "No Date";
-  const date = new Date(d);
-  if (isNaN(date.getTime())) return d;
-  return date.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+  const key = parseDateKey(d);
+  if (!key) return d;
+  const [y, m, day] = key.split("-").map(Number);
+  return new Date(y, m - 1, day).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
 }
 
 function groupByDate(list: Registration[]): { key: string; label: string; sessions: Registration[] }[] {
