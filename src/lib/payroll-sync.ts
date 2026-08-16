@@ -112,6 +112,7 @@ interface RegistrationRow {
   booked_start_time: string | null;
   booked_end_time: string | null;
   booked_trainer: string | null;
+  booked_group: string | null;
   status: string;
   session_price: number | null;
   applied_account_credit: number | null;
@@ -317,7 +318,11 @@ function deriveCancellationFlag(
 
 interface DerivedRow {
   date: string;
-  sessionType: "Group" | "Private";
+  // "Pickup" is its own distinct value (not lumped into "Group") so the
+  // sheet's Pay column formula can key off it — Artemios pays a flat $120
+  // for a pickup session regardless of headcount/duration, unlike a regular
+  // Group session's per-participant rate.
+  sessionType: "Group" | "Pickup" | "Private";
   participants: number;
   startTime: string;
   endTime: string;
@@ -354,7 +359,13 @@ function deriveRow(
   if (!cancellationFlag) return null;
   if (!reg.booked_date || !reg.booked_start_time || !reg.booked_end_time) return null;
 
-  const sessionType: "Group" | "Private" = reg.type === "weekly" ? "Group" : "Private";
+  // Matches the same "pickup" substring convention already used elsewhere
+  // in this codebase to identify pickup sessions from a group name (see
+  // typePillLabel in admin/page.tsx, isCompanionGroup in schedule/page.tsx) —
+  // case-insensitive since it's hand-typed into the schedule sheet.
+  const isPickup = reg.type === "weekly" && !!reg.booked_group?.toLowerCase().includes("pickup");
+  const sessionType: "Group" | "Pickup" | "Private" =
+    reg.type === "weekly" ? (isPickup ? "Pickup" : "Group") : "Private";
   const participants = reg.total_participants || 1;
   const hours = hoursBetween(reg.booked_start_time, reg.booked_end_time) ?? 0;
   const credit = reg.applied_account_credit || 0;
@@ -521,7 +532,7 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
   const { data: regs, error: regErr } = await supabase
     .from("registrations")
     .select(
-      "id, parent_name, email, type, total_participants, booked_date, booked_start_time, booked_end_time, booked_trainer, status, session_price, applied_account_credit, package_id, stripe_checkout_session_id, stripe_payment_intent_id"
+      "id, parent_name, email, type, total_participants, booked_date, booked_start_time, booked_end_time, booked_trainer, booked_group, status, session_price, applied_account_credit, package_id, stripe_checkout_session_id, stripe_payment_intent_id"
     )
     .in("type", ["weekly", "private", "group-private"])
     .in("status", ["confirmed", "cancelled", "no_show"])
