@@ -87,7 +87,7 @@ function buildEmailHtml(): string {
             As some of you already know I will be heading off to continue my professional playing career in Greece for some time. Before I leave, I wanted to make sure that I thank each and everyone for your continuous support of the program. None of this would be possible without you guys and I&rsquo;m truly forever grateful for the trust, loyalty, and commitment you have brought to MEΣΑ. Continuing to believe in what I&rsquo;ve been building from the start means everything to me.
           </p>
           <p class="mesa-gold-text" style="margin: 0 0 18px; color: #d4af37; font-size: 15px; line-height: 1.7;">
-            Although I won&rsquo;t physically be present, MEΣA isn&rsquo;t going anywhere. If you don&rsquo;t know yet, I have hand picked a team of 4 additional trainers with a high level of experience, who I trust and know will continue to share the same values, standards, and passion for developing your kids the right way. I encourage everyone to explore what each of them bring to the table and give your athletes the ability to learn from different basketball minds that still share the same values. You can find out more about each of them specifically in the <a href="${BASE_URL}/about" class="mesa-gold-text" style="color: #d4af37; font-weight: bold; text-decoration: underline;">&ldquo;About&rdquo; section</a> of the website. The quality and care you have come to expect from MEΣA will not change.
+            Although I won&rsquo;t physically be present, MEΣA isn&rsquo;t going anywhere. If you don&rsquo;t know yet, I have hand picked a team of 4 additional trainers with a high level of experience, who I trust and know will continue to share the same values, standards, and passion for developing your kids the right way. I encourage everyone to explore what each of them bring to the table and give your athletes the ability to learn from different basketball minds that still share the same values. You can find out more about each of them specifically in the <a href="${BASE_URL}/about#meet-the-team" class="mesa-gold-text" style="color: #d4af37; font-weight: bold; text-decoration: underline;">&ldquo;About&rdquo; section</a> of the website. The quality and care you have come to expect from MEΣA will not change.
           </p>
           <p class="mesa-gold-text" style="margin: 0; color: #d4af37; font-size: 15px; line-height: 1.7;">
             As for me, I will still be involved remotely and MEΣΑ will continue to grow while I&rsquo;m away. This is not goodbye, but another step that I&rsquo;m grateful to bring everyone along with me in. I cannot wait and hope to see you all when I return. Please do not ever hesitate to reach out for any questions about anything basketball related, even outside of our program. Thank you from the bottom of my heart for continuing to trust MEΣA.
@@ -116,7 +116,7 @@ function buildEmailHtml(): string {
 // the WHOLE message as UCS-2, cutting the per-segment length from 153 down
 // to 67 characters and roughly tripling the segment (cost) count.
 const SMS_BODY =
-  "MESA: I have a special message for all my MESA families - it's in your email inbox. Please take a moment to read it. Thank you for everything. - Coach Artemios. Reply STOP to opt out.";
+  "MESA: I have sent you all a special message through email. Please take a moment to read it. Thank you - Coach Artemios. Reply STOP to opt out.";
 
 async function sendOneEmail(resend: Resend, to: string): Promise<void> {
   const result = await resend.emails.send({
@@ -141,7 +141,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { mode, channel } = await req.json();
+  const { mode, channel, dryRun } = await req.json();
   if (mode !== "test" && mode !== "send") {
     return NextResponse.json({ error: "mode must be \"test\" or \"send\"" }, { status: 400 });
   }
@@ -228,6 +228,17 @@ export async function POST(req: NextRequest) {
         phones.push(r.phone);
       }
     }
+  }
+
+  // dryRun: report exactly who this WOULD reach, without sending anything —
+  // meant to be checked once before the real broadcast, given how
+  // irreversible sending to every past/present client actually is.
+  if (dryRun === true) {
+    return NextResponse.json({
+      mode, channel, dryRun: true,
+      wouldEmail: wantsEmail ? emails.length : 0,
+      wouldText: wantsSms ? phones.length : 0,
+    });
   }
 
   if (wantsEmail && resend) {
