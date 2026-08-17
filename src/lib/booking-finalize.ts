@@ -558,8 +558,13 @@ export async function finalizeConfirmedWeeklyBooking(params: FinalizeWeeklyBooki
     ? joinWithAnd(groupEntries.map(([group, count]) => `${count} ${group}`))
     : primaryGroupLabel;
   const isPickupBooking = !isMixedGroups && primaryGroupLabel.toLowerCase().includes("pickup");
+  // A single booking can span more than one trainer (e.g. different dates
+  // covered by different sub-trainers) — when that happens, each session
+  // needs its own trainer named rather than relying on the single summary
+  // "Trainer:" line below, which only ever reflects weeklySessions[0].
+  const weeklyAllSameTrainer = weeklySessions.every((s) => trainerNamesMatch(s.trainer, weeklySessions[0]?.trainer));
   const allSessionsList = weeklySessions
-    .map((s) => `${s.date} ${s.startTime}-${s.endTime} at ${s.location}${isMixedGroups ? ` (${s.group})` : ""}`)
+    .map((s) => `${s.date} ${s.startTime}-${s.endTime} at ${s.location}${isMixedGroups ? ` (${s.group})` : ""}${!weeklyAllSameTrainer && s.trainer ? ` — Trainer: ${formatTrainerForDisplay(s.trainer)}` : ""}`)
     .join("<br/>");
 
   // What actually got charged via Stripe (net of credit) — 0 if fully
@@ -598,6 +603,7 @@ export async function finalizeConfirmedWeeklyBooking(params: FinalizeWeeklyBooki
       calendarEvents: weeklySessions.map((s) => ({ date: s.date, startTime: s.startTime, endTime: s.endTime, location: s.location })),
       isPickup: isPickupBooking,
       sessionDetailsIsHtml: true,
+      suppressTrainerAndRateLines: !weeklyAllSameTrainer,
     });
 
     if (weeklyReferrer) {
@@ -607,14 +613,14 @@ export async function finalizeConfirmedWeeklyBooking(params: FinalizeWeeklyBooki
     console.error("Weekly booking email failed (booking was paid):", notifyErr);
   }
 
-  const weeklyTrainerLine = weeklySessions[0]?.trainer ? `\nTrainer: ${weeklySessions[0].trainer}` : "";
+  const weeklyTrainerLine = weeklyAllSameTrainer && weeklySessions[0]?.trainer ? `\nTrainer: ${formatTrainerForDisplay(weeklySessions[0].trainer)}` : "";
   const totalCount = weeklySessions.length;
   const confirmLabel = isMixedGroups
     ? `${groupSummary} sessions`
     : (totalCount === 1 ? `${primaryGroupLabel} session` : `${totalCount} ${primaryGroupLabel} sessions`);
   if (params.smsConsent && params.phone) {
     const sessionLines = weeklySessions.map((s) =>
-      `${formatDateWithDay(s.date)} | ${s.startTime}-${s.endTime}\nLocation: ${resolveLocationName(s.location)}${isMixedGroups ? `\nGroup: ${s.group}` : ""}`
+      `${formatDateWithDay(s.date)} | ${s.startTime}-${s.endTime}\nLocation: ${resolveLocationName(s.location)}${isMixedGroups ? `\nGroup: ${s.group}` : ""}${!weeklyAllSameTrainer && s.trainer ? `\nTrainer: ${formatTrainerForDisplay(s.trainer)}` : ""}`
     ).join("\n");
     const creditLine = weeklyCreditApplied > 0 ? `\n$${fmtMoney(weeklyCreditApplied)} account credit applied.` : "";
     const chargeLine = weeklyAmountCharged > 0 ? `\nCharged: $${fmtMoney(weeklyTotalWithFee)}.` : "";
@@ -622,7 +628,7 @@ export async function finalizeConfirmedWeeklyBooking(params: FinalizeWeeklyBooki
   }
 
   const adminLines = weeklySessions.map((s) =>
-    `${formatDateWithDay(s.date)} | ${s.startTime}-${s.endTime}\nLocation: ${resolveLocationName(s.location)}${isMixedGroups ? `\nGroup: ${s.group}` : ""}`
+    `${formatDateWithDay(s.date)} | ${s.startTime}-${s.endTime}\nLocation: ${resolveLocationName(s.location)}${isMixedGroups ? `\nGroup: ${s.group}` : ""}${!weeklyAllSameTrainer && s.trainer ? `\nTrainer: ${formatTrainerForDisplay(s.trainer)}` : ""}`
   ).join("\n");
   await sendAdminSMS(`NEW BOOKING (paid): ${params.parentName}\n${confirmLabel}:\n${adminLines}${weeklyTrainerLine}\nPlayers: ${params.kids}${params.submittedReferralCode ? `\nRef code: ${params.submittedReferralCode} ${weeklyReferrer ? "✓ applied" : "✗ NOT applied"}` : ""}`).catch(() => {});
 
@@ -901,17 +907,18 @@ export async function finalizeConfirmedPrivateSeriesBooking(params: FinalizePriv
     }
   }
 
-  const allSessionsList = privateSessions
-    .map((s) => `${s.date} ${s.startTime}-${s.endTime} at ${s.location}`)
-    .join("<br/>");
   // A recurring series can legitimately use different trainers on different
   // dates (see notifyTrainerOfNewBooking's per-session loop below) — the
   // standalone "Trainer:"/"Rate:" summary lines only ever reflect
   // privateSessions[0], so they'd misrepresent every other date whenever
-  // the series isn't all one trainer. The accurate per-series total is
-  // already itemized in priceNote/sessionDetails below, so it's safe (and
-  // more accurate) to omit those two summary lines entirely in that case.
+  // the series isn't all one trainer. When that happens, name each date's
+  // trainer right on its own line instead (the "Rate:" summary is still
+  // safe to omit, since price is trainer-tier-dependent and the accurate
+  // per-series total is already itemized in priceNote below).
   const allSameTrainer = privateSessions.every((s) => trainerNamesMatch(s.trainer, privateSessions[0]?.trainer));
+  const allSessionsList = privateSessions
+    .map((s) => `${s.date} ${s.startTime}-${s.endTime} at ${s.location}${!allSameTrainer && s.trainer ? ` — Trainer: ${formatTrainerForDisplay(s.trainer)}` : ""}`)
+    .join("<br/>");
   const totalPaid = privateSessions.reduce((sum, s) => sum + (s.packageCovered ? 0 : effectiveSessionPrice(s.fullPrice, s.isFree, isPrivateType, !!params.usedReferralCredit)), 0);
   const seriesAmountCharged = Math.max(0, totalPaid - params.accountCreditApplied);
   const seriesTotalWithFee = seriesAmountCharged > 0 ? Math.round((seriesAmountCharged + calcServiceFee(seriesAmountCharged)) * 100) / 100 : 0;
@@ -947,7 +954,7 @@ export async function finalizeConfirmedPrivateSeriesBooking(params: FinalizePriv
 
   if (params.smsConsent && params.phone) {
     const sessionLines = privateSessions.map((s) =>
-      `${formatDateWithDay(s.date)} | ${s.startTime}-${s.endTime}\nLocation: ${resolveLocationName(s.location)}`
+      `${formatDateWithDay(s.date)} | ${s.startTime}-${s.endTime}\nLocation: ${resolveLocationName(s.location)}${!allSameTrainer && s.trainer ? `\nTrainer: ${formatTrainerForDisplay(s.trainer)}` : ""}`
     ).join("\n");
     const pkgNote = packageSessionsRemaining !== undefined
       ? `\n${packageSessionsRemaining} session${packageSessionsRemaining !== 1 ? "s" : ""} remaining in your package.`
@@ -959,9 +966,9 @@ export async function finalizeConfirmedPrivateSeriesBooking(params: FinalizePriv
   }
 
   const adminLines = privateSessions.map((s) =>
-    `${formatDateWithDay(s.date)} | ${s.startTime}-${s.endTime}\nLocation: ${resolveLocationName(s.location)}`
+    `${formatDateWithDay(s.date)} | ${s.startTime}-${s.endTime}\nLocation: ${resolveLocationName(s.location)}${!allSameTrainer && s.trainer ? `\nTrainer: ${formatTrainerForDisplay(s.trainer)}` : ""}`
   ).join("\n");
-  const trainerLine = privateSessions[0]?.trainer && allSameTrainer ? `\nTrainer: ${privateSessions[0].trainer}` : "";
+  const trainerLine = privateSessions[0]?.trainer && allSameTrainer ? `\nTrainer: ${formatTrainerForDisplay(privateSessions[0].trainer)}` : "";
   const adminTypeLabel = params.type === "group-private" ? "group private" : "private";
   await sendAdminSMS(`NEW BOOKING (paid): ${params.parentName}\n${privateSessions.length} ${adminTypeLabel} sessions:\n${adminLines}${trainerLine}\nPlayers: ${params.kids}${params.submittedReferralCode ? `\nRef code: ${params.submittedReferralCode} ${params.privateReferrer ? "✓ applied" : "✗ NOT applied"}` : ""}`).catch(() => {});
 
