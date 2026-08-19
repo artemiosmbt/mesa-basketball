@@ -1787,7 +1787,7 @@ export default function AdminPage() {
   // add/move/remove edits are exactly what's reflected here.
   const groupBuckets = useMemo(() => {
     const buckets: Record<CanonicalGroupId | "all-else", { email: string; parentName: string; athlete: ProfileKid; displayName: string; sortLastName: string }[]> = {
-      junior: [], "ms-boys": [], "ms-girls": [], "hs-girls": [], "hs-boys": [], "all-else": [],
+      junior: [], ms: [], "hs-girls": [], "jv-boys": [], "varsity-boys": [], "all-else": [],
     };
     for (const [email, profile] of Object.entries(profilesMap)) {
       for (const kid of profile.kids) {

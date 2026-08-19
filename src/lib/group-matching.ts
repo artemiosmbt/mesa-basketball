@@ -58,37 +58,51 @@ export interface CanonicalGroup {
   gender: "boys" | "girls" | "coed";
   minGrade: string;
   maxGrade: string;
+  // Whether a brand-new athlete with no booking history yet should be
+  // seeded into this group from grade+gender alone (see
+  // defaultGroupsForGradeGender). JV vs Varsity is a skill-tier split, not
+  // an age/gender one — grade+gender can't tell them apart, so guessing
+  // both would wrongly put every new 9-12 boy on both rosters (and both
+  // groups' reminder emails) until a real booking narrows it down. Left
+  // unset (true) for every other group, where grade+gender IS enough.
+  autoSeed?: boolean;
 }
 
-// The 5 group programs the owner runs. Grade-5 boundary overlap between
-// "junior" and the ms-* groups, and the top-of-bracket "play up" overlap
-// between ms-* and hs-*, are both intentional — an athlete can carry more
-// than one of these in their persisted `groups` at once.
+// The 5 group programs the owner runs. Grade ranges deliberately overlap
+// between groups (junior/ms at grade 5, ms/hs-girls at 7-8, jv-boys/
+// varsity-boys at 8-10) — these are skill-tier splits as much as age ones,
+// so an athlete can legitimately belong to more than one at once (e.g.
+// "playing up"), and can carry more than one in their persisted `groups`.
 export const CANONICAL_GROUPS: CanonicalGroup[] = [
-  { id: "junior", label: "Junior Boys & Girls (K-5, Co-ed)", gender: "coed", minGrade: "K", maxGrade: "5" },
-  { id: "ms-boys", label: "Middle School Boys (5-8)", gender: "boys", minGrade: "5", maxGrade: "8" },
-  { id: "ms-girls", label: "Middle School Girls (5-8)", gender: "girls", minGrade: "5", maxGrade: "8" },
-  { id: "hs-girls", label: "High School Girls (9-12)", gender: "girls", minGrade: "9", maxGrade: "12" },
-  { id: "hs-boys", label: "High School Boys (9-12)", gender: "boys", minGrade: "9", maxGrade: "12" },
+  { id: "junior", label: "JR Boys & Girls (K-5th, Co-ed)", gender: "coed", minGrade: "K", maxGrade: "5" },
+  { id: "ms", label: "Middle School Boys & Girls (5th-8th, Co-ed)", gender: "coed", minGrade: "5", maxGrade: "8" },
+  { id: "hs-girls", label: "High School Girls (7th-12th)", gender: "girls", minGrade: "7", maxGrade: "12" },
+  { id: "jv-boys", label: "JV Boys (7th-10th)", gender: "boys", minGrade: "7", maxGrade: "10", autoSeed: false },
+  { id: "varsity-boys", label: "Varsity Boys (8th-12th)", gender: "boys", minGrade: "8", maxGrade: "12", autoSeed: false },
 ];
 
 // Maps a LIVE session label (WeeklySession.group / registrations.booked_group)
-// to one of the 5 canonical groups via keywords, not exact string match — so
-// wording variants like "Middle School Boys 5-8" and "Middle School Boys -
-// Grades 5-8" both resolve to "ms-boys" with no special-casing needed. If
-// the live schedule is ever reworded to drop these keywords, matching for
-// that group silently stops working everywhere (reminder emails, Groups
-// tab, auto-assign-on-booking) — worth a quick sanity check whenever a
-// schedule label changes.
-export function canonicalGroupForLabel(liveLabel: string): CanonicalGroupId | null {
+// to the canonical group(s) it belongs to, via keywords rather than exact
+// string match — so wording variants still resolve without special-casing.
+// Returns an array (rather than a single id) because the combo "JV &
+// Varsity Boys" session (see COMBO_GROUPS in schedule/page.tsx) genuinely
+// belongs to BOTH jv-boys and varsity-boys at once — kids in either group
+// should get reminded about it, and a kid who books it should pick up both.
+// If the live schedule is ever reworded to drop these keywords, matching
+// for that group silently stops working everywhere (reminder emails,
+// Groups tab, auto-assign-on-booking) — worth a quick sanity check whenever
+// a schedule label changes.
+export function canonicalGroupForLabel(liveLabel: string): CanonicalGroupId[] {
   const name = liveLabel.toLowerCase();
-  const gender = getSessionGender(liveLabel);
-  if (name.includes("junior")) return "junior";
-  if (name.includes("middle school") && gender === "boys") return "ms-boys";
-  if (name.includes("middle school") && gender === "girls") return "ms-girls";
-  if (name.includes("high school") && gender === "girls") return "hs-girls";
-  if (name.includes("high school") && gender === "boys") return "hs-boys";
-  return null;
+  const hasJV = /\bjv\b/.test(name);
+  const hasVarsity = name.includes("varsity");
+  if (hasJV && hasVarsity) return ["jv-boys", "varsity-boys"];
+  if (hasJV) return ["jv-boys"];
+  if (hasVarsity) return ["varsity-boys"];
+  if (name.includes("junior") || /\bjr\b/.test(name)) return ["junior"];
+  if (name.includes("middle school")) return ["ms"];
+  if (name.includes("high school") && name.includes("girls")) return ["hs-girls"];
+  return [];
 }
 
 function gradeInRange(grade: string, min: string, max: string): boolean {
@@ -104,6 +118,7 @@ function gradeInRange(grade: string, min: string, max: string): boolean {
 // which prefers real history when it exists).
 export function defaultGroupsForGradeGender(grade: string, gender: string | undefined): CanonicalGroupId[] {
   return CANONICAL_GROUPS.filter((g) => {
+    if (g.autoSeed === false) return false;
     if (!gradeInRange(grade, g.minGrade, g.maxGrade)) return false;
     return g.gender === "coed" || g.gender === gender;
   }).map((g) => g.id);
@@ -131,8 +146,9 @@ export function mergeAthleteAfterBooking(existing: Athlete, incoming: Partial<At
     groups: [...existing.groups],
   };
   for (const label of bookedGroupLabels || []) {
-    const cg = canonicalGroupForLabel(label);
-    if (cg && !merged.groups.includes(cg)) merged.groups.push(cg);
+    for (const cg of canonicalGroupForLabel(label)) {
+      if (!merged.groups.includes(cg)) merged.groups.push(cg);
+    }
   }
   return merged;
 }

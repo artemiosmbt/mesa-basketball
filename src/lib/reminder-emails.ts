@@ -79,10 +79,10 @@ export async function runReminderEmailWindow(window: ReminderWindow, options?: {
 
   const groupToSessions = new Map<CanonicalGroupId, WeeklySession[]>();
   for (const s of windowSessions) {
-    const cg = canonicalGroupForLabel(s.group);
-    if (!cg) continue;
-    if (!groupToSessions.has(cg)) groupToSessions.set(cg, []);
-    groupToSessions.get(cg)!.push(s);
+    for (const cg of canonicalGroupForLabel(s.group)) {
+      if (!groupToSessions.has(cg)) groupToSessions.set(cg, []);
+      groupToSessions.get(cg)!.push(s);
+    }
   }
 
   // Session-first, not athlete-first: two siblings matching the exact same

@@ -66,7 +66,7 @@ export async function POST(req: NextRequest) {
     if (!email || !r.kids) continue;
     if (!athletesByEmail.has(email)) athletesByEmail.set(email, new Map());
     const bucket = athletesByEmail.get(email)!;
-    const cg = r.booked_group ? canonicalGroupForLabel(r.booked_group) : null;
+    const cgs = r.booked_group ? canonicalGroupForLabel(r.booked_group) : [];
     for (const kid of parseRegistrationKidsString(r.kids)) {
       // Keyed on name+DOB, not name alone — a name-only key collapses two
       // same-named siblings (twins, or any kids sharing a name) across a
@@ -79,7 +79,7 @@ export async function POST(req: NextRequest) {
       // limitation, not something this key change can solve.
       const key = `${normalizedAthleteName(kid.name)}|${kid.dob}`;
       if (!bucket.has(key)) bucket.set(key, { ...kid, groups: new Set() });
-      if (cg) bucket.get(key)!.groups.add(cg);
+      for (const cg of cgs) bucket.get(key)!.groups.add(cg);
     }
   }
 

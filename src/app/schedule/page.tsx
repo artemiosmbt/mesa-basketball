@@ -430,12 +430,27 @@ interface BookingModal {
   weeklySavings?: number;
 }
 
+// Combo sessions — a single trainer covering two groups at once on a day
+// with only one trainer working (e.g. "JV & Varsity Boys") — never get their
+// own card. Instead the same session object is filed under BOTH member
+// groups' cards, so it renders as an ordinary row in each. Its `s.group`
+// field stays the literal combo text either way, so capacity/enrollment
+// (keyed off s.group, see getEnrollmentCount/getGroupSessionKey) is one
+// shared pool no matter which card it's viewed or booked from.
+const COMBO_GROUPS: Record<string, string[]> = {
+  "jv & varsity boys": ["JV Boys", "Varsity Boys"],
+};
+
 // Group weekly sessions by group name
 function groupByGroup(sessions: WeeklySession[]) {
   const groups: Record<string, WeeklySession[]> = {};
   sessions.forEach((s) => {
-    if (!groups[s.group]) groups[s.group] = [];
-    groups[s.group].push(s);
+    const comboMembers = COMBO_GROUPS[s.group.trim().toLowerCase()];
+    const targets = comboMembers || [s.group];
+    for (const key of targets) {
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(s);
+    }
   });
   return groups;
 }
@@ -2354,10 +2369,14 @@ export default function Home() {
                   })()}
 
                   {isActive && (() => {
+                    // A High School Pickup slot isn't tied to just one boys'
+                    // card anymore — JV and Varsity are two separate cards
+                    // now, and pickup is relevant to both, so it shows its
+                    // tab in each rather than only under one.
                     const pickupKey = Object.keys(grouped).find(
-                      (k) => k.toLowerCase().includes("pickup") && k.toLowerCase().includes("high school boys")
+                      (k) => k.toLowerCase().includes("pickup") && k.toLowerCase().includes("high school")
                     ) ?? null;
-                    const hasPickup = !!pickupKey && group.toLowerCase().includes("high school boys");
+                    const hasPickup = !!pickupKey && (groupBaseName(group) === "jv boys" || groupBaseName(group) === "varsity boys");
                     const pickupSessions = hasPickup ? (grouped[pickupKey!] || []).filter(isFutureSession) : [];
                     const pickupUnitPrice = pickupSessions[0]?.price || 30;
                     const showAllPickup = showAllGroups.has(`${group}|pickup`);

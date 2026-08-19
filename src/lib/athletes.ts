@@ -3,7 +3,7 @@
 // ALL_GRADES/GRADE_ORDER, previously duplicated between schedule/page.tsx
 // and settings/page.tsx.
 
-export type CanonicalGroupId = "junior" | "ms-boys" | "ms-girls" | "hs-girls" | "hs-boys";
+export type CanonicalGroupId = "junior" | "ms" | "hs-girls" | "jv-boys" | "varsity-boys";
 
 export interface Athlete {
   id: string;
