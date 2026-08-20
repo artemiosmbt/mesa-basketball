@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { getWeeklySchedule, parseTimeToMins, type WeeklySession } from "@/lib/sheets";
 import { normalizeDate } from "@/lib/calendar";
-import { canonicalGroupForLabel } from "@/lib/group-matching";
+import { canonicalGroupForLabel, CANONICAL_GROUPS } from "@/lib/group-matching";
 import { sendReminderEmail, sendReminderEmailAdminSummary } from "@/lib/email";
 import { regGroupKey } from "@/lib/weekly-schedule-matching";
 import type { Athlete, CanonicalGroupId } from "@/lib/athletes";
@@ -40,6 +40,36 @@ interface SessionGroup {
   timeLabel: string;
   location: string;
   athleteNames: string[];
+}
+
+// Internal-only tracking shape, kept separate from the public SessionGroup
+// above (what actually gets sent to sendReminderEmail/returned from a dry
+// run). matchedGroups accumulates every canonical group that actually
+// caused THIS parent's kid(s) to be included — a combo session's `s.group`
+// stays the literal live-sheet text ("JV & Varsity Boys") no matter who's
+// in it (see COMBO_GROUPS in schedule/page.tsx), so a kid who's ONLY in JV
+// would otherwise get an email calling it "JV & Varsity Boys" instead of
+// their normal "JV Boys" — see displayGroupLabel below, which derives the
+// actual shown label from matchedGroups instead of the raw combo text.
+interface SessionGroupInternal {
+  rawGroup: string;
+  matchedGroups: Set<CanonicalGroupId>;
+  dateLabel: string;
+  timeLabel: string;
+  location: string;
+  athleteNames: string[];
+}
+
+// "JV Boys" for a JV-only match, "Varsity Boys" for a Varsity-only match,
+// "JV Boys & Varsity Boys" for a family with kids in both attending the
+// same combined session — never the raw live-sheet combo text itself.
+function displayGroupLabel(matchedGroups: Set<CanonicalGroupId>, rawGroup: string): string {
+  const labels = CANONICAL_GROUPS.filter((cg) => matchedGroups.has(cg.id)).map((cg) => cg.shortLabel);
+  return labels.length > 0 ? labels.join(" & ") : rawGroup;
+}
+
+function toPublicSessions(entries: SessionGroupInternal[]): SessionGroup[] {
+  return entries.map(({ rawGroup, matchedGroups, ...rest }) => ({ group: displayGroupLabel(matchedGroups, rawGroup), ...rest }));
 }
 
 // Core logic shared by both cron routes. Reads each athlete's PERSISTED
@@ -90,7 +120,7 @@ export async function runReminderEmailWindow(window: ReminderWindow, options?: {
   // near-identical cards repeating the same group/date/time/location — the
   // whole point being less to read, so it reads as more urgent, not less.
   const sessionKey = (s: WeeklySession) => `${s.group}|${s.date}|${s.startTime}|${s.endTime}|${s.location}`;
-  const byEmail = new Map<string, { parentName: string; sessionsByKey: Map<string, SessionGroup> }>();
+  const byEmail = new Map<string, { parentName: string; sessionsByKey: Map<string, SessionGroupInternal> }>();
 
   if (groupToSessions.size > 0) {
     // A parent already confirmed for a specific session doesn't need to be
@@ -156,7 +186,8 @@ export async function runReminderEmailWindow(window: ReminderWindow, options?: {
             const key = sessionKey(s);
             if (!parentEntry.sessionsByKey.has(key)) {
               parentEntry.sessionsByKey.set(key, {
-                group: s.group,
+                rawGroup: s.group,
+                matchedGroups: new Set<CanonicalGroupId>(),
                 dateLabel: formatDateLabel(normalizeDate(s.date)),
                 timeLabel: s.endTime ? `${s.startTime}–${s.endTime}` : s.startTime,
                 location: s.location,
@@ -164,6 +195,7 @@ export async function runReminderEmailWindow(window: ReminderWindow, options?: {
               });
             }
             const sessionGroup = parentEntry.sessionsByKey.get(key)!;
+            sessionGroup.matchedGroups.add(g);
             if (!sessionGroup.athleteNames.includes(kid.name)) sessionGroup.athleteNames.push(kid.name);
           }
         }
@@ -177,7 +209,7 @@ export async function runReminderEmailWindow(window: ReminderWindow, options?: {
     const failedEmails: string[] = [];
 
     for (const [email, { parentName, sessionsByKey }] of byEmail) {
-      const sessions = Array.from(sessionsByKey.values());
+      const sessions = toPublicSessions(Array.from(sessionsByKey.values()));
       try {
         await sendReminderEmail({ to: email, parentName, isToday, sessions });
         emailsSent++;
@@ -225,7 +257,7 @@ export async function runReminderEmailWindow(window: ReminderWindow, options?: {
       ? Array.from(byEmail.entries()).map(([email, v]) => ({
           email,
           parentName: v.parentName,
-          sessions: Array.from(v.sessionsByKey.values()),
+          sessions: toPublicSessions(Array.from(v.sessionsByKey.values())),
         }))
       : undefined,
   };
