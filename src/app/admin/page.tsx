@@ -1223,6 +1223,11 @@ export default function AdminPage() {
   // dashboard mount like it used to be.
   const [groupsLoaded, setGroupsLoaded] = useState(false);
   const [groupsLoading, setGroupsLoading] = useState(false);
+  // "Reconcile from booking history" action — a preview run must complete
+  // before the Apply button appears, so the admin always sees counts before
+  // anything writes. reconcilePending tracks which of the two is in flight.
+  const [reconcileReport, setReconcileReport] = useState<{ apply: boolean; profilesCreated: number; athletesCreated: { email: string; name: string; groups: string[] }[]; athletesUpdated: { email: string; name: string; groupsAdded: string[] }[]; skippedNoAccount: number } | null>(null);
+  const [reconcilePending, setReconcilePending] = useState<"preview" | "apply" | null>(null);
 
   // Admin reschedule state
   const [reschedulingId, setReschedulingId] = useState<string | null>(null);
@@ -1878,6 +1883,36 @@ export default function AdminPage() {
       }
     } finally {
       setGroupActionPending(null);
+    }
+  }
+
+  // Reassigns groups from real booking history — additive only, never
+  // removes an existing assignment. Always run once as a preview (apply:
+  // false) so the admin sees counts before anything writes; the Apply
+  // button only appears after a preview has come back.
+  async function runReconcileGroups(apply: boolean) {
+    if (!token) return;
+    if (apply) {
+      const created = reconcileReport?.athletesCreated.length ?? 0;
+      const updated = reconcileReport?.athletesUpdated.length ?? 0;
+      if (!confirm(`Apply this? ${updated} athlete(s) will gain a group, ${created} new athlete(s) will be created from booking history. This only adds groups — nothing is removed.`)) return;
+    }
+    setReconcilePending(apply ? "apply" : "preview");
+    try {
+      const res = await fetch("/api/admin/reconcile-groups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ apply }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data?.error || "Failed to reconcile groups.");
+        return;
+      }
+      setReconcileReport(data);
+      if (apply) setGroupsLoaded(false); // reload the Groups tab's athlete list to reflect the writes
+    } finally {
+      setReconcilePending(null);
     }
   }
 
@@ -2663,6 +2698,51 @@ export default function AdminPage() {
         )}
         {tab === "groups" && authCtx?.role === "admin" && groupsLoaded && (
           <div className="space-y-6">
+            <div className="rounded-xl border-2 border-mesa-accent bg-brown-900/40 p-4 shadow-lg shadow-black/30">
+              <p className="text-sm text-brown-300 mb-3">
+                Reassign athletes into groups from their real booking history — Junior stays Junior, Middle School Girls/Boys → Middle School Boys &amp; Girls, High School Girls stays High School Girls, High School Boys → JV Boys. Only ever <span className="font-semibold text-white">adds</span> a group, never removes one — an athlete who booked more than one program in the past ends up in both.
+              </p>
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  disabled={!!reconcilePending}
+                  onClick={() => runReconcileGroups(false)}
+                  className="rounded-lg bg-mesa-accent px-4 py-2 text-sm font-semibold text-brown-900 hover:bg-yellow-400 transition disabled:opacity-50"
+                >
+                  {reconcilePending === "preview" ? "Checking…" : "Preview from Booking History"}
+                </button>
+                {reconcileReport && !reconcileReport.apply && (
+                  <button
+                    type="button"
+                    disabled={!!reconcilePending}
+                    onClick={() => runReconcileGroups(true)}
+                    className="rounded-lg border-2 border-mesa-accent px-4 py-2 text-sm font-semibold text-mesa-accent hover:bg-mesa-accent hover:text-brown-900 transition disabled:opacity-50"
+                  >
+                    {reconcilePending === "apply" ? "Applying…" : `Apply (${reconcileReport.athletesUpdated.length + reconcileReport.athletesCreated.length} athletes)`}
+                  </button>
+                )}
+              </div>
+              {reconcileReport && (
+                <div className="mt-3 text-xs text-brown-400 space-y-2">
+                  <p>
+                    {reconcileReport.apply ? "Applied — " : "Preview only, nothing written yet — "}
+                    {reconcileReport.athletesCreated.length} new athlete{reconcileReport.athletesCreated.length === 1 ? "" : "s"} would be created,{" "}
+                    {reconcileReport.athletesUpdated.length} existing athlete{reconcileReport.athletesUpdated.length === 1 ? "" : "s"} would gain a group,{" "}
+                    {reconcileReport.skippedNoAccount} client{reconcileReport.skippedNoAccount === 1 ? "" : "s"} skipped (guest booking, no account).
+                  </p>
+                  {(reconcileReport.athletesCreated.length > 0 || reconcileReport.athletesUpdated.length > 0) && (
+                    <div className="max-h-48 overflow-y-auto rounded-lg border border-brown-700 bg-brown-950/40 p-2 space-y-1">
+                      {reconcileReport.athletesCreated.map((a, i) => (
+                        <p key={`c${i}`}><span className="text-mesa-accent">+new</span> {a.name} &lt;{a.email}&gt; → {a.groups.join(", ")}</p>
+                      ))}
+                      {reconcileReport.athletesUpdated.map((a, i) => (
+                        <p key={`u${i}`}><span className="text-mesa-accent">+group</span> {a.name} &lt;{a.email}&gt; → {a.groupsAdded.join(", ")}</p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
             {[...CANONICAL_GROUPS, { id: "all-else" as const, shortLabel: "All Else" }].map((g) => {
               const rows = groupBuckets[g.id];
               return (
