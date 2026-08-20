@@ -74,7 +74,7 @@ export interface CanonicalGroup {
 // so an athlete can legitimately belong to more than one at once (e.g.
 // "playing up"), and can carry more than one in their persisted `groups`.
 export const CANONICAL_GROUPS: CanonicalGroup[] = [
-  { id: "junior", label: "JR Boys & Girls (K-5th, Co-ed)", gender: "coed", minGrade: "K", maxGrade: "5" },
+  { id: "junior", label: "Junior Boys & Girls (K-5th, Co-ed)", gender: "coed", minGrade: "K", maxGrade: "5" },
   { id: "ms", label: "Middle School Boys & Girls (5th-8th, Co-ed)", gender: "coed", minGrade: "5", maxGrade: "8" },
   { id: "hs-girls", label: "High School Girls (7th-12th)", gender: "girls", minGrade: "7", maxGrade: "12" },
   { id: "jv-boys", label: "JV Boys (7th-10th)", gender: "boys", minGrade: "7", maxGrade: "10", autoSeed: false },
