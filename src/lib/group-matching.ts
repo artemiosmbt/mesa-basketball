@@ -54,16 +54,13 @@ export function normalizeSessionLabelForComparison(label: string | null | undefi
 
 export interface CanonicalGroup {
   id: CanonicalGroupId;
-  label: string;
-  // Admin Groups-tab section-header text only — verbatim copy of the live
-  // schedule card's own group name, whatever it actually says (most cards
+  // Verbatim copy of the live schedule card's own group name, whatever it
+  // actually says — used everywhere in the admin Groups tab (section
+  // headers, per-athlete badges, the add/remove toggle buttons). Most cards
   // carry no grade info; Junior's happens to bake "— Grade 5 & Below" into
-  // its own live name, so that stays). Never hand-write extra grade/coed
-  // detail here that isn't literally on the card. Kept separate from
-  // `label` (the fuller hand-written text stays useful on the per-athlete
-  // badges and toggle buttons elsewhere in the Groups tab) so this doesn't
-  // ripple into those.
-  shortLabel: string;
+  // its own live name, so that stays. Never hand-write extra grade/coed
+  // detail here that isn't literally on the card.
+  label: string;
   gender: "boys" | "girls" | "coed";
   minGrade: string;
   maxGrade: string;
@@ -83,11 +80,11 @@ export interface CanonicalGroup {
 // so an athlete can legitimately belong to more than one at once (e.g.
 // "playing up"), and can carry more than one in their persisted `groups`.
 export const CANONICAL_GROUPS: CanonicalGroup[] = [
-  { id: "junior", label: "Junior Boys & Girls (K-5th, Co-ed)", shortLabel: "Junior Boys & Girls — Grade 5 & Below", gender: "coed", minGrade: "K", maxGrade: "5" },
-  { id: "ms", label: "Middle School Boys & Girls (5th-8th, Co-ed)", shortLabel: "Middle School Boys & Girls", gender: "coed", minGrade: "5", maxGrade: "8" },
-  { id: "hs-girls", label: "High School Girls (7th-12th)", shortLabel: "High School Girls", gender: "girls", minGrade: "7", maxGrade: "12" },
-  { id: "jv-boys", label: "JV Boys (7th-10th)", shortLabel: "JV Boys", gender: "boys", minGrade: "7", maxGrade: "10", autoSeed: false },
-  { id: "varsity-boys", label: "Varsity Boys (8th-12th)", shortLabel: "Varsity Boys", gender: "boys", minGrade: "8", maxGrade: "12", autoSeed: false },
+  { id: "junior", label: "Junior Boys & Girls — Grade 5 & Below", gender: "coed", minGrade: "K", maxGrade: "5" },
+  { id: "ms", label: "Middle School Boys & Girls", gender: "coed", minGrade: "5", maxGrade: "8" },
+  { id: "hs-girls", label: "High School Girls", gender: "girls", minGrade: "7", maxGrade: "12" },
+  { id: "jv-boys", label: "JV Boys", gender: "boys", minGrade: "7", maxGrade: "10", autoSeed: false },
+  { id: "varsity-boys", label: "Varsity Boys", gender: "boys", minGrade: "8", maxGrade: "12", autoSeed: false },
 ];
 
 // Maps a LIVE session label (WeeklySession.group / registrations.booked_group)

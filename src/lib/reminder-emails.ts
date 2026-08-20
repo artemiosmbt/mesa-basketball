@@ -64,7 +64,7 @@ interface SessionGroupInternal {
 // "JV Boys & Varsity Boys" for a family with kids in both attending the
 // same combined session — never the raw live-sheet combo text itself.
 function displayGroupLabel(matchedGroups: Set<CanonicalGroupId>, rawGroup: string): string {
-  const labels = CANONICAL_GROUPS.filter((cg) => matchedGroups.has(cg.id)).map((cg) => cg.shortLabel);
+  const labels = CANONICAL_GROUPS.filter((cg) => matchedGroups.has(cg.id)).map((cg) => cg.label);
   return labels.length > 0 ? labels.join(" & ") : rawGroup;
 }
 
