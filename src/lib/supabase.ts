@@ -2,9 +2,9 @@ import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { sendAdminSMS } from "@/lib/sms";
 import { REFERRAL_PROGRAM_ENABLED, REFERRAL_CREDIT_REDEMPTION_ENABLED } from "@/lib/feature-flags";
 import { trainerNamesMatch } from "@/lib/trainers";
-import { normalizeSessionLabelForComparison as normLabel } from "@/lib/group-matching";
+import { normalizeSessionLabelForComparison as normLabel, mergeAthleteAfterBooking, defaultGroupsForGradeGender, canonicalGroupForLabel } from "@/lib/group-matching";
 import { regGroupKey } from "@/lib/weekly-schedule-matching";
-import type { Athlete } from "@/lib/athletes";
+import { normalizedAthleteName, type Athlete, type CanonicalGroupId } from "@/lib/athletes";
 
 let _supabase: SupabaseClient | null = null;
 
@@ -1806,5 +1806,124 @@ export async function checkDuplicateRegistration(
     .eq("booked_start_time", startTime)
     .eq("status", "confirmed");
   return !error && (count ?? 0) > 0;
+}
+
+// --- Ported verbatim from booking-finalize.ts's parseKidsList/playerLabel
+// (kept as a separate copy rather than an import — booking-finalize.ts
+// already imports FROM this file, so importing back would be circular). ---
+function parseKidsListForGroupSync(kidsStr: string): string[] {
+  if (!kidsStr.trim()) return [];
+  if (kidsStr.includes("(")) {
+    return kidsStr.split("), ").map((p, i, arr) =>
+      i < arr.length - 1 ? p + ")" : p
+    ).filter((s) => s.trim());
+  }
+  return kidsStr.split(",").map((s) => s.trim()).filter(Boolean);
+}
+function playerLabelForGroupSync(playerStr: string): string {
+  const idx = playerStr.indexOf(" (");
+  return idx > -1 ? playerStr.substring(0, idx).trim() : playerStr.trim();
+}
+
+// Looks at one athlete's most recent 20 weekly-group bookings (across ALL
+// groups, not just the one being checked) and drops any currently-assigned
+// canonical group that doesn't appear among them — the owner's own rule for
+// letting a stale assignment (a kid who's aged out or moved to a different
+// program) fall off automatically instead of piling up forever, since
+// mergeAthleteAfterBooking only ever ADDS a group and never removes one.
+// registrations.kids has no per-kid id, so matching is by normalized name
+// within this one email's own history — a same-named kid on a different
+// family's account can't bleed into this window.
+async function pruneStaleGroups(supabase: SupabaseClient, email: string, athleteName: string, currentGroups: CanonicalGroupId[]): Promise<CanonicalGroupId[]> {
+  if (currentGroups.length === 0) return currentGroups;
+  const nameKey = normalizedAthleteName(athleteName);
+
+  const { data: regs } = await supabase
+    .from("registrations_with_parsed_date")
+    .select("kids, booked_group, booked_date_parsed")
+    .ilike("email", email)
+    .eq("type", "weekly")
+    .neq("status", "payment_abandoned")
+    .order("booked_date_parsed", { ascending: false })
+    .limit(300); // generous upper bound before per-athlete name-matching narrows this to the real 20
+
+  const recentGroups = new Set<CanonicalGroupId>();
+  let matched = 0;
+  for (const r of regs || []) {
+    if (matched >= 20) break;
+    if (!r.kids) continue;
+    const names = parseKidsListForGroupSync(r.kids).map((p) => normalizedAthleteName(playerLabelForGroupSync(p)));
+    if (!names.includes(nameKey)) continue;
+    matched++;
+    if (r.booked_group) for (const g of canonicalGroupForLabel(r.booked_group)) recentGroups.add(g);
+  }
+
+  // Fewer than 20 bookings on record at all yet — too little history to
+  // conclude a group was actually dropped, so leave everything as-is.
+  if (matched < 20) return currentGroups;
+  return currentGroups.filter((g) => recentGroups.has(g));
+}
+
+// Auto-syncs one weekly booking's athletes into their saved profile roster's
+// `groups` — adds any newly-booked canonical group (never seen this before
+// on a free booking's client-side saveProfile() call in schedule/page.tsx,
+// which never runs for a PAID booking: the browser navigates to Stripe
+// Checkout and away from the page before that fetch can fire). This is the
+// one place guaranteed to run for every weekly booking regardless of path —
+// called from finalizeConfirmedWeeklyBooking for both the free-confirm and
+// the post-Stripe-webhook paths. Also prunes any group an athlete's most
+// recent 20 weekly bookings no longer support (see pruneStaleGroups).
+// Best-effort: the booking itself is already confirmed by the time this
+// runs, so a failure here must never surface as a failed booking — callers
+// should wrap this in try/catch.
+export async function syncAthleteGroupsFromBooking(email: string, kidsStr: string, bookedGroupLabels: string[]): Promise<void> {
+  const normalizedEmail = (email || "").toLowerCase().trim();
+  const resolvedLabels = (bookedGroupLabels || []).filter(Boolean);
+  if (!normalizedEmail || !kidsStr || resolvedLabels.length === 0) return;
+
+  const parsed = parseKidsListForGroupSync(kidsStr)
+    .map((p) => {
+      const name = playerLabelForGroupSync(p);
+      const dobMatch = p.match(/DOB:\s*([^,)]+)/i);
+      const gradeMatch = p.match(/Grade:\s*([^,)]+)/i);
+      const genderMatch = p.match(/Gender:\s*(Male|Female)/i);
+      return {
+        name,
+        dob: dobMatch ? dobMatch[1].trim() : "",
+        grade: gradeMatch ? gradeMatch[1].trim() : "",
+        gender: genderMatch ? (genderMatch[1].trim().toLowerCase() as "male" | "female") : undefined,
+      };
+    })
+    .filter((k) => k.name);
+  if (parsed.length === 0) return;
+
+  const supabase = getSupabase();
+  // Guest checkout (no account) has no profiles row at all — profiles.id
+  // has a hard FK to auth.users.id, so there's nothing to sync onto.
+  const { data: profile } = await supabase.from("profiles").select("id, kids").ilike("email", normalizedEmail).maybeSingle();
+  if (!profile) return;
+
+  const existingKids: Athlete[] = Array.isArray(profile.kids) ? profile.kids : [];
+  const merged = [...existingKids];
+  const claimedThisRequest = new Set<number>();
+  for (const incoming of parsed) {
+    const idx = merged.findIndex((k, i) => !claimedThisRequest.has(i) && normalizedAthleteName(k.name) === normalizedAthleteName(incoming.name));
+    if (idx >= 0) {
+      merged[idx] = mergeAthleteAfterBooking(merged[idx], incoming, resolvedLabels);
+      claimedThisRequest.add(idx);
+    } else {
+      const groups = defaultGroupsForGradeGender(incoming.grade || "", incoming.gender);
+      const fresh: Athlete = { id: crypto.randomUUID(), name: incoming.name, dob: incoming.dob, grade: incoming.grade, gender: incoming.gender || "", groups };
+      merged.push(mergeAthleteAfterBooking(fresh, incoming, resolvedLabels));
+      claimedThisRequest.add(merged.length - 1);
+    }
+  }
+
+  for (const idx of claimedThisRequest) {
+    merged[idx] = { ...merged[idx], groups: await pruneStaleGroups(supabase, normalizedEmail, merged[idx].name, merged[idx].groups) };
+  }
+
+  const { error } = await supabase.from("profiles").update({ kids: merged, updated_at: new Date().toISOString() }).eq("id", profile.id);
+  if (error) console.error(`syncAthleteGroupsFromBooking: update failed for ${normalizedEmail}:`, error);
 }
 

@@ -27,6 +27,7 @@ import {
   getRegistrationByToken,
   updateRegistrationPlayers,
   alertIfPrivateDoubleBooked,
+  syncAthleteGroupsFromBooking,
   type Registration,
 } from "@/lib/supabase";
 
@@ -575,6 +576,19 @@ export async function finalizeConfirmedWeeklyBooking(params: FinalizeWeeklyBooki
   const priceNote = weeklyTotalPrice
     ? `<p><strong>Total:</strong> $${fmtMoney(weeklyTotalPrice)}${weeklyCreditApplied > 0 ? ` — $${fmtMoney(weeklyCreditApplied)} account credit applied` : ""}${weeklyAmountCharged > 0 ? ` — <strong>Charged:</strong> $${fmtMoney(weeklyTotalWithFee)}` : ""}</p>`
     : "";
+
+  // Best-effort — same "already confirmed" rule as everything else in this
+  // function: a sync failure must never surface as a failed booking. This
+  // is what actually makes group auto-assignment work for a PAID booking —
+  // schedule/page.tsx's client-side saveProfile() call never runs for the
+  // Stripe Checkout path (the browser navigates to Stripe and away from the
+  // page before that fetch can fire), so this server-side sync is the one
+  // place guaranteed to run for every weekly booking, paid or free.
+  try {
+    await syncAthleteGroupsFromBooking(params.email, params.kids, Array.from(groupCounts.keys()));
+  } catch (syncErr) {
+    console.error("Athlete group sync failed (weekly booking already confirmed):", syncErr);
+  }
 
   // Best-effort — the sessions are already paid for and confirmed, so a
   // failure here must not surface as a failed booking.
