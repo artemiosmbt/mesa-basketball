@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { generateUniqueReferralCode, isReferralCodeTaken } from "@/lib/supabase";
+import { normalizeGender } from "@/lib/athletes";
 
 function getSupabaseAdmin() {
   return createClient(
@@ -31,7 +32,14 @@ export async function GET(req: NextRequest) {
       .eq("email", user.email!.toLowerCase().trim())
       .eq("status", "confirmed"),
   ]);
-  return NextResponse.json({ ...(data || {}), is_returning_client: (bookingCount || 0) > 0 });
+  // Self-heals a profile saved back when signup/page.tsx's gender dropdown
+  // still returned capitalized "Male"/"Female" (see normalizeGender) — every
+  // reader downstream expects lowercase, so this is normalized on every read
+  // rather than requiring a one-time data migration.
+  const normalized = data && Array.isArray(data.kids)
+    ? { ...data, kids: data.kids.map((k: Record<string, unknown>) => ({ ...k, gender: normalizeGender(k.gender as string) })) }
+    : data;
+  return NextResponse.json({ ...(normalized || {}), is_returning_client: (bookingCount || 0) > 0 });
 }
 
 export async function POST(req: NextRequest) {
@@ -72,6 +80,7 @@ export async function POST(req: NextRequest) {
     ...k,
     id: (k.id as string) || crypto.randomUUID(),
     groups: Array.isArray(k.groups) ? k.groups : [],
+    gender: normalizeGender(k.gender as string),
   }));
 
   const upsertData: Record<string, unknown> = {

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { normalizedAthleteName, type Athlete } from "@/lib/athletes";
+import { normalizedAthleteName, normalizeGender, type Athlete } from "@/lib/athletes";
 import { mergeAthleteAfterBooking, defaultGroupsForGradeGender } from "@/lib/group-matching";
 
 function getSupabaseAdmin() {
@@ -49,8 +49,13 @@ export async function POST(req: NextRequest) {
   // deliberate reference, not a name guess), so re-submitting the SAME real
   // athlete twice in one request (by id) still correctly merges into one.
   const claimedThisRequest = new Set<number>();
-  for (const incoming of (body.athletes || []) as Partial<Athlete>[]) {
-    if (!incoming.name?.trim()) continue;
+  for (const rawIncoming of (body.athletes || []) as Partial<Athlete>[]) {
+    if (!rawIncoming.name?.trim()) continue;
+    // See normalizeGender: a booking form pre-filled from a profile saved
+    // back when signup's dropdown returned capitalized "Male"/"Female"
+    // would otherwise carry that casing straight through into this
+    // athlete's persisted gender again.
+    const incoming: Partial<Athlete> = { ...rawIncoming, gender: normalizeGender(rawIncoming.gender) };
     let idx = incoming.id ? merged.findIndex((k) => k.id === incoming.id) : -1;
     if (idx === -1) {
       idx = merged.findIndex((k, i) => !claimedThisRequest.has(i) && normalizedAthleteName(k.name) === normalizedAthleteName(incoming.name!));

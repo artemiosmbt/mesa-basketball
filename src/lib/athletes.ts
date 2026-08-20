@@ -46,3 +46,23 @@ export const OTHER_GRADE_SENTINEL = "Other";
 export function normalizedAthleteName(name: string): string {
   return name.trim().toLowerCase().replace(/\s+/g, " ");
 }
+
+// Every gender comparison in this codebase (the schedule booking form's own
+// <select value="male">, the boys/girls mismatch warning, the Coach Z NCAA
+// notice check in trainers.ts, group auto-assignment) is a strict lowercase
+// `=== "male"`/`=== "female"` check — signup/page.tsx used to save the
+// capitalized "Male"/"Female" its own dropdown returned, straight to
+// profiles.kids, with nothing normalizing it anywhere after that. A
+// capitalized value silently fails every one of those checks: the booking
+// form's <select> (lowercase-valued options) shows blank even though the
+// saved state is non-empty, so the required-field check never catches it,
+// and any place defaulting on a failed match (schedule/page.tsx's kidsStr
+// builder: `gender === "male" ? "Male" : "Female"`) writes the wrong gender
+// into the booking. Call this at every point gender is accepted from a
+// client (signup, settings, a booking form) or read back out of the
+// database, so an already-affected saved profile self-heals the moment it's
+// next loaded or re-saved, without needing a data migration.
+export function normalizeGender(gender: string | undefined | null): "male" | "female" | "" {
+  const g = (gender || "").trim().toLowerCase();
+  return g === "male" || g === "female" ? g : "";
+}

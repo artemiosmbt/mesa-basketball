@@ -1146,8 +1146,8 @@ export default function ManageBooking({
                               className="w-full rounded border border-brown-700 bg-brown-900 px-3 py-2 text-sm text-white"
                             >
                               <option value="">Gender *</option>
-                              <option value="Male">Male</option>
-                              <option value="Female">Female</option>
+                              <option value="male">Male</option>
+                              <option value="female">Female</option>
                             </select>
                             <div className="flex gap-2">
                               <button
@@ -1596,8 +1596,8 @@ export default function ManageBooking({
                                 <label className="mb-1 block text-xs text-brown-300">Gender <span className="text-red-500">*</span></label>
                                 <select required value={player.gender} onChange={e => setReschedulePlayers(prev => prev.map((p, j) => j === i ? { ...p, gender: e.target.value } : p))} onClick={(e) => e.stopPropagation()} className="w-full rounded-lg border border-mesa-accent/40 bg-brown-800 px-3 py-2 text-white text-sm focus:border-mesa-accent focus:outline-none">
                                   <option value="">Select...</option>
-                                  <option value="Male">Male</option>
-                                  <option value="Female">Female</option>
+                                  <option value="male">Male</option>
+                                  <option value="female">Female</option>
                                 </select>
                               </div>
                             </div>
