@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { id, bookedDate, bookedStartTime, bookedEndTime, bookedLocation, bookedGroup, bookedTrainer, sessionLabelPrefix, newType, keepReferralCredit, feeChoice } = await req.json();
+  const { id, bookedDate, bookedStartTime, bookedEndTime, bookedLocation, bookedGroup, bookedTrainer, sessionLabelPrefix, newType, keepReferralCredit, feeChoice, suppressNotification } = await req.json();
   if (!id || !bookedDate || !bookedStartTime || !bookedEndTime || !bookedLocation) {
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
   }
@@ -667,26 +667,36 @@ export async function POST(req: NextRequest) {
   const toLine = `To: ${prefix} — ${formatDateWithDay(bookedDate)} | ${bookedStartTime}-${bookedEndTime} at ${resolveLocationName(bookedLocation)}`;
 
   try {
-    await sendRescheduleNotification({
-      parentName: reg.parent_name,
-      email: reg.email,
-      oldSessionDetails,
-      newSessionDetails,
-      manageToken: reg.manage_token,
-      isLateReschedule: chargeLateFee,
-      lateFeeCredited: chargeLateFee ? lateFeeCredited : undefined,
-      lateFeeCreditApplied: chargeLateFee ? lateFeeCreditApplied : undefined,
-      priceAdjustment: autoChargedAmount > 0 ? { kind: "charge", amount: autoChargedAmount } : undefined,
-      newTrainer: resolvedTrainer,
-      packageSessionForfeited,
-      newSessionPackageCovered: packageSessionForfeited ? !clearPackageId : undefined,
-      fullForfeitNoRefund,
-    });
-    if (reg.sms_consent && reg.phone) {
-      await sendSMS(
-        reg.phone,
-        `Mesa Basketball: Your session has been rescheduled by your trainer.\n${fromLine ? `${fromLine}\n` : ""}${toLine}\nAthlete: ${reg.kids}${priceNote}${creditRefundNote}\nManage: mesabasketballtraining.com/booking/${reg.manage_token}\nReply STOP to opt out.`
-      );
+    // suppressNotification: for a pure internal relabel (e.g. a group's
+    // display name changed but the date/time/trainer/price didn't) — the
+    // client's actual session isn't moving, so a "rescheduled" email/SMS
+    // would be misleading noise, not useful information. Defaults to
+    // false/undefined so every normal reschedule keeps notifying exactly as
+    // before; the admin has to deliberately opt out per-action. The admin's
+    // own SMS summary below still always fires either way, as a record of
+    // what changed.
+    if (!suppressNotification) {
+      await sendRescheduleNotification({
+        parentName: reg.parent_name,
+        email: reg.email,
+        oldSessionDetails,
+        newSessionDetails,
+        manageToken: reg.manage_token,
+        isLateReschedule: chargeLateFee,
+        lateFeeCredited: chargeLateFee ? lateFeeCredited : undefined,
+        lateFeeCreditApplied: chargeLateFee ? lateFeeCreditApplied : undefined,
+        priceAdjustment: autoChargedAmount > 0 ? { kind: "charge", amount: autoChargedAmount } : undefined,
+        newTrainer: resolvedTrainer,
+        packageSessionForfeited,
+        newSessionPackageCovered: packageSessionForfeited ? !clearPackageId : undefined,
+        fullForfeitNoRefund,
+      });
+      if (reg.sms_consent && reg.phone) {
+        await sendSMS(
+          reg.phone,
+          `Mesa Basketball: Your session has been rescheduled by your trainer.\n${fromLine ? `${fromLine}\n` : ""}${toLine}\nAthlete: ${reg.kids}${priceNote}${creditRefundNote}\nManage: mesabasketballtraining.com/booking/${reg.manage_token}\nReply STOP to opt out.`
+        );
+      }
     }
     const adminPriceNote = reg.package_id
       ? packageSessionForfeited

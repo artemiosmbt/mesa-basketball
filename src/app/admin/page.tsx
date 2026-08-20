@@ -1224,6 +1224,11 @@ export default function AdminPage() {
   const [rescheduleConvertToPrivate, setRescheduleConvertToPrivate] = useState(false);
   const [rescheduleConvertToGroup, setRescheduleConvertToGroup] = useState(false);
   const [rescheduleKeepCredit, setRescheduleKeepCredit] = useState(true);
+  // Opt-in, per-action — for a pure internal relabel (date/time/trainer
+  // unchanged, only the group's display name is different) where a
+  // "rescheduled" email/SMS would be misleading. Defaults off so every
+  // normal reschedule keeps notifying exactly as before.
+  const [rescheduleSuppressNotification, setRescheduleSuppressNotification] = useState(false);
 
   // Add-player state
   const [addPlayerOpenId, setAddPlayerOpenId] = useState<string | null>(null);
@@ -1546,6 +1551,7 @@ export default function AdminPage() {
     setRescheduleConvertToPrivate(false);
     setRescheduleConvertToGroup(false);
     setRescheduleKeepCredit(true);
+    setRescheduleSuppressNotification(false);
     // For weekly/camp we start the picker blank so the admin actively selects
     // from real sheet options rather than pre-filling with the (possibly
     // stale) current label. Private sessions still start pre-filled since
@@ -1629,6 +1635,7 @@ export default function AdminPage() {
         newType,
         keepReferralCredit: showCreditCheckbox ? rescheduleKeepCredit : undefined,
         feeChoice,
+        suppressNotification: rescheduleSuppressNotification || undefined,
       }),
     });
     const data = await res.json();
@@ -2821,7 +2828,20 @@ export default function AdminPage() {
                   );
                 })()}
                 {rescheduleError && <p className="text-xs text-red-400 mt-2">{rescheduleError}</p>}
-                <p className="text-[11px] text-brown-500 mt-3">If the current session is within 24 hours, you&apos;ll be asked whether to waive or charge the late fee. The client will get an email/text about the change.</p>
+                <label className="flex items-center gap-2 mt-3 text-xs text-brown-300">
+                  <input
+                    type="checkbox"
+                    checked={rescheduleSuppressNotification}
+                    onChange={(e) => setRescheduleSuppressNotification(e.target.checked)}
+                    className="rounded border-brown-600 accent-mesa-accent h-3.5 w-3.5"
+                  />
+                  Don&apos;t notify the client (internal relabel only — date/time/trainer unchanged)
+                </label>
+                <p className="text-[11px] text-brown-500 mt-2">
+                  {rescheduleSuppressNotification
+                    ? "The client will NOT be emailed or texted about this change."
+                    : "If the current session is within 24 hours, you’ll be asked whether to waive or charge the late fee. The client will get an email/text about the change."}
+                </p>
                 <div className="flex gap-3 mt-4">
                   <button onClick={() => submitReschedule()} disabled={rescheduleSaving} className="flex-1 rounded-lg bg-mesa-accent text-white text-sm font-semibold py-2 disabled:opacity-50">
                     {rescheduleSaving ? "Sending..." : "Confirm & Send"}
