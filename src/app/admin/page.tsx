@@ -1155,6 +1155,22 @@ export default function AdminPage() {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [noShowConfirm, setNoShowConfirm] = useState<string | null>(null);
   const [noShowing, setNoShowing] = useState<string | null>(null);
+  // RegCard/FolderCard are defined inside this component's body, so React
+  // treats them as a brand-new component type on every render of THIS
+  // component — any local useState inside them (e.g. an expanded/collapsed
+  // toggle) gets reset on the very next re-render triggered by anything
+  // else on the page (like clicking "No Show", which sets noShowConfirm
+  // above). Keeping expanded/collapsed here instead survives that, since
+  // this component itself never remounts.
+  const [expandedCardIds, setExpandedCardIds] = useState<Set<string>>(new Set());
+  function toggleExpandedCard(id: string) {
+    setExpandedCardIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
   const [token, setToken] = useState<string | null>(null);
   const [authCtx, setAuthCtx] = useState<AuthContext | null>(null);
   const [trainerFilter, setTrainerFilter] = useState("all");
@@ -1953,7 +1969,8 @@ export default function AdminPage() {
   const campCapacity = useMemo(() => buildCampCapacityMap(scheduleData?.camps || []), [scheduleData]);
 
   function RegCard({ r, isPast = false }: { r: Registration; isPast?: boolean }) {
-    const [expanded, setExpanded] = useState(false);
+    const cardId = `reg-${r.id}`;
+    const expanded = expandedCardIds.has(cardId);
     const fullSession = r.session_details
       ? r.session_details.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim()
       : "—";
@@ -1962,7 +1979,7 @@ export default function AdminPage() {
         {/* Tappable summary row */}
         <button
           type="button"
-          onClick={() => setExpanded((v) => !v)}
+          onClick={() => toggleExpandedCard(cardId)}
           className="w-full text-left px-4 py-3 flex items-start justify-between gap-2"
         >
           <div className="min-w-0">
@@ -2116,17 +2133,24 @@ export default function AdminPage() {
   // A collapsed folder for one real weekly/pickup/camp session — expands to
   // the individual RegCards (with each athlete's info) that make it up.
   function FolderCard({ folder, isPast = false }: { folder: Folder; isPast?: boolean }) {
-    const [expanded, setExpanded] = useState(false);
+    const cardId = `folder-${folder.key}`;
+    const expanded = expandedCardIds.has(cardId);
     const sample = folder.regs[0];
     const timeLabel = sample.booked_start_time ? `${sample.booked_start_time}${sample.booked_end_time ? `-${sample.booked_end_time}` : ""}` : null;
+    const noShowCount = folder.regs.filter((r) => r.status === "no_show").length;
     return (
       <div className="rounded-xl border-2 border-brown-600 bg-brown-900/40 overflow-hidden shadow-lg shadow-black/30">
-        <button type="button" onClick={() => setExpanded((v) => !v)} className="w-full text-left px-4 py-3 flex items-start justify-between gap-2">
+        <button type="button" onClick={() => toggleExpandedCard(cardId)} className="w-full text-left px-4 py-3 flex items-start justify-between gap-2">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
               <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${isPickup(sample) ? "bg-orange-500 text-white" : "bg-amber-400 text-blue-900"}`}>{typePillLabel(sample.type, sample.session_details)}</span>
               <span className="font-medium text-sm">{folderLabel(sample)}</span>
               {(() => { const da = daysAway(sample.booked_date); return da ? <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${da.cls}`}>{da.label}</span> : null; })()}
+              {noShowCount > 0 && (
+                <span className="rounded-full bg-orange-900/40 text-orange-400 px-2 py-0.5 text-xs font-medium">
+                  {noShowCount === folder.regs.length ? "no show" : `${noShowCount} no show${noShowCount === 1 ? "" : "s"}`}
+                </span>
+              )}
             </div>
             <div className="text-xs text-brown-400 mt-1">
               {timeLabel && <span>{timeLabel}</span>}{sample.booked_location ? ` · ${sample.booked_location}` : ""}
