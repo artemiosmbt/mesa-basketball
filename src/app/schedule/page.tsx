@@ -2065,6 +2065,30 @@ export default function Home() {
     return baseA.includes(baseB) || baseB.includes(baseA);
   }
 
+  // On a day with two trainers running JV Boys and Varsity Boys at the
+  // exact same time (as opposed to the single-trainer "JV & Varsity Boys"
+  // combo — that one's a single row with a single trainer, so it never
+  // matches here), parents see both trainers there either way. Purely a
+  // display label — s.trainer itself is untouched, since capacity/payroll/
+  // reschedule logic all depend on it staying the one real trainer name
+  // actually on that row.
+  function pairedTrainerLabel(s: { date: string; startTime: string; location: string; group: string; trainer?: string }): string {
+    const base = groupBaseName(s.group);
+    const pairBase = base === "jv boys" ? "varsity boys" : base === "varsity boys" ? "jv boys" : null;
+    if (!pairBase) return formatTrainerForDisplay(s.trainer);
+    const sibling = schedule.find(
+      (o) =>
+        o.date === s.date &&
+        o.startTime === s.startTime &&
+        o.location.trim().toLowerCase() === s.location.trim().toLowerCase() &&
+        groupBaseName(o.group) === pairBase
+    );
+    if (!sibling || !sibling.trainer || !s.trainer || sibling.trainer.trim().toLowerCase() === s.trainer.trim().toLowerCase()) {
+      return formatTrainerForDisplay(s.trainer);
+    }
+    return `${formatTrainerForDisplay(s.trainer)} and ${formatTrainerForDisplay(sibling.trainer)}`;
+  }
+
   // The companion pickup or skills session for this one — a different but
   // related group's session on the same date, at the same location,
   // scheduled exactly back-to-back (its end = this one's start, or its
@@ -2509,7 +2533,7 @@ export default function Home() {
                                 <div className="flex-1 min-w-0">
                                   <p className="font-medium text-sm">{dayName}, {s.date}</p>
                                   <p className="text-xs text-brown-400">
-                                    {s.startTime} - {s.endTime} &bull; <LocationLink location={s.location} /> &bull; {formatTrainerForDisplay(s.trainer)}
+                                    {s.startTime} - {s.endTime} &bull; <LocationLink location={s.location} /> &bull; {pairedTrainerLabel(s)}
                                     <TrainerBioLink trainer={s.trainer || "Artemios Gavalas"} />
                                   </p>
                                 </div>
@@ -2579,7 +2603,7 @@ export default function Home() {
                                 <div className="flex-1 min-w-0">
                                   <p className="font-medium text-sm">{dayName}, {s.date}</p>
                                   <p className="text-xs text-brown-400">
-                                    {s.startTime} - {s.endTime} &bull; <LocationLink location={s.location} /> &bull; {formatTrainerForDisplay(s.trainer)}
+                                    {s.startTime} - {s.endTime} &bull; <LocationLink location={s.location} /> &bull; {pairedTrainerLabel(s)}
                                     <TrainerBioLink trainer={s.trainer || "Artemios Gavalas"} />
                                   </p>
                                 </div>
