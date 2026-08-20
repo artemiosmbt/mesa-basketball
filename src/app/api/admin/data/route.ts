@@ -176,7 +176,38 @@ export async function GET(req: NextRequest) {
     if (ctx.role !== "admin") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
-    const { data: profiles } = await supabase.from("profiles").select("email, phone, parent_name, kids, video_consent");
+    const { data: profiles } = await supabase.from("profiles").select("id, email, phone, parent_name, kids, video_consent");
+
+    // Same backfill as supabase-migration-athlete-ids-and-groups.sql, done
+    // lazily here instead of as a one-time migration: the admin/page.tsx
+    // Groups tab silently drops any kid missing an `id` from EVERY bucket
+    // (including "All Else") since every group-assign/hide/merge action
+    // needs a stable id to target a specific kid. Idempotent — a kid that
+    // already has both fields is returned untouched — so safe to run on
+    // every fetch of this view, keeping every saved athlete visible without
+    // ever needing another manual migration run.
+    const backfillRows: { id: string; kids: unknown }[] = [];
+    for (const p of profiles || []) {
+      if (!Array.isArray(p.kids) || p.kids.length === 0) continue;
+      let changed = false;
+      const fixedKids = p.kids.map((k: Record<string, unknown>) => {
+        if (k.id && Array.isArray(k.groups)) return k;
+        changed = true;
+        return { ...k, id: k.id || crypto.randomUUID(), groups: Array.isArray(k.groups) ? k.groups : [] };
+      });
+      if (changed) {
+        p.kids = fixedKids;
+        backfillRows.push({ id: p.id, kids: fixedKids });
+      }
+    }
+    if (backfillRows.length > 0) {
+      await Promise.all(
+        backfillRows.map((row) =>
+          supabase.from("profiles").update({ kids: row.kids, updated_at: new Date().toISOString() }).eq("id", row.id)
+        )
+      );
+    }
+
     return NextResponse.json({ profiles: profiles || [] });
   }
 
