@@ -2340,7 +2340,7 @@ export default function Home() {
                   }}
                 >
                   <div className="flex items-center justify-between">
-                    <h3 className="text-lg font-bold text-mesa-accent">{group.replace("Grade 5 & Below", "Grades K-5")}</h3>
+                    <h3 className="text-lg font-bold text-mesa-accent">{group}</h3>
                     <div className="flex items-center gap-2">
 {selectedCount > 0 && (
                         <span className="rounded-full bg-mesa-accent/20 px-2 py-0.5 text-xs font-semibold text-mesa-accent">
