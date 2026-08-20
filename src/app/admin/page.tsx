@@ -1229,6 +1229,12 @@ export default function AdminPage() {
   // "rescheduled" email/SMS would be misleading. Defaults off so every
   // normal reschedule keeps notifying exactly as before.
   const [rescheduleSuppressNotification, setRescheduleSuppressNotification] = useState(false);
+  // Same idea as suppressNotification, for price — a pure relabel (e.g. a
+  // bulk-discounted weekly booking whose rate has nothing to do with the
+  // new group's live sheet price) shouldn't get repriced off the new
+  // session's rate. Defaults off so every normal reschedule still recomputes
+  // price exactly as before.
+  const [rescheduleKeepPriceUnchanged, setRescheduleKeepPriceUnchanged] = useState(false);
 
   // Add-player state
   const [addPlayerOpenId, setAddPlayerOpenId] = useState<string | null>(null);
@@ -1552,6 +1558,7 @@ export default function AdminPage() {
     setRescheduleConvertToGroup(false);
     setRescheduleKeepCredit(true);
     setRescheduleSuppressNotification(false);
+    setRescheduleKeepPriceUnchanged(false);
     // For weekly/camp we start the picker blank so the admin actively selects
     // from real sheet options rather than pre-filling with the (possibly
     // stale) current label. Private sessions still start pre-filled since
@@ -1636,6 +1643,7 @@ export default function AdminPage() {
         keepReferralCredit: showCreditCheckbox ? rescheduleKeepCredit : undefined,
         feeChoice,
         suppressNotification: rescheduleSuppressNotification || undefined,
+        keepPriceUnchanged: rescheduleKeepPriceUnchanged || undefined,
       }),
     });
     const data = await res.json();
@@ -2788,7 +2796,13 @@ export default function AdminPage() {
                   const targetIsPrivate = convertingToPrivate || (isPrivateTypeClient(r.type) && !convertingToGroup);
                   const targetIsWeekly = convertingToGroup || (r.type === "weekly" && !convertingToPrivate);
                   let newFull: number | undefined;
-                  if (targetIsPrivate) {
+                  if (rescheduleKeepPriceUnchanged) {
+                    // Mirrors the server: keepPriceUnchanged leaves newFullPrice
+                    // undefined there too, which falls back to the existing
+                    // price — shown here as an explicit "same as before" rather
+                    // than silently previewing a recompute that won't happen.
+                    newFull = r.session_price ?? undefined;
+                  } else if (targetIsPrivate) {
                     const durationMins = Math.max(60, parseTimeToMinsClient(rescheduleForm.end) - parseTimeToMinsClient(rescheduleForm.start));
                     newFull = calcPrivatePricePreview(durationMins, r.total_participants || 1, getTrainerTier(rescheduleForm.trainer || r.booked_trainer));
                   } else if (targetIsWeekly && typeof rescheduleForm.price === "number") {
@@ -2837,8 +2851,19 @@ export default function AdminPage() {
                   />
                   Don&apos;t notify the client (internal relabel only — date/time/trainer unchanged)
                 </label>
+                <label className="flex items-center gap-2 mt-2 text-xs text-brown-300">
+                  <input
+                    type="checkbox"
+                    checked={rescheduleKeepPriceUnchanged}
+                    onChange={(e) => setRescheduleKeepPriceUnchanged(e.target.checked)}
+                    className="rounded border-brown-600 accent-mesa-accent h-3.5 w-3.5"
+                  />
+                  Keep the same price (skip recompute — e.g. a bulk/discounted rate that shouldn&apos;t change)
+                </label>
                 <p className="text-[11px] text-brown-500 mt-2">
-                  {rescheduleSuppressNotification
+                  {rescheduleKeepPriceUnchanged
+                    ? "Price will NOT be recomputed — this registration keeps exactly what it already has."
+                    : rescheduleSuppressNotification
                     ? "The client will NOT be emailed or texted about this change."
                     : "If the current session is within 24 hours, you’ll be asked whether to waive or charge the late fee. The client will get an email/text about the change."}
                 </p>

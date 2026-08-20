@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { id, bookedDate, bookedStartTime, bookedEndTime, bookedLocation, bookedGroup, bookedTrainer, sessionLabelPrefix, newType, keepReferralCredit, feeChoice, suppressNotification } = await req.json();
+  const { id, bookedDate, bookedStartTime, bookedEndTime, bookedLocation, bookedGroup, bookedTrainer, sessionLabelPrefix, newType, keepReferralCredit, feeChoice, suppressNotification, keepPriceUnchanged } = await req.json();
   if (!id || !bookedDate || !bookedStartTime || !bookedEndTime || !bookedLocation) {
     return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
   }
@@ -188,7 +188,17 @@ export async function POST(req: NextRequest) {
       const sessions = await getWeeklySchedule({ noCache: true });
       weeklyMatch = sessions.find((s) => s.group === newSessionLabel && s.date === bookedDate && s.startTime === bookedStartTime);
       if (weeklyMatch) {
-        newFullPrice = Math.round(weeklyMatch.price * (reg.total_participants || 1));
+        // keepPriceUnchanged: a pure internal relabel (e.g. this registrant's
+        // bulk/discounted weekly rate has nothing to do with the new
+        // group's live sheet price) — weeklyMatch is still resolved above so
+        // the capacity check below still runs against the real target
+        // session, but newFullPrice deliberately stays undefined so nothing
+        // downstream treats this as a price change (see effectiveAmount /
+        // priceDelta, which both fall back to the existing price whenever
+        // newFullPrice is undefined — same as the untouched-camp-pricing path).
+        if (!keepPriceUnchanged) {
+          newFullPrice = Math.round(weeklyMatch.price * (reg.total_participants || 1));
+        }
       } else {
         priceLookupFailed = true;
       }
