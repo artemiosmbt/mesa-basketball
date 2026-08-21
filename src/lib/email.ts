@@ -3,6 +3,7 @@ import { calcServiceFee, fmtMoney, PRIVATE_RATE_BY_TIER, GROUP_PRIVATE_RATE_BY_T
 import { formatTrainerForDisplay } from "./trainers";
 import { formatMonthYear } from "./sms";
 import { REFERRAL_PROGRAM_ENABLED } from "./feature-flags";
+import { buildUnsubscribeUrl } from "./unsubscribe";
 
 const ARTEMI_EMAIL = "artemios@mesabasketballtraining.com";
 const FROM_EMAIL = "Mesa Basketball <noreply@mesabasketballtraining.com>";
@@ -1278,6 +1279,7 @@ export async function sendReminderEmail(data: {
 }) {
   const resend = getResend();
   const whenLabel = data.isToday ? "Today" : "Tomorrow";
+  const unsubscribeUrl = buildUnsubscribeUrl(BASE_URL, data.to);
 
   const sessionBlocks = data.sessions
     .map(
@@ -1296,6 +1298,16 @@ export async function sendReminderEmail(data: {
     from: FROM_EMAIL,
     to: data.to,
     subject: `⏰ Spots Open ${whenLabel} — Mesa Basketball Training`,
+    // Gmail/Yahoo/Apple Mail read this to show their own built-in
+    // "Unsubscribe" button next to the sender, and (per RFC 8058) require it
+    // on mail that reads as bulk/promotional or risk bulk-foldering the
+    // sender entirely — this is a recurring "Book Now" nudge, exactly that
+    // category. List-Unsubscribe-Post opts into true one-click (POST,
+    // no confirmation page) rather than just linking the URL.
+    headers: {
+      "List-Unsubscribe": `<${unsubscribeUrl}>`,
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+    },
     html: `<!doctype html>
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
 <head>
@@ -1371,7 +1383,7 @@ export async function sendReminderEmail(data: {
                 Questions? Call/text (631) 599-1280 or email <a href="mailto:artemios@mesabasketballtraining.com" class="mesa-gold-text" style="color: #d4af37;">artemios@mesabasketballtraining.com</a>
               </p>
               <p class="mesa-muted-text" style="margin: 0; color: #7d8bab; font-size: 11px;">
-                You're getting this because Reminder Emails are on in your <a href="${BASE_URL}/settings" class="mesa-muted-text" style="color: #7d8bab;">account settings</a> — turn them off there anytime.
+                You're getting this because Reminder Emails are on in your <a href="${BASE_URL}/settings" class="mesa-muted-text" style="color: #7d8bab;">account settings</a> — turn them off there, or <a href="${unsubscribeUrl}" class="mesa-muted-text" style="color: #7d8bab;">unsubscribe</a> anytime.
               </p>
             </td>
           </tr>
@@ -1381,6 +1393,7 @@ export async function sendReminderEmail(data: {
 </html>`,
   });
   if (result.error) console.error("Resend reminder email error:", result.error, "to:", data.to);
+  return result;
 }
 
 // One consolidated email to Artemios per cron run — not a copy of each
