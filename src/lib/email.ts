@@ -1313,8 +1313,8 @@ export async function sendReminderEmail(data: {
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<meta name="color-scheme" content="light only" />
-<meta name="supported-color-schemes" content="light only" />
+<meta name="color-scheme" content="light" />
+<meta name="supported-color-schemes" content="light" />
 <title>Mesa Basketball Training</title>
 <style>
   /* Belt-and-suspenders against client dark-mode auto-recoloring, which
