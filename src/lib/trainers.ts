@@ -1,3 +1,41 @@
+import { TRAINER_ACCOUNTS } from "@/lib/auth";
+
+// The one name that prices/redeems at the "owner" tier, and that every
+// trainer-selection dropdown site-wide (admin dashboard, public schedule
+// page) always pins first in the list — see sortTrainerNames below.
+export const OWNER_TRAINER_NAME = "Artemios Gavalas";
+
+// Canonical roster for trainer-selection dropdowns: the owner plus every
+// configured TRAINER_ACCOUNTS entry, regardless of whether that trainer has
+// any upcoming/current sessions in the live schedule data. Without this,
+// a trainer with a temporary gap in bookings (or the owner himself, who
+// isn't in TRAINER_ACCOUNTS) silently disappears from the dropdown instead
+// of just showing zero results when selected. Callers should still layer in
+// any extra names found in live data (a substitute not yet added here) on
+// top of this list, not replace it.
+export const ALL_TRAINER_NAMES: string[] = [
+  OWNER_TRAINER_NAME,
+  ...TRAINER_ACCOUNTS.filter((t) => t.trainerName).map((t) => t.trainerName as string),
+];
+
+// Owner first (when present), then alphabetical, "TBD" ("Any Available
+// Trainer" — see formatTrainerForDisplay) always last regardless of where it
+// 'd otherwise alphabetize to, since it's a flexible fallback option rather
+// than a specific person to pick among the named trainers. Used everywhere a
+// set of trainers needs a stable order, including every trainer-selection
+// dropdown site-wide.
+export function sortTrainerNames(names: string[]): string[] {
+  return [...names].sort((a, b) => {
+    const aTbd = a === "TBD";
+    const bTbd = b === "TBD";
+    if (aTbd !== bTbd) return aTbd ? 1 : -1;
+    const aOwner = trainerNamesMatch(a, OWNER_TRAINER_NAME);
+    const bOwner = trainerNamesMatch(b, OWNER_TRAINER_NAME);
+    if (aOwner !== bOwner) return aOwner ? -1 : 1;
+    return a.localeCompare(b);
+  });
+}
+
 /**
  * Maps a trainer's display name (as it appears in schedule data) to the
  * anchor slug of their bio section on /about. Only trainers listed here get
@@ -57,13 +95,12 @@ export function formatTrainerForDisplay(name: string | null | undefined): string
 
 export type TrainerTier = "artemios" | "other";
 
-// The one name that prices/redeems at the "owner" tier. Every other trainer
-// name — including sheet typos or names not yet added anywhere else — falls
-// back to "other" rather than erroring, since treating an unrecognized name
-// as a (cheaper) substitute is the safe direction: it can never overcharge a
-// client or let a package under-cover a session.
-const OWNER_TRAINER_NAME = "Artemios Gavalas";
-
+// The one name that prices/redeems at the "owner" tier (OWNER_TRAINER_NAME,
+// exported above). Every other trainer name — including sheet typos or
+// names not yet added anywhere else — falls back to "other" rather than
+// erroring, since treating an unrecognized name as a (cheaper) substitute is
+// the safe direction: it can never overcharge a client or let a package
+// under-cover a session.
 export function getTrainerTier(name: string | undefined | null): TrainerTier {
   // Case/whitespace-insensitive, same as every other trainer-name comparison
   // in this file (trainerNamesMatch) — a hand-typed schedule-sheet casing

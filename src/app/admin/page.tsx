@@ -3,10 +3,10 @@
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { authClient, resolveAuthRole, TRAINER_ACCOUNTS, type AuthContext } from "@/lib/auth";
+import { authClient, resolveAuthRole, type AuthContext } from "@/lib/auth";
 import type { WeeklySession, Camp, PrivateSlot } from "@/lib/sheets";
 import { fullPriceForType, calcPrivatePrice as calcPrivatePricePreview, getTrainerTier, effectiveSessionPrice, REFERRAL_CREDIT_SESSION_PRICE } from "@/lib/pricing";
-import { trainerNamesMatch, normalizeTrainerNameForComparison } from "@/lib/trainers";
+import { trainerNamesMatch, normalizeTrainerNameForComparison, ALL_TRAINER_NAMES, sortTrainerNames } from "@/lib/trainers";
 import { type CanonicalGroupId } from "@/lib/athletes";
 import { CANONICAL_GROUPS } from "@/lib/group-matching";
 
@@ -1747,22 +1747,23 @@ export default function AdminPage() {
     [registrations, trainerFilter]
   );
 
-  // Seeded with every configured trainer account FIRST (so a trainer with
-  // zero sessions booked yet — brand new, or just hasn't been assigned
-  // anything — still shows up as a real filter option, not just names that
-  // happen to already appear on a registration), then layered with whatever
-  // actually shows up in registrations for anyone not already covered (the
-  // owner himself, "TBD", or a substitute not yet added as a dashboard
-  // account). Deduped by normalized name so a casing/whitespace variant
-  // never shows up as a separate, near-identical option — one
-  // representative spelling per real trainer (the configured account's
-  // canonical spelling wins when both exist), which visibleRegistrations
-  // above then normalized-matches against every casing variant anyway.
+  // Seeded with the canonical trainer list (owner + every configured
+  // trainer account) FIRST — so the owner and a trainer with zero sessions
+  // booked yet (brand new, or just hasn't been assigned anything) still show
+  // up as real filter options, not just names that happen to already appear
+  // on a registration — then layered with whatever actually shows up in
+  // registrations for anyone not already covered ("TBD", or a substitute not
+  // yet added as a dashboard account). Deduped by normalized name so a
+  // casing/whitespace variant never shows up as a separate, near-identical
+  // option — one representative spelling per real trainer (the canonical
+  // list's spelling wins when both exist), which visibleRegistrations above
+  // then normalized-matches against every casing variant anyway. Sorted
+  // owner-first-then-alphabetical, same as every other trainer dropdown
+  // site-wide.
   const availableTrainers = useMemo(() => {
     const byNormalized = new Map<string, string>();
-    for (const t of TRAINER_ACCOUNTS) {
-      if (!t.trainerName) continue;
-      byNormalized.set(normalizeTrainerNameForComparison(t.trainerName), t.trainerName);
+    for (const name of ALL_TRAINER_NAMES) {
+      byNormalized.set(normalizeTrainerNameForComparison(name), name);
     }
     for (const r of registrations) {
       const raw = r.booked_trainer || "";
@@ -1770,7 +1771,7 @@ export default function AdminPage() {
       const key = normalizeTrainerNameForComparison(raw);
       if (!byNormalized.has(key)) byNormalized.set(key, raw);
     }
-    return uniqueSorted(Array.from(byNormalized.values()));
+    return sortTrainerNames(Array.from(byNormalized.values()));
   }, [registrations]);
 
   const upcoming = useMemo(() => {

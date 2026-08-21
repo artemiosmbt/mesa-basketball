@@ -5,30 +5,12 @@ import Image from "next/image";
 import { authClient, ADMIN_EMAIL } from "@/lib/auth";
 import LandingNav from "@/app/LandingNav";
 import { REFERRAL_PROGRAM_ENABLED, REFERRAL_CREDIT_REDEMPTION_ENABLED, NEW_CLIENT_DISCOUNT_ENABLED, ARTEMIOS_PACKAGES_AVAILABLE } from "@/lib/feature-flags";
-import { getTrainerBioSlug, getTrainerTier, normalizeTrainerTier, formatTrainerForDisplay, athleteTriggersCoachZNcaaNotice, COACH_Z_NCAA_NOTICE_MESSAGE, trainerNamesMatch, type TrainerTier } from "@/lib/trainers";
+import { getTrainerBioSlug, getTrainerTier, normalizeTrainerTier, formatTrainerForDisplay, athleteTriggersCoachZNcaaNotice, COACH_Z_NCAA_NOTICE_MESSAGE, trainerNamesMatch, OWNER_TRAINER_NAME, ALL_TRAINER_NAMES, sortTrainerNames, type TrainerTier } from "@/lib/trainers";
 import { calcServiceFee, serviceFeeLabel, serviceFeeItemName, isPercentServiceFee, SERVICE_FEE_PERCENT_TEXT, packagePrice, PRIVATE_RATE_BY_TIER, GROUP_PRIVATE_RATE_BY_TIER, calcPrivatePrice as getPrivatePrice, REFERRAL_CREDIT_SESSION_PRICE, packageCoversTrainerTier } from "@/lib/pricing";
 import { ALL_GRADES, normalizedAthleteName } from "@/lib/athletes";
 import { getSessionGender, getGradesForGroup } from "@/lib/group-matching";
 
-const OWNER_TRAINER_NAME = "Artemios Gavalas";
 const SUBSTITUTE_TRAINER_LABEL = "Any Available Trainer";
-
-// Owner first (when present), then alphabetical, "TBD" ("Any Available
-// Trainer" — see formatTrainerForDisplay) always last regardless of where it
-//'d otherwise alphabetize to, since it's a flexible fallback option rather
-// than a specific person to pick among the named trainers. Used everywhere a
-// set of trainers for the same date/time/location needs a stable order.
-function sortTrainerNames(names: string[]): string[] {
-  return [...names].sort((a, b) => {
-    const aTbd = a === "TBD";
-    const bTbd = b === "TBD";
-    if (aTbd !== bTbd) return aTbd ? 1 : -1;
-    const aOwner = a === OWNER_TRAINER_NAME;
-    const bOwner = b === OWNER_TRAINER_NAME;
-    if (aOwner !== bOwner) return aOwner ? -1 : 1;
-    return a.localeCompare(b);
-  });
-}
 
 function sameTrainerSet(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((t, i) => t === b[i]);
@@ -1995,12 +1977,18 @@ export default function Home() {
       .map((w) => (filterTrainer ? { ...w, trainers: w.trainers.filter((t) => trainerNamesMatch(t, filterTrainer)) } : w));
   }, [timeWindows, filterDays, filterMonth, filterTrainer, calendarSelectedDate]);
 
-  // Distinct trainers offered across all (non-empty) private windows, deduped
-  // case/whitespace-insensitively like every other trainer-name comparison —
-  // the sheet can have the same trainer typed slightly differently across
-  // rows. Owner-first-then-alphabetical, "Any Available Trainer" last.
+  // Seeded with every canonical trainer (owner + configured accounts) FIRST,
+  // so a trainer with zero currently-scheduled private windows — on
+  // vacation, a gap in the sheet, or the owner himself between bookings —
+  // still shows up as a real filter option instead of silently vanishing.
+  // Then layered with whatever actually appears across all (non-empty)
+  // private windows, deduped case/whitespace-insensitively like every other
+  // trainer-name comparison (the sheet can have the same trainer typed
+  // slightly differently across rows), for any substitute not yet added to
+  // the canonical list. Owner-first-then-alphabetical, "Any Available
+  // Trainer" last.
   const availableTrainers = useMemo(() => {
-    const names: string[] = [];
+    const names: string[] = [...ALL_TRAINER_NAMES];
     timeWindows.forEach((w) => {
       if (w.endMins - w.startMins < 60) return;
       w.trainers.forEach((t) => {
