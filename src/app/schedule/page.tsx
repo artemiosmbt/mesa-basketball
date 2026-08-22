@@ -352,10 +352,14 @@ function formatPrice(amount: number): string {
 }
 
 // Groups weekly sessions by their own `group` name and prices each group
-// using its OWN volume-discount tier (10% at 4+, 15% at 8+ sessions of THAT
-// group) — never blended with another group's rate or count. A selection
-// can span more than one group at once (e.g. a group skills session plus
-// its cross-sold companion pickup slot), each with its own price entirely.
+// using ONE shared volume-discount tier (10% at 4+, 15% at 8+) based on the
+// TOTAL number of sessions across the whole selection — a selection can span
+// more than one group at once (e.g. siblings booked into different groups at
+// the same time, or a group skills session plus its cross-sold companion
+// pickup slot), and the combined batch should qualify for the discount just
+// like one big group booking would. Mirrors the server's per-batch count in
+// src/app/api/register/route.ts (totalSessionCount) so the preview matches
+// what's actually charged.
 function calcWeeklyGroupBreakdown(sessions: { group: string; price: number }[], kidCount: number) {
   // Sums each session's OWN price rather than assuming every session in a
   // group shares one flat rate — the sheet stores a price per row, so the
@@ -369,9 +373,10 @@ function calcWeeklyGroupBreakdown(sessions: { group: string; price: number }[], 
     if (existing) { existing.count++; existing.totalBasePrice += s.price; }
     else byGroup.set(s.group, { count: 1, totalBasePrice: s.price });
   }
+  const totalSessionCount = sessions.length;
+  const discountPct = totalSessionCount >= 8 ? 0.15 : totalSessionCount >= 4 ? 0.10 : 0;
   const items: { group: string; count: number; unitPrice: number; subtotal: number; savings: number }[] = [];
   for (const [group, { count, totalBasePrice }] of byGroup) {
-    const discountPct = count >= 8 ? 0.15 : count >= 4 ? 0.10 : 0;
     const subtotal = Math.round(totalBasePrice * (1 - discountPct) * kidCount * 100) / 100;
     const fullSubtotal = Math.round(totalBasePrice * kidCount * 100) / 100;
     const unitPrice = Math.round((totalBasePrice / count) * (1 - discountPct) * 100) / 100;
@@ -422,6 +427,18 @@ interface BookingModal {
 const COMBO_GROUPS: Record<string, string[]> = {
   "jv & varsity boys": ["JV Boys", "Varsity Boys"],
 };
+
+// A combo session's `s.group` stays the literal raw text ("JV & Varsity
+// Boys") no matter which member card it was booked from (see COMBO_GROUPS
+// above), so anywhere that raw text would otherwise leak into booking-facing
+// copy (the registration modal, itemized session lists), show the specific
+// card the parent actually clicked into instead — falling back to the raw
+// group for any session that isn't a combo.
+function displayGroupLabel(rawGroup: string, activeCardGroup: string): string {
+  const comboMembers = COMBO_GROUPS[rawGroup.trim().toLowerCase()];
+  if (comboMembers && comboMembers.includes(activeCardGroup)) return activeCardGroup;
+  return rawGroup;
+}
 
 // Group weekly sessions by group name
 function groupByGroup(sessions: WeeklySession[]) {
@@ -2153,9 +2170,9 @@ export default function Home() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingGroupOpen, allSelectedWeeklySessions]);
 
-  // Per-group volume-discount breakdown across EVERY selected weekly-type
-  // session (skills, any group, and pickup alike) — mirrors calcWeeklyGroupBreakdown's
-  // per-group tiering, which is also what the server actually prices/books
+  // Volume-discount breakdown across EVERY selected weekly-type session
+  // (skills, any group, and pickup alike) — mirrors calcWeeklyGroupBreakdown's
+  // whole-batch tiering, which is also what the server actually prices/books
   // against, so this preview never diverges from what the modal (and the
   // real charge) will show.
   const groupPricing = useMemo(() => {
@@ -2182,9 +2199,11 @@ export default function Home() {
     // "Group Sessions" once more than one distinct group is in the mix
     // (skills across several age groups, and/or pickup together) — the
     // per-group label only makes sense when everything selected is from
-    // the same one.
+    // the same one. For a combo session (e.g. "JV & Varsity Boys"), show
+    // whichever member card the parent actually booked from instead of the
+    // raw combo text.
     const distinctGroups = new Set(sessions.map((s) => s.group));
-    const groupLabel = distinctGroups.size === 1 ? sessions[0].group : "Group Sessions";
+    const groupLabel = distinctGroups.size === 1 ? displayGroupLabel(sessions[0].group, activeGroup) : "Group Sessions";
 
     setModal({
       open: true,
@@ -2632,12 +2651,12 @@ export default function Home() {
                                   You save ${groupPricing.savings.toFixed(2)} total!
                                 </p>
                               )}
-                              {groupPricing.items.length === 1 && groupPricing.count >= 1 && groupPricing.count < 4 && (
+                              {groupPricing.count >= 1 && groupPricing.count < 4 && (
                                 <p className="text-xs text-brown-500 mt-0.5">
                                   Add {4 - groupPricing.count} more for 10% off
                                 </p>
                               )}
-                              {groupPricing.items.length === 1 && groupPricing.count >= 4 && groupPricing.count < 8 && (
+                              {groupPricing.count >= 4 && groupPricing.count < 8 && (
                                 <p className="text-xs text-brown-500 mt-0.5">
                                   Add {8 - groupPricing.count} more for 15% off
                                 </p>
@@ -3531,7 +3550,7 @@ export default function Home() {
                     {modal.selectedGroupSessions.map((s, i) => {
                       return (
                         <p key={i} className="text-xs text-brown-400">
-                          {multiGroup ? `${s.group} — ` : ""}
+                          {multiGroup ? `${displayGroupLabel(s.group, activeGroup)} — ` : ""}
                           {fmtDateShort(s.date)} &bull; {s.startTime}-{s.endTime} &bull; <LocationLink location={s.location} />
                         </p>
                       );

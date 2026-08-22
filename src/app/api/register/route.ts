@@ -328,25 +328,25 @@ export async function POST(req: NextRequest) {
       }
 
       // Same multi-session volume-discount tiers shown on the booking form
-      // (4+ sessions = 10% off, 8+ = 15% off) — but applied PER GROUP, not
-      // across the whole request. A submission can now span more than one
-      // group at once (e.g. a group skills session plus its companion
-      // pickup slot, cross-sold on the booking form), each with its own
-      // live rate and its own discount tier based on how many sessions of
-      // THAT group are in this request, never blended with another group's
-      // price or count.
+      // (4+ sessions = 10% off, 8+ = 15% off) — applied across the WHOLE
+      // request, regardless of how many distinct groups it spans. Siblings
+      // booked together often land in different groups (e.g. one in Middle
+      // School, one in High School Girls) at the same time, and that combined
+      // batch should qualify for the discount exactly like one big group
+      // booking would, not be split back into per-group counts that never
+      // individually reach the threshold.
       const groupCounts = new Map<string, number>();
       for (const s of weeklySessions) groupCounts.set(s.group, (groupCounts.get(s.group) || 0) + 1);
+      const totalSessionCount = weeklySessions.length;
       // Captured alongside price so it can be persisted on each row below —
       // the later late-cancel/late-reschedule forfeiture policy needs a
       // stable record of "was THIS booking bulk-discounted," not something
       // re-derived from the group's live rate at cancellation time (which
       // silently breaks if the owner changes that rate in between).
-      const perSessionIsBulkDiscounted: boolean[] = weeklySessions.map((s: { group: string }) => (groupCounts.get(s.group)!) >= 4);
+      const perSessionIsBulkDiscounted: boolean[] = weeklySessions.map(() => totalSessionCount >= 4);
       const perSessionPrices: number[] = weeklySessions.map((s: { group: string }, i: number) => {
         const liveMatch = liveWeeklyMatches[i]!;
-        const groupCount = groupCounts.get(s.group)!;
-        const volumeDiscountPct = groupCount >= 8 ? 0.15 : groupCount >= 4 ? 0.10 : 0;
+        const volumeDiscountPct = totalSessionCount >= 8 ? 0.15 : totalSessionCount >= 4 ? 0.10 : 0;
         const unitPrice = Math.round(liveMatch.price * (1 - volumeDiscountPct) * 100) / 100;
         return Math.round(unitPrice * (totalParticipants || 1) * 100) / 100;
       });
