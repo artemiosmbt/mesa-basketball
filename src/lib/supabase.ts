@@ -57,6 +57,7 @@ export interface Registration {
   stripe_refund_id?: string | null;
   package_id?: string | null;
   is_bulk_discounted?: boolean;
+  full_session_price?: number | null;
 }
 
 export async function addRegistration(data: {
@@ -76,11 +77,21 @@ export async function addRegistration(data: {
   usedReferralCredit?: boolean;
   isFree?: boolean;
   sessionPrice?: number;
+  // The undiscounted price this session would cost with no volume discount —
+  // see supabase-migration-full-session-price.sql. Only meaningful for
+  // weekly sessions; carried forward on a same-batch reschedule so a later
+  // cancellation's tier true-up (computeBulkWeeklySettlement) never has to
+  // guess it.
+  fullSessionPrice?: number;
   // Set when a reschedule needs real money to move before the new booking is
   // confirmed (see the Stripe reschedule topup flow) — mirrors the same
   // pending_payment/bookingBatchId pattern addRegistrationWithRewards uses.
   status?: string;
   bookingBatchId?: string;
+  // Carried forward on a reschedule that stays within the same volume-discount
+  // batch (same weekly group headcount) — see is_bulk_discounted migration
+  // comment. Only ever true for `type: "weekly"`.
+  isBulkDiscounted?: boolean;
   // Set when a reschedule DIDN'T need a fresh Stripe charge (same price, or
   // a refund of the difference) — carries the old booking's payment identity
   // forward so a later cancellation/reschedule of the new booking still
@@ -118,8 +129,10 @@ export async function addRegistration(data: {
       ...(data.usedReferralCredit ? { used_referral_credit: true } : {}),
       ...(data.isFree ? { is_free: true } : {}),
       ...(data.sessionPrice != null ? { session_price: data.sessionPrice } : {}),
+      ...(data.fullSessionPrice != null ? { full_session_price: data.fullSessionPrice } : {}),
       ...(data.status ? { status: data.status } : {}),
       ...(data.bookingBatchId ? { booking_batch_id: data.bookingBatchId } : {}),
+      ...(data.isBulkDiscounted ? { is_bulk_discounted: true } : {}),
       ...(data.stripePaymentIntentId ? { stripe_payment_intent_id: data.stripePaymentIntentId } : {}),
       ...(data.stripeCustomerId ? { stripe_customer_id: data.stripeCustomerId } : {}),
       ...(data.appliedAccountCredit ? { applied_account_credit: data.appliedAccountCredit } : {}),
@@ -243,6 +256,31 @@ export async function updateRegistrationPlayers(
   query = claimToken ? query.eq("admin_action_claim_token", claimToken) : query.is("admin_action_claim_token", null);
   const { data, error } = await query.select("id");
   return !error && !!data && data.length > 0;
+}
+
+/**
+ * Re-prices the surviving sibling rows in a bulk-discounted weekly batch after
+ * one of them leaves (cancelled, or rescheduled out) drops the batch below the
+ * 4- or 8-session discount threshold — see computeBulkWeeklySettlement in
+ * booking-finalize.ts, the only caller. Each row is still gated on
+ * `status = 'confirmed'` so a sibling that itself got cancelled/rescheduled in
+ * the moment between that settlement's read and this write is left untouched
+ * rather than silently resurrecting its price.
+ */
+export async function updateRegistrationsPricing(
+  updates: { id: string; sessionPrice: number; isBulkDiscounted: boolean }[]
+): Promise<void> {
+  if (updates.length === 0) return;
+  const supabase = getSupabase();
+  await Promise.all(
+    updates.map((u) =>
+      supabase
+        .from("registrations")
+        .update({ session_price: u.sessionPrice, is_bulk_discounted: u.isBulkDiscounted })
+        .eq("id", u.id)
+        .eq("status", "confirmed")
+    )
+  );
 }
 
 /**
@@ -940,6 +978,9 @@ export async function addRegistrationWithRewards(data: {
   // the later forfeiture-vs-50%-fee policy decision to what was TRUE at
   // booking time, not whatever the group's live rate happens to be later.
   isBulkDiscounted?: boolean;
+  // The undiscounted price this session would cost with no volume discount —
+  // see supabase-migration-full-session-price.sql and computeBulkWeeklySettlement.
+  fullSessionPrice?: number;
 }): Promise<{ id: string; manageToken: string }> {
   const supabase = getSupabase();
   const { data: row, error } = await supabase
@@ -967,6 +1008,7 @@ export async function addRegistrationWithRewards(data: {
       camp_drop_in_rate: data.campDropInRate ?? null,
       applied_account_credit: data.appliedAccountCredit ?? 0,
       is_bulk_discounted: data.isBulkDiscounted ?? false,
+      ...(data.fullSessionPrice != null ? { full_session_price: data.fullSessionPrice } : {}),
       ...(data.status ? { status: data.status } : {}),
       ...(data.bookingBatchId ? { booking_batch_id: data.bookingBatchId } : {}),
       ...(data.packageId ? { package_id: data.packageId } : {}),
@@ -991,6 +1033,23 @@ export async function attachStripeCheckoutSession(bookingBatchId: string, checko
     .from("registrations")
     .update({ stripe_checkout_session_id: checkoutSessionId })
     .eq("booking_batch_id", bookingBatchId);
+}
+
+/**
+ * Re-links a single row to a different booking_batch_id — used only when a
+ * rescheduled-into-a-topup-charge weekly session needs to rejoin its true
+ * bulk-discount sibling batch after payment confirms. The row is created
+ * with its OWN fresh batch id for Stripe payment-batch tracking (see
+ * attachStripeCheckoutSession/finalizePaidBookingBatch, both keyed off
+ * booking_batch_id with no status filter on the checkout-session stamp — one
+ * shared id must never be reused between an in-flight payment batch and an
+ * already-settled discount batch, or paying for this row would stamp the
+ * checkout session id onto its unrelated already-confirmed siblings too).
+ * Only called once that payment has actually succeeded.
+ */
+export async function relinkBookingBatch(token: string, newBatchId: string): Promise<void> {
+  const supabase = getSupabase();
+  await supabase.from("registrations").update({ booking_batch_id: newBatchId }).eq("manage_token", token);
 }
 
 export async function getRegistrationsByBatchId(bookingBatchId: string): Promise<Registration[]> {

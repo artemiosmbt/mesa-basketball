@@ -5,7 +5,7 @@ import { deletePrivateSessionFromCalendar, upsertGroupSessionCalendarEvent } fro
 import { sendCancellationNotification } from "@/lib/email";
 import { getCurrentSheetLocation } from "@/lib/sheets";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
-import { issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome, isLateAction, parseSessionDateTimeET } from "@/lib/booking-finalize";
+import { issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome, isLateAction, parseSessionDateTimeET, computeBulkWeeklySettlement } from "@/lib/booking-finalize";
 import { notifyTrainerOfCancellation } from "@/lib/trainer-notify";
 import {
   addAccountCredit,
@@ -17,6 +17,7 @@ import {
   cancelFullCampByReferralCode,
   cancelRegistration,
   recordCampDayRefund,
+  updateRegistrationsPricing,
 } from "@/lib/supabase";
 import { fmtMoney } from "@/lib/pricing";
 
@@ -41,7 +42,7 @@ export async function POST(req: NextRequest) {
   // a late cancellation the same way a client-initiated one would.
   const { data: reg } = await supabase
     .from("registrations")
-    .select("manage_token, type, email, parent_name, booked_date, booked_start_time, booked_end_time, booked_location, booked_group, booked_trainer, kids, session_details, total_participants, phone, sms_consent, is_paid, stripe_payment_intent_id, applied_account_credit, session_price, is_free, used_referral_credit, created_at, admin_change_at, package_id, is_full_camp, referral_code, camp_drop_in_rate, is_bulk_discounted")
+    .select("id, manage_token, type, email, parent_name, booked_date, booked_start_time, booked_end_time, booked_location, booked_group, booked_trainer, kids, session_details, total_participants, phone, sms_consent, is_paid, stripe_payment_intent_id, applied_account_credit, session_price, full_session_price, is_free, used_referral_credit, created_at, admin_change_at, package_id, is_full_camp, referral_code, camp_drop_in_rate, is_bulk_discounted, booking_batch_id")
     .eq("id", id)
     .single();
 
@@ -87,16 +88,6 @@ export async function POST(req: NextRequest) {
   }
 
   const chargeLateFee = isLate && feeChoice === "charge";
-
-  // Whether this was part of a bulk/volume-discounted weekly booking (the
-  // 10%/15% off for booking several sessions at once) — the full-forfeiture
-  // late-cancellation policy only applies to those, not a plain 1-3 session
-  // weekly booking at the regular rate (which keeps the old 50% late-fee
-  // policy). Read from the stored, booking-time-anchored flag rather than
-  // re-deriving it from the group's CURRENT live rate — a rate change since
-  // booking would otherwise silently reclassify this booking's policy (see
-  // is_bulk_discounted migration comment).
-  const isBulkDiscountedWeekly = reg.type === "weekly" && !!reg.is_bulk_discounted;
 
   // A multi-day camp booking is actually SEVERAL rows sharing a referral_code
   // (see getCampGroupByReferralCode), each still carrying the ORIGINAL
@@ -372,39 +363,48 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // Full refund/credit unless the admin explicitly chose to charge the
-  // standard late fee — in which case it's exactly the client-initiated
-  // late-cancellation policy: half kept (no refund needed, it's already
-  // been captured), half credited — EXCEPT for bulk-discounted weekly group
-  // sessions, where "charge" now means full forfeiture (0% credited),
-  // replacing the old 50% policy there too. A plain (non-bulk) weekly
-  // booking keeps the 50% policy. No new Stripe charge is ever needed here
-  // either way — this only decides how much of the EXISTING captured
-  // payment gets refunded back vs kept.
+  // Full Stripe refund unless the admin explicitly chose to charge the
+  // standard late fee — in which case it's the same flat 50%-of-full-price
+  // fee a client-initiated late cancellation would apply, not 50% of
+  // whatever discounted amount was actually paid (see
+  // computeBulkWeeklySettlement). For a bulk-discounted weekly session,
+  // cancelling one can also drop the REST of that batch below its discount
+  // threshold; that same settlement re-prices the survivors and takes the
+  // shortfall out of this refund/credit too. No new Stripe charge is ever
+  // needed here either way — this only decides how much of the EXISTING
+  // captured payment gets refunded back vs kept.
   const wasPaid = !!reg.is_paid || !!reg.stripe_payment_intent_id;
-  const fullForfeitNoRefund = isBulkDiscountedWeekly && chargeLateFee;
   let stripeRefundResult: { refundedAmount: number; creditedAmount: number; failed: boolean } | undefined;
   let creditIssued = 0;
+  let fullForfeitNoRefund = false;
   if (wasPaid && reg.email) {
-    const paidAmount = Math.max(0, resolvedSessionPrice(reg) - (reg.applied_account_credit || 0));
+    const settlement = await computeBulkWeeklySettlement(reg, chargeLateFee);
+    const dueAmount = settlement.refundOrCreditAmount;
+    fullForfeitNoRefund = chargeLateFee && dueAmount <= 0;
     if (chargeLateFee) {
-      creditIssued = fullForfeitNoRefund ? 0 : Math.round(paidAmount * 0.5 * 100) / 100;
+      creditIssued = dueAmount;
       if (creditIssued > 0) await addAccountCredit(reg.email, creditIssued).catch(() => {});
-    } else if (paidAmount > 0) {
+    } else if (dueAmount > 0) {
       if (reg.stripe_payment_intent_id) {
         stripeRefundResult = await issueStripeRefund({
           email: reg.email,
           manageToken: reg.manage_token,
           paymentIntentId: reg.stripe_payment_intent_id,
-          amountDollars: paidAmount,
+          amountDollars: dueAmount,
           sessionLabel: reg.session_details || "",
         });
       } else {
-        await addAccountCredit(reg.email, paidAmount).catch(() => {});
-        creditIssued = paidAmount;
+        await addAccountCredit(reg.email, dueAmount).catch(() => {});
+        creditIssued = dueAmount;
       }
     }
+    if (settlement.siblingUpdates.length > 0) {
+      await updateRegistrationsPricing(settlement.siblingUpdates).catch((err) =>
+        console.error("Sibling re-pricing failed after bulk-discount tier true-up (admin cancel):", err)
+      );
+    }
     if (chargeLateFee) {
+      const paidAmount = Math.max(0, resolvedSessionPrice(reg) - (reg.applied_account_credit || 0));
       await logLateFeeEvent({
         registrationId: id,
         parentName: reg.parent_name,
@@ -492,7 +492,7 @@ export async function POST(req: NextRequest) {
         : reg.package_id
           ? "\nPackage session — slot freed"
           : "";
-      const adminForfeitNote = fullForfeitNoRefund ? "\nWeekly late cancellation — full forfeiture, no refund" : "";
+      const adminForfeitNote = fullForfeitNoRefund ? "\nLate cancellation — fee consumed the full amount, no refund/credit due" : "";
       await sendAdminSMS(`CANCELLED: ${reg.parent_name}\n${sessionDetails}\nPlayers: ${reg.kids}${chargeLateFee ? "\n(Late fee charged)" : isLate ? "\n(Late fee waived)" : ""}${adminMoneyOutcome ? `\n${adminMoneyOutcome}` : ""}${adminPackageNote}${adminForfeitNote}`);
     } catch (err) {
       console.error("Email/SMS notification error (admin cancel):", err);

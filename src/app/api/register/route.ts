@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getStripe, buildCreditDiscount } from "@/lib/stripe";
-import { calcServiceFee, serviceFeeItemName, fmtMoney, calcPrivatePrice, getTrainerTier, normalizeTrainerTier, packageCoversTrainerTier, REFERRAL_CREDIT_SESSION_PRICE, type TrainerTier } from "@/lib/pricing";
+import { calcServiceFee, serviceFeeItemName, fmtMoney, calcPrivatePrice, getTrainerTier, normalizeTrainerTier, packageCoversTrainerTier, REFERRAL_CREDIT_SESSION_PRICE, volumeDiscountPct, type TrainerTier } from "@/lib/pricing";
 import { getWeeklySchedule, getCamps, isPrivateWindowOfferedByTrainer } from "@/lib/sheets";
 import { resolveRequestEmail } from "@/lib/request-email";
 import { NEW_CLIENT_DISCOUNT_ENABLED } from "@/lib/feature-flags";
@@ -344,11 +344,17 @@ export async function POST(req: NextRequest) {
       // re-derived from the group's live rate at cancellation time (which
       // silently breaks if the owner changes that rate in between).
       const perSessionIsBulkDiscounted: boolean[] = weeklySessions.map(() => totalSessionCount >= 4);
-      const perSessionPrices: number[] = weeklySessions.map((s: { group: string }, i: number) => {
+      // The undiscounted price for each session — stored alongside its
+      // discounted session_price (full_session_price column) so a later
+      // cancellation/reschedule's tier true-up (computeBulkWeeklySettlement)
+      // always has the real per-row full price on hand, never a guess.
+      const perSessionFullPrices: number[] = weeklySessions.map((s: { group: string }, i: number) => {
         const liveMatch = liveWeeklyMatches[i]!;
-        const volumeDiscountPct = totalSessionCount >= 8 ? 0.15 : totalSessionCount >= 4 ? 0.10 : 0;
-        const unitPrice = Math.round(liveMatch.price * (1 - volumeDiscountPct) * 100) / 100;
-        return Math.round(unitPrice * (totalParticipants || 1) * 100) / 100;
+        return Math.round(liveMatch.price * (totalParticipants || 1) * 100) / 100;
+      });
+      const perSessionPrices: number[] = weeklySessions.map((s: { group: string }, i: number) => {
+        const pct = volumeDiscountPct(totalSessionCount);
+        return Math.round(perSessionFullPrices[i]! * (1 - pct) * 100) / 100;
       });
       const weeklyTotal = Math.round(perSessionPrices.reduce((sum: number, p: number) => sum + p, 0) * 100) / 100;
 
@@ -400,6 +406,7 @@ export async function POST(req: NextRequest) {
           isFree: false,
           smsConsent: !!smsConsent,
           sessionPrice: perSessionPrices[i],
+          fullSessionPrice: perSessionFullPrices[i],
           ...(weeklyCreditShares[i] > 0 ? { appliedAccountCredit: weeklyCreditShares[i] } : {}),
           status: amountToCharge > 0 ? "pending_payment" : undefined,
           bookingBatchId,

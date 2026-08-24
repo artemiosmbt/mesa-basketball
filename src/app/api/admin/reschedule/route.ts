@@ -9,9 +9,9 @@ import {
 import { sendRescheduleNotification } from "@/lib/email";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import { getWeeklySchedule } from "@/lib/sheets";
-import { addAccountCredit, deductAccountCredit, addReferralCredit, addRegistration, cancelRegistration, logLateFeeEvent, logRegistrationTopupCharge, getPackageById, countPackageSessionsUsed, setPackageSessions, checkGroupSessionCapacity } from "@/lib/supabase";
-import { isLateAction, resolveOffSessionPaymentSource, chargeSavedCardOffSession, issueStripeRefund } from "@/lib/booking-finalize";
-import { calcServiceFee, serviceFeeLabel, fmtMoney, calcPrivatePrice, fullPriceForType, getTrainerTier, normalizeTrainerTier, effectiveSessionPrice, packageCoversTrainerTier } from "@/lib/pricing";
+import { addAccountCredit, deductAccountCredit, addReferralCredit, addRegistration, cancelRegistration, logLateFeeEvent, logRegistrationTopupCharge, getPackageById, countPackageSessionsUsed, setPackageSessions, checkGroupSessionCapacity, updateRegistrationsPricing } from "@/lib/supabase";
+import { isLateAction, resolveOffSessionPaymentSource, chargeSavedCardOffSession, issueStripeRefund, computeBulkWeeklySettlement, fullPriceForWeeklyRow, countConfirmedInBatch } from "@/lib/booking-finalize";
+import { calcServiceFee, serviceFeeLabel, fmtMoney, calcPrivatePrice, fullPriceForType, getTrainerTier, normalizeTrainerTier, effectiveSessionPrice, packageCoversTrainerTier, volumeDiscountPct } from "@/lib/pricing";
 import { notifyTrainerOfCancellation, notifyTrainerOfReschedule, notifyTrainerOfNewBooking } from "@/lib/trainer-notify";
 
 
@@ -118,16 +118,6 @@ export async function POST(req: NextRequest) {
   }
   const chargeLateFee = isLateReschedule && feeChoice === "charge";
 
-  // Whether the OLD session was part of a bulk/volume-discounted weekly
-  // booking (the 10%/15% off for booking several sessions at once) — the
-  // full-forfeiture late-reschedule policy only applies to those, not a
-  // plain 1-3 session weekly booking at the regular rate (which keeps the
-  // old 50% late-fee policy). Read from the stored, booking-time-anchored
-  // flag rather than re-deriving it from the group's CURRENT live rate — a
-  // rate change since booking would otherwise silently reclassify this
-  // booking's policy (see is_bulk_discounted migration comment).
-  const isBulkDiscountedWeekly = reg.type === "weekly" && !!reg.is_bulk_discounted;
-
   const oldSessionDetails: string = reg.session_details;
   const oldBookedDate: string | null = reg.booked_date;
   const oldBookedStartTime: string | null = reg.booked_start_time;
@@ -136,6 +126,17 @@ export async function POST(req: NextRequest) {
 
   const effectiveType: string = (typeof newType === "string" && newType) ? newType : reg.type;
   const isNewPrivate = isPrivateType(effectiveType);
+
+  // staysInBulkBatch: a weekly->weekly reschedule swaps one session for
+  // another within the same bulk-discount batch — the batch's total count
+  // (and therefore its tier) doesn't change, so the new price should carry
+  // the SAME discount forward rather than being priced at the raw live rate.
+  // leavesBulkBatch: a type-switch reschedule takes the OLD session out of
+  // its batch entirely — the count actually shrinks by one here, same as a
+  // cancellation, so the survivors need the same tier true-up
+  // computeBulkWeeklySettlement gives a cancellation.
+  const staysInBulkBatch = reg.type === "weekly" && effectiveType === "weekly" && !!reg.booking_batch_id;
+  const leavesBulkBatch = reg.type === "weekly" && !!reg.booking_batch_id && effectiveType !== "weekly";
 
   // Rebuild session_details by swapping only the trailing "date time at location"
   // segment. If the caller (the reschedule picker) already knows the exact new
@@ -180,6 +181,13 @@ export async function POST(req: NextRequest) {
   let newFullPrice: number | undefined;
   let priceLookupFailed = false;
   let weeklyMatch: Awaited<ReturnType<typeof getWeeklySchedule>>[number] | undefined;
+  // The new weekly session's own undiscounted price (see
+  // supabase-migration-full-session-price.sql) — persisted alongside
+  // newFullPrice (which, when staysInBulkBatch, is the DISCOUNTED price) so
+  // a later cancellation's tier true-up always has the real full price on
+  // hand instead of guessing it.
+  let newBulkFullPrice: number | undefined;
+  let newIsBulkDiscounted = false;
   if (isNewPrivate) {
     const durationMins = Math.max(60, parseMinsFromTime(bookedEndTime) - parseMinsFromTime(bookedStartTime));
     newFullPrice = calcPrivatePrice(durationMins, reg.total_participants || 1, getTrainerTier(resolvedTrainer));
@@ -197,7 +205,16 @@ export async function POST(req: NextRequest) {
         // priceDelta, which both fall back to the existing price whenever
         // newFullPrice is undefined — same as the untouched-camp-pricing path).
         if (!keepPriceUnchanged) {
-          newFullPrice = Math.round(weeklyMatch.price * (reg.total_participants || 1));
+          newBulkFullPrice = Math.round(weeklyMatch.price * (reg.total_participants || 1) * 100) / 100;
+          // Staying within the same bulk-discount batch: the batch's total
+          // session count doesn't change on a reschedule (one swapped for
+          // another), so price the new session at that SAME tier rather
+          // than the raw live rate — otherwise an on-time reschedule that
+          // doesn't actually change anything about the batch looks like a
+          // price increase equal to the discount itself.
+          const pct = staysInBulkBatch ? volumeDiscountPct(await countConfirmedInBatch(reg.booking_batch_id!)) : 0;
+          newIsBulkDiscounted = pct > 0;
+          newFullPrice = Math.round(newBulkFullPrice * (1 - pct) * 100) / 100;
         }
       } else {
         priceLookupFailed = true;
@@ -242,11 +259,28 @@ export async function POST(req: NextRequest) {
   // need to reflect what the client actually still owes, not the pre-credit rate.
   const appliedCredit = reg.applied_account_credit || 0;
   const oldFullPrice = reg.session_price ?? fullPriceForType(reg.type, getTrainerTier(reg.booked_trainer));
-  const oldAmount = Math.max(0, effectiveAmount(oldFullPrice, !!reg.is_free, wasPrivate, !!reg.used_referral_credit) - appliedCredit);
+  let oldAmount = Math.max(0, effectiveAmount(oldFullPrice, !!reg.is_free, wasPrivate, !!reg.used_referral_credit) - appliedCredit);
   const newAmount = newFullPrice !== undefined ? Math.max(0, effectiveAmount(newFullPrice, newIsFree, isNewPrivate, newUsedReferralCredit) - appliedCredit) : oldAmount;
-  const priceDelta = newFullPrice !== undefined ? newAmount - oldAmount : 0;
 
   const wasPaid = !!reg.is_paid || !!reg.stripe_payment_intent_id;
+
+  // Leaving the bulk-discount batch entirely (a type-switch reschedule)
+  // shrinks it by one, same as a cancellation — the trued-up settlement (not
+  // the row's raw oldAmount) is the correct baseline for both the on-time
+  // delta below and (if late) the late-fee credit further down. Computed
+  // once here and reused there via leavesBulkSettlementAmount so this only
+  // ever calls computeBulkWeeklySettlement (and its sibling re-pricing) a
+  // single time per request.
+  let bulkSiblingUpdates: { id: string; sessionPrice: number; isBulkDiscounted: boolean }[] = [];
+  let leavesBulkSettlementAmount: number | null = null;
+  if (wasPaid && leavesBulkBatch) {
+    const settlement = await computeBulkWeeklySettlement(reg, chargeLateFee);
+    bulkSiblingUpdates = settlement.siblingUpdates;
+    leavesBulkSettlementAmount = settlement.refundOrCreditAmount;
+    if (!chargeLateFee) oldAmount = settlement.refundOrCreditAmount;
+  }
+
+  const priceDelta = newFullPrice !== undefined ? newAmount - oldAmount : 0;
 
   // A package-covered session has no direct per-session Stripe payment on
   // this row (wasPaid is always false for it — it was covered by the
@@ -335,21 +369,33 @@ export async function POST(req: NextRequest) {
   // saved card when the row itself has no direct payment on file, so the
   // packageMoveOutCharge piece below can charge through the exact same
   // mechanism with no separate code path needed.
-  const fullForfeitNoRefund = isBulkDiscountedWeekly && chargeLateFee;
   let lateFeeCredited = 0;
   let lateFeeCreditApplied = 0;
   let amountToCharge = 0;
   if (wasPaid && chargeLateFee) {
-    // Bulk-discounted weekly group sessions: late reschedule is full
-    // forfeiture — nothing credited toward the new session, which is
-    // charged in full below. A plain (non-bulk) weekly booking, and every
-    // other paid session type, keeps the original 50%-credited policy.
-    lateFeeCredited = fullForfeitNoRefund ? 0 : Math.round(oldAmount * 0.5 * 100) / 100;
+    // The flat 50%-of-full-price late fee (see computeLateFeeAmounts/
+    // computeBulkWeeklySettlement) — never simply forfeits everything
+    // outright, and never based on the discounted amount actually paid.
+    // Whatever's left after the fee (floored at $0) carries forward as
+    // credit toward the new session. leavesBulkSettlementAmount is already
+    // this same computation, done once above (and its sibling re-pricing
+    // captured), when the old session is leaving its bulk-discount batch.
+    if (leavesBulkSettlementAmount != null) {
+      lateFeeCredited = leavesBulkSettlementAmount;
+    } else {
+      const fullPrice = reg.type === "weekly" ? await fullPriceForWeeklyRow(reg) : oldAmount;
+      lateFeeCredited = Math.max(0, Math.round((oldAmount - Math.round(fullPrice * 0.5 * 100) / 100) * 100) / 100);
+    }
     lateFeeCreditApplied = Math.min(lateFeeCredited, newAmount);
     amountToCharge = Math.max(0, Math.round((newAmount - lateFeeCreditApplied) * 100) / 100);
   } else if (wasPaid && priceDelta > 0) {
     amountToCharge = priceDelta;
   }
+  // True only when the flat late fee consumed everything that would
+  // otherwise have carried forward as credit — the new session is then owed
+  // at its full price (already reflected above). Not a fixed bulk-discount
+  // policy anymore — see computeLateFeeAmounts/computeBulkWeeklySettlement.
+  const fullForfeitNoRefund = wasPaid && chargeLateFee && lateFeeCredited <= 0;
   amountToCharge = Math.round((amountToCharge + packageMoveOutCharge) * 100) / 100;
 
   let autoChargedAmount = 0;
@@ -411,6 +457,9 @@ export async function POST(req: NextRequest) {
         used_referral_credit: newUsedReferralCredit,
         admin_action_claim_token: null,
         ...(newFullPrice !== undefined ? { session_price: newFullPrice } : {}),
+        ...(newBulkFullPrice !== undefined ? { full_session_price: newBulkFullPrice } : {}),
+        ...(staysInBulkBatch ? { is_bulk_discounted: newIsBulkDiscounted } : {}),
+        ...(leavesBulkBatch ? { is_bulk_discounted: false, booking_batch_id: null } : {}),
         ...(clearPackageId ? { package_id: null } : {}),
       })
       .eq("id", id)
@@ -463,6 +512,15 @@ export async function POST(req: NextRequest) {
     }
     await releaseClaim();
     return NextResponse.json({ error: `${error.message}${refundNote}` }, { status: 500 });
+  }
+
+  // Re-price the survivors of the OLD bulk-discount batch now that this
+  // reschedule has actually gone through — see computeBulkWeeklySettlement,
+  // called above when leavesBulkBatch.
+  if (bulkSiblingUpdates.length > 0) {
+    await updateRegistrationsPricing(bulkSiblingUpdates).catch((err) =>
+      console.error("Sibling re-pricing failed after bulk-discount tier true-up (admin reschedule):", err)
+    );
   }
 
   // The session just left package coverage (moved to a different month, or
@@ -654,9 +712,9 @@ export async function POST(req: NextRequest) {
             : "\nStill covered by your monthly package — nothing further due for this session.",
         ].filter(Boolean).join("")
     : fullForfeitNoRefund
-      ? `\nYour original session was fully forfeited (non-refundable) — the new session is charged at full price.${autoChargedAmount > 0 ? ` $${fmtMoney(autoChargedAmount + calcServiceFee(autoChargedAmount))} was charged to your card on file.` : ""}`
+      ? `\nOur late reschedule fee consumed the full amount of your original session — the new session is charged at full price.${autoChargedAmount > 0 ? ` $${fmtMoney(autoChargedAmount + calcServiceFee(autoChargedAmount))} was charged to your card on file.` : ""}`
       : chargeLateFee
-        ? `\nLate reschedule fee: $${fmtMoney(lateFeeCredited)} (50% of what you paid) credited to your account${lateFeeCreditApplied > 0 ? `, $${fmtMoney(lateFeeCreditApplied)} applied to your new session` : ""}.${autoChargedAmount > 0 ? ` $${fmtMoney(autoChargedAmount + calcServiceFee(autoChargedAmount))} was charged to your card on file to cover the rest.` : ""}`
+        ? `\nLate reschedule fee applied: $${fmtMoney(lateFeeCredited)} credited to your account${lateFeeCreditApplied > 0 ? `, $${fmtMoney(lateFeeCreditApplied)} applied to your new session` : ""}.${autoChargedAmount > 0 ? ` $${fmtMoney(autoChargedAmount + calcServiceFee(autoChargedAmount))} was charged to your card on file to cover the rest.` : ""}`
         : newFullPrice === undefined
           ? ""
           : creditGranted > 0
@@ -723,9 +781,9 @@ export async function POST(req: NextRequest) {
               : "\nStill within package month — no charge.",
           ].filter(Boolean).join("")
       : fullForfeitNoRefund
-        ? `\nWeekly late reschedule — old session fully forfeited, no refund.${autoChargedAmount > 0 ? ` $${fmtMoney(autoChargedAmount + calcServiceFee(autoChargedAmount))} auto-charged to their card on file (${autoChargePaymentIntentId}) for the new session at full price.` : ""}`
+        ? `\nLate reschedule — fee consumed the full amount, new session charged in full.${autoChargedAmount > 0 ? ` $${fmtMoney(autoChargedAmount + calcServiceFee(autoChargedAmount))} auto-charged to their card on file (${autoChargePaymentIntentId}) for the new session at full price.` : ""}`
         : chargeLateFee
-          ? `\nLate fee charged: $${fmtMoney(lateFeeCredited)} credited (50% of $${fmtMoney(oldAmount)} paid)${lateFeeCreditApplied > 0 ? `, $${fmtMoney(lateFeeCreditApplied)} applied to new session ($${fmtMoney(newAmount)})` : ""}.${autoChargedAmount > 0 ? ` $${fmtMoney(autoChargedAmount + calcServiceFee(autoChargedAmount))} auto-charged to their card on file (${autoChargePaymentIntentId}).` : ""}`
+          ? `\nLate fee charged: $${fmtMoney(lateFeeCredited)} credited${lateFeeCreditApplied > 0 ? `, $${fmtMoney(lateFeeCreditApplied)} applied to new session ($${fmtMoney(newAmount)})` : ""}.${autoChargedAmount > 0 ? ` $${fmtMoney(autoChargedAmount + calcServiceFee(autoChargedAmount))} auto-charged to their card on file (${autoChargePaymentIntentId}).` : ""}`
           : newFullPrice === undefined
             ? ""
             : creditGranted > 0

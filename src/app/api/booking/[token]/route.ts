@@ -19,10 +19,11 @@ import {
   hasConflictingPrivateBooking,
   checkGroupSessionCapacity,
   getSavedAthletesByEmail,
+  updateRegistrationsPricing,
 } from "@/lib/supabase";
-import { issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome, isLateAction, parseSessionDateTimeET, computeLateFeeAmounts, settleOldBookingForReschedule, computePlayerEditPricing, parseKidsList } from "@/lib/booking-finalize";
+import { issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome, isLateAction, parseSessionDateTimeET, computeLateFeeAmounts, computeBulkWeeklySettlement, fullPriceForWeeklyRow, countConfirmedInBatch, settleOldBookingForReschedule, computePlayerEditPricing, parseKidsList } from "@/lib/booking-finalize";
 import { getStripe } from "@/lib/stripe";
-import { calcServiceFee, serviceFeeItemName, fmtMoney, calcPrivatePrice, getTrainerTier, normalizeTrainerTier, packageCoversTrainerTier } from "@/lib/pricing";
+import { calcServiceFee, serviceFeeItemName, fmtMoney, calcPrivatePrice, getTrainerTier, normalizeTrainerTier, packageCoversTrainerTier, volumeDiscountPct } from "@/lib/pricing";
 import {
   sendCancellationNotification,
   sendRescheduleNotification,
@@ -115,26 +116,6 @@ export async function DELETE(
     return NextResponse.json(
       { error: "Booking is already cancelled" },
       { status: 400 }
-    );
-  }
-
-  // Block cancellation of group sessions that were volume-discounted at
-  // booking time (e.g. booking several sessions together nets a lower
-  // per-session rate) — those get rescheduled instead so the discount math
-  // isn't disturbed. Read from the stored, booking-time-anchored flag rather
-  // than re-deriving it from the group's CURRENT live rate — a rate change
-  // since booking would otherwise silently reclassify this booking's policy
-  // (see is_bulk_discounted migration comment). Also captured here for reuse
-  // below: the full-forfeiture-on-late-cancel policy only applies to these
-  // bulk/volume-discounted bookings, not a plain 1-3 session weekly booking
-  // at the regular rate (which keeps the old 50% late-fee policy) — though
-  // in practice a request only reaches the fee logic below at all when this
-  // is false, since a true bulk booking is rejected right here.
-  const isBulkDiscountedWeekly = reg.type === "weekly" && !!reg.is_bulk_discounted;
-  if (isBulkDiscountedWeekly) {
-    return NextResponse.json(
-      { error: "Cancellation is not available for sessions booked at a discounted rate. Please use the reschedule option instead." },
-      { status: 403 }
     );
   }
 
@@ -445,41 +426,45 @@ export async function DELETE(
     await addAccountCredit(reg.email, reg.applied_account_credit).catch(() => {});
   }
 
-  // If they already paid: full Stripe refund with 24+ hours notice, 50%
-  // account credit (charge kept) if cancelled late. Bookings paid the old
-  // manual/cash way (is_paid, no Stripe charge on file) still fall back to
-  // account credit since there's no card to refund.
+  // If they already paid: full Stripe refund with 24+ hours notice; a late
+  // cancellation instead applies a flat 50%-of-full-price fee (not 50% of
+  // whatever discounted amount was actually paid) — see
+  // computeBulkWeeklySettlement. For a bulk-discounted weekly session,
+  // cancelling one can also drop the REST of that batch below the 4- or
+  // 8-session discount threshold; that same settlement re-prices the
+  // survivors and takes the shortfall out of this refund/credit too, so a
+  // later cancellation in the same batch starts from a correct baseline.
+  // Bookings paid the old manual/cash way (is_paid, no Stripe charge on
+  // file) still fall back to account credit since there's no card to refund.
   const wasPaid = !!reg.is_paid || !!reg.stripe_payment_intent_id;
   let cancelCredit = 0;
   let stripeRefundResult: { refundedAmount: number; creditedAmount: number; failed: boolean } | undefined;
   if (wasPaid && reg.email) {
-    const paidAmount = Math.max(0, resolvedSessionPrice(reg) - (reg.applied_account_credit || 0));
+    const settlement = await computeBulkWeeklySettlement(reg, isLateCancel);
+    const dueAmount = settlement.refundOrCreditAmount;
     if (isLateCancel) {
-      // Weekly group sessions booked in bulk (the 10%/15% volume discount)
-      // are now full forfeiture on late cancel — 0% credited. A plain
-      // (non-bulk) weekly booking, plain private, and group-private all keep
-      // the original 50% credit. Package-covered sessions never reach this
-      // branch (wasPaid is always false for them — see the
-      // packageSessionForfeited handling below). In practice this route
-      // never actually sees a bulk-discounted weekly cancellation (blocked
-      // above, reschedule-only), so this only matters for consistency.
-      cancelCredit = isBulkDiscountedWeekly ? 0 : Math.round(paidAmount * 0.5 * 100) / 100;
+      cancelCredit = dueAmount;
       if (cancelCredit > 0) await addAccountCredit(reg.email, cancelCredit).catch(() => {});
     } else {
-      cancelCredit = paidAmount;
-      if (paidAmount > 0) {
+      cancelCredit = dueAmount;
+      if (dueAmount > 0) {
         if (reg.stripe_payment_intent_id) {
           stripeRefundResult = await issueStripeRefund({
             email: reg.email,
             manageToken: token,
             paymentIntentId: reg.stripe_payment_intent_id,
-            amountDollars: paidAmount,
+            amountDollars: dueAmount,
             sessionLabel: reg.session_details,
           });
         } else {
-          await addAccountCredit(reg.email, paidAmount).catch(() => {});
+          await addAccountCredit(reg.email, dueAmount).catch(() => {});
         }
       }
+    }
+    if (settlement.siblingUpdates.length > 0) {
+      await updateRegistrationsPricing(settlement.siblingUpdates).catch((err) =>
+        console.error("Sibling re-pricing failed after bulk-discount tier true-up (cancel):", err)
+      );
     }
   }
   if (wasPaid && isLateCancel) {
@@ -538,24 +523,23 @@ export async function DELETE(
     });
   }
 
-  // Bulk-discounted weekly group sessions (booked as part of the 10%/15%
-  // volume discount): late cancellation is now full forfeiture (0%
-  // refunded/credited) instead of the old 50%-credited policy. A plain
-  // (non-bulk) weekly booking, and plain/group-private sessions, are
-  // unaffected — this route never actually reaches here for a bulk
-  // cancellation though (blocked above as reschedule-only).
-  const fullForfeitNoRefund = isBulkDiscountedWeekly && isLateCancel;
+  // True only when a late cancellation's flat 50%-of-full-price fee consumed
+  // everything that would otherwise have been refunded/credited — nothing
+  // further is charged in that case (erased, same as a no-show), never a
+  // negative/extra charge. Not a fixed policy tied to bulk-discounted weekly
+  // sessions specifically anymore — see computeBulkWeeklySettlement.
+  const fullForfeitNoRefund = wasPaid && isLateCancel && !reg.package_id && cancelCredit <= 0;
 
-  // Late fee wording only makes sense for the original (non-package,
-  // non-weekly) policy — someone who already paid is being credited
-  // (possibly $0 if their existing account credit already covered the whole
-  // thing), never asked for more. Package and weekly sessions now forfeit
-  // instead of owing a fee, so they never populate this.
-  const lateFeeAmount = reg.package_id || fullForfeitNoRefund
-    ? undefined
-    : isLateCancel && !wasPaid
-      ? Math.round(Math.max(0, resolvedSessionPrice(reg) - (reg.applied_account_credit || 0)) * 0.5 * 100) / 100
-      : undefined;
+  // Late fee wording only makes sense for the original (non-package) policy
+  // — someone who already paid is being credited (possibly $0 if the fee
+  // consumed it all — see fullForfeitNoRefund above), never asked for more.
+  let lateFeeAmount: number | undefined;
+  if (!reg.package_id && isLateCancel && !wasPaid) {
+    const unpaidFullPrice = reg.type === "weekly"
+      ? await fullPriceForWeeklyRow(reg)
+      : Math.max(0, resolvedSessionPrice(reg) - (reg.applied_account_credit || 0));
+    lateFeeAmount = Math.round(unpaidFullPrice * 0.5 * 100) / 100;
+  }
 
   let cancelSessionDetails = reg.session_details;
   let cancelLocation = reg.booked_location || "";
@@ -607,7 +591,7 @@ export async function DELETE(
     : reg.package_id
       ? "\nPackage session — on-time, no fee, slot freed"
       : "";
-  const adminForfeitNote = fullForfeitNoRefund ? "\nWeekly late cancellation — full forfeiture, no refund" : "";
+  const adminForfeitNote = fullForfeitNoRefund ? "\nLate cancellation — fee consumed the full amount, no refund/credit due" : "";
   await sendAdminSMS(`CANCELLED: ${reg.parent_name}\n${cancelSessionDetails}${isLateCancel ? " (late)" : ""}${adminMoneyOutcome ? `\n${adminMoneyOutcome}` : ""}${adminPackageNote}${adminForfeitNote}\nPlayers: ${reg.kids}`);
 
   if (reg.booked_date && reg.booked_start_time && reg.booked_trainer) {
@@ -926,22 +910,29 @@ export async function PUT(
   // Check if original session is within 24h (with grace period) → late reschedule fee applies
   const isLateReschedule = !!(reg.booked_date && reg.booked_start_time && isLateAction(reg.booked_date, reg.booked_start_time, reg.created_at, reg.admin_change_at));
 
-  // Whether the OLD session was part of a bulk/volume-discounted weekly
-  // booking (the 10%/15% off for booking several sessions at once) — the
-  // full-forfeiture-on-late-reschedule policy only applies to those, not a
-  // plain 1-3 session weekly booking at the regular rate (which keeps the
-  // old 50% late-fee policy). Read from the stored, booking-time-anchored
-  // flag rather than re-deriving it from the group's CURRENT live rate — a
-  // rate change since booking would otherwise silently reclassify this
-  // booking's policy (see is_bulk_discounted migration comment). Reschedule
-  // is always allowed regardless of discount, same as before.
-  const isBulkDiscountedWeekly = reg.type === "weekly" && !!reg.is_bulk_discounted;
-
   // What was actually paid for the old session via Stripe (if it was), net
   // of any account credit applied at booking time — this is the baseline
   // the new session's price gets reconciled against below.
   const oldPaymentIntentId = reg.stripe_payment_intent_id || undefined;
   const oldPaidAmount = Math.max(0, resolvedSessionPrice(reg) - (reg.applied_account_credit || 0));
+  // The old session's own full undiscounted price — the flat 50% late-fee
+  // basis (computeLateFeeAmounts), independent of whatever discount was
+  // actually applied. For a non-weekly (or non-bulk) session this is simply
+  // what was paid — there's no discount to reconstruct.
+  const oldFullPrice = reg.type === "weekly" ? await fullPriceForWeeklyRow(reg) : oldPaidAmount;
+  // Whether the OLD session stays inside its bulk-discount batch through
+  // this reschedule — true only when both the old AND new session are
+  // weekly (a type-switch reschedule leaves the batch entirely, handled like
+  // a cancellation further below) and the old row actually belongs to one.
+  // A reschedule swaps one session for another within the batch — the total
+  // session count (and therefore the discount tier) doesn't change, unlike a
+  // cancellation which actually shrinks it.
+  const staysInBulkBatch = reg.type === "weekly" && newType === "weekly" && !!reg.booking_batch_id;
+  // True when the OLD session leaves its bulk-discount batch entirely (a
+  // type-switch reschedule) — the batch's total count actually shrinks by
+  // one here, same as a cancellation, so the survivors need the same tier
+  // true-up as computeBulkWeeklySettlement gives a cancellation.
+  const leavesBulkBatch = reg.type === "weekly" && !!reg.booking_batch_id && newType !== "weekly";
 
   // The old booking is deliberately left COMPLETELY untouched through this
   // whole computation — no cancellation, no credit refunds, no calendar
@@ -991,12 +982,23 @@ export async function PUT(
   // way. Camp is intentionally left unpriced here (too many variables —
   // early-bird, drop-in rate, referral discounts — to safely auto-recompute).
   let newSessionPrice: number | undefined;
+  let newFullSessionPrice: number | undefined;
+  let newIsBulkDiscounted = false;
   if (newType === "weekly") {
     try {
       const liveSessions = await getWeeklySchedule({ noCache: true });
       const liveMatch = liveSessions.find((s) => s.group === sessionGroup && s.date === bookedDate && s.startTime === bookedStartTime);
       if (liveMatch) {
-        newSessionPrice = Math.round(liveMatch.price * kidCount);
+        newFullSessionPrice = Math.round(liveMatch.price * kidCount * 100) / 100;
+        // Staying within the same bulk-discount batch: the batch's total
+        // session count doesn't change on a reschedule (one swapped for
+        // another), so price the new session at that SAME tier rather than
+        // the raw live rate — an on-time reschedule that doesn't actually
+        // change anything about the batch shouldn't look like a price
+        // increase equal to the discount itself.
+        const pct = staysInBulkBatch ? volumeDiscountPct(await countConfirmedInBatch(reg.booking_batch_id!)) : 0;
+        newIsBulkDiscounted = pct > 0;
+        newSessionPrice = Math.round(newFullSessionPrice * (1 - pct) * 100) / 100;
       } else {
         console.error(`Client reschedule: couldn't find "${sessionGroup}" on ${bookedDate} ${bookedStartTime} in the live sheet — price reconciliation skipped for this reschedule. Verify manually.`);
       }
@@ -1031,10 +1033,23 @@ export async function PUT(
   // to pay always matches what actually gets applied later.
   let priceReconciliation: { kind: "refund" | "charge"; amount: number } | null = null;
   let previewLateFeeCreditApplied = 0;
+  let previewLateFeeCredited = 0;
   if (oldPaymentIntentId) {
+    // Leaving the bulk-discount batch entirely (a type-switch reschedule)
+    // shrinks it by one, same as a cancellation — the trued-up settlement
+    // (not the row's raw oldPaidAmount) is the correct baseline either way,
+    // late or on-time. Re-computed for real (and its sibling re-pricing
+    // actually applied) once this settlement is confirmed — see
+    // settleOldBookingForReschedule — this call is read-only, purely to size
+    // what the client owes/gets back right now.
+    const basisAmount = leavesBulkBatch
+      ? (await computeBulkWeeklySettlement(reg, isLateReschedule)).refundOrCreditAmount
+      : null;
     if (isLateReschedule) {
-      const amounts = computeLateFeeAmounts(oldPaidAmount, isBulkDiscountedWeekly, newPriceKnown, newEffectivePrice);
-      previewLateFeeCreditApplied = amounts.lateFeeCreditApplied;
+      previewLateFeeCredited = basisAmount != null ? basisAmount : computeLateFeeAmounts(oldPaidAmount, oldFullPrice, newPriceKnown, newEffectivePrice).lateFeeCredited;
+      previewLateFeeCreditApplied = newPriceKnown && newEffectivePrice! > 0 && previewLateFeeCredited > 0
+        ? Math.min(previewLateFeeCredited, newEffectivePrice!)
+        : 0;
       if (newPriceKnown && newEffectivePrice! > 0) {
         const amountStillOwed = Math.round((newEffectivePrice! - previewLateFeeCreditApplied) * 100) / 100;
         if (amountStillOwed > 0.005) {
@@ -1042,7 +1057,8 @@ export async function PUT(
         }
       }
     } else if (newPriceKnown) {
-      const delta = Math.round((newEffectivePrice! - oldPaidAmount) * 100) / 100;
+      const baseline = basisAmount != null ? basisAmount : oldPaidAmount;
+      const delta = Math.round((newEffectivePrice! - baseline) * 100) / 100;
       if (delta < -0.005) {
         priceReconciliation = { kind: "refund", amount: Math.round(Math.abs(delta) * 100) / 100 };
       } else if (delta > 0.005) {
@@ -1103,13 +1119,12 @@ export async function PUT(
       priceReconciliation = { kind: "charge", amount: newEffectivePrice! };
     }
   }
-  // Bulk-discounted weekly group sessions: late reschedule is full
-  // forfeiture of the old session, and the new session is always charged at
-  // full price — the charge itself already happens naturally above
-  // (previewLateFeeCredited was forced to 0 for a bulk booking, so the full
-  // newEffectivePrice flows through as priceReconciliation); this flag only
-  // drives the wording below.
-  const fullForfeitNoRefund = isBulkDiscountedWeekly && isLateReschedule;
+  // True only when a late reschedule's flat 50%-of-full-price fee consumed
+  // everything that would otherwise have carried forward as credit — the new
+  // session is then owed at its full price (already reflected above via
+  // priceReconciliation, since previewLateFeeCreditApplied is 0 in that
+  // case). Not a fixed bulk-discount policy anymore — see computeLateFeeAmounts.
+  const fullForfeitNoRefund = !!oldPaymentIntentId && isLateReschedule && previewLateFeeCredited <= 0;
 
   // Price increased (or a late reschedule needs a fresh full charge): the
   // new booking isn't confirmed yet — send the client to Stripe Checkout for
@@ -1121,6 +1136,15 @@ export async function PUT(
   // abandoned/expired Checkout then leaves the original booking completely
   // untouched, same as if the reschedule was never attempted.
   if (priceReconciliation?.kind === "charge") {
+    // A fresh id for THIS checkout's own payment-batch tracking (flipped
+    // pending_payment -> confirmed by the webhook) — deliberately NOT the
+    // old session's bulk-discount batch id, even when staysInBulkBatch:
+    // attachStripeCheckoutSession below stamps a checkout_session_id onto
+    // every row sharing this id with no status filter, so reusing the real
+    // discount batch id here would overwrite that field on unrelated,
+    // already-confirmed sibling rows too. Re-linked to the true discount
+    // batch (discountBatchId in metadata) once payment actually confirms —
+    // see finalizeRescheduleTopup.
     const bookingBatchId = crypto.randomUUID();
     await addRegistration({
       parentName: newParentName,
@@ -1139,6 +1163,8 @@ export async function PUT(
       isFree: newIsFree,
       usedReferralCredit: newUsedReferralCredit,
       sessionPrice: newSessionPrice,
+      fullSessionPrice: newFullSessionPrice,
+      isBulkDiscounted: newIsBulkDiscounted,
       appliedAccountCredit: previewLateFeeCreditApplied || undefined,
       status: "pending_payment",
       bookingBatchId,
@@ -1165,7 +1191,9 @@ export async function PUT(
         old_session_details: reg.session_details,
         resolved_trainer: resolvedTrainer || "",
         is_late_reschedule: String(!!isLateReschedule),
-        is_bulk_discounted_weekly: String(isBulkDiscountedWeekly),
+        old_session_full_price: String(oldFullPrice),
+        discount_batch_id: staysInBulkBatch ? reg.booking_batch_id! : "",
+        leaves_bulk_batch: String(leavesBulkBatch),
         topup_amount: String(priceReconciliation.amount),
       },
       line_items: [
@@ -1205,7 +1233,8 @@ export async function PUT(
   const settled = await settleOldBookingForReschedule({
     reg,
     isLateReschedule,
-    isBulkDiscountedWeekly,
+    fullPrice: oldFullPrice,
+    leavesBulkBatch,
     resolvedTrainer,
     newSessionDetails,
     newEffectivePrice,
@@ -1260,6 +1289,15 @@ export async function PUT(
     isFree: newIsFree,
     usedReferralCredit: newUsedReferralCredit,
     sessionPrice: newSessionPrice,
+    fullSessionPrice: newFullSessionPrice,
+    // Carries the bulk-discount batch linkage forward when this reschedule
+    // just swaps one weekly session for another within the same batch — the
+    // total count (and therefore the tier) hasn't changed, so the new row
+    // stays part of the same discount group for future cancellations. No
+    // payment-batch conflict here (unlike the topup path above): this row is
+    // created already-confirmed, with no Stripe Checkout of its own to track.
+    bookingBatchId: staysInBulkBatch ? reg.booking_batch_id! : undefined,
+    isBulkDiscounted: staysInBulkBatch ? newIsBulkDiscounted : undefined,
     appliedAccountCredit: lateFeeCreditApplied || undefined,
     stripePaymentIntentId: newPriceKnown && !isLateReschedule ? oldPaymentIntentId : undefined,
     stripeCustomerId: newPriceKnown && !isLateReschedule ? (reg.stripe_customer_id || undefined) : undefined,
@@ -1312,7 +1350,7 @@ export async function PUT(
   const lateFeeAmount = reg.package_id || fullForfeitNoRefund
     ? undefined
     : isLateReschedule && !priceReconciliation && !lateFeeCredited
-      ? Math.round(resolvedSessionPrice(reg) * 0.5 * 100) / 100
+      ? Math.round(oldFullPrice * 0.5 * 100) / 100
       : undefined;
 
   // priceReconciliation is never "charge" by this point — that branch
@@ -1375,7 +1413,7 @@ export async function PUT(
     : reg.package_id
       ? "\nPackage session — slot moved, no fee"
       : "";
-  const adminForfeitNote = fullForfeitNoRefund ? "\nWeekly late reschedule — old session forfeited, new session full price" : "";
+  const adminForfeitNote = fullForfeitNoRefund ? "\nLate reschedule — fee consumed the full amount, new session charged in full" : "";
   await sendAdminSMS(`RESCHEDULED: ${newParentName}\nFrom: ${reg.session_details}\nTo: ${newSessionDetails}${rescheduleTrainerLine}\nPlayers: ${kidsToUse}${refundOutcomeAdminText ? `\n${refundOutcomeAdminText}` : ""}${adminCreditNote}${adminPackageNote}${adminForfeitNote}`);
 
   // Trainer-facing NEW-side notification only — the old trainer (if this

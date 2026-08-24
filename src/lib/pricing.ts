@@ -141,3 +141,15 @@ export function fullPriceForType(type: string, trainerTier: TrainerTier): number
   if (type === "private") return PRIVATE_RATE_BY_TIER[trainerTier];
   return LEGACY_GROUP_SESSION_FALLBACK;
 }
+
+// Multi-session volume discount for weekly group bookings — 4+ sessions booked
+// together (regardless of how many distinct groups they span) = 10% off each,
+// 8+ = 15% off. Single source of truth for these breakpoints — used at booking
+// time (register/route.ts), on reschedule (client + admin), and by the bulk
+// settlement math (computeBulkWeeklySettlement) that re-evaluates a batch's
+// tier every time a session leaves it.
+export function volumeDiscountPct(sessionCount: number): number {
+  if (sessionCount >= 8) return 0.15;
+  if (sessionCount >= 4) return 0.10;
+  return 0;
+}
