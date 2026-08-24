@@ -260,7 +260,6 @@ export async function POST(req: NextRequest) {
   const appliedCredit = reg.applied_account_credit || 0;
   const oldFullPrice = reg.session_price ?? fullPriceForType(reg.type, getTrainerTier(reg.booked_trainer));
   let oldAmount = Math.max(0, effectiveAmount(oldFullPrice, !!reg.is_free, wasPrivate, !!reg.used_referral_credit) - appliedCredit);
-  const newAmount = newFullPrice !== undefined ? Math.max(0, effectiveAmount(newFullPrice, newIsFree, isNewPrivate, newUsedReferralCredit) - appliedCredit) : oldAmount;
 
   const wasPaid = !!reg.is_paid || !!reg.stripe_payment_intent_id;
 
@@ -270,7 +269,10 @@ export async function POST(req: NextRequest) {
   // delta below and (if late) the late-fee credit further down. Computed
   // once here and reused there via leavesBulkSettlementAmount so this only
   // ever calls computeBulkWeeklySettlement (and its sibling re-pricing) a
-  // single time per request.
+  // single time per request. Must run BEFORE newAmount is computed — its
+  // fallback (newFullPrice undefined, e.g. rescheduling into a camp, whose
+  // pricing is deliberately left untouched) is `: oldAmount`, which needs to
+  // already be the trued-up figure, not the stale pre-override one.
   let bulkSiblingUpdates: { id: string; sessionPrice: number; isBulkDiscounted: boolean }[] = [];
   let leavesBulkSettlementAmount: number | null = null;
   if (wasPaid && leavesBulkBatch) {
@@ -280,6 +282,7 @@ export async function POST(req: NextRequest) {
     if (!chargeLateFee) oldAmount = settlement.refundOrCreditAmount;
   }
 
+  const newAmount = newFullPrice !== undefined ? Math.max(0, effectiveAmount(newFullPrice, newIsFree, isNewPrivate, newUsedReferralCredit) - appliedCredit) : oldAmount;
   const priceDelta = newFullPrice !== undefined ? newAmount - oldAmount : 0;
 
   // A package-covered session has no direct per-session Stripe payment on
