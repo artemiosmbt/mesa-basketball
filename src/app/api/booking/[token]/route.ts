@@ -1155,6 +1155,23 @@ export async function PUT(
   // abandoned/expired Checkout then leaves the original booking completely
   // untouched, same as if the reschedule was never attempted.
   if (priceReconciliation?.kind === "charge") {
+    // Leaving the bulk-discount batch entirely via a topup checkout needs
+    // the SAME serialization as the sync path — otherwise a sibling could
+    // be cancelled/rescheduled-out while this client is sitting on Stripe's
+    // payment page, off a stale sibling count. Held across the redirect:
+    // released either by finalizeRescheduleTopup once payment confirms, or
+    // by the abandoned-checkout cron/webhook if they never complete it —
+    // never released here on the happy path (only on an error before the
+    // checkout URL is even returned).
+    const needsTopupBatchLock = leavesBulkBatch && !!reg.is_bulk_discounted;
+    const topupBatchClaimToken = needsTopupBatchLock ? await claimBulkBatch(reg.booking_batch_id!, reg.id) : null;
+    if (needsTopupBatchLock && !topupBatchClaimToken) {
+      return NextResponse.json(
+        { error: "This booking's group is being updated by another request right now — please try again in a moment." },
+        { status: 409 }
+      );
+    }
+    try {
     // A fresh id for THIS checkout's own payment-batch tracking (flipped
     // pending_payment -> confirmed by the webhook) — deliberately NOT the
     // old session's bulk-discount batch id, even when staysInBulkBatch:
@@ -1213,6 +1230,12 @@ export async function PUT(
         old_session_full_price: String(oldFullPrice),
         discount_batch_id: staysInBulkBatch ? reg.booking_batch_id! : "",
         leaves_bulk_batch: String(leavesBulkBatch),
+        // Carried through so whichever side resolves this checkout (the
+        // webhook on success, the abandon-cron on expiry) can release the
+        // claim acquired above — see claim_batch_id/claim_token readers in
+        // finalizeRescheduleTopup and expireAbandonedCheckoutSession.
+        claim_batch_id: topupBatchClaimToken ? reg.booking_batch_id! : "",
+        claim_token: topupBatchClaimToken || "",
         topup_amount: String(priceReconciliation.amount),
       },
       line_items: [
@@ -1241,6 +1264,13 @@ export async function PUT(
     await attachStripeCheckoutSession(bookingBatchId, checkoutSession.id);
 
     return NextResponse.json({ success: true, checkoutUrl: checkoutSession.url, isLateReschedule: !!isLateReschedule, packageSessionForfeited: packageSessionForfeitedPreview, fullForfeitNoRefund });
+    } catch (err) {
+      // Never got as far as handing the client a checkout URL — nothing for
+      // the webhook/abandon-cron to release this claim later, so it must be
+      // released right here or the batch would stay locked forever.
+      if (topupBatchClaimToken) await releaseBulkBatch(reg.booking_batch_id!, topupBatchClaimToken).catch(() => {});
+      throw err;
+    }
   }
 
   // No further payment needed (same price, a price decrease, or a

@@ -31,6 +31,7 @@ import {
   getRegistrationsByBatchId,
   updateRegistrationsPricing,
   relinkBookingBatch,
+  releaseBulkBatch,
   type Registration,
 } from "@/lib/supabase";
 
@@ -1132,6 +1133,16 @@ export async function expireAbandonedCheckoutSession(session: Stripe.Checkout.Se
     return;
   }
   await expireAbandonedBookingBatch(referenceId, session.metadata?.purpose === "reschedule_topup");
+  // The client never completed a reschedule-out-of-batch topup checkout —
+  // release the bulk-batch claim it acquired before this checkout was even
+  // created (see claim_batch_id/claim_token in the client route), or that
+  // batch would stay locked forever since the webhook never fires for an
+  // abandoned session.
+  if (session.metadata?.claim_batch_id && session.metadata?.claim_token) {
+    await releaseBulkBatch(session.metadata.claim_batch_id, session.metadata.claim_token).catch((err) =>
+      console.error("Failed to release bulk-batch claim after abandoned reschedule topup:", err)
+    );
+  }
 }
 
 export function parseKidsList(kidsStr: string): string[] {
@@ -1704,6 +1715,13 @@ export interface FinalizeRescheduleTopupParams {
   // session id onto unrelated already-confirmed siblings), so once payment
   // is confirmed here it needs re-linking to its true discount batch.
   discountBatchId?: string;
+  // Set only when leavesBulkBatch's claimBulkBatch call (in the route
+  // handler, before this checkout was even created) is still holding a
+  // lock on the OLD session's batch — released in a finally below,
+  // regardless of whether settlement actually succeeded, so an abandoned
+  // claim never survives past this function running.
+  claimBatchId?: string;
+  claimToken?: string;
 }
 
 /**
@@ -1717,6 +1735,7 @@ export interface FinalizeRescheduleTopupParams {
  * exactly where they started, not mid-cancelled with a fee already taken).
  */
 export async function finalizeRescheduleTopup(params: FinalizeRescheduleTopupParams): Promise<void> {
+  try {
   const isPrivateType = params.type === "private" || params.type === "group-private";
 
   const oldReg = await getRegistrationByToken(params.originalManageToken);
@@ -1874,6 +1893,13 @@ export async function finalizeRescheduleTopup(params: FinalizeRescheduleTopupPar
   } catch (err) {
     console.error("Calendar sync error (reschedule topup):", err);
     await sendAdminSMS(`⚠️ Calendar sync FAILED for ${params.parentName}'s paid reschedule (${formatDateWithDay(params.bookedDate)} ${params.bookedStartTime}). Booking is confirmed — update the calendar manually.`).catch(() => {});
+  }
+  } finally {
+    if (params.claimBatchId && params.claimToken) {
+      await releaseBulkBatch(params.claimBatchId, params.claimToken).catch((err) =>
+        console.error("Failed to release bulk-batch claim after reschedule topup:", err)
+      );
+    }
   }
 }
 
@@ -2146,8 +2172,24 @@ export async function finalizePaidCheckoutSession(session: Stripe.Checkout.Sessi
   // finalizeRescheduleTopup, now that payment has actually gone through.
   if (metadata.purpose === "reschedule_topup") {
     const reg = confirmedRows[0];
-    if (!reg.booked_date || !reg.booked_start_time) return;
+    // Both guards below bail out BEFORE finalizeRescheduleTopup ever runs —
+    // its own claim release (in a finally) never fires for these, so a bulk-
+    // batch claim held from before this checkout was created has to be
+    // released right here, or it would stay locked forever on this
+    // should-never-happen data-integrity snag.
+    const releaseOrphanedClaim = async () => {
+      if (metadata.claim_batch_id && metadata.claim_token) {
+        await releaseBulkBatch(metadata.claim_batch_id, metadata.claim_token).catch((err) =>
+          console.error("Failed to release bulk-batch claim after reschedule_topup finalize was skipped:", err)
+        );
+      }
+    };
+    if (!reg.booked_date || !reg.booked_start_time) {
+      await releaseOrphanedClaim();
+      return;
+    }
     if (!metadata.original_manage_token) {
+      await releaseOrphanedClaim();
       console.error(`reschedule_topup checkout ${session.id} completed with no original_manage_token in metadata — cannot settle the old booking.`);
       return;
     }
@@ -2175,6 +2217,8 @@ export async function finalizePaidCheckoutSession(session: Stripe.Checkout.Sessi
       amountCharged: metadata.topup_amount ? Number(metadata.topup_amount) : 0,
       newEffectivePrice: resolvedSessionPrice(reg),
       discountBatchId: metadata.discount_batch_id || undefined,
+      claimBatchId: metadata.claim_batch_id || undefined,
+      claimToken: metadata.claim_token || undefined,
     });
     return;
   }
