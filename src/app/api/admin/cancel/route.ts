@@ -18,6 +18,8 @@ import {
   cancelRegistration,
   recordCampDayRefund,
   updateRegistrationsPricing,
+  claimBulkBatch,
+  releaseBulkBatch,
 } from "@/lib/supabase";
 import { fmtMoney } from "@/lib/pricing";
 
@@ -302,6 +304,19 @@ export async function POST(req: NextRequest) {
   // applied_account_credit is zeroed here (refunded back separately below)
   // to match cancelRegistration's convention, preventing it from being
   // double-refunded if this row is ever swept up elsewhere.
+  // Serializes against any other request touching this same bulk-discount
+  // batch (another sibling being cancelled/rescheduled-out right now) — see
+  // claimBulkBatch's doc comment. Only bulk-flagged weekly batches actually
+  // have tier true-up math that staleness could corrupt.
+  const needsBatchLock = reg.type === "weekly" && !!reg.booking_batch_id && !!reg.is_bulk_discounted;
+  const batchClaimToken = needsBatchLock ? await claimBulkBatch(reg.booking_batch_id, reg.id) : null;
+  if (needsBatchLock && !batchClaimToken) {
+    return NextResponse.json(
+      { error: "This booking's group is being updated by another request right now — please try again in a moment." },
+      { status: 409 }
+    );
+  }
+  try {
   const { data: updated, error } = await supabase
     .from("registrations")
     .update({ status: "cancelled", is_late_cancel: chargeLateFee, applied_account_credit: 0 })
@@ -526,4 +541,7 @@ export async function POST(req: NextRequest) {
     packageSessionForfeited,
     fullForfeitNoRefund,
   });
+  } finally {
+    if (batchClaimToken) await releaseBulkBatch(reg.booking_batch_id, batchClaimToken).catch(() => {});
+  }
 }

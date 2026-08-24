@@ -1,0 +1,13 @@
+-- Serializes concurrent cancel/reschedule operations against the SAME
+-- bulk-discount batch (see supabase-migration-bulk-discount-flag.sql). Two
+-- sessions from the same 4+/8+ bulk booking being cancelled/rescheduled-out
+-- within moments of each other could otherwise both read the batch's
+-- sibling count at the same instant and each compute their tier true-up
+-- against the same stale "before" snapshot, when in reality both leaving
+-- should be accounted for together. claimBulkBatch/releaseBulkBatch in
+-- src/lib/supabase.ts use this as a compare-and-swap lock: a request claims
+-- every currently-confirmed row sharing a booking_batch_id before computing
+-- or applying computeBulkWeeklySettlement's tier true-up, and releases it
+-- once done — a concurrent request racing for the same batch gets back zero
+-- claimed rows and is told to retry rather than proceeding on stale data.
+ALTER TABLE registrations ADD COLUMN IF NOT EXISTS bulk_batch_claim_token uuid;

@@ -20,6 +20,8 @@ import {
   checkGroupSessionCapacity,
   getSavedAthletesByEmail,
   updateRegistrationsPricing,
+  claimBulkBatch,
+  releaseBulkBatch,
 } from "@/lib/supabase";
 import { issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome, isLateAction, parseSessionDateTimeET, computeLateFeeAmounts, computeBulkWeeklySettlement, fullPriceForWeeklyRow, countConfirmedInBatch, settleOldBookingForReschedule, computePlayerEditPricing, parseKidsList } from "@/lib/booking-finalize";
 import { getStripe } from "@/lib/stripe";
@@ -406,17 +408,31 @@ export async function DELETE(
     });
   }
 
-  const success = await cancelRegistration(token, isLateCancel);
-  if (!success) {
-    // Zero rows matched — another request (double-click, retry) already
-    // cancelled this. Bail out here so the refund logic below never runs twice.
+  // Serializes against any other request touching this same bulk-discount
+  // batch (another sibling being cancelled/rescheduled-out right now) — see
+  // claimBulkBatch's doc comment. Only bulk-flagged weekly batches actually
+  // have tier true-up math that staleness could corrupt, so a plain
+  // (non-bulk) weekly cancellation never pays this cost.
+  const needsBatchLock = reg.type === "weekly" && !!reg.booking_batch_id && !!reg.is_bulk_discounted;
+  const batchClaimToken = needsBatchLock ? await claimBulkBatch(reg.booking_batch_id!, reg.id) : null;
+  if (needsBatchLock && !batchClaimToken) {
     return NextResponse.json(
-      { error: "This booking was already cancelled" },
+      { error: "This booking's group is being updated by another request right now — please try again in a moment." },
       { status: 409 }
     );
   }
+  try {
+    const success = await cancelRegistration(token, isLateCancel);
+    if (!success) {
+      // Zero rows matched — another request (double-click, retry) already
+      // cancelled this. Bail out here so the refund logic below never runs twice.
+      return NextResponse.json(
+        { error: "This booking was already cancelled" },
+        { status: 409 }
+      );
+    }
 
-  // Refund referral credit if one was used for this session
+    // Refund referral credit if one was used for this session
   if (reg.used_referral_credit && reg.email) {
     await addReferralCredit(reg.email).catch(() => {});
   }
@@ -638,7 +654,10 @@ export async function DELETE(
     }
   }
 
-  return NextResponse.json({ success: true, isLateCancel, packageSessionForfeited, fullForfeitNoRefund });
+    return NextResponse.json({ success: true, isLateCancel, packageSessionForfeited, fullForfeitNoRefund });
+  } finally {
+    if (batchClaimToken) await releaseBulkBatch(reg.booking_batch_id!, batchClaimToken).catch(() => {});
+  }
 }
 
 // Helper for PATCH — kept local since it's only used for the reschedule
@@ -1230,6 +1249,17 @@ export async function PUT(
   // the old booking for real right now (cancel it, refund its
   // referral/account credit, notify its trainer, sync its calendar, and —
   // if late — credit/apply/log its 50% forfeiture).
+  // Serializes against any other request touching this same bulk-discount
+  // batch while this session leaves it — see claimBulkBatch's doc comment.
+  const needsBatchLock = leavesBulkBatch && !!reg.is_bulk_discounted;
+  const batchClaimToken = needsBatchLock ? await claimBulkBatch(reg.booking_batch_id!, reg.id) : null;
+  if (needsBatchLock && !batchClaimToken) {
+    return NextResponse.json(
+      { error: "This booking's group is being updated by another request right now — please try again in a moment." },
+      { status: 409 }
+    );
+  }
+  try {
   const settled = await settleOldBookingForReschedule({
     reg,
     isLateReschedule,
@@ -1462,4 +1492,7 @@ export async function PUT(
     newSessionPackageCovered: packageSessionForfeited ? newSessionPackageCovered : undefined,
     fullForfeitNoRefund,
   });
+  } finally {
+    if (batchClaimToken) await releaseBulkBatch(reg.booking_batch_id!, batchClaimToken).catch(() => {});
+  }
 }

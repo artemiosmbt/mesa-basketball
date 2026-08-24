@@ -284,6 +284,46 @@ export async function updateRegistrationsPricing(
 }
 
 /**
+ * Claims every currently-confirmed row sharing a bulk-discount batch, as a
+ * mutual-exclusion gate before computeBulkWeeklySettlement reads siblings
+ * and (via updateRegistrationsPricing) writes their trued-up prices — see
+ * supabase-migration-bulk-batch-claim-lock.sql for why. A single UPDATE
+ * gated on `bulk_batch_claim_token IS NULL` means at most one concurrent
+ * caller can ever win it: if another request already holds the batch, this
+ * claims zero rows. `targetRowId` (the specific session actually being
+ * cancelled/rescheduled) must be among what got claimed — if it's missing
+ * (already claimed by someone else, or no longer confirmed), whatever WAS
+ * claimed here is released immediately rather than left stuck locked, and
+ * this returns null so the caller knows to back off instead of proceeding
+ * on a partial/stale batch view.
+ */
+export async function claimBulkBatch(bookingBatchId: string, targetRowId: string): Promise<string | null> {
+  const supabase = getSupabase();
+  const claimToken = crypto.randomUUID();
+  const { data, error } = await supabase
+    .from("registrations")
+    .update({ bulk_batch_claim_token: claimToken })
+    .eq("booking_batch_id", bookingBatchId)
+    .eq("status", "confirmed")
+    .is("bulk_batch_claim_token", null)
+    .select("id");
+  const claimedIds = !error && data ? data.map((r) => r.id as string) : [];
+  if (claimedIds.includes(targetRowId)) return claimToken;
+  if (claimedIds.length > 0) {
+    await supabase.from("registrations").update({ bulk_batch_claim_token: null })
+      .eq("booking_batch_id", bookingBatchId).eq("bulk_batch_claim_token", claimToken);
+  }
+  return null;
+}
+
+/** Releases a claim acquired by claimBulkBatch — always call in a finally. */
+export async function releaseBulkBatch(bookingBatchId: string, claimToken: string): Promise<void> {
+  const supabase = getSupabase();
+  await supabase.from("registrations").update({ bulk_batch_claim_token: null })
+    .eq("booking_batch_id", bookingBatchId).eq("bulk_batch_claim_token", claimToken);
+}
+
+/**
  * Returns true only if THIS call actually flipped the row — a WHERE-clause
  * update matching zero rows (e.g. someone/something already cancelled it a
  * moment ago) is not a Supabase error, so callers MUST check the returned

@@ -9,7 +9,7 @@ import {
 import { sendRescheduleNotification } from "@/lib/email";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import { getWeeklySchedule } from "@/lib/sheets";
-import { addAccountCredit, deductAccountCredit, addReferralCredit, addRegistration, cancelRegistration, logLateFeeEvent, logRegistrationTopupCharge, getPackageById, countPackageSessionsUsed, setPackageSessions, checkGroupSessionCapacity, updateRegistrationsPricing } from "@/lib/supabase";
+import { addAccountCredit, deductAccountCredit, addReferralCredit, addRegistration, cancelRegistration, logLateFeeEvent, logRegistrationTopupCharge, getPackageById, countPackageSessionsUsed, setPackageSessions, checkGroupSessionCapacity, updateRegistrationsPricing, claimBulkBatch, releaseBulkBatch } from "@/lib/supabase";
 import { isLateAction, resolveOffSessionPaymentSource, chargeSavedCardOffSession, issueStripeRefund, computeBulkWeeklySettlement, fullPriceForWeeklyRow, countConfirmedInBatch } from "@/lib/booking-finalize";
 import { calcServiceFee, serviceFeeLabel, fmtMoney, calcPrivatePrice, fullPriceForType, getTrainerTier, normalizeTrainerTier, effectiveSessionPrice, packageCoversTrainerTier, volumeDiscountPct } from "@/lib/pricing";
 import { notifyTrainerOfCancellation, notifyTrainerOfReschedule, notifyTrainerOfNewBooking } from "@/lib/trainer-notify";
@@ -273,6 +273,24 @@ export async function POST(req: NextRequest) {
   // fallback (newFullPrice undefined, e.g. rescheduling into a camp, whose
   // pricing is deliberately left untouched) is `: oldAmount`, which needs to
   // already be the trued-up figure, not the stale pre-override one.
+  // Serializes against any other request touching this same bulk-discount
+  // batch (another sibling being cancelled/rescheduled-out right now) — see
+  // claimBulkBatch's doc comment. Only bulk-flagged weekly batches actually
+  // have tier true-up math that staleness could corrupt. This is separate
+  // from the row-level admin_action_claim_token above (that one only stops
+  // a second concurrent reschedule of this SAME row) — released here too on
+  // abort, since leaving this whole request without either lock held would
+  // strand the row unreschedulable.
+  const needsBatchLock = wasPaid && leavesBulkBatch && !!reg.is_bulk_discounted;
+  const batchClaimToken = needsBatchLock ? await claimBulkBatch(reg.booking_batch_id, id) : null;
+  if (needsBatchLock && !batchClaimToken) {
+    await releaseClaim();
+    return NextResponse.json(
+      { error: "This booking's group is being updated by another request right now — please try again in a moment." },
+      { status: 409 }
+    );
+  }
+  try {
   let bulkSiblingUpdates: { id: string; sessionPrice: number; isBulkDiscounted: boolean }[] = [];
   let leavesBulkSettlementAmount: number | null = null;
   if (wasPaid && leavesBulkBatch) {
@@ -875,4 +893,7 @@ export async function POST(req: NextRequest) {
     newSessionPackageCovered: packageSessionForfeited ? !clearPackageId : undefined,
     fullForfeitNoRefund,
   });
+  } finally {
+    if (batchClaimToken) await releaseBulkBatch(reg.booking_batch_id, batchClaimToken).catch(() => {});
+  }
 }
