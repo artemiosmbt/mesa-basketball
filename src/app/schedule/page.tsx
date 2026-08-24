@@ -2901,9 +2901,12 @@ export default function Home() {
           <div className="mt-10 border-t border-brown-800 pt-8">
             <h3 className="text-center text-xl font-bold">Monthly Packages</h3>
             <p className="mt-1 text-center text-sm text-brown-400">
-              Commit to a full month of training and save — private sessions only.
+              Commit to one calendar month of training and save — private sessions only.
             </p>
             <p className="mt-1 text-center text-xs text-brown-500">Up to 3 players per package.</p>
+            <p className="mt-1 text-center text-xs text-brown-500">
+              Each package covers a single calendar month you choose at enrollment — sessions don&apos;t carry over into the next month.
+            </p>
             <p className="mt-1 text-center text-xs text-brown-500">
               Pick your trainer inside the enrollment form to see pricing.
             </p>
@@ -2911,7 +2914,7 @@ export default function Home() {
               {/* 4-session */}
               <div className="rounded-xl border border-brown-700 bg-brown-900/40 p-5 text-center">
                 <p className="text-3xl font-bold text-mesa-accent">4-Pack</p>
-                <p className="mt-0.5 text-sm text-brown-300">4 sessions / month</p>
+                <p className="mt-0.5 text-sm text-brown-300">4 sessions, one calendar month</p>
                 <div className="mt-3 rounded-lg bg-brown-800/50 p-3">
                   <p className="text-sm font-semibold text-green-400">Save vs. booking sessions individually</p>
                 </div>
@@ -2926,7 +2929,7 @@ export default function Home() {
               <div className="relative rounded-xl border border-mesa-accent/50 bg-brown-900/40 p-5 text-center">
                 <span className="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-mesa-accent px-3 py-0.5 text-xs font-bold text-white whitespace-nowrap">BEST VALUE</span>
                 <p className="text-3xl font-bold text-mesa-accent">8-Pack</p>
-                <p className="mt-0.5 text-sm text-brown-300">8 sessions / month</p>
+                <p className="mt-0.5 text-sm text-brown-300">8 sessions, one calendar month</p>
                 <div className="mt-3 rounded-lg bg-brown-800/50 p-3">
                   <p className="text-sm font-semibold text-green-400">Save vs. booking sessions individually</p>
                 </div>
@@ -2939,7 +2942,7 @@ export default function Home() {
               </div>
             </div>
             <p className="mt-4 text-center text-xs text-brown-500">
-              Sessions expire at the end of the calendar month — unused sessions do not carry over.
+              Packages are good for the single calendar month you enroll in only — all sessions must be booked and completed within that month. Unused sessions expire at month&apos;s end and do not carry over or refund.
               Cancellations &amp; reschedules within 24 hours forfeit that session from your package — no fee, but no refund either. If it was your last session, rescheduling requires paying full price for the new one. No-shows without prior notice are charged the full session fee.
             </p>
           </div>
@@ -4346,12 +4349,15 @@ export default function Home() {
                   <input type="tel" required value={pkgPhone} onChange={e => setPkgPhone(e.target.value)} className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none" />
                 </div>
                 <div>
-                  <label className="mb-1 block text-sm font-medium text-brown-300">Month <span className="text-red-500">*</span></label>
+                  <label className="mb-1 block text-sm font-medium text-brown-300">Calendar Month <span className="text-red-500">*</span></label>
                   <select required value={pkgMonth} onChange={e => setPkgMonth(e.target.value)} className="w-full rounded-lg border border-brown-700 bg-brown-800 px-3 py-2 text-white focus:border-mesa-accent focus:outline-none">
                     {pkgMonthOptions.map(opt => (
                       <option key={opt.value} value={opt.value}>{opt.label}</option>
                     ))}
                   </select>
+                  <p className="mt-1 text-xs text-brown-500">
+                    All {pkgModal.packageType || 4} sessions must be used within this calendar month — they expire at month&apos;s end and won&apos;t carry over.
+                  </p>
                 </div>
                 {REFERRAL_PROGRAM_ENABLED && !isReturningClient && (
                   <div>
