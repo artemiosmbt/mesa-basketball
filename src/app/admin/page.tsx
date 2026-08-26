@@ -343,16 +343,6 @@ function parseDateKey(dateStr: string): string {
   return isNaN(d.getTime()) ? "" : toDateKey(d);
 }
 
-// Used to default the "reschedule to a past date" picker to the day before
-// the session's original date.
-function shiftDateKey(dateStr: string, days: number): string {
-  const key = parseDateKey(dateStr);
-  if (!key) return "";
-  const d = new Date(`${key}T12:00:00`);
-  d.setDate(d.getDate() + days);
-  return toDateKey(d);
-}
-
 // --- Reschedule dropdown helpers -------------------------------------------
 
 function splitCampTime(time: string): { start: string; end: string } {
@@ -477,18 +467,10 @@ function campDayOptions(camp: Camp): string[] {
 const RESCHEDULE_SELECT_CLASS = "mt-0.5 w-full rounded bg-brown-950 border border-brown-700 px-2 py-1.5 text-sm text-white";
 const RESCHEDULE_LABEL_CLASS = "text-[10px] uppercase tracking-wider text-brown-500";
 
-function renderWeeklyRescheduleFields(weeklySchedule: WeeklySession[], form: RescheduleForm, setForm: (f: RescheduleForm) => void, extraDate?: string) {
+function renderWeeklyRescheduleFields(weeklySchedule: WeeklySession[], form: RescheduleForm, setForm: (f: RescheduleForm) => void) {
   const groups = uniqueSorted(weeklySchedule.map((s) => s.group));
   const sessionsForGroup = weeklySchedule.filter((s) => s.group === form.group);
-  const sheetDates = uniqueSorted(sessionsForGroup.map((s) => s.date));
-  // Lets the admin move a session back onto the day before it was originally
-  // booked, even though the sheet (see isUpcoming() in /api/schedule) only
-  // ever lists upcoming dates. If this group actually runs on that day, its
-  // real times/locations show up below same as any other date; if not, the
-  // Time dropdown will just come up empty and the admin can pick a different
-  // group/session type instead.
-  const dates = (extraDate && !sheetDates.includes(extraDate) ? [...sheetDates, extraDate] : sheetDates)
-    .sort((a, b) => dateSortKey(a) - dateSortKey(b));
+  const dates = uniqueSorted(sessionsForGroup.map((s) => s.date)).sort((a, b) => dateSortKey(a) - dateSortKey(b));
   const sessionsForDate = sessionsForGroup.filter((s) => s.date === form.date);
   const times = Array.from(new Set(sessionsForDate.map((s) => s.startTime)));
   const sessionsForTime = sessionsForDate.filter((s) => s.startTime === form.start);
@@ -561,12 +543,10 @@ function renderWeeklyRescheduleFields(weeklySchedule: WeeklySession[], form: Res
   );
 }
 
-function renderCampRescheduleFields(camps: Camp[], form: RescheduleForm, setForm: (f: RescheduleForm) => void, extraDate?: string) {
+function renderCampRescheduleFields(camps: Camp[], form: RescheduleForm, setForm: (f: RescheduleForm) => void) {
   const options = campOptions(camps);
   const selected = options.find((o) => o.key === form.group);
-  const sheetDays = selected ? campDayOptions(selected.camp) : [];
-  const days = (selected && extraDate && !sheetDays.includes(extraDate) ? [...sheetDays, extraDate] : sheetDays)
-    .sort((a, b) => dateSortKey(a) - dateSortKey(b));
+  const days = selected ? campDayOptions(selected.camp) : [];
 
   return (
     <>
@@ -609,10 +589,8 @@ function renderCampRescheduleFields(camps: Camp[], form: RescheduleForm, setForm
   );
 }
 
-function renderPrivateRescheduleFields(privateSlots: PrivateSlot[], form: RescheduleForm, setForm: (f: RescheduleForm) => void, preferredDurationMins: number = 60, extraDate?: string) {
-  const sheetDates = uniqueSorted(privateSlots.map((s) => s.date));
-  const dates = (extraDate && !sheetDates.includes(extraDate) ? [...sheetDates, extraDate] : sheetDates)
-    .sort((a, b) => dateSortKey(a) - dateSortKey(b));
+function renderPrivateRescheduleFields(privateSlots: PrivateSlot[], form: RescheduleForm, setForm: (f: RescheduleForm) => void, preferredDurationMins: number = 60) {
+  const dates = uniqueSorted(privateSlots.map((s) => s.date)).sort((a, b) => dateSortKey(a) - dateSortKey(b));
   const slotsForDate = privateSlots.filter((s) => s.date === form.date);
   const locations = Array.from(new Set(slotsForDate.map((s) => s.location)));
   const slotsForLocation = slotsForDate.filter((s) => s.location === form.location);
@@ -1328,8 +1306,13 @@ export default function AdminPage() {
 
       // Load the current schedule (groups/camps/private slots) — every role
       // needs this for folder capacity ("X/Y signed up"), not just admin's
-      // reschedule modal.
-      fetch("/api/schedule").then((r) => r.json()).then((d) => {
+      // reschedule modal. scope=all skips the public booking pages' upcoming-
+      // only filter so the reschedule date pickers also see sessions whose
+      // start time already passed (earlier today, or any past date the sheet
+      // still has a row for) — capacity lookups elsewhere are unaffected
+      // since they're keyed lookups against real registrations, not lists
+      // rendered directly from this data.
+      fetch("/api/schedule?scope=all").then((r) => r.json()).then((d) => {
         setScheduleData({
           weeklySchedule: d.weeklySchedule || [],
           camps: d.camps || [],
@@ -2804,12 +2787,6 @@ export default function AdminPage() {
         const r = reschedulingReg;
         if (!r) return null;
 
-        // Injected into the Date/Day dropdowns below as an extra option so the
-        // admin can move a session back onto the day before it was originally
-        // booked — the sheet-backed lists otherwise only ever contain upcoming
-        // dates (see isUpcoming() in /api/schedule).
-        const dayBeforeOriginal = shiftDateKey(r.booked_date || "", -1) || undefined;
-
         // For the confirm-step "To" label: converting clears the group in favor
         // of "Private Session" (or vice versa); weekly uses the group name as-is;
         // camp resolves the picked option key back to "Name — GradeGroup".
@@ -2979,13 +2956,13 @@ export default function AdminPage() {
                 ) : (scheduleData.weeklySchedule.length === 0 && scheduleData.camps.length === 0 && scheduleData.privateSlots.length === 0) ? (
                   renderManualRescheduleFields(rescheduleForm, setRescheduleForm)
                 ) : r.type === "weekly" && rescheduleConvertToPrivate ? (
-                  renderPrivateRescheduleFields(scheduleData.privateSlots, rescheduleForm, setRescheduleForm, 60, dayBeforeOriginal)
+                  renderPrivateRescheduleFields(scheduleData.privateSlots, rescheduleForm, setRescheduleForm)
                 ) : r.type === "weekly" ? (
-                  renderWeeklyRescheduleFields(scheduleData.weeklySchedule, rescheduleForm, setRescheduleForm, dayBeforeOriginal)
+                  renderWeeklyRescheduleFields(scheduleData.weeklySchedule, rescheduleForm, setRescheduleForm)
                 ) : r.type === "camp" ? (
-                  renderCampRescheduleFields(scheduleData.camps, rescheduleForm, setRescheduleForm, dayBeforeOriginal)
+                  renderCampRescheduleFields(scheduleData.camps, rescheduleForm, setRescheduleForm)
                 ) : isPrivateTypeClient(r.type) && rescheduleConvertToGroup ? (
-                  renderWeeklyRescheduleFields(scheduleData.weeklySchedule, rescheduleForm, setRescheduleForm, dayBeforeOriginal)
+                  renderWeeklyRescheduleFields(scheduleData.weeklySchedule, rescheduleForm, setRescheduleForm)
                 ) : (
                   // Preserve the original booking's own duration (e.g. a 90
                   // or 120-min session) rather than defaulting to 60 — the
@@ -2995,8 +2972,7 @@ export default function AdminPage() {
                     scheduleData.privateSlots,
                     rescheduleForm,
                     setRescheduleForm,
-                    Math.max(60, parseTimeToMinsClient(r.booked_end_time || "") - parseTimeToMinsClient(r.booked_start_time || "")),
-                    dayBeforeOriginal
+                    Math.max(60, parseTimeToMinsClient(r.booked_end_time || "") - parseTimeToMinsClient(r.booked_start_time || ""))
                   )
                 )}
               </div>

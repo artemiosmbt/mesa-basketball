@@ -53,7 +53,13 @@ function isUpcoming(dateStr: string, startTime: string, et: ReturnType<typeof ge
   return parseTimeMins(startTime) > et.totalMins;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  // Admin's reschedule picker needs sessions whose start time has already
+  // passed too (today's already-started sessions, or any earlier date the
+  // sheet still has a row for) — the default upcoming-only filter exists so
+  // parents can't book into the past on the public schedule/booking pages.
+  const includePast = new URL(request.url).searchParams.get("scope") === "all";
+
   const hasSheets =
     process.env.SHEET_CSV_WEEKLY_SCHEDULE ||
     process.env.SHEET_CSV_CAMPS ||
@@ -88,9 +94,9 @@ export async function GET() {
     const et = getNowET();
 
     return NextResponse.json({
-      weeklySchedule: weeklySchedule.filter(s => isUpcoming(s.date, s.startTime, et)),
+      weeklySchedule: includePast ? weeklySchedule : weeklySchedule.filter(s => isUpcoming(s.date, s.startTime, et)),
       camps,
-      privateSlots: privateSlots.filter(s => s.available && isUpcoming(s.date, s.startTime, et)),
+      privateSlots: includePast ? privateSlots.filter(s => s.available) : privateSlots.filter(s => s.available && isUpcoming(s.date, s.startTime, et)),
       bookedSlots,
       groupEnrollment,
     });
