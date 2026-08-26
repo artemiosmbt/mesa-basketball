@@ -2089,7 +2089,7 @@ export default function AdminPage() {
                     {cancelling === r.id ? "Cancelling..." : "Cancel"}
                   </button>
                 )}
-                {canEdit && r.status === "confirmed" && !isPast && (
+                {canEdit && r.status === "confirmed" && (
                   <button onClick={() => openReschedule(r)} className="text-xs text-blue-400 hover:text-blue-300 transition">
                     Reschedule
                   </button>
