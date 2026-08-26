@@ -1306,12 +1306,12 @@ export default function AdminPage() {
 
       // Load the current schedule (groups/camps/private slots) — every role
       // needs this for folder capacity ("X/Y signed up"), not just admin's
-      // reschedule modal. scope=all skips the public booking pages' upcoming-
-      // only filter so the reschedule date pickers also see sessions whose
-      // start time already passed (earlier today, or any past date the sheet
-      // still has a row for) — capacity lookups elsewhere are unaffected
-      // since they're keyed lookups against real registrations, not lists
-      // rendered directly from this data.
+      // reschedule modal. scope=all extends the public booking pages'
+      // upcoming-only filter with a one-day lookback (today's sessions even
+      // if already started, plus yesterday's), not the sheet's entire past —
+      // capacity lookups elsewhere are unaffected since they're keyed
+      // lookups against real registrations, not lists rendered directly
+      // from this data.
       fetch("/api/schedule?scope=all").then((r) => r.json()).then((d) => {
         setScheduleData({
           weeklySchedule: d.weeklySchedule || [],

@@ -53,12 +53,32 @@ function isUpcoming(dateStr: string, startTime: string, et: ReturnType<typeof ge
   return parseTimeMins(startTime) > et.totalMins;
 }
 
+// Is this session's calendar date today or yesterday (ET), regardless of
+// its start time? Used for the admin reschedule picker's one-day lookback —
+// deliberately not "any past date ever in the sheet", just enough to cover
+// a session that already started today, or moving one back one day.
+function isWithinOneDayLookback(dateStr: string, et: ReturnType<typeof getNowET>): boolean {
+  const iso = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  let sy: number, sm: number, sd: number;
+  if (iso) {
+    sy = parseInt(iso[1]); sm = parseInt(iso[2]); sd = parseInt(iso[3]);
+  } else {
+    const d = new Date(dateStr + " 12:00:00");
+    if (isNaN(d.getTime())) return false;
+    sy = d.getUTCFullYear(); sm = d.getUTCMonth() + 1; sd = d.getUTCDate();
+  }
+  const sessionDate = new Date(sy, sm - 1, sd);
+  const yesterday = new Date(et.year, et.month - 1, et.day - 1);
+  return sessionDate.getTime() === yesterday.getTime() || sessionDate.getTime() === new Date(et.year, et.month - 1, et.day).getTime();
+}
+
 export async function GET(request: Request) {
-  // Admin's reschedule picker needs sessions whose start time has already
-  // passed too (today's already-started sessions, or any earlier date the
-  // sheet still has a row for) — the default upcoming-only filter exists so
-  // parents can't book into the past on the public schedule/booking pages.
-  const includePast = new URL(request.url).searchParams.get("scope") === "all";
+  // Admin's reschedule picker gets a one-day lookback on top of the normal
+  // upcoming filter: today's sessions even if their start time already
+  // passed, and yesterday's — not the sheet's entire past history. The
+  // default upcoming-only filter still applies otherwise, so parents can't
+  // book into the past on the public schedule/booking pages.
+  const withLookback = new URL(request.url).searchParams.get("scope") === "all";
 
   const hasSheets =
     process.env.SHEET_CSV_WEEKLY_SCHEDULE ||
@@ -94,9 +114,9 @@ export async function GET(request: Request) {
     const et = getNowET();
 
     return NextResponse.json({
-      weeklySchedule: includePast ? weeklySchedule : weeklySchedule.filter(s => isUpcoming(s.date, s.startTime, et)),
+      weeklySchedule: weeklySchedule.filter(s => isUpcoming(s.date, s.startTime, et) || (withLookback && isWithinOneDayLookback(s.date, et))),
       camps,
-      privateSlots: includePast ? privateSlots.filter(s => s.available) : privateSlots.filter(s => s.available && isUpcoming(s.date, s.startTime, et)),
+      privateSlots: privateSlots.filter(s => s.available && (isUpcoming(s.date, s.startTime, et) || (withLookback && isWithinOneDayLookback(s.date, et)))),
       bookedSlots,
       groupEnrollment,
     });
