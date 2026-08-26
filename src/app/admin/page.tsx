@@ -477,10 +477,18 @@ function campDayOptions(camp: Camp): string[] {
 const RESCHEDULE_SELECT_CLASS = "mt-0.5 w-full rounded bg-brown-950 border border-brown-700 px-2 py-1.5 text-sm text-white";
 const RESCHEDULE_LABEL_CLASS = "text-[10px] uppercase tracking-wider text-brown-500";
 
-function renderWeeklyRescheduleFields(weeklySchedule: WeeklySession[], form: RescheduleForm, setForm: (f: RescheduleForm) => void) {
+function renderWeeklyRescheduleFields(weeklySchedule: WeeklySession[], form: RescheduleForm, setForm: (f: RescheduleForm) => void, extraDate?: string) {
   const groups = uniqueSorted(weeklySchedule.map((s) => s.group));
   const sessionsForGroup = weeklySchedule.filter((s) => s.group === form.group);
-  const dates = uniqueSorted(sessionsForGroup.map((s) => s.date)).sort((a, b) => dateSortKey(a) - dateSortKey(b));
+  const sheetDates = uniqueSorted(sessionsForGroup.map((s) => s.date));
+  // Lets the admin move a session back onto the day before it was originally
+  // booked, even though the sheet (see isUpcoming() in /api/schedule) only
+  // ever lists upcoming dates. If this group actually runs on that day, its
+  // real times/locations show up below same as any other date; if not, the
+  // Time dropdown will just come up empty and the admin can pick a different
+  // group/session type instead.
+  const dates = (extraDate && !sheetDates.includes(extraDate) ? [...sheetDates, extraDate] : sheetDates)
+    .sort((a, b) => dateSortKey(a) - dateSortKey(b));
   const sessionsForDate = sessionsForGroup.filter((s) => s.date === form.date);
   const times = Array.from(new Set(sessionsForDate.map((s) => s.startTime)));
   const sessionsForTime = sessionsForDate.filter((s) => s.startTime === form.start);
@@ -553,10 +561,12 @@ function renderWeeklyRescheduleFields(weeklySchedule: WeeklySession[], form: Res
   );
 }
 
-function renderCampRescheduleFields(camps: Camp[], form: RescheduleForm, setForm: (f: RescheduleForm) => void) {
+function renderCampRescheduleFields(camps: Camp[], form: RescheduleForm, setForm: (f: RescheduleForm) => void, extraDate?: string) {
   const options = campOptions(camps);
   const selected = options.find((o) => o.key === form.group);
-  const days = selected ? campDayOptions(selected.camp) : [];
+  const sheetDays = selected ? campDayOptions(selected.camp) : [];
+  const days = (selected && extraDate && !sheetDays.includes(extraDate) ? [...sheetDays, extraDate] : sheetDays)
+    .sort((a, b) => dateSortKey(a) - dateSortKey(b));
 
   return (
     <>
@@ -599,8 +609,10 @@ function renderCampRescheduleFields(camps: Camp[], form: RescheduleForm, setForm
   );
 }
 
-function renderPrivateRescheduleFields(privateSlots: PrivateSlot[], form: RescheduleForm, setForm: (f: RescheduleForm) => void, preferredDurationMins: number = 60) {
-  const dates = uniqueSorted(privateSlots.map((s) => s.date)).sort((a, b) => dateSortKey(a) - dateSortKey(b));
+function renderPrivateRescheduleFields(privateSlots: PrivateSlot[], form: RescheduleForm, setForm: (f: RescheduleForm) => void, preferredDurationMins: number = 60, extraDate?: string) {
+  const sheetDates = uniqueSorted(privateSlots.map((s) => s.date));
+  const dates = (extraDate && !sheetDates.includes(extraDate) ? [...sheetDates, extraDate] : sheetDates)
+    .sort((a, b) => dateSortKey(a) - dateSortKey(b));
   const slotsForDate = privateSlots.filter((s) => s.date === form.date);
   const locations = Array.from(new Set(slotsForDate.map((s) => s.location)));
   const slotsForLocation = slotsForDate.filter((s) => s.location === form.location);
@@ -1244,12 +1256,6 @@ export default function AdminPage() {
   const [reschedulingReg, setReschedulingReg] = useState<Registration | null>(null);
   const [rescheduleStep, setRescheduleStep] = useState<"edit" | "confirm">("edit");
   const [rescheduleForm, setRescheduleForm] = useState<RescheduleForm>({ group: "", date: "", start: "", end: "", location: "", trainer: "" });
-  // Lets the admin move a session to a past date (the sheet-backed date
-  // dropdown only ever lists upcoming sessions — see isUpcoming() in
-  // /api/schedule). Everything else (group/camp, time, location) is locked
-  // to the session's existing values to rule out picking a mismatched
-  // time/location/session by mistake — only the date itself is editable.
-  const [rescheduleManualDate, setRescheduleManualDate] = useState(false);
   const [rescheduleSaving, setRescheduleSaving] = useState(false);
   const [rescheduleError, setRescheduleError] = useState<string | null>(null);
   const [scheduleData, setScheduleData] = useState<ScheduleData | null>(null);
@@ -1591,7 +1597,6 @@ export default function AdminPage() {
     setRescheduleKeepCredit(true);
     setRescheduleSuppressNotification(false);
     setRescheduleKeepPriceUnchanged(false);
-    setRescheduleManualDate(false);
     // For weekly/camp we start the picker blank so the admin actively selects
     // from real sheet options rather than pre-filling with the (possibly
     // stale) current label. Private sessions still start pre-filled since
@@ -1640,13 +1645,7 @@ export default function AdminPage() {
     let bookedGroup: string | undefined;
     let sessionLabelPrefix: string | undefined;
     let newType: string | undefined;
-    // In "reschedule to a past date" mode, group/camp/type are locked to the
-    // session's existing values — leaving these undefined tells the API to
-    // keep whatever the row already has (see its bookedGroup/sessionLabelPrefix
-    // fallback logic) rather than re-deriving from a picker that isn't shown.
-    if (rescheduleManualDate) {
-      // no-op — bookedGroup/sessionLabelPrefix/newType stay undefined
-    } else if (convertingToPrivate) {
+    if (convertingToPrivate) {
       sessionLabelPrefix = "Private Session";
       newType = "private";
     } else if (convertingToGroup) {
@@ -2805,6 +2804,12 @@ export default function AdminPage() {
         const r = reschedulingReg;
         if (!r) return null;
 
+        // Injected into the Date/Day dropdowns below as an extra option so the
+        // admin can move a session back onto the day before it was originally
+        // booked — the sheet-backed lists otherwise only ever contain upcoming
+        // dates (see isUpcoming() in /api/schedule).
+        const dayBeforeOriginal = shiftDateKey(r.booked_date || "", -1) || undefined;
+
         // For the confirm-step "To" label: converting clears the group in favor
         // of "Private Session" (or vice versa); weekly uses the group name as-is;
         // camp resolves the picked option key back to "Name — GradeGroup".
@@ -2936,7 +2941,7 @@ export default function AdminPage() {
             <div className="w-full max-w-sm rounded-xl bg-brown-900 border border-brown-700 p-5" onClick={(e) => e.stopPropagation()}>
               <h3 className="text-sm font-semibold text-white mb-1">Reschedule Session</h3>
               <p className="text-xs text-brown-400 mb-3">{r.parent_name} — {athleteNames(r.kids || "")}</p>
-              {!rescheduleManualDate && r.type === "weekly" && (
+              {r.type === "weekly" && (
                 <div className="flex rounded-lg border border-brown-700 overflow-hidden mb-3 text-xs font-medium">
                   <button
                     onClick={() => { setRescheduleConvertToPrivate(false); setRescheduleForm({ group: "", date: "", start: "", end: "", location: "", trainer: "" }); }}
@@ -2952,7 +2957,7 @@ export default function AdminPage() {
                   </button>
                 </div>
               )}
-              {!rescheduleManualDate && isPrivateTypeClient(r.type) && (
+              {isPrivateTypeClient(r.type) && (
                 <div className="flex rounded-lg border border-brown-700 overflow-hidden mb-3 text-xs font-medium">
                   <button
                     onClick={() => { setRescheduleConvertToGroup(false); setRescheduleForm({ group: "", date: r.booked_date || "", start: r.booked_start_time || "", end: r.booked_end_time || "", location: r.booked_location || "", trainer: r.booked_trainer || "" }); }}
@@ -2968,63 +2973,19 @@ export default function AdminPage() {
                   </button>
                 </div>
               )}
-              {!!scheduleData && (scheduleData.weeklySchedule.length > 0 || scheduleData.camps.length > 0 || scheduleData.privateSlots.length > 0) && (
-                <label className="flex items-center gap-2 mb-2 text-xs text-brown-300 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={rescheduleManualDate}
-                    onChange={(e) => {
-                      const checked = e.target.checked;
-                      setRescheduleManualDate(checked);
-                      setRescheduleConvertToPrivate(false);
-                      setRescheduleConvertToGroup(false);
-                      setRescheduleForm(
-                        checked
-                          ? {
-                              group: r.booked_group || "",
-                              date: shiftDateKey(r.booked_date || "", -1) || (r.booked_date || ""),
-                              start: r.booked_start_time || "",
-                              end: r.booked_end_time || "",
-                              location: r.booked_location || "",
-                              trainer: r.booked_trainer || "",
-                            }
-                          : { group: "", date: "", start: "", end: "", location: "", trainer: "" }
-                      );
-                    }}
-                  />
-                  <span>Reschedule to a past date (keeps the same session, time &amp; location — only the date changes)</span>
-                </label>
-              )}
               <div className="space-y-2">
-                {rescheduleManualDate ? (
-                  <>
-                    <div className="rounded-lg border border-brown-700 bg-brown-950 px-3 py-2 text-xs text-brown-300">
-                      <p className="text-brown-500 uppercase tracking-wider text-[10px] mb-1">Unchanged</p>
-                      {r.booked_group && <p>{r.booked_group}</p>}
-                      <p>{r.booked_start_time}{r.booked_end_time ? `-${r.booked_end_time}` : ""} at {r.booked_location}</p>
-                    </div>
-                    <div>
-                      <label className={RESCHEDULE_LABEL_CLASS}>New Date (past dates allowed)</label>
-                      <input
-                        type="date"
-                        value={rescheduleForm.date}
-                        onChange={(e) => setRescheduleForm({ ...rescheduleForm, date: e.target.value })}
-                        className={RESCHEDULE_SELECT_CLASS}
-                      />
-                    </div>
-                  </>
-                ) : !scheduleData ? (
+                {!scheduleData ? (
                   <p className="text-xs text-brown-500">Loading available sessions…</p>
                 ) : (scheduleData.weeklySchedule.length === 0 && scheduleData.camps.length === 0 && scheduleData.privateSlots.length === 0) ? (
                   renderManualRescheduleFields(rescheduleForm, setRescheduleForm)
                 ) : r.type === "weekly" && rescheduleConvertToPrivate ? (
-                  renderPrivateRescheduleFields(scheduleData.privateSlots, rescheduleForm, setRescheduleForm)
+                  renderPrivateRescheduleFields(scheduleData.privateSlots, rescheduleForm, setRescheduleForm, 60, dayBeforeOriginal)
                 ) : r.type === "weekly" ? (
-                  renderWeeklyRescheduleFields(scheduleData.weeklySchedule, rescheduleForm, setRescheduleForm)
+                  renderWeeklyRescheduleFields(scheduleData.weeklySchedule, rescheduleForm, setRescheduleForm, dayBeforeOriginal)
                 ) : r.type === "camp" ? (
-                  renderCampRescheduleFields(scheduleData.camps, rescheduleForm, setRescheduleForm)
+                  renderCampRescheduleFields(scheduleData.camps, rescheduleForm, setRescheduleForm, dayBeforeOriginal)
                 ) : isPrivateTypeClient(r.type) && rescheduleConvertToGroup ? (
-                  renderWeeklyRescheduleFields(scheduleData.weeklySchedule, rescheduleForm, setRescheduleForm)
+                  renderWeeklyRescheduleFields(scheduleData.weeklySchedule, rescheduleForm, setRescheduleForm, dayBeforeOriginal)
                 ) : (
                   // Preserve the original booking's own duration (e.g. a 90
                   // or 120-min session) rather than defaulting to 60 — the
@@ -3034,14 +2995,15 @@ export default function AdminPage() {
                     scheduleData.privateSlots,
                     rescheduleForm,
                     setRescheduleForm,
-                    Math.max(60, parseTimeToMinsClient(r.booked_end_time || "") - parseTimeToMinsClient(r.booked_start_time || ""))
+                    Math.max(60, parseTimeToMinsClient(r.booked_end_time || "") - parseTimeToMinsClient(r.booked_start_time || "")),
+                    dayBeforeOriginal
                   )
                 )}
               </div>
-              {!rescheduleManualDate && rescheduleConvertToPrivate && (
+              {rescheduleConvertToPrivate && (
                 <p className="text-[11px] text-amber-400 mt-2">Price will be recalculated for a private session based on duration and player count.</p>
               )}
-              {!rescheduleManualDate && isPrivateTypeClient(r.type) && rescheduleConvertToGroup && (
+              {isPrivateTypeClient(r.type) && rescheduleConvertToGroup && (
                 <p className="text-[11px] text-amber-400 mt-2">Price will be recalculated using the new group&apos;s rate.</p>
               )}
               {!!r.used_referral_credit && ((r.type === "weekly" && rescheduleConvertToPrivate) || (isPrivateTypeClient(r.type) && !rescheduleConvertToGroup)) && (
