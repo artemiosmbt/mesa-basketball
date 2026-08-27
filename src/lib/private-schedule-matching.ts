@@ -66,13 +66,23 @@ export function findPrivateTrainerReassignments<
     if (!intervalsCoverRange(covered, regStart, regEnd)) continue;
 
     const currentTrainer = r.booked_trainer || "Artemios Gavalas";
-    const coveringTrainer = trainersHere.find((t) => {
+    const trainerCovers = (t: string) => {
       const trainerIntervals = sameDayLocation
         .filter((s) => s.trainer === t)
         .map((s) => ({ start: parseTimeMins(s.startTime), end: parseTimeMins(s.endTime) }))
         .filter((s): s is { start: number; end: number } => s.start !== null && s.end !== null);
       return intervalsCoverRange(trainerIntervals, regStart, regEnd);
-    });
+    };
+    // If the trainer already on the booking still has a slot covering this
+    // exact window, nothing changed for them — leave it alone. Without this
+    // check, two trainers each legitimately booked at the same date/
+    // location/time (e.g. two different clients' private sessions running
+    // side by side) would race on `.find()`'s sheet-row order below, and
+    // whichever trainer's row happened to come first would silently steal
+    // the OTHER trainer's already-correct booking, double-booking that
+    // trainer at the same time slot.
+    if (trainerCovers(currentTrainer)) continue;
+    const coveringTrainer = trainersHere.find(trainerCovers);
     if (coveringTrainer && coveringTrainer !== currentTrainer) {
       result.push({ reg: r, newTrainer: coveringTrainer });
     }
