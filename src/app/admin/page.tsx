@@ -605,6 +605,24 @@ function renderPrivateRescheduleFields(privateSlots: PrivateSlot[], form: Resche
     windowsForLocation.flatMap((w) => getStartOptionsClient(w, preferredDurationMins))
   )).sort((a, b) => a - b);
 
+  // Every trainer whose OWN sheet slot(s) fully cover the selected window —
+  // not just whichever one a `.find()` happened to hit first. When two
+  // trainers each have a private slot at the same date/location/time (e.g.
+  // two different clients' sessions running side by side), there is no
+  // single correct answer to infer; the admin has to pick. Surfacing this
+  // explicitly is what closes the gap that let sync-time-changes silently
+  // swap a booking onto the wrong trainer — see private-schedule-matching.ts.
+  const startMins = form.start ? parseTimeToMinsClient(form.start) : null;
+  const endMins = form.end ? parseTimeToMinsClient(form.end) : null;
+  const dedupedTrainersForLocation: string[] = [];
+  for (const s of slotsForLocation) {
+    if (!dedupedTrainersForLocation.some((t) => trainerNamesMatch(t, s.trainer))) dedupedTrainersForLocation.push(s.trainer);
+  }
+  const trainersForWindow = startMins === null || endMins === null ? [] : dedupedTrainersForLocation.filter((t) => {
+    const merged = buildTimeWindowsClient(slotsForLocation.filter((s) => trainerNamesMatch(s.trainer, t)));
+    return merged.some((w) => w.startMins <= startMins && w.endMins >= endMins);
+  });
+
   return (
     <>
       <div>
@@ -639,16 +657,22 @@ function renderPrivateRescheduleFields(privateSlots: PrivateSlot[], form: Resche
             onChange={(e) => {
               const startMins = parseInt(e.target.value, 10);
               const endMins = startMins + preferredDurationMins;
-              // Recover the trainer from whichever raw sheet row actually
-              // covers the full selected duration at this location.
-              const match = slotsForLocation.find((s) =>
-                parseTimeToMinsClient(s.startTime) <= startMins && parseTimeToMinsClient(s.endTime) >= endMins
-              );
+              // Every trainer whose own slot(s) cover the full selected
+              // duration — auto-fill only when that's unambiguous (exactly
+              // one trainer); otherwise leave it blank and require the
+              // explicit Trainer picker below, rather than silently
+              // guessing via array order (that's the bug that caused a
+              // wrong trainer swap in sync-time-changes — see
+              // private-schedule-matching.ts).
+              const covering = dedupedTrainersForLocation.filter((t) => {
+                const merged = buildTimeWindowsClient(slotsForLocation.filter((s) => trainerNamesMatch(s.trainer, t)));
+                return merged.some((w) => w.startMins <= startMins && w.endMins >= endMins);
+              });
               setForm({
                 ...form,
                 start: formatTimeFromMinsClient(startMins),
                 end: formatTimeFromMinsClient(endMins),
-                trainer: match?.trainer || form.trainer,
+                trainer: covering.length === 1 ? covering[0] : "",
               });
             }}
             className={RESCHEDULE_SELECT_CLASS}
@@ -660,6 +684,24 @@ function renderPrivateRescheduleFields(privateSlots: PrivateSlot[], form: Resche
               </option>
             ))}
           </select>
+        </div>
+      )}
+      {form.start && form.end && (
+        <div>
+          <label className={RESCHEDULE_LABEL_CLASS}>Trainer</label>
+          <select
+            value={form.trainer}
+            onChange={(e) => setForm({ ...form, trainer: e.target.value })}
+            className={RESCHEDULE_SELECT_CLASS}
+          >
+            <option value="">{trainersForWindow.length > 1 ? "Multiple trainers cover this time — pick one…" : "Select a trainer…"}</option>
+            {trainersForWindow.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+          {trainersForWindow.length > 1 && (
+            <p className="text-[11px] text-amber-400 mt-1">
+              More than one trainer has a slot covering this exact time/location — choose the right one, it won&apos;t be guessed for you.
+            </p>
+          )}
         </div>
       )}
     </>
@@ -1605,8 +1647,18 @@ export default function AdminPage() {
     const convertingToPrivate = r?.type === "weekly" && rescheduleConvertToPrivate;
     const convertingToGroup = !!r && isPrivateTypeClient(r.type) && rescheduleConvertToGroup;
     const needsGroup = (r?.type === "weekly" && !convertingToPrivate) || r?.type === "camp" || convertingToGroup;
+    const needsTrainer = convertingToPrivate || (!!r && isPrivateTypeClient(r.type) && !convertingToGroup);
     if ((needsGroup && !rescheduleForm.group.trim()) || !rescheduleForm.date.trim() || !rescheduleForm.start.trim() || !rescheduleForm.end.trim() || !rescheduleForm.location.trim()) {
       setRescheduleError("Please select all fields.");
+      return;
+    }
+    // The trainer field can be legitimately blank mid-edit whenever more
+    // than one trainer covers the picked window (see renderPrivateReschedule
+    // Fields) — the server falls back to the OLD trainer when this is
+    // omitted, which would silently leave a wrong assignment in place rather
+    // than erroring, so this has to be caught here instead.
+    if (needsTrainer && !rescheduleForm.trainer.trim()) {
+      setRescheduleError("Please select which trainer this session belongs to.");
       return;
     }
     setRescheduleError(null);

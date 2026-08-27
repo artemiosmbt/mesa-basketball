@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { trainerNamesMatch } from "@/lib/trainers";
 
 // Shared by src/app/api/cron/detect-time-changes/route.ts (fires on every
 // sheet edit) and src/app/api/admin/sync-time-changes/route.ts (fires on
@@ -62,13 +63,17 @@ export function findPrivateTrainerReassignments<
   // overlapping confirmed sessions on the same day. This is what actually
   // guarantees no double-booking, rather than relying on the matching logic
   // above (date+location only, no per-client key) getting every case right.
+  // Compared with trainerNamesMatch, not ===, for the same reason every
+  // other trainer-conflict check in this codebase does (see its docstring
+  // in trainers.ts) — a casing/whitespace drift between two sheet edits
+  // must never make this miss (or invent) a real double-booking.
   const wouldDoubleBook = (candidateTrainer: string, forReg: T) => {
     const iv = regInterval(forReg);
     if (!iv) return true; // can't verify the window — refuse rather than risk it
     return regs.some((other) => {
       if (other.id === forReg.id) return false;
       if (other.booked_date !== forReg.booked_date) return false;
-      if ((other.booked_trainer || "Artemios Gavalas") !== candidateTrainer) return false;
+      if (!trainerNamesMatch(other.booked_trainer || "Artemios Gavalas", candidateTrainer)) return false;
       const oIv = regInterval(other);
       return !!oIv && overlaps(iv, oIv);
     });
@@ -80,7 +85,13 @@ export function findPrivateTrainerReassignments<
     if (regStart === null || regEnd === null) continue;
 
     const sameDayLocation = slots.filter((s) => s.date === r.booked_date && s.location === (r.booked_location || ""));
-    const trainersHere = [...new Set(sameDayLocation.map((s) => s.trainer))];
+    // Dedupe by normalized name — otherwise "Zain Amjad" and "zain amjad" on
+    // two different sheet rows would count as two distinct candidate
+    // trainers below and trip the ambiguous-skip path for no real reason.
+    const trainersHere: string[] = [];
+    for (const s of sameDayLocation) {
+      if (!trainersHere.some((t) => trainerNamesMatch(t, s.trainer))) trainersHere.push(s.trainer);
+    }
     const covered: { start: number; end: number }[] = sameDayLocation
       .map((s) => ({ start: parseTimeMins(s.startTime), end: parseTimeMins(s.endTime) }))
       .filter((s): s is { start: number; end: number } => s.start !== null && s.end !== null);
@@ -92,7 +103,7 @@ export function findPrivateTrainerReassignments<
     const currentTrainer = r.booked_trainer || "Artemios Gavalas";
     const trainerCovers = (t: string) => {
       const trainerIntervals = sameDayLocation
-        .filter((s) => s.trainer === t)
+        .filter((s) => trainerNamesMatch(s.trainer, t))
         .map((s) => ({ start: parseTimeMins(s.startTime), end: parseTimeMins(s.endTime) }))
         .filter((s): s is { start: number; end: number } => s.start !== null && s.end !== null);
       return intervalsCoverRange(trainerIntervals, regStart, regEnd);
@@ -112,7 +123,7 @@ export function findPrivateTrainerReassignments<
     // trainer this client's session actually followed) — skip rather than
     // guess, same "flag for manual review, don't guess" rule as
     // findPrivateLocationChanges' ambiguous bucket.
-    const safeCandidates = trainersHere.filter((t) => t !== currentTrainer && trainerCovers(t) && !wouldDoubleBook(t, r));
+    const safeCandidates = trainersHere.filter((t) => !trainerNamesMatch(t, currentTrainer) && trainerCovers(t) && !wouldDoubleBook(t, r));
     if (safeCandidates.length === 1) {
       result.push({ reg: r, newTrainer: safeCandidates[0] });
     }
