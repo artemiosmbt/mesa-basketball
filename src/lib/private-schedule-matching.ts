@@ -50,6 +50,30 @@ export function findPrivateTrainerReassignments<
   slots: { date: string; startTime: string; endTime: string; location: string; trainer: string }[]
 ): { reg: T; newTrainer: string }[] {
   const result: { reg: T; newTrainer: string }[] = [];
+
+  const regInterval = (x: T) => {
+    const s = parseTimeMins(x.booked_start_time || "");
+    const e = parseTimeMins(x.booked_end_time || "");
+    return s !== null && e !== null ? { start: s, end: e } : null;
+  };
+  const overlaps = (a: { start: number; end: number }, b: { start: number; end: number }) => a.start < b.end && b.start < a.end;
+  // Hard backstop, independent of whatever the sheet-matching below decides:
+  // never write a reassignment that would give `candidateTrainer` two
+  // overlapping confirmed sessions on the same day. This is what actually
+  // guarantees no double-booking, rather than relying on the matching logic
+  // above (date+location only, no per-client key) getting every case right.
+  const wouldDoubleBook = (candidateTrainer: string, forReg: T) => {
+    const iv = regInterval(forReg);
+    if (!iv) return true; // can't verify the window — refuse rather than risk it
+    return regs.some((other) => {
+      if (other.id === forReg.id) return false;
+      if (other.booked_date !== forReg.booked_date) return false;
+      if ((other.booked_trainer || "Artemios Gavalas") !== candidateTrainer) return false;
+      const oIv = regInterval(other);
+      return !!oIv && overlaps(iv, oIv);
+    });
+  };
+
   for (const r of regs) {
     const regStart = parseTimeMins(r.booked_start_time || "");
     const regEnd = parseTimeMins(r.booked_end_time || "");
@@ -77,14 +101,20 @@ export function findPrivateTrainerReassignments<
     // exact window, nothing changed for them — leave it alone. Without this
     // check, two trainers each legitimately booked at the same date/
     // location/time (e.g. two different clients' private sessions running
-    // side by side) would race on `.find()`'s sheet-row order below, and
-    // whichever trainer's row happened to come first would silently steal
-    // the OTHER trainer's already-correct booking, double-booking that
-    // trainer at the same time slot.
+    // side by side) would race on the candidate search below, and whichever
+    // trainer's row happened to come first would silently steal the OTHER
+    // trainer's already-correct booking, double-booking that trainer.
     if (trainerCovers(currentTrainer)) continue;
-    const coveringTrainer = trainersHere.find(trainerCovers);
-    if (coveringTrainer && coveringTrainer !== currentTrainer) {
-      result.push({ reg: r, newTrainer: coveringTrainer });
+
+    // Among the trainers whose sheet slot covers this window, only ones
+    // that wouldn't double-book are safe to even consider. If more than one
+    // remains, that's genuinely ambiguous (the sheet doesn't say which
+    // trainer this client's session actually followed) — skip rather than
+    // guess, same "flag for manual review, don't guess" rule as
+    // findPrivateLocationChanges' ambiguous bucket.
+    const safeCandidates = trainersHere.filter((t) => t !== currentTrainer && trainerCovers(t) && !wouldDoubleBook(t, r));
+    if (safeCandidates.length === 1) {
+      result.push({ reg: r, newTrainer: safeCandidates[0] });
     }
   }
   return result;
