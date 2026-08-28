@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { authClient } from "@/lib/auth";
@@ -141,10 +141,16 @@ export default function SettingsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading]);
 
-  const hasUnsavedChanges = useMemo(() => {
-    if (initialSnapshotRef.current === null) return false;
-    return JSON.stringify({ parentName, phone, kids, marketingEmails, smsConsent, videoConsent, reminderEmails, referralCode }) !== initialSnapshotRef.current;
-  }, [parentName, phone, kids, marketingEmails, smsConsent, videoConsent, reminderEmails, referralCode]);
+  // Deliberately NOT useMemo: this reads initialSnapshotRef.current, a ref —
+  // performSave() updates that ref on a successful save, but a ref write
+  // isn't a dependency-array-visible change, so a memoized version keeps
+  // returning its stale pre-save "true" until some OTHER tracked value
+  // happens to change. That's exactly what made the unsaved-changes popup
+  // fire right after clicking Save Changes: the save had genuinely gone
+  // through, this just hadn't noticed yet. Recomputing on every render is
+  // cheap (one small JSON.stringify) and can't go stale like that.
+  const hasUnsavedChanges = initialSnapshotRef.current !== null &&
+    JSON.stringify({ parentName, phone, kids, marketingEmails, smsConsent, videoConsent, reminderEmails, referralCode }) !== initialSnapshotRef.current;
 
   // Intercepts a same-app link click — navigates immediately via the router
   // (keeping normal client-side nav speed) unless there are unsaved changes,
