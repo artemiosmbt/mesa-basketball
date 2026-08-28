@@ -22,34 +22,6 @@ function athleteNames(kids: string): string {
   return kids ? kids.replace(/\([^)]*\)/g, "").split(",").map((k) => k.trim()).filter(Boolean).join(", ") : "—";
 }
 
-// --- Ported verbatim from backfill-athlete-profiles/route.ts's
-// parseKidsList/playerLabel + DOB/Grade/Gender regex pulls, for the
-// ?view=groups missing-athlete backfill below. ---
-function parseKidsStringForGroupsView(kidsStr: string): { name: string; dob: string; grade: string; gender?: string }[] {
-  const parts = !kidsStr.trim()
-    ? []
-    : kidsStr.includes("(")
-    ? kidsStr.split("), ").map((p, i, arr) => (i < arr.length - 1 ? p + ")" : p)).filter((s) => s.trim())
-    : kidsStr.split(",").map((s) => s.trim()).filter(Boolean);
-  return parts
-    .map((p) => {
-      const idx = p.indexOf(" (");
-      const name = (idx > -1 ? p.substring(0, idx) : p).trim();
-      const dobMatch = p.match(/DOB:\s*([^,)]+)/i);
-      const gradeMatch = p.match(/Grade:\s*([^,)]+)/i);
-      const genderMatch = p.match(/Gender:\s*(Male|Female)/i);
-      return {
-        name,
-        dob: dobMatch ? dobMatch[1].trim() : "",
-        grade: gradeMatch ? gradeMatch[1].trim() : "",
-        gender: genderMatch ? genderMatch[1].trim().toLowerCase() : undefined,
-      };
-    })
-    .filter((k) => k.name);
-}
-function normalizeNameForGroupsView(name: string): string {
-  return name.trim().toLowerCase().replace(/\s+/g, " ");
-}
 
 
 export async function GET(req: NextRequest) {
@@ -237,63 +209,18 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // Also creates any athlete with real registration history under an
-    // account-holding client's email who was never saved to profiles.kids
-    // at all (e.g. booked before that client created an account, or some
-    // other gap in the save-on-booking path) — matched by name only, never
-    // guessing a group, so a newly-created entry starts empty and lands in
-    // "All Else" for the admin to sort through by hand. A true guest client
-    // (no account, no profiles row at all — profiles.id has a hard FK to
-    // auth.users.id) can't be created here; those still only ever show up
-    // in the Clients tab.
-    const accountEmails = (profiles || []).map((p) => (p.email || "").toLowerCase().trim()).filter(Boolean);
-    if (accountEmails.length > 0) {
-      const { data: regs } = await supabase
-        .from("registrations")
-        .select("email, kids")
-        .neq("status", "payment_abandoned")
-        .in("email", accountEmails);
-
-      const kidsSeenByEmail = new Map<string, Map<string, { name: string; dob: string; grade: string; gender?: string }>>();
-      for (const r of regs || []) {
-        const email = (r.email || "").toLowerCase().trim();
-        if (!email || !r.kids) continue;
-        if (!kidsSeenByEmail.has(email)) kidsSeenByEmail.set(email, new Map());
-        const bucket = kidsSeenByEmail.get(email)!;
-        for (const kid of parseKidsStringForGroupsView(r.kids)) {
-          const key = normalizeNameForGroupsView(kid.name);
-          if (!bucket.has(key)) bucket.set(key, kid);
-        }
-      }
-
-      const createRows: { id: string; kids: unknown }[] = [];
-      for (const p of profiles || []) {
-        const email = (p.email || "").toLowerCase().trim();
-        const seen = kidsSeenByEmail.get(email);
-        if (!seen) continue;
-        const kids: Record<string, unknown>[] = Array.isArray(p.kids) ? p.kids : [];
-        const grown = [...kids];
-        let changed = false;
-        for (const [nameKey, parsed] of seen) {
-          const alreadyExists = grown.some((k) => normalizeNameForGroupsView((k.name as string) || "") === nameKey);
-          if (alreadyExists) continue;
-          grown.push({ id: crypto.randomUUID(), name: parsed.name, dob: parsed.dob, grade: parsed.grade, gender: parsed.gender || "", groups: [] });
-          changed = true;
-        }
-        if (changed) {
-          p.kids = grown;
-          createRows.push({ id: p.id, kids: grown });
-        }
-      }
-      if (createRows.length > 0) {
-        await Promise.all(
-          createRows.map((row) =>
-            supabase.from("profiles").update({ kids: row.kids, updated_at: new Date().toISOString() }).eq("id", row.id)
-          )
-        );
-      }
-    }
-
+    // This view used to also reconstruct "missing" athletes from raw
+    // registration history on every single load — scanning every past
+    // booking's free-text kids string and recreating anything not already
+    // in profiles.kids. That's exactly the mechanism that made a
+    // just-removed or just-merged athlete reappear the moment this tab was
+    // reopened, no new booking required: it saw the old registration text
+    // and treated it as ground truth over the admin's own edit. Removed —
+    // this tab is now a direct mirror of profiles.kids, nothing more. The
+    // one-time catch-up case that block was originally for (a client with
+    // real booking history but no saved roster at all, e.g. from before
+    // this athlete-tracking system existed) is still covered by the
+    // dedicated, admin-triggered /api/admin/backfill-athlete-profiles.
     return NextResponse.json({ profiles: profiles || [] });
   }
 
