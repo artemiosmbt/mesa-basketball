@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { generateUniqueReferralCode, isReferralCodeTaken } from "@/lib/supabase";
-import { normalizeGender } from "@/lib/athletes";
+import { normalizedAthleteName, normalizeGender, type Athlete } from "@/lib/athletes";
 
 function getSupabaseAdmin() {
   return createClient(
@@ -83,12 +83,32 @@ export async function POST(req: NextRequest) {
     gender: normalizeGender(k.gender as string),
   }));
 
+  // A full-roster save is the ONE place a removal is deliberate — diff
+  // against what was saved before so a kid missing from this save (by id)
+  // gets tombstoned in removed_kid_names. Without this, the very next
+  // booking that types the same name back in (which a parent has no reason
+  // not to do — they just decluttered a list, not stopped their kid from
+  // playing) silently recreates the exact entry that was just removed; see
+  // syncAthleteGroupsFromBooking and /api/profile/athletes, which both
+  // honor this list before creating a fresh saved-athlete entry. A name
+  // that's present in THIS save (the parent explicitly typed it back in) is
+  // conversely un-tombstoned, so ambient syncing resumes for it normally.
+  const { data: existingForKids } = await supabase.from("profiles").select("kids, removed_kid_names").eq("id", user.id).maybeSingle();
+  const oldKids: Athlete[] = Array.isArray(existingForKids?.kids) ? existingForKids.kids : [];
+  const newIds = new Set(kidsNormalized.map((k: Athlete) => k.id));
+  const newNames = new Set(kidsNormalized.map((k: Athlete) => normalizedAthleteName(k.name)));
+  const newlyRemovedNames = oldKids.filter((k) => k.id && !newIds.has(k.id)).map((k) => normalizedAthleteName(k.name));
+  const removedKidNames = Array.from(
+    new Set([...(Array.isArray(existingForKids?.removed_kid_names) ? existingForKids.removed_kid_names : []), ...newlyRemovedNames])
+  ).filter((n: string) => !newNames.has(n));
+
   const upsertData: Record<string, unknown> = {
     id: user.id,
     email: user.email,
     parent_name: body.parentName || null,
     phone: body.phone || null,
     kids: kidsNormalized,
+    removed_kid_names: removedKidNames,
     marketing_emails: body.marketingEmails ?? true,
     // Defaults to false (opt-out), not true — TCPA consent must never be
     // assumed. Every current caller (signup, settings, post-confirmation

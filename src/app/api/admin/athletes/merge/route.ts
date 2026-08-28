@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { verifyAdmin } from "@/lib/auth";
-import type { Athlete } from "@/lib/athletes";
+import { normalizedAthleteName, type Athlete } from "@/lib/athletes";
 
 // Merges two saved-athlete entries that are actually the same kid recorded
 // under two slightly different name spellings across separate historical
@@ -43,7 +43,18 @@ export async function POST(req: NextRequest) {
   if (keepIdx === -1 || mergeIdx === -1) return NextResponse.json({ error: "Athlete not found." }, { status: 404 });
 
   const mergedGroups = Array.from(new Set([...(kids[keepIdx].groups || []), ...(kids[mergeIdx].groups || [])]));
-  kids[keepIdx] = { ...kids[keepIdx], groups: mergedGroups };
+  // Record mergeId's name (and any aliases IT already carried, in case it
+  // was itself the product of an earlier merge) as an alias on the survivor
+  // — this is what keeps the merge permanent. Without it, the next booking
+  // typed under the merged-away name doesn't match keepId by name at all,
+  // so syncAthleteGroupsFromBooking creates a brand-new athlete with that
+  // name: the exact duplicate this merge just removed, back again.
+  const mergedAliases = Array.from(new Set([
+    ...(kids[keepIdx].aliases || []),
+    kids[mergeIdx].name,
+    ...(kids[mergeIdx].aliases || []),
+  ].filter((a) => normalizedAthleteName(a) !== normalizedAthleteName(kids[keepIdx].name))));
+  kids[keepIdx] = { ...kids[keepIdx], groups: mergedGroups, aliases: mergedAliases };
   const finalKids = kids.filter((_, i) => i !== mergeIdx);
 
   const { error: updateError } = await supabase

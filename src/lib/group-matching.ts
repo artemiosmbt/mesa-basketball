@@ -142,10 +142,16 @@ export function defaultGroupsForGradeGender(grade: string, gender: string | unde
 //   single label) because one weekly booking can span multiple distinct
 //   groups at once (e.g. a combined "Group Sessions" booking mixing a
 //   Junior slot with a Middle School slot).
-export function mergeAthleteAfterBooking(existing: Athlete, incoming: Partial<Athlete>, bookedGroupLabels?: string[]): Athlete {
+// - Name normally follows the latest booking, EXCEPT when the caller only
+//   found this athlete via a known alias (an old, pre-merge name — see
+//   athleteMatchesName) rather than its current name: in that case incoming
+//   name IS the alias, and applying it here would silently rename the
+//   merged entry back to the duplicate name an admin already merged away.
+//   `matchedViaAlias` tells us which case we're in.
+export function mergeAthleteAfterBooking(existing: Athlete, incoming: Partial<Athlete>, bookedGroupLabels?: string[], matchedViaAlias?: boolean): Athlete {
   const merged: Athlete = {
     ...existing,
-    name: incoming.name?.trim() || existing.name,
+    name: (!matchedViaAlias && incoming.name?.trim()) || existing.name,
     dob: incoming.dob || existing.dob,
     grade: incoming.grade && incoming.grade !== OTHER_GRADE_SENTINEL ? incoming.grade : existing.grade,
     gender: incoming.gender || existing.gender,

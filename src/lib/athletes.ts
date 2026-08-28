@@ -22,6 +22,13 @@ export interface Athlete {
   // sees. For "I've already handled this one, stop cluttering my outreach
   // view" — never a data deletion.
   hidden?: boolean;
+  // Past name(s) this athlete was previously saved under, recorded when an
+  // admin merges a duplicate entry into this one (see the athletes/merge
+  // route). Exists so a FUTURE booking that types the old (pre-merge) name
+  // still resolves back onto this same entry instead of silently recreating
+  // the duplicate that was just merged away — see athleteMatchesName below,
+  // the one thing that actually keeps a merge permanent.
+  aliases?: string[];
 }
 
 export const ALL_GRADES = [
@@ -45,6 +52,19 @@ export const OTHER_GRADE_SENTINEL = "Other";
 
 export function normalizedAthleteName(name: string): string {
   return name.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+// Does `name` refer to this saved athlete — either its current name, or one
+// of its recorded aliases (a name it used to be saved under before an admin
+// merged a duplicate into it)? Every place that matches an incoming booking
+// against a parent's saved roster by name (not by id) should use this, not a
+// bare normalizedAthleteName(...) === comparison — see the `aliases` field
+// comment on Athlete for why: without it, a booking typed under the
+// pre-merge name recreates the exact duplicate the merge just removed.
+export function athleteMatchesName(athlete: Pick<Athlete, "name" | "aliases">, name: string): boolean {
+  const target = normalizedAthleteName(name);
+  if (normalizedAthleteName(athlete.name) === target) return true;
+  return (athlete.aliases || []).some((a) => normalizedAthleteName(a) === target);
 }
 
 // Every gender comparison in this codebase (the schedule booking form's own

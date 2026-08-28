@@ -4,7 +4,7 @@ import { REFERRAL_PROGRAM_ENABLED, REFERRAL_CREDIT_REDEMPTION_ENABLED } from "@/
 import { trainerNamesMatch } from "@/lib/trainers";
 import { normalizeSessionLabelForComparison as normLabel, mergeAthleteAfterBooking, defaultGroupsForGradeGender, canonicalGroupForLabel } from "@/lib/group-matching";
 import { regGroupKey } from "@/lib/weekly-schedule-matching";
-import { normalizedAthleteName, type Athlete, type CanonicalGroupId } from "@/lib/athletes";
+import { athleteMatchesName, normalizedAthleteName, type Athlete, type CanonicalGroupId } from "@/lib/athletes";
 
 let _supabase: SupabaseClient | null = null;
 
@@ -1999,23 +1999,34 @@ export async function syncAthleteGroupsFromBooking(email: string, kidsStr: strin
   const supabase = getSupabase();
   // Guest checkout (no account) has no profiles row at all — profiles.id
   // has a hard FK to auth.users.id, so there's nothing to sync onto.
-  const { data: profile } = await supabase.from("profiles").select("id, kids").ilike("email", normalizedEmail).maybeSingle();
+  const { data: profile } = await supabase.from("profiles").select("id, kids, removed_kid_names").ilike("email", normalizedEmail).maybeSingle();
   if (!profile) return;
 
   const existingKids: Athlete[] = Array.isArray(profile.kids) ? profile.kids : [];
   const merged = [...existingKids];
+  // This is THE path a settings removal or an admin merge (Groups tab) most
+  // often silently "comes back" through — this function runs after EVERY
+  // paid weekly booking, has no athlete id to go on (only whatever name the
+  // checkout form had typed), and used to fall straight to "no exact name
+  // match → create a fresh athlete" for both cases. athleteMatchesName
+  // (checks aliases too — see the Athlete type) fixes the merge case;
+  // removedNames fixes the settings-removal case.
+  const removedNames = new Set<string>((Array.isArray(profile.removed_kid_names) ? profile.removed_kid_names : []).map(normalizedAthleteName));
   const claimedThisRequest = new Set<number>();
   for (const incoming of parsed) {
-    const idx = merged.findIndex((k, i) => !claimedThisRequest.has(i) && normalizedAthleteName(k.name) === normalizedAthleteName(incoming.name));
+    const idx = merged.findIndex((k, i) => !claimedThisRequest.has(i) && athleteMatchesName(k, incoming.name));
     if (idx >= 0) {
-      merged[idx] = mergeAthleteAfterBooking(merged[idx], incoming, resolvedLabels);
+      const matchedViaAlias = normalizedAthleteName(merged[idx].name) !== normalizedAthleteName(incoming.name);
+      merged[idx] = mergeAthleteAfterBooking(merged[idx], incoming, resolvedLabels, matchedViaAlias);
       claimedThisRequest.add(idx);
-    } else {
+    } else if (!removedNames.has(normalizedAthleteName(incoming.name))) {
       const groups = defaultGroupsForGradeGender(incoming.grade || "", incoming.gender);
       const fresh: Athlete = { id: crypto.randomUUID(), name: incoming.name, dob: incoming.dob, grade: incoming.grade, gender: incoming.gender || "", groups };
       merged.push(mergeAthleteAfterBooking(fresh, incoming, resolvedLabels));
       claimedThisRequest.add(merged.length - 1);
     }
+    // else: name was explicitly removed from the saved roster — the booking
+    // itself is unaffected, this just skips resurrecting a roster entry.
   }
 
   for (const idx of claimedThisRequest) {

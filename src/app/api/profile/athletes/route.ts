@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { normalizedAthleteName, normalizeGender, type Athlete } from "@/lib/athletes";
+import { athleteMatchesName, normalizedAthleteName, normalizeGender, type Athlete } from "@/lib/athletes";
 import { mergeAthleteAfterBooking, defaultGroupsForGradeGender } from "@/lib/group-matching";
 
 function getSupabaseAdmin() {
@@ -35,9 +35,15 @@ export async function POST(req: NextRequest) {
   const body = await req.json();
   const supabase = getSupabaseAdmin();
 
-  const { data: existing } = await supabase.from("profiles").select("kids").eq("id", user.id).maybeSingle();
+  const { data: existing } = await supabase.from("profiles").select("kids, removed_kid_names").eq("id", user.id).maybeSingle();
   const existingKids: Athlete[] = Array.isArray(existing?.kids) ? existing.kids : [];
   const merged = [...existingKids];
+  // Names a parent has explicitly removed (via Settings' full-roster save —
+  // see /api/profile) — an ambient sync like this one must never silently
+  // recreate one of these just because a booking happened to use that name
+  // again, or "remove" would never actually stick. Only an explicit Settings
+  // save (which owns this list) clears an entry back out of it.
+  const removedNames = new Set<string>((Array.isArray(existing?.removed_kid_names) ? existing!.removed_kid_names : []).map(normalizedAthleteName));
 
   // Tracks which `merged` indices an EARLIER entry in this same request
   // already resolved to — without this, two same-named siblings (twins, or
@@ -57,13 +63,15 @@ export async function POST(req: NextRequest) {
     // athlete's persisted gender again.
     const incoming: Partial<Athlete> = { ...rawIncoming, gender: normalizeGender(rawIncoming.gender) };
     let idx = incoming.id ? merged.findIndex((k) => k.id === incoming.id) : -1;
+    let matchedViaAlias = false;
     if (idx === -1) {
-      idx = merged.findIndex((k, i) => !claimedThisRequest.has(i) && normalizedAthleteName(k.name) === normalizedAthleteName(incoming.name!));
+      idx = merged.findIndex((k, i) => !claimedThisRequest.has(i) && athleteMatchesName(k, incoming.name!));
+      if (idx >= 0) matchedViaAlias = normalizedAthleteName(merged[idx].name) !== normalizedAthleteName(incoming.name!);
     }
     if (idx >= 0) {
-      merged[idx] = mergeAthleteAfterBooking(merged[idx], incoming, body.bookedGroupLabels);
+      merged[idx] = mergeAthleteAfterBooking(merged[idx], incoming, body.bookedGroupLabels, matchedViaAlias);
       claimedThisRequest.add(idx);
-    } else {
+    } else if (!removedNames.has(normalizedAthleteName(incoming.name!))) {
       const groups = defaultGroupsForGradeGender(incoming.grade || "", incoming.gender);
       const fresh: Athlete = {
         id: crypto.randomUUID(),
@@ -76,6 +84,9 @@ export async function POST(req: NextRequest) {
       merged.push(mergeAthleteAfterBooking(fresh, incoming, body.bookedGroupLabels));
       claimedThisRequest.add(merged.length - 1);
     }
+    // else: this name was explicitly removed from the roster in Settings —
+    // the booking itself still goes through fine, it just doesn't resurrect
+    // a saved-athlete entry for it.
   }
 
   const upsertData: Record<string, unknown> = {
@@ -96,8 +107,12 @@ export async function POST(req: NextRequest) {
 }
 
 // DELETE ?id=<athleteId> — removes exactly one saved athlete, leaves the
-// rest of the roster untouched. Used by the settings page's per-athlete
-// remove control.
+// rest of the roster untouched. NOT currently called by the settings page
+// (which instead removes locally and persists via a full-roster save to
+// /api/profile) — kept correct for any future direct-delete caller. Records
+// the removed name as a tombstone (see removed_kid_names on /api/profile)
+// so this ambient-sync route's own create-fresh-if-no-match path above
+// doesn't immediately recreate whatever was just deleted here.
 export async function DELETE(req: NextRequest) {
   const user = await getUser(req);
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -105,10 +120,15 @@ export async function DELETE(req: NextRequest) {
   if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
 
   const supabase = getSupabaseAdmin();
-  const { data: existing } = await supabase.from("profiles").select("kids").eq("id", user.id).maybeSingle();
-  const kids: Athlete[] = (Array.isArray(existing?.kids) ? existing.kids : []).filter((k: Athlete) => k.id !== id);
+  const { data: existing } = await supabase.from("profiles").select("kids, removed_kid_names").eq("id", user.id).maybeSingle();
+  const existingKids: Athlete[] = Array.isArray(existing?.kids) ? existing.kids : [];
+  const removedKid = existingKids.find((k) => k.id === id);
+  const kids = existingKids.filter((k) => k.id !== id);
+  const removedKidNames = removedKid
+    ? Array.from(new Set([...(Array.isArray(existing?.removed_kid_names) ? existing!.removed_kid_names : []), normalizedAthleteName(removedKid.name)]))
+    : existing?.removed_kid_names;
 
-  const { error } = await supabase.from("profiles").update({ kids, updated_at: new Date().toISOString() }).eq("id", user.id);
+  const { error } = await supabase.from("profiles").update({ kids, removed_kid_names: removedKidNames, updated_at: new Date().toISOString() }).eq("id", user.id);
   if (error) {
     console.error("Athlete delete failed:", error);
     return NextResponse.json({ error: "Failed to save." }, { status: 500 });
