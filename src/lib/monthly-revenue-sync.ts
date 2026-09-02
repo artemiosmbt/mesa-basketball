@@ -844,6 +844,17 @@ async function buildMonthTab(
             { userEnteredValue: { formulaValue: `=SUM(G${firstDayRow1}:G${lastDayRow1})` }, userEnteredFormat: { textFormat: { bold: true }, ...currencyFmt } },
             { userEnteredValue: { formulaValue: `=SUM(H${firstDayRow1}:H${lastDayRow1})` }, userEnteredFormat: { textFormat: { bold: true }, ...currencyFmt } },
             { userEnteredValue: { formulaValue: `=SUM(I${firstDayRow1}:I${lastDayRow1})` }, userEnteredFormat: { textFormat: { bold: true }, ...currencyFmt } },
+            // J and K carry the pickups add-on the owner asked for
+            // (2026-09-02): Net Revenue reads as "$10,866.63 + $1,116.00
+            // $11,982.63" straight across the totals row, since pickups are
+            // real cash that never appears in a day row (they're logged in
+            // the K:M table instead, so SUM(I) can't see them). J is a text
+            // cell purely so the "+" shows; K is the number that matters.
+            // Deliberately NOT folded into I itself — I must stay equal to
+            // SUM of the Net Revenue column above it or the day rows stop
+            // reconciling against their own total.
+            { userEnteredValue: { formulaValue: `="+ "&TEXT(${PICKUPS_TOTAL_CELL},"$#,##0.00")` }, userEnteredFormat: { textFormat: { bold: true } } },
+            { userEnteredValue: { formulaValue: `=I${totalsRow1}+${PICKUPS_TOTAL_CELL}` }, userEnteredFormat: { textFormat: { bold: true }, ...currencyFmt } },
           ],
         },
       ],
