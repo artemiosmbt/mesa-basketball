@@ -250,7 +250,6 @@ interface DerivedSession {
   // runMonthlyRevenueSync uses it to hand the flat $120 to exactly one of
   // them and leave the rest at $0.
   pickupKey: string | null;
-  isLoggableLate: boolean;
   location: string;
 }
 
@@ -366,7 +365,6 @@ function deriveSession(reg: RegRow, isLateCancel: boolean, lateFeeAmountKept: nu
     stripeFee: 0,
     trainerPay,
     pickupKey,
-    isLoggableLate,
     location: reg.booked_location || "",
   };
 }
@@ -1215,10 +1213,11 @@ export async function runMonthlyRevenueSync(): Promise<MonthlyRevenueSyncResult>
   // the amount is identical but which row holds it drifts, which is the kind
   // of silent churn that makes a payroll number impossible to re-verify.
   //
-  // The 50% late-cancel haircut applies only when EVERY registration in the
-  // session was a late cancel/reschedule — i.e. nobody actually turned up
-  // and the session didn't run. One client cancelling late doesn't reduce a
-  // flat session fee the trainer earned by running it for everyone else.
+  // No late-cancel haircut here, unlike every other session type: a pickup
+  // is flat $120 to the trainer, full stop (confirmed by the owner
+  // 2026-09-02 when this deliberately shipped with a half-pay branch for
+  // the all-cancelled case). The fee is for running the session, so who
+  // did or didn't cancel out of it never changes what the trainer is owed.
   const pickupGroups = new Map<string, DerivedSession[]>();
   for (const s of sessions) {
     if (!s.pickupKey) continue;
@@ -1227,8 +1226,7 @@ export async function runMonthlyRevenueSync(): Promise<MonthlyRevenueSyncResult>
   }
   for (const group of pickupGroups.values()) {
     const rep = group.reduce((a, b) => (a.registrationId <= b.registrationId ? a : b));
-    const allLate = group.every((s) => s.isLoggableLate);
-    rep.trainerPay = allLate ? round2(PICKUP_FLAT_PAY * 0.5) : PICKUP_FLAT_PAY;
+    rep.trainerPay = PICKUP_FLAT_PAY;
   }
 
   // Card-vs-Link lookup, shared by both the session and package fee
