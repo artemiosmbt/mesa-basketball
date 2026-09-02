@@ -93,6 +93,12 @@ const BASE_HOURLY_RATE = 20;
 const INCENTIVE_PER_HEAD = 20;
 const PRIVATE_TRAINER_RATE_1_3 = 60;
 const PRIVATE_TRAINER_RATE_4PLUS = 90;
+// A pickup session pays a flat $120 for the SESSION — not per participant,
+// not per hour, and not once per registration. Matches the payroll sheet's
+// own Pickup branch (see payroll-sync.ts's sessionType and the trainer tabs'
+// "[helper] Session Start?" column, which is what makes that sheet count the
+// $120 a single time no matter how many kids booked in separately).
+const PICKUP_FLAT_PAY = 120;
 // STRIPE_PCT_CARD/STRIPE_FIXED are imported from ./stripe-payment-method (shared with payroll-sync.ts).
 
 interface LocationSeed { name: string; monthlyRent: number }
@@ -239,6 +245,12 @@ interface DerivedSession {
   processingFee: number; // filled in by the post-pass; 0 until then
   stripeFee: number; // filled in by the post-pass; 0 until then
   trainerPay: number;
+  // Non-null only for a pickup session run by a sub-trainer. Every
+  // registration in one pickup session shares a key; the pay pass in
+  // runMonthlyRevenueSync uses it to hand the flat $120 to exactly one of
+  // them and leave the rest at $0.
+  pickupKey: string | null;
+  isLoggableLate: boolean;
   location: string;
 }
 
@@ -293,8 +305,23 @@ function deriveSession(reg: RegRow, isLateCancel: boolean, lateFeeAmountKept: nu
 
   const trainerNorm = normalizeTrainerName(reg.booked_trainer);
   const isSubTrainer = SUB_TRAINERS.some((t) => normalizeTrainerName(t) === trainerNorm);
+  // Same "pickup" substring convention the rest of the codebase already uses
+  // to spot a pickup slot from its group name (payroll-sync.ts's
+  // sessionType, admin/page.tsx's typePillLabel, schedule/page.tsx's
+  // isCompanionGroup).
+  const isPickup = reg.type === "weekly" && !!reg.booked_group?.toLowerCase().includes("pickup");
   let trainerPay = 0;
-  if (isSubTrainer) {
+  let pickupKey: string | null = null;
+  if (isSubTrainer && isPickup) {
+    // Left at $0 here on purpose — the flat session fee can't be decided
+    // from one registration in isolation, so the pass in
+    // runMonthlyRevenueSync awards it once per session instead. Without
+    // this branch a pickup fell through to the Group rate below and got
+    // paid per registration: Zain's 9-kid pickup on 2026-08-18 billed
+    // 9 x ($20/hr x 2hrs) = $360 instead of $120, which is what put his
+    // week of 08/17 at $540 on the sheet instead of $300 (found 2026-09-02).
+    pickupKey = `${date}|${trainerNorm}|${reg.booked_start_time}|${reg.booked_end_time}|${(reg.booked_group || "").trim().toLowerCase()}`;
+  } else if (isSubTrainer) {
     const isWeekly = reg.type === "weekly";
     const base = isWeekly
       ? BASE_HOURLY_RATE * hours
@@ -338,6 +365,8 @@ function deriveSession(reg: RegRow, isLateCancel: boolean, lateFeeAmountKept: nu
     processingFee: 0,
     stripeFee: 0,
     trainerPay,
+    pickupKey,
+    isLoggableLate,
     location: reg.booked_location || "",
   };
 }
@@ -1173,6 +1202,33 @@ export async function runMonthlyRevenueSync(): Promise<MonthlyRevenueSyncResult>
   for (const reg of registrations) {
     const derived = deriveSession(reg, isLateCancelById.get(reg.id) ?? false, amountKeptById.get(reg.id) ?? 0);
     if (derived) sessions.push(derived);
+  }
+
+  // PICKUP PAY — the flat $120 belongs to the session, not to a registration,
+  // so it can only be awarded once every registration is known. Each pickup
+  // session's rows share a pickupKey (see deriveSession); one representative
+  // row carries the whole $120 and the rest stay at $0, exactly the shape
+  // the day-row/week totals already expect from a per-row pay figure.
+  //
+  // The representative is picked deterministically (registrationId order) so
+  // two runs over the same data always award it to the same row — otherwise
+  // the amount is identical but which row holds it drifts, which is the kind
+  // of silent churn that makes a payroll number impossible to re-verify.
+  //
+  // The 50% late-cancel haircut applies only when EVERY registration in the
+  // session was a late cancel/reschedule — i.e. nobody actually turned up
+  // and the session didn't run. One client cancelling late doesn't reduce a
+  // flat session fee the trainer earned by running it for everyone else.
+  const pickupGroups = new Map<string, DerivedSession[]>();
+  for (const s of sessions) {
+    if (!s.pickupKey) continue;
+    if (!pickupGroups.has(s.pickupKey)) pickupGroups.set(s.pickupKey, []);
+    pickupGroups.get(s.pickupKey)!.push(s);
+  }
+  for (const group of pickupGroups.values()) {
+    const rep = group.reduce((a, b) => (a.registrationId <= b.registrationId ? a : b));
+    const allLate = group.every((s) => s.isLoggableLate);
+    rep.trainerPay = allLate ? round2(PICKUP_FLAT_PAY * 0.5) : PICKUP_FLAT_PAY;
   }
 
   // Card-vs-Link lookup, shared by both the session and package fee
