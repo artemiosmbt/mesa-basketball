@@ -1092,6 +1092,25 @@ export async function relinkBookingBatch(token: string, newBatchId: string): Pro
   await supabase.from("registrations").update({ booking_batch_id: newBatchId }).eq("manage_token", token);
 }
 
+/**
+ * Records how much account credit was really applied to a row AFTER the fact.
+ * Only used by the reschedule-topup path, where the amount isn't known at
+ * row-creation time: the credit doesn't exist until the old booking is
+ * settled, which can't happen until the client's Stripe Checkout is paid.
+ * Every other writer sets applied_account_credit at insert time, right after
+ * deducting it — the invariant this preserves is that the column always means
+ * "dollars actually removed from account_credits for this row", never a
+ * projection of what might be deducted later.
+ */
+export async function setAppliedAccountCredit(token: string, amount: number): Promise<void> {
+  const supabase = getSupabase();
+  const { error } = await supabase
+    .from("registrations")
+    .update({ applied_account_credit: amount })
+    .eq("manage_token", token);
+  if (error) throw new Error(error.message);
+}
+
 export async function getRegistrationsByBatchId(bookingBatchId: string): Promise<Registration[]> {
   const supabase = getSupabase();
   const { data, error } = await supabase

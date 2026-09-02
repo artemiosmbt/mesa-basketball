@@ -31,6 +31,7 @@ import {
   getRegistrationsByBatchId,
   updateRegistrationsPricing,
   relinkBookingBatch,
+  setAppliedAccountCredit,
   releaseBulkBatch,
   type Registration,
 } from "@/lib/supabase";
@@ -1800,6 +1801,22 @@ export async function finalizeRescheduleTopup(params: FinalizeRescheduleTopupPar
       `RESCHEDULE TOPUP UNWOUND: ${params.email}\nOld booking was already gone by payment time — new booking cancelled and $${fmtMoney(topupTotalWithFee)} refunded instead of confirming a session for less than its price. Please verify manually.`
     ).catch(() => {});
     return;
+  }
+
+  // Now — and only now — is there a real account-credit deduction to record
+  // against the new row. settleOldBookingForReschedule just granted the
+  // late-fee carry-forward and deducted the part that covers this session, so
+  // this is the first moment applied_account_credit can be set truthfully.
+  // It matters beyond bookkeeping: if this session is later cancelled, this
+  // is the amount given back to the family, and revenue/payroll reporting
+  // reads it to separate credit from cash.
+  if (lateFeeCreditApplied > 0) {
+    await setAppliedAccountCredit(params.manageToken, lateFeeCreditApplied).catch(async (err) => {
+      console.error("Failed to record applied late-fee credit on rescheduled booking:", err);
+      await sendAdminSMS(
+        `⚠️ Reschedule for ${params.email} is confirmed and paid, but $${fmtMoney(lateFeeCreditApplied)} of late-fee credit could NOT be recorded on the new booking. If that session is ever cancelled they'd be short that amount — set applied_account_credit manually.`
+      ).catch(() => {});
+    });
   }
 
   if (params.discountBatchId) {

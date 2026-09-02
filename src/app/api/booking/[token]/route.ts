@@ -1201,7 +1201,21 @@ export async function PUT(
       sessionPrice: newSessionPrice,
       fullSessionPrice: newFullSessionPrice,
       isBulkDiscounted: newIsBulkDiscounted,
-      appliedAccountCredit: previewLateFeeCreditApplied || undefined,
+      // DELIBERATELY NOT stamped with previewLateFeeCreditApplied here.
+      // applied_account_credit means exactly one thing everywhere else in
+      // this codebase: dollars that were really taken OUT of the family's
+      // account_credits balance for this row — every other writer sets it
+      // only after a successful deductAccountCredit (see /api/register and
+      // /api/packages). At this point nothing has been deducted: the old
+      // booking is still completely untouched and the 50% late-fee
+      // carry-forward is only a preview (it isn't granted/deducted until
+      // settleOldBookingForReschedule runs, once this checkout is actually
+      // paid). Stamping the preview here made expireAbandonedBookingBatch's
+      // "give back what was tentatively deducted" loop invent real, spendable
+      // account credit out of nothing whenever the client walked away from
+      // this Checkout — money the family never paid and never had deducted,
+      // which they could then spend on a package. The real applied amount is
+      // written onto this row by finalizeRescheduleTopup after settlement.
       status: "pending_payment",
       bookingBatchId,
     });

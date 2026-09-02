@@ -9,7 +9,7 @@ import {
 import { sendRescheduleNotification } from "@/lib/email";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import { getWeeklySchedule } from "@/lib/sheets";
-import { addAccountCredit, deductAccountCredit, addReferralCredit, addRegistration, cancelRegistration, logLateFeeEvent, logRegistrationTopupCharge, getPackageById, countPackageSessionsUsed, setPackageSessions, checkGroupSessionCapacity, updateRegistrationsPricing, claimBulkBatch, releaseBulkBatch } from "@/lib/supabase";
+import { addAccountCredit, deductAccountCredit, setAppliedAccountCredit, addReferralCredit, addRegistration, cancelRegistration, logLateFeeEvent, logRegistrationTopupCharge, getPackageById, countPackageSessionsUsed, setPackageSessions, checkGroupSessionCapacity, updateRegistrationsPricing, claimBulkBatch, releaseBulkBatch } from "@/lib/supabase";
 import { isLateAction, resolveOffSessionPaymentSource, chargeSavedCardOffSession, issueStripeRefund, computeBulkWeeklySettlement, fullPriceForWeeklyRow, countConfirmedInBatch } from "@/lib/booking-finalize";
 import { calcServiceFee, serviceFeeLabel, fmtMoney, calcPrivatePrice, fullPriceForType, getTrainerTier, normalizeTrainerTier, effectiveSessionPrice, packageCoversTrainerTier, volumeDiscountPct } from "@/lib/pricing";
 import { notifyTrainerOfCancellation, notifyTrainerOfReschedule, notifyTrainerOfNewBooking } from "@/lib/trainer-notify";
@@ -608,6 +608,27 @@ export async function POST(req: NextRequest) {
       if (lateFeeCreditApplied > 0) {
         const applied = await deductAccountCredit(reg.email, lateFeeCreditApplied).catch(() => false);
         if (!applied) lateFeeCreditApplied = 0; // couldn't apply it (shouldn't happen right after crediting it) — leave it in their balance instead
+      }
+      // Record the credit that was really spent on this row, on top of
+      // whatever it already carried from the original booking. The row is
+      // updated in place by this route (rather than cancelled + recreated
+      // like the client-facing flow), and the in-place update above runs
+      // BEFORE this credit movement, so without this second write the row
+      // would keep claiming $0 of credit was applied while the family's
+      // balance really was debited. That understatement is not cosmetic: a
+      // later cancellation sizes its Stripe refund as price MINUS
+      // applied_account_credit (computeBulkWeeklySettlement) and hands back
+      // applied_account_credit as credit — so the family would be refunded
+      // the credit portion in CASH against the original charge, and lose the
+      // credit itself. Revenue/payroll reporting reads the same column to
+      // split credit from cash.
+      if (lateFeeCreditApplied > 0) {
+        await setAppliedAccountCredit(reg.manage_token, Math.round((appliedCredit + lateFeeCreditApplied) * 100) / 100).catch(async (err) => {
+          console.error("Failed to record applied late-fee credit on admin-rescheduled booking:", err);
+          await sendAdminSMS(
+            `⚠️ Admin reschedule for ${reg.parent_name} went through, but $${lateFeeCreditApplied} of late-fee credit could NOT be recorded on the booking. If it's ever cancelled they'd be over-refunded in cash — set applied_account_credit manually.`
+          ).catch(() => {});
+        });
       }
     }
     creditGranted = lateFeeCredited - lateFeeCreditApplied;
