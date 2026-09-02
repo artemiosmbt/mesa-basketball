@@ -148,6 +148,7 @@ interface PackageRow {
   package_type: number;
   status: string;
   total_price: number | null;
+  applied_account_credit: number | null;
   trainer_tier: string | null;
   parent_name: string | null;
   stripe_payment_intent_id: string | null;
@@ -345,6 +346,7 @@ interface DerivedPackage {
   date: string;
   label: string;
   totalPrice: number; // the raw package price (excl. fee) — counted as real Gross Revenue (plus processingFee, see buildMonthTab) on this date; see deriveSession's grossRevenue=0 for package-covered sessions for why this can't also be counted again per-session later
+  amountCharged: number; // totalPrice MINUS account credit — what actually hit the card, and therefore the only correct base for both fees below
   processingFee: number;
   stripeFee: number; // default assumes a card payment; the payment-method-aware post-pass in runMonthlyRevenueSync overrides this for Link
   paymentIntentId: string | null;
@@ -354,15 +356,37 @@ function derivePackage(pkg: PackageRow): DerivedPackage | null {
   const date = pkg.created_at ? pkg.created_at.slice(0, 10) : "";
   if (!date || date < TRACKER_START_DATE) return null;
   const price = pkg.total_price ?? 0;
-  const processingFee = price > 0 ? calcServiceFee(price) : 0;
+  // Account credit is a payment METHOD, not a discount: the package is still
+  // worth its full price as Gross Revenue (the cash behind that credit was
+  // never counted as revenue here — an on-time cancellation that credits a
+  // family drops out of this sync entirely, see deriveSession's early
+  // return, so counting the full price when the credit is spent is right and
+  // doesn't double-count). The two FEE figures are a different story. At
+  // checkout the service fee is charged on the post-credit remainder
+  // (calcServiceFee(amountToCharge) in /api/packages), and Stripe's cut comes
+  // out of what actually hit the card. Sizing either off the sticker price
+  // overstated BOTH — inflating the service-fee revenue this sheet reports as
+  // collected and the Stripe cost it reports as incurred. The session side
+  // already gets this right (the checkout-group post-pass bases its fee on
+  // the group's real stripePortion, which nets credit out); packages were the
+  // one outlier.
+  const appliedCredit = pkg.applied_account_credit || 0;
+  const amountCharged = Math.max(0, round2(price - appliedCredit));
+  const processingFee = amountCharged > 0 ? calcServiceFee(amountCharged) : 0;
   // Stripe's 2.9%+$0.30 (card) is charged on the TOTAL amount that actually
-  // hits the card — price PLUS the service-fee surcharge added on top at
-  // checkout — not on the package price alone. Defaults to the card rate;
-  // overridden below for Link payments (2.7%+$0.30).
-  const stripeFee = price > 0 ? round2((price + processingFee) * STRIPE_PCT_CARD + STRIPE_FIXED) : 0;
+  // hits the card — amountCharged PLUS the service-fee surcharge added on top
+  // at checkout. Defaults to the card rate; overridden below for Link
+  // payments (2.7%+$0.30). A package covered in FULL by credit never reaches
+  // Stripe at all (finalizePaidPackageEnrollment is invoked directly, with no
+  // PaymentIntent), so it correctly carries neither fee.
+  const stripeFee = amountCharged > 0 ? round2((amountCharged + processingFee) * STRIPE_PCT_CARD + STRIPE_FIXED) : 0;
   const size = pkg.package_type === 8 ? "8-Pack" : "4-Pack";
   const buyer = pkg.parent_name || "Unknown";
-  return { date, label: `${buyer} — ${size} $${price.toFixed(2)}`, totalPrice: price, processingFee, stripeFee, paymentIntentId: pkg.stripe_payment_intent_id };
+  // Spell out the split when credit was involved — a row reading "$200.00"
+  // next to a fee sized off $175 is exactly the audit-trail mismatch this
+  // tracker exists to prevent (same reasoning as deriveSession's amountText).
+  const creditNote = appliedCredit > 0 ? ` ($${appliedCredit.toFixed(2)} credit, $${amountCharged.toFixed(2)} charged)` : "";
+  return { date, label: `${buyer} — ${size} $${price.toFixed(2)}${creditNote}`, totalPrice: price, amountCharged, processingFee, stripeFee, paymentIntentId: pkg.stripe_payment_intent_id };
 }
 
 // ---------------------------------------------------------------------------
@@ -1222,7 +1246,7 @@ export async function runMonthlyRevenueSync(): Promise<MonthlyRevenueSyncResult>
 
   const { data: pkgSales, error: pkgErr } = await supabase
     .from("monthly_packages")
-    .select("id, created_at, package_type, status, total_price, trainer_tier, parent_name, stripe_payment_intent_id")
+    .select("id, created_at, package_type, status, total_price, applied_account_credit, trainer_tier, parent_name, stripe_payment_intent_id")
     .in("status", ["active", "cancelled"])
     .gte("created_at", TRACKER_START_DATE);
   if (pkgErr) throw new Error(`monthly_packages query: ${pkgErr.message}`);
@@ -1235,9 +1259,10 @@ export async function runMonthlyRevenueSync(): Promise<MonthlyRevenueSyncResult>
   // packages are always their own standalone checkout, so no grouping
   // needed, just a straight per-package lookup.
   for (const pkg of packages) {
-    if (!pkg.paymentIntentId || pkg.totalPrice <= 0) continue;
+    // amountCharged, not totalPrice — same reasoning as derivePackage above.
+    if (!pkg.paymentIntentId || pkg.amountCharged <= 0) continue;
     const pct = await resolveStripePct(pkg.paymentIntentId, pmCache, pmCacheWrites, stripeLookupBudget);
-    pkg.stripeFee = round2((pkg.totalPrice + pkg.processingFee) * pct + STRIPE_FIXED);
+    pkg.stripeFee = round2((pkg.amountCharged + pkg.processingFee) * pct + STRIPE_FIXED);
   }
 
   // Day-row edit protection (see the file header comment, textFingerprint,
