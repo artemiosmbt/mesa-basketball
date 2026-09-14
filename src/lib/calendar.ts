@@ -3,6 +3,8 @@
  * No external packages — uses fetch only.
  */
 
+import { canonicalGroupForLabel } from "@/lib/group-matching";
+
 // ---------------------------------------------------------------------------
 // JWT / token helpers
 // ---------------------------------------------------------------------------
@@ -449,6 +451,29 @@ async function getSessionRegistrations(
   if (!url || !key) return [];
 
   const supabase = createClient(url, key, { auth: { persistSession: false } });
+
+  // A combo session ("JV & Varsity Boys") can hold kids who booked it under a
+  // member group's name — e.g. they signed up for "Varsity Boys" before that
+  // slot was combined in the sheet. The admin dashboard still shows them (it
+  // groups by date/time), so the calendar roster has to pick them up too
+  // instead of only exact-label matches.
+  const comboMembers = sessionType === "weekly" ? canonicalGroupForLabel(sessionLabel) : [];
+  if (comboMembers.length > 1) {
+    const { data, error } = await supabase
+      .from("registrations")
+      .select("kids, total_participants, booked_group, session_details")
+      .eq("type", sessionType)
+      .eq("status", "confirmed")
+      .eq("booked_date", date)
+      .eq("booked_start_time", startTime);
+    if (error || !data) return [];
+    return data.filter((r) => {
+      const label: string = r.booked_group || (r.session_details || "").split(" — ")[0] || "";
+      const groups = canonicalGroupForLabel(label);
+      return groups.length > 0 && groups.every((g) => comboMembers.includes(g));
+    }) as RegistrationRow[];
+  }
+
   const { data, error } = await supabase
     .from("registrations")
     .select("kids, total_participants")
