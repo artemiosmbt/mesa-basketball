@@ -785,6 +785,18 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
     );
   }
 
+  // Pass 5: AB "[helper] Group" — AA (Session Start?) dedupes rows into one
+  // session by date+start+end, so a trainer running JV Boys AND Varsity Boys
+  // in the same hour had two real sessions collapsed into one (Sessions Run /
+  // Hours Worked came up short). AA also keys on AB, so each group counts on
+  // its own. Written separately from the fingerprinted input columns so
+  // backfilling it never rewrites (and never clobbers edits to) a row.
+  try {
+    await syncGroupHelperColumn(spreadsheetId, registrations, log, weeklySessions);
+  } catch (err) {
+    result.errors.push(`group helper column: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
   // ---- package purchases -> Package Sales Log ----
   const { data: pkgSales, error: pkgErr } = await supabase
     .from("monthly_packages")
@@ -827,6 +839,78 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
   return result;
   } finally {
     await supabase.from("payroll_sync_lock").update({ is_running: false }).eq("id", 1);
+  }
+}
+
+const GROUP_HELPER_COL = "AB";
+const GROUP_HELPER_HEADER = "[helper] Group";
+
+/** The session identity a row's group-session dedupe should use. When the
+ * trainer has exactly one schedule row at that date+time, every booking
+ * there is the same session — use that row's label, so a combo session
+ * ("JV & Varsity Boys") still counts once even if some kids booked it under
+ * a member group's name. When they have several (JV Boys and Varsity Boys
+ * both at 7 PM), the booking's own group tells them apart. Privates stay
+ * blank, matching AA's original date+time-only behavior for them. */
+function groupHelperValue(reg: RegistrationRow, trainer: string, weeklySessions: { date: string; startTime: string; group: string; trainer?: string }[]): string {
+  if (reg.type !== "weekly") return "";
+  const sameSlot = weeklySessions.filter((s) =>
+    normalizeDate(s.date) === normalizeDate(reg.booked_date || "") &&
+    normalizeTime(s.startTime) === normalizeTime(reg.booked_start_time) &&
+    TRAINER_BY_NORMALIZED.get(normalizeTrainerName(s.trainer || "")) === trainer
+  );
+  if (sameSlot.length === 1) return sameSlot[0].group;
+  return reg.booked_group || "";
+}
+
+async function syncGroupHelperColumn(
+  spreadsheetId: string,
+  registrations: RegistrationRow[],
+  log: Map<string, SyncLogEntry>,
+  weeklySessions: { date: string; startTime: string; group: string; trainer?: string }[]
+): Promise<void> {
+  const regById = new Map(registrations.map((r) => [r.id, r]));
+  const meta = await getSheetMeta(spreadsheetId);
+  for (const trainer of TRAINERS) {
+    // Trainer tabs were built A:AA, so AB may not exist in the grid yet.
+    const tabMeta = meta.find((m) => m.title === trainer);
+    if (!tabMeta) continue;
+    const columnCount = tabMeta.gridProperties?.columnCount;
+    if (columnCount !== undefined && columnCount < TRAINER_NUM_COLS + 1) {
+      await batchUpdate(spreadsheetId, [
+        { appendDimension: { sheetId: tabMeta.sheetId, dimension: "COLUMNS", length: TRAINER_NUM_COLS + 1 - columnCount } },
+      ]);
+    }
+
+    const desired = new Map<number, string>();
+    for (const entry of log.values()) {
+      if (entry.tab !== trainer) continue;
+      const reg = regById.get(entry.key);
+      if (reg) desired.set(entry.row, groupHelperValue(reg, trainer, weeklySessions));
+    }
+    const lastRow = Math.max(TRAINER_FIRST_ROW, ...desired.keys());
+    const current = await getValues(spreadsheetId, `${a1Quote(trainer)}!${GROUP_HELPER_COL}3:${GROUP_HELPER_COL}${lastRow}`);
+    const cell = (row: number) => String(current[row - 3]?.[0] ?? "");
+
+    const writes: { range: string; values: unknown[][] }[] = [];
+    if (cell(3) !== GROUP_HELPER_HEADER) {
+      // First run on this tab: switch AA to also key on the group. Row 4 is
+      // the template every new row is cloned from, so later rows inherit it.
+      writes.push({ range: `${a1Quote(trainer)}!${GROUP_HELPER_COL}3`, values: [[GROUP_HELPER_HEADER]] });
+      writes.push({
+        range: `${a1Quote(trainer)}!AA${TRAINER_FIRST_ROW}:AA${lastRow}`,
+        values: Array.from({ length: lastRow - TRAINER_FIRST_ROW + 1 }, (_, i) => {
+          const r = TRAINER_FIRST_ROW + i;
+          return [`=IF($A${r}="",0,IF(COUNTIFS($A$4:$A${r},$A${r},$E$4:$E${r},$E${r},$F$4:$F${r},$F${r},$AB$4:$AB${r},"="&$AB${r})=1,1,0))`];
+        }),
+      });
+    }
+    for (const [row, value] of desired) {
+      // Leading apostrophe keeps USER_ENTERED from reinterpreting a label.
+      // AA matches with "="&AB, so a blank AB (privates) still matches blanks.
+      if (cell(row) !== value) writes.push({ range: `${a1Quote(trainer)}!${GROUP_HELPER_COL}${row}`, values: [[value ? `'${value}` : ""]] });
+    }
+    await batchUpdateValues(spreadsheetId, writes);
   }
 }
 

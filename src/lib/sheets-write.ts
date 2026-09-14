@@ -218,13 +218,14 @@ export async function appendValues(
 interface SheetMeta {
   sheetId: number;
   title: string;
+  gridProperties?: { columnCount?: number };
 }
 
 /** List every tab's sheetId + title — needed because copyPaste requests address tabs by numeric sheetId, not name. */
 export async function getSheetMeta(spreadsheetId: string): Promise<SheetMeta[]> {
   return withRetry(async () => {
     const token = await getToken();
-    const url = `${SHEETS_BASE}/${spreadsheetId}?fields=sheets.properties.sheetId,sheets.properties.title`;
+    const url = `${SHEETS_BASE}/${spreadsheetId}?fields=sheets.properties.sheetId,sheets.properties.title,sheets.properties.gridProperties.columnCount`;
     const resp = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
     if (!resp.ok) {
       throw new Error(`Sheets get (metadata) failed (${resp.status}): ${await resp.text().catch(() => "")}`);
