@@ -869,7 +869,9 @@ interface CalendarViewProps {
   weeklyCapacity: Map<string, number>;
   campCapacity: Map<string, number>;
   canEdit: boolean;
-  cancelRegistration: (id: string, feeChoice?: "waive" | "charge", regHint?: Registration) => Promise<void>;
+  cancelRegistration: (id: string, feeChoice?: "waive" | "charge", regHint?: Registration, noRefund?: boolean) => Promise<void>;
+  // Opens the parent's cancel confirm box, which carries the no-refund choice.
+  requestCancel: (r: Registration) => void;
   markNoShow: (id: string) => Promise<void>;
   openReschedule: (r: Registration) => void;
   deleteRegistration: (id: string) => Promise<void>;
@@ -880,7 +882,7 @@ interface CalendarViewProps {
   deleting: string | null;
 }
 
-function CalendarView({ token, trainerFilter, weeklyCapacity, campCapacity, canEdit, cancelRegistration, markNoShow, openReschedule, deleteRegistration, cancelling, noShowing, noShowConfirm, setNoShowConfirm, deleting }: CalendarViewProps) {
+function CalendarView({ token, trainerFilter, weeklyCapacity, campCapacity, canEdit, cancelRegistration, requestCancel, markNoShow, openReschedule, deleteRegistration, cancelling, noShowing, noShowConfirm, setNoShowConfirm, deleting }: CalendarViewProps) {
   const [currentMonth, setCurrentMonth] = useState(() => {
     const [y, m] = todayKeyET().split("-").map(Number);
     return new Date(y, m - 1, 1);
@@ -1001,7 +1003,7 @@ function CalendarView({ token, trainerFilter, weeklyCapacity, campCapacity, canE
             {r.status === "confirmed" && (
               <div className="flex flex-wrap gap-3 pt-1 border-t border-brown-800">
                 {canEdit && (
-                  <button onClick={() => cancelRegistration(r.id, undefined, r)} disabled={cancelling === r.id} className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50">
+                  <button onClick={() => requestCancel(r)} disabled={cancelling === r.id} className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50">
                     {cancelling === r.id ? "..." : "Cancel"}
                   </button>
                 )}
@@ -1194,6 +1196,11 @@ export default function AdminPage() {
   const [search, setSearch] = useState("");
   const [clientSearch, setClientSearch] = useState("");
   const [cancelling, setCancelling] = useState<string | null>(null);
+  // Cancel now goes through a small confirm box instead of a browser prompt,
+  // because it carries a real choice: refund as normal, or move no money at
+  // all (for when the money was already settled outside the app).
+  const [cancelPrompt, setCancelPrompt] = useState<Registration | null>(null);
+  const [cancelNoRefund, setCancelNoRefund] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [noShowConfirm, setNoShowConfirm] = useState<string | null>(null);
   const [noShowing, setNoShowing] = useState<string | null>(null);
@@ -1513,19 +1520,25 @@ export default function AdminPage() {
     setDeleting(null);
   }
 
-  async function cancelRegistration(id: string, feeChoice?: "waive" | "charge", regHint?: Registration) {
+  async function cancelRegistration(
+    id: string,
+    feeChoice?: "waive" | "charge",
+    regHint?: Registration,
+    noRefund?: boolean
+  ) {
     if (!token) return;
-    if (!feeChoice && !confirm("Cancel this registration? If the client already paid, they'll be refunded in full automatically.")) return;
     setCancelling(id);
     const res = await fetch("/api/admin/cancel", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ id, feeChoice }),
+      body: JSON.stringify({ id, feeChoice, noRefund }),
     });
     const data = await res.json().catch(() => null);
     if (res.ok) {
       setRegistrations((prev) => prev.map((r) => (r.id === id ? { ...r, status: "cancelled" } : r)));
-      if (data?.refundFailed) {
+      if (data?.noRefund) {
+        alert("Cancelled with NO refund. Nothing was refunded or credited, and no package slot was returned.");
+      } else if (data?.refundFailed) {
         alert("Cancelled, but the automatic refund failed — you'll need to refund this client manually in the Stripe dashboard.");
       } else if (data?.refundedAmount > 0 || data?.creditedAmount > 0) {
         const parts = [
@@ -1554,7 +1567,7 @@ export default function AdminPage() {
       const charge = confirm(
         `This booking is within the 24-hour late-cancellation window.\n\n${feeExplainer}`
       );
-      return cancelRegistration(id, charge ? "charge" : "waive", reg);
+      return cancelRegistration(id, charge ? "charge" : "waive", reg, false);
     } else {
       alert(data?.error || "Failed to cancel.");
     }
@@ -2142,7 +2155,7 @@ export default function AdminPage() {
             {(r.status === "confirmed" || (canEdit && (isPast || isDeletablePending(r)))) && (
               <div className="flex flex-wrap gap-3 pt-1 border-t border-brown-800">
                 {canEdit && r.status === "confirmed" && !isPast && (
-                  <button onClick={() => cancelRegistration(r.id, undefined, r)} disabled={cancelling === r.id} className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50">
+                  <button onClick={() => { setCancelNoRefund(false); setCancelPrompt(r); }} disabled={cancelling === r.id} className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50">
                     {cancelling === r.id ? "Cancelling..." : "Cancel"}
                   </button>
                 )}
@@ -2563,6 +2576,7 @@ export default function AdminPage() {
               campCapacity={campCapacity}
               canEdit={canEdit}
               cancelRegistration={cancelRegistration}
+            requestCancel={(r: Registration) => { setCancelNoRefund(false); setCancelPrompt(r); }}
               markNoShow={markNoShow}
               openReschedule={openReschedule}
               deleteRegistration={deleteRegistration}
@@ -3053,6 +3067,64 @@ export default function AdminPage() {
                 </button>
                 <button onClick={() => closeReschedule()} className="rounded-lg border border-brown-700 text-brown-300 text-sm px-4 py-2">
                   Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {cancelPrompt && (() => {
+        const r = cancelPrompt;
+        const paid = !!r.is_paid;
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4" onClick={() => setCancelPrompt(null)}>
+            <div className="w-full max-w-sm rounded-xl bg-brown-900 border border-brown-700 p-5" onClick={(e) => e.stopPropagation()}>
+              <h3 className="text-sm font-semibold text-white mb-1">Cancel this session?</h3>
+              <p className="text-xs text-brown-400 mb-3">{r.parent_name} — {athleteNames(r.kids || "")}</p>
+              <div className="rounded-lg border border-brown-700 bg-brown-950 p-3 text-xs space-y-1">
+                {r.booked_group && <p className="text-brown-300">{r.booked_group}</p>}
+                <p className="text-white font-medium">{formatDate(r.booked_date)} · {r.booked_start_time}{r.booked_end_time ? `-${r.booked_end_time}` : ""}</p>
+                {r.booked_location && <p className="text-brown-400">{r.booked_location}</p>}
+              </div>
+
+              <label className="flex items-start gap-2 mt-4 text-xs text-brown-200 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={cancelNoRefund}
+                  onChange={(e) => setCancelNoRefund(e.target.checked)}
+                  className="mt-0.5 accent-mesa-accent"
+                />
+                <span>
+                  <span className="font-semibold text-white">No refund</span>
+                  <span className="block text-brown-400">
+                    Cancels the session and moves no money — no refund to their card, no account credit,
+                    no package slot returned. Use this when the money was already sorted out somewhere else.
+                  </span>
+                </span>
+              </label>
+
+              <p className="text-[11px] text-brown-500 mt-3">
+                {cancelNoRefund
+                  ? "They'll get a cancellation email and text that says the payment was handled separately."
+                  : paid
+                    ? "They paid, so this refunds their card automatically. If it's within 24 hours you'll be asked about the late fee first."
+                    : "Nothing was paid on this booking, so there's nothing to refund."}
+              </p>
+
+              <div className="flex gap-3 mt-4">
+                <button
+                  onClick={() => {
+                    const noRefund = cancelNoRefund;
+                    setCancelPrompt(null);
+                    cancelRegistration(r.id, undefined, r, noRefund);
+                  }}
+                  className={`flex-1 rounded-lg text-white text-sm font-semibold py-2 ${cancelNoRefund ? "bg-red-700" : "bg-mesa-accent"}`}
+                >
+                  {cancelNoRefund ? "Cancel — no refund" : "Cancel session"}
+                </button>
+                <button onClick={() => setCancelPrompt(null)} className="rounded-lg border border-brown-700 text-brown-300 text-sm px-4 py-2">
+                  Back
                 </button>
               </div>
             </div>

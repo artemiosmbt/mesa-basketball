@@ -28,7 +28,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { id, feeChoice } = await req.json();
+  // noRefund: cancel the booking and move NO money — no card refund, no
+  // account credit, no referral credit returned, no package slot handed back.
+  // For the case where the money was already settled outside the app (e.g. a
+  // refund that fired by accident, or one done by hand in Stripe) and a second
+  // automatic refund would pay the client twice.
+  const { id, feeChoice, noRefund } = await req.json();
   if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
   if (feeChoice && feeChoice !== "waive" && feeChoice !== "charge") {
     return NextResponse.json({ error: "Invalid feeChoice" }, { status: 400 });
@@ -82,14 +87,16 @@ export async function POST(req: NextRequest) {
   // if the client had done it themselves.
   const isLate = !!(reg.booked_date && reg.booked_start_time && isLateAction(reg.booked_date, reg.booked_start_time, reg.created_at, reg.admin_change_at));
 
-  if (isLate && !feeChoice) {
+  // With noRefund there is no fee decision to make — nothing is being
+  // refunded, credited or charged either way.
+  if (isLate && !feeChoice && !noRefund) {
     return NextResponse.json(
       { error: "This booking is within the 24-hour window — choose how to handle the fee.", needsFeeChoice: true, isLateCancel: true },
       { status: 400 }
     );
   }
 
-  const chargeLateFee = isLate && feeChoice === "charge";
+  const chargeLateFee = !noRefund && isLate && feeChoice === "charge";
 
   // A multi-day camp booking is actually SEVERAL rows sharing a referral_code
   // (see getCampGroupByReferralCode), each still carrying the ORIGINAL
@@ -331,12 +338,12 @@ export async function POST(req: NextRequest) {
 
   // Give back a redeemed referral credit — the client didn't choose to
   // cancel, so they shouldn't lose it.
-  if (reg.used_referral_credit && reg.email) {
+  if (reg.used_referral_credit && reg.email && !noRefund) {
     await addReferralCredit(reg.email).catch(() => {});
   }
 
   // Give back any account credit that was applied at booking time.
-  if (reg.applied_account_credit && reg.email) {
+  if (reg.applied_account_credit && reg.email && !noRefund) {
     await addAccountCredit(reg.email, reg.applied_account_credit).catch(() => {});
   }
 
@@ -346,7 +353,7 @@ export async function POST(req: NextRequest) {
   // client's behalf (e.g. over the phone) never returns that session to
   // their package, permanently costing them one of the sessions they paid
   // for with no way to fix it from the admin dashboard.
-  if (reg.package_id) {
+  if (reg.package_id && !noRefund) {
     try {
       const used = await countPackageSessionsUsed(reg.package_id);
       await setPackageSessions(reg.package_id, used);
@@ -392,7 +399,7 @@ export async function POST(req: NextRequest) {
   let stripeRefundResult: { refundedAmount: number; creditedAmount: number; failed: boolean } | undefined;
   let creditIssued = 0;
   let fullForfeitNoRefund = false;
-  if (wasPaid && reg.email) {
+  if (wasPaid && reg.email && !noRefund) {
     const settlement = await computeBulkWeeklySettlement(reg, chargeLateFee);
     const dueAmount = settlement.refundOrCreditAmount;
     fullForfeitNoRefund = chargeLateFee && dueAmount <= 0;
@@ -486,13 +493,16 @@ export async function POST(req: NextRequest) {
         cancelCredit: !stripeRefundResult && creditIssued > 0 && !fullForfeitNoRefund ? creditIssued : undefined,
         packageSessionForfeited,
         fullForfeitNoRefund,
+        refundHandledSeparately: !!noRefund,
       });
       if (reg.sms_consent && reg.phone) {
         const sessionLine = reg.booked_date && reg.booked_start_time
           ? `\n${formatDateWithDay(reg.booked_date)} | ${reg.booked_start_time}${reg.booked_end_time ? `-${reg.booked_end_time}` : ""}${bookedLocation ? `\nLocation: ${resolveLocationName(bookedLocation)}` : ""}`
           : "";
-        const moneyOutcome = wasPaid ? describeMoneyOutcome(stripeRefundResult, creditIssued, chargeLateFee, false) : "";
-        const moneyNote = packageSessionForfeited
+        const moneyOutcome = wasPaid && !noRefund ? describeMoneyOutcome(stripeRefundResult, creditIssued, chargeLateFee, false) : "";
+        const moneyNote = noRefund
+          ? "\nAny money owed for this session was handled separately — nothing new was charged or refunded."
+          : packageSessionForfeited
           ? "\nLate cancellation: this session is forfeited from your package — no additional charge."
           : fullForfeitNoRefund
             ? "\nLate cancellation: this session is non-refundable per our 24-hour policy."
@@ -501,7 +511,9 @@ export async function POST(req: NextRequest) {
               : moneyOutcome ? `\n${moneyOutcome}.` : "";
         await sendSMS(reg.phone, `Mesa Basketball: Session cancelled by your trainer.${sessionLine}\nAthlete: ${reg.kids}${moneyNote}\nQuestions? mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
       }
-      const adminMoneyOutcome = wasPaid ? describeMoneyOutcome(stripeRefundResult, creditIssued, chargeLateFee, true) : "";
+      const adminMoneyOutcome = noRefund
+        ? "NO REFUND — cancelled without moving any money (no card refund, no credit, no package slot returned)"
+        : wasPaid ? describeMoneyOutcome(stripeRefundResult, creditIssued, chargeLateFee, true) : "";
       const adminPackageNote = packageSessionForfeited
         ? "\nPackage session — late cancellation, session forfeited, no fee charged"
         : reg.package_id
@@ -540,6 +552,7 @@ export async function POST(req: NextRequest) {
     refundFailed: !!stripeRefundResult?.failed,
     packageSessionForfeited,
     fullForfeitNoRefund,
+    noRefund: !!noRefund,
   });
   } finally {
     if (batchClaimToken) await releaseBulkBatch(reg.booking_batch_id, batchClaimToken).catch(() => {});

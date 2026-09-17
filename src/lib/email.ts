@@ -466,6 +466,11 @@ export async function sendCancellationNotification(data: {
   // everything that would otherwise have been refunded/credited — nothing
   // further is due. Also mutually exclusive with cancelCredit/stripeRefundResult.
   fullForfeitNoRefund?: boolean;
+  // Admin cancelled with "no refund": the money for this booking was already
+  // settled outside the app (e.g. refunded by hand in Stripe after a mis-step),
+  // so this cancellation moves nothing. The email must not promise a refund
+  // that isn't coming, and must not imply a late fee either.
+  refundHandledSeparately?: boolean;
 }) {
   const resend = getResend();
   const isPickupCancel = data.sessionDetails.toLowerCase().includes("pickup");
@@ -492,9 +497,14 @@ export async function sendCancellationNotification(data: {
           </div>`
         : "";
 
-  const creditNote = !data.campAdjustment && !data.packageSessionForfeited && !data.fullForfeitNoRefund
-    ? moneyOutcomeHtml(data.stripeRefundResult, data.cancelCredit, data.isLateCancel ? " (per our late cancellation policy)" : "")
-    : "";
+  const creditNote = data.refundHandledSeparately
+    ? `<div style="background: #1e3a5f; border-left: 4px solid #3b82f6; border-radius: 6px; padding: 14px 16px; margin: 16px 0;">
+        <p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #ffffff;">Payment</p>
+        <p style="margin: 0; color: #ffffff; font-size: 14px;">Any money owed for this session has already been handled separately — nothing new was charged or refunded here. Questions? Just reply to this email.</p>
+      </div>`
+    : !data.campAdjustment && !data.packageSessionForfeited && !data.fullForfeitNoRefund
+      ? moneyOutcomeHtml(data.stripeRefundResult, data.cancelCredit, data.isLateCancel ? " (per our late cancellation policy)" : "")
+      : "";
 
   // Camp day partial-cancel: recomputed total + credit/due, worded off the isPaid flag
   // rather than assuming payment happened (not every family pays at registration).
