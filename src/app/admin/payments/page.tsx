@@ -164,6 +164,14 @@ export default function PaymentsPage() {
     });
   }, [router]);
 
+  // The booking's own price, shown only as a reference next to the amount box —
+  // an admin charge is normally a BALANCE (the part the site failed to collect),
+  // not the whole session, so the box starts empty on purpose.
+  function sessionAmount(r: Registration): string {
+    const price = r.session_price ?? 0;
+    return price.toFixed(2);
+  }
+
   // The flat $4.50 / 3.2% service fee the public checkout adds, mirrored here
   // so an admin charge costs the client exactly what the site would have.
   function serviceFeeFor(amount: number): number {
@@ -525,7 +533,7 @@ export default function PaymentsPage() {
                     </div>
                   </div>
                   <button
-                    onClick={() => { setChargeTarget(r); setChargeAmount(String(amount)); setChargeNote(""); setChargeAddFee(true); setChargeError(null); }}
+                    onClick={() => { setChargeTarget(r); setChargeAmount(""); setChargeNote(""); setChargeAddFee(true); setChargeError(null); }}
                     className="shrink-0 rounded-lg border border-brown-600 hover:border-mesa-accent text-xs text-brown-300 hover:text-white px-2 py-1.5 transition"
                     title="Charge their card on file"
                   >
@@ -759,7 +767,9 @@ export default function PaymentsPage() {
               <p className="text-xs text-brown-400 mb-3">{chargeTarget.parent_name} · {chargeTarget.email}</p>
               <p className="text-xs text-brown-300 rounded-lg border border-brown-700 bg-brown-950 p-3">{sessionLabel(chargeTarget)}</p>
 
-              <label className="block text-xs text-brown-300 mt-4 mb-1">Amount</label>
+              <label className="block text-xs text-brown-300 mt-4 mb-1">
+                How much to charge <span className="text-brown-500">(this session is ${sessionAmount(chargeTarget)})</span>
+              </label>
               <div className="flex items-center gap-2">
                 <span className="text-brown-400">$</span>
                 <input
