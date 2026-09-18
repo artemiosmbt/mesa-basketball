@@ -97,12 +97,21 @@ export async function GET(req: NextRequest) {
       });
     }
 
+    // package_id and status are what the Packages tab needs to show a
+    // package's own sessions and what became of each one. Still a deliberately
+    // trimmed row — no manage_token, no phone, no payment fields.
     const { data: registrations } = await supabase
       .from("registrations")
-      .select("id, type, booked_date, booked_start_time, booked_end_time")
+      .select("id, type, booked_date, booked_start_time, booked_end_time, status, package_id")
       .eq("email", emailFilter.trim().toLowerCase())
       .order("booked_date", { ascending: true });
-    return NextResponse.json({ registrations: registrations || [] });
+    // Late cancels/reschedules for those same bookings — the only way to tell
+    // a session that was moved from one that was simply cancelled.
+    const regIds = (registrations || []).map((r: { id: string }) => r.id);
+    const { data: lateFees } = regIds.length
+      ? await supabase.from("late_fee_events").select("registration_id, action").in("registration_id", regIds)
+      : { data: [] as { registration_id: string; action: string }[] };
+    return NextResponse.json({ registrations: registrations || [], lateFeeEvents: lateFees || [] });
   }
 
   // Clients tab list — built from an aggregate over registrations
