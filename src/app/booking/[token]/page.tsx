@@ -81,6 +81,7 @@ interface Booking {
   totalParticipants: number;
   campGroupDays?: { token: string; bookedDate: string | null; bookedStartTime: string | null; status: string }[];
   isPackageBooking?: boolean;
+  onTimeToken?: string;
 }
 
 interface TimeWindow {
@@ -720,7 +721,10 @@ export default function ManageBooking({
     const res = await fetch(`/api/booking/${token}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      // Proof this booking was still outside the 24-hour window when the page
+      // was opened. Good for ten minutes, so finishing a minute past the
+      // cutoff isn't a late reschedule — see src/lib/reschedule-grace.ts.
+      body: JSON.stringify({ ...body, onTimeToken: booking?.onTimeToken }),
     });
     const data = await res.json();
     if (data.success) {

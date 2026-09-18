@@ -27,6 +27,7 @@ import {
 import {
   computeRescheduleMoney, issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome, isLateAction, parseSessionDateTimeET, computeLateFeeAmounts, computeBulkWeeklySettlement, fullPriceForWeeklyRow, countConfirmedInBatch, settleOldBookingForReschedule, computePlayerEditPricing, parseKidsList } from "@/lib/booking-finalize";
 import { getStripe } from "@/lib/stripe";
+import { issueOnTimeToken, verifyOnTimeToken } from "@/lib/reschedule-grace";
 import { calcServiceFee, serviceFeeItemName, fmtMoney, calcPrivatePrice, getTrainerTier, normalizeTrainerTier, packageCoversTrainerTier, volumeDiscountPct } from "@/lib/pricing";
 import {
   sendCancellationNotification,
@@ -103,6 +104,14 @@ export async function GET(
     campGroupDays,
     isPackageBooking: !!reg.package_id,
     savedAthletes,
+    // Proof that they opened this while still outside the 24-hour window. Sent
+    // back on a reschedule and honoured for ten minutes, so finishing a change
+    // a minute after the cutoff isn't treated as late — see reschedule-grace.ts.
+    onTimeToken:
+      reg.booked_date && reg.booked_start_time &&
+      !isLateAction(reg.booked_date, reg.booked_start_time, reg.created_at, reg.admin_change_at)
+        ? issueOnTimeToken(reg.id)
+        : undefined,
   });
 }
 
@@ -835,7 +844,7 @@ export async function PUT(
   // reschedules, but it's deliberately never read — the live-schedule
   // lookup below is the only trusted source for the weekly trainer. See the
   // resolvedTrainer block just below.
-  const { bookedDate, bookedStartTime, bookedEndTime, bookedLocation, bookedTrainer, kids: bodyKids, sessionType: bodySessionType, sessionGroup, parentName: bodyParentName, phone: bodyPhone, useReferralCredit } = body;
+  const { bookedDate, bookedStartTime, bookedEndTime, bookedLocation, bookedTrainer, kids: bodyKids, sessionType: bodySessionType, sessionGroup, parentName: bodyParentName, phone: bodyPhone, useReferralCredit, onTimeToken } = body;
 
   if (!bookedDate || !bookedStartTime || !bookedEndTime || !bookedLocation) {
     return NextResponse.json(
@@ -929,7 +938,15 @@ export async function PUT(
   }
 
   // Check if original session is within 24h (with grace period) → late reschedule fee applies
-  const isLateReschedule = !!(reg.booked_date && reg.booked_start_time && isLateAction(reg.booked_date, reg.booked_start_time, reg.created_at, reg.admin_change_at));
+  const isLateNow = !!(reg.booked_date && reg.booked_start_time && isLateAction(reg.booked_date, reg.booked_start_time, reg.created_at, reg.admin_change_at));
+  // ...unless they STARTED while still on time. Opening the page at 6:59 for a
+  // 7pm-tomorrow session and finishing at 7:01 is not a late reschedule — they
+  // beat the cutoff, the clock just moved while they picked a new date. The
+  // token proving that is only good for ten minutes (see reschedule-grace.ts),
+  // so nobody can open the page early and come back hours later to dodge the
+  // fee.
+  const startedOnTime = isLateNow && verifyOnTimeToken(onTimeToken, reg.id);
+  const isLateReschedule = isLateNow && !startedOnTime;
 
   // What was actually paid for the old session via Stripe (if it was), net
   // of any account credit applied at booking time — this is the baseline
