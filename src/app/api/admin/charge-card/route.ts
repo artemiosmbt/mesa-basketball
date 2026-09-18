@@ -72,6 +72,9 @@ export async function POST(req: NextRequest) {
     paymentMethodId: source.paymentMethodId,
     amountDollars: total,
     description,
+    // The client gets Stripe's receipt with the note on it — the only thing
+    // they receive, since this route deliberately sends no text.
+    receiptEmail: reg.email,
   });
 
   if (!charge.success || !charge.paymentIntentId) {
@@ -107,10 +110,10 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Deliberately silent to the client. An automatic text about a charge they
-  // weren't expecting confuses more than it explains — the owner is charging
-  // by hand precisely because the situation needs a human explanation, and he
-  // sends that himself. Stripe still emails its own receipt.
+  // No text to the client — an automatic one about a charge they weren't
+  // expecting confuses more than it explains, and the owner is charging by
+  // hand precisely because the situation needs a human explanation. Their
+  // only automatic notice is Stripe's receipt above, which carries the note.
   await sendAdminSMS(
     `CHARGED: ${reg.parent_name || reg.email}\n$${fmtMoney(total)}${fee > 0 ? ` ($${fmtMoney(amount)} + $${fmtMoney(fee)} service fee)` : ""}\n${label}${note ? `\nNote: ${note}` : ""}`
   ).catch(() => {});

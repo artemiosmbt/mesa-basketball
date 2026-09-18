@@ -783,7 +783,7 @@ export default function PaymentsPage() {
                 />
               </div>
 
-              <label className="block text-xs text-brown-300 mt-3 mb-1">What is it for? (shows on their receipt)</label>
+              <label className="block text-xs text-brown-300 mt-3 mb-1">What is it for? (this is what she sees on the Stripe receipt)</label>
               <input
                 type="text"
                 value={chargeNote}
@@ -804,7 +804,7 @@ export default function PaymentsPage() {
               </div>
 
               {chargeError && <p className="text-xs text-red-400 mt-3">{chargeError}</p>}
-              <p className="text-[11px] text-brown-500 mt-3">Charges the card they last paid with and marks the session paid. No text is sent to them — Stripe emails its own receipt, and anything else is yours to explain.</p>
+              <p className="text-[11px] text-brown-500 mt-3">Charges the card they last paid with and marks the session paid. No text is sent to them. Stripe emails them a receipt with your note on it, and anything more is yours to explain.</p>
 
               <div className="flex gap-3 mt-4">
                 <button onClick={submitCharge} disabled={charging || total <= 0} className="flex-1 rounded-lg bg-mesa-accent text-white text-sm font-semibold py-2 disabled:opacity-50">

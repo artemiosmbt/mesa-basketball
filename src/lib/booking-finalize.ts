@@ -334,6 +334,13 @@ export async function chargeSavedCardOffSession(params: {
   paymentMethodId: string;
   amountDollars: number;
   description: string;
+  /**
+   * Sends Stripe's own receipt to this address, carrying `description` with
+   * it. Set it when the client should see what the charge was for in writing;
+   * leave it off and whether a receipt goes out depends on an account-level
+   * setting, which is not something to rely on.
+   */
+  receiptEmail?: string;
 }): Promise<OffSessionChargeResult> {
   if (params.amountDollars <= 0) return { success: true };
   const stripe = getStripe();
@@ -346,6 +353,7 @@ export async function chargeSavedCardOffSession(params: {
       off_session: true,
       confirm: true,
       description: params.description,
+      ...(params.receiptEmail ? { receipt_email: params.receiptEmail } : {}),
     });
     if (pi.status !== "succeeded") {
       return { success: false, reason: `Charge did not complete (status: ${pi.status}) — it may require additional authentication the client needs to provide themselves.` };
