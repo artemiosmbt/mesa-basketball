@@ -88,7 +88,7 @@ export default function AboutPage() {
               ARTEMIOS GAVALAS
             </h1>
             <p className="mt-4 text-brown-300 text-base">
-              Former Division I Point Guard &nbsp;&bull;&nbsp; Professional Experience &nbsp;&bull;&nbsp; 5+ Year Trainer
+              Former Division I Point Guard &nbsp;&bull;&nbsp; Current Overseas Pro &nbsp;&bull;&nbsp; 5+ Year Trainer
             </p>
             <div className="mt-6 flex flex-wrap justify-center gap-3 text-sm text-brown-300">
               <span className="rounded-full border border-brown-700 px-4 py-1">St. John&apos;s University</span>
