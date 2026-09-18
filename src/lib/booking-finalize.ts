@@ -287,6 +287,37 @@ export async function resolveOffSessionPaymentSource(reg: {
   }
 }
 
+/**
+ * Last-resort lookup for a client's saved card when the booking itself has no
+ * Stripe identity on it — a session paid entirely with account credit, or one
+ * booked before card details were kept. Finds their Stripe customer by email
+ * and takes the default saved card (or the most recently attached one).
+ *
+ * Used only by the admin "charge card on file" action, where a real person is
+ * watching the result. Returns null when nothing is on file, so the caller can
+ * say so plainly instead of guessing.
+ */
+export async function resolveOffSessionPaymentSourceByEmail(
+  email: string
+): Promise<{ customerId: string; paymentMethodId: string } | null> {
+  if (!email) return null;
+  const stripe = getStripe();
+  try {
+    const customers = await stripe.customers.list({ email: email.toLowerCase().trim(), limit: 10 });
+    for (const customer of customers.data) {
+      const defaultPm = customer.invoice_settings?.default_payment_method;
+      const defaultPmId = typeof defaultPm === "string" ? defaultPm : defaultPm?.id;
+      if (defaultPmId) return { customerId: customer.id, paymentMethodId: defaultPmId };
+      const methods = await stripe.paymentMethods.list({ customer: customer.id, type: "card", limit: 1 });
+      if (methods.data.length > 0) return { customerId: customer.id, paymentMethodId: methods.data[0].id };
+    }
+    return null;
+  } catch (err) {
+    console.error("Saved-card lookup by email failed:", err);
+    return null;
+  }
+}
+
 export interface OffSessionChargeResult {
   success: boolean;
   paymentIntentId?: string;

@@ -744,7 +744,7 @@ export async function logRegistrationTopupCharge(event: {
   stripePaymentIntentId: string;
   priceDelta: number;
   serviceFee: number;
-  source: "add_player" | "reschedule_topup";
+  source: "add_player" | "reschedule_topup" | "admin_charge";
 }): Promise<void> {
   try {
     const supabase = getSupabase();

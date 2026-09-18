@@ -126,6 +126,14 @@ export default function PaymentsPage() {
   const [lateFeeEvents, setLateFeeEvents] = useState<LateFeeEvent[]>([]);
   const [token, setToken] = useState<string | null>(null);
   const [togglingPaid, setTogglingPaid] = useState<string | null>(null);
+  // "Charge card" — collecting money the site itself didn't take: a balance
+  // left after a change made by hand, or a session that went out unpaid.
+  const [chargeTarget, setChargeTarget] = useState<Registration | null>(null);
+  const [chargeAmount, setChargeAmount] = useState("");
+  const [chargeNote, setChargeNote] = useState("");
+  const [chargeAddFee, setChargeAddFee] = useState(true);
+  const [charging, setCharging] = useState(false);
+  const [chargeError, setChargeError] = useState<string | null>(null);
   const [showAllPaid, setShowAllPaid] = useState(false);
   const [creditEmail, setCreditEmail] = useState("");
   const [creditAmount, setCreditAmount] = useState("");
@@ -155,6 +163,40 @@ export default function PaymentsPage() {
         .finally(() => setLoading(false));
     });
   }, [router]);
+
+  // The flat $4.50 / 3.2% service fee the public checkout adds, mirrored here
+  // so an admin charge costs the client exactly what the site would have.
+  function serviceFeeFor(amount: number): number {
+    if (!Number.isFinite(amount) || amount <= 0) return 0;
+    return amount <= 140 ? 4.5 : Math.round(amount * 0.032 * 100) / 100;
+  }
+
+  async function submitCharge() {
+    if (!token || !chargeTarget) return;
+    const amount = Math.round(Number(chargeAmount) * 100) / 100;
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setChargeError("Enter an amount greater than zero.");
+      return;
+    }
+    setCharging(true);
+    setChargeError(null);
+    const res = await fetch("/api/admin/charge-card", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ id: chargeTarget.id, amountDollars: amount, addServiceFee: chargeAddFee, note: chargeNote.trim() || undefined }),
+    });
+    const data = await res.json().catch(() => null);
+    setCharging(false);
+    if (!res.ok) {
+      setChargeError(data?.error || "The charge didn't go through.");
+      return;
+    }
+    setRegistrations((prev) => prev.map((x) => (x.id === chargeTarget.id ? { ...x, is_paid: true } : x)));
+    setChargeTarget(null);
+    setChargeAmount("");
+    setChargeNote("");
+    alert(`Charged $${data.chargedAmount.toFixed(2)} to their card on file.`);
+  }
 
   async function togglePaid(id: string, currentValue: boolean, referralCode?: string | null, bookedGroup?: string | null) {
     if (!token) return;
@@ -483,6 +525,13 @@ export default function PaymentsPage() {
                     </div>
                   </div>
                   <button
+                    onClick={() => { setChargeTarget(r); setChargeAmount(String(amount)); setChargeNote(""); setChargeAddFee(true); setChargeError(null); }}
+                    className="shrink-0 rounded-lg border border-brown-600 hover:border-mesa-accent text-xs text-brown-300 hover:text-white px-2 py-1.5 transition"
+                    title="Charge their card on file"
+                  >
+                    Charge
+                  </button>
+                  <button
                     onClick={() => togglePaid(r.id, r.is_paid, r.is_full_camp ? r.referral_code : null, r.is_full_camp ? r.booked_group : null)}
                     disabled={togglingPaid === r.id}
                     className="w-9 h-9 shrink-0 rounded-full border-2 border-brown-600 hover:border-green-500 flex items-center justify-center transition font-bold text-brown-600 hover:text-green-500 text-sm"
@@ -698,6 +747,67 @@ export default function PaymentsPage() {
 
       </div>
       </div>
+
+      {chargeTarget && (() => {
+        const base = Math.round(Number(chargeAmount) * 100) / 100;
+        const fee = chargeAddFee ? serviceFeeFor(base) : 0;
+        const total = Number.isFinite(base) && base > 0 ? Math.round((base + fee) * 100) / 100 : 0;
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4" onClick={() => !charging && setChargeTarget(null)}>
+            <div className="w-full max-w-sm rounded-xl bg-brown-900 border border-brown-700 p-5" onClick={(e) => e.stopPropagation()}>
+              <h3 className="text-sm font-semibold text-white mb-1">Charge card on file</h3>
+              <p className="text-xs text-brown-400 mb-3">{chargeTarget.parent_name} · {chargeTarget.email}</p>
+              <p className="text-xs text-brown-300 rounded-lg border border-brown-700 bg-brown-950 p-3">{sessionLabel(chargeTarget)}</p>
+
+              <label className="block text-xs text-brown-300 mt-4 mb-1">Amount</label>
+              <div className="flex items-center gap-2">
+                <span className="text-brown-400">$</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={chargeAmount}
+                  onChange={(e) => setChargeAmount(e.target.value)}
+                  className="flex-1 rounded-lg bg-brown-950 border border-brown-700 text-white text-sm px-3 py-2"
+                  autoFocus
+                />
+              </div>
+
+              <label className="block text-xs text-brown-300 mt-3 mb-1">What is it for? (shows on their receipt)</label>
+              <input
+                type="text"
+                value={chargeNote}
+                onChange={(e) => setChargeNote(e.target.value)}
+                placeholder="e.g. group to private difference"
+                className="w-full rounded-lg bg-brown-950 border border-brown-700 text-white text-sm px-3 py-2"
+              />
+
+              <label className="flex items-center gap-2 mt-3 text-xs text-brown-200 cursor-pointer">
+                <input type="checkbox" checked={chargeAddFee} onChange={(e) => setChargeAddFee(e.target.checked)} className="accent-mesa-accent" />
+                <span>Add the service fee, like the site does</span>
+              </label>
+
+              <div className="mt-4 rounded-lg border border-brown-700 bg-brown-950 p-3 text-xs">
+                <div className="flex justify-between text-brown-300"><span>Amount</span><span>${Number.isFinite(base) && base > 0 ? base.toFixed(2) : "0.00"}</span></div>
+                {chargeAddFee && <div className="flex justify-between text-brown-400 mt-1"><span>Service fee</span><span>${fee.toFixed(2)}</span></div>}
+                <div className="flex justify-between text-white font-semibold mt-2 pt-2 border-t border-brown-800"><span>Charged now</span><span>${total.toFixed(2)}</span></div>
+              </div>
+
+              {chargeError && <p className="text-xs text-red-400 mt-3">{chargeError}</p>}
+              <p className="text-[11px] text-brown-500 mt-3">Charges the card they last paid with. They get a text from Mesa and Stripe&apos;s own receipt, and the session is marked paid.</p>
+
+              <div className="flex gap-3 mt-4">
+                <button onClick={submitCharge} disabled={charging || total <= 0} className="flex-1 rounded-lg bg-mesa-accent text-white text-sm font-semibold py-2 disabled:opacity-50">
+                  {charging ? "Charging..." : `Charge $${total.toFixed(2)}`}
+                </button>
+                <button onClick={() => setChargeTarget(null)} disabled={charging} className="rounded-lg border border-brown-700 text-brown-300 text-sm px-4 py-2 disabled:opacity-50">
+                  Back
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
