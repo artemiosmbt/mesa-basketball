@@ -13,6 +13,7 @@ import {
   getReferralCredits,
   decrementReferralCredit,
   addAccountCredit,
+  deductAccountCredit,
   attachStripeCheckoutSession,
   logLateFeeEvent,
   recordCampDayRefund,
@@ -23,7 +24,8 @@ import {
   claimBulkBatch,
   releaseBulkBatch,
 } from "@/lib/supabase";
-import { issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome, isLateAction, parseSessionDateTimeET, computeLateFeeAmounts, computeBulkWeeklySettlement, fullPriceForWeeklyRow, countConfirmedInBatch, settleOldBookingForReschedule, computePlayerEditPricing, parseKidsList } from "@/lib/booking-finalize";
+import {
+  computeRescheduleMoney, issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome, isLateAction, parseSessionDateTimeET, computeLateFeeAmounts, computeBulkWeeklySettlement, fullPriceForWeeklyRow, countConfirmedInBatch, settleOldBookingForReschedule, computePlayerEditPricing, parseKidsList } from "@/lib/booking-finalize";
 import { getStripe } from "@/lib/stripe";
 import { calcServiceFee, serviceFeeItemName, fmtMoney, calcPrivatePrice, getTrainerTier, normalizeTrainerTier, packageCoversTrainerTier, volumeDiscountPct } from "@/lib/pricing";
 import {
@@ -1053,37 +1055,43 @@ export async function PUT(
   let priceReconciliation: { kind: "refund" | "charge"; amount: number } | null = null;
   let previewLateFeeCreditApplied = 0;
   let previewLateFeeCredited = 0;
-  if (oldPaymentIntentId) {
+  // Account credit the old session was paid with, carried onto the new row
+  // rather than handed back: it was already spent on this booking.
+  let creditCarriedForward = 0;
+  // Account credit counts as money already collected, so this runs for a
+  // credit-paid booking too. Gating the whole reconciliation on the Stripe
+  // payment intent alone let a session paid with credit switch to a pricier
+  // private and collect nothing, while the old row's cancellation handed the
+  // credit back on top — a free upgrade plus a refund (2026-09-18).
+  //
+  // Everything here is a PREVIEW — pure computation, no DB writes, no credit
+  // movement. If this needs a Stripe topup, the real credit/forfeiture/log
+  // only happens once that payment succeeds (settleOldBookingForReschedule,
+  // called either synchronously below when no topup is needed, or from the
+  // webhook) — off the same computeRescheduleMoney math, so what a client is
+  // asked to pay always matches what actually gets applied.
+  const oldCreditPaid = reg.applied_account_credit || 0;
+  if (oldPaymentIntentId || oldCreditPaid > 0) {
     // Leaving the bulk-discount batch entirely (a type-switch reschedule)
-    // shrinks it by one, same as a cancellation — the trued-up settlement
-    // (not the row's raw oldPaidAmount) is the correct baseline either way,
-    // late or on-time. Re-computed for real (and its sibling re-pricing
-    // actually applied) once this settlement is confirmed — see
-    // settleOldBookingForReschedule — this call is read-only, purely to size
-    // what the client owes/gets back right now.
+    // shrinks it by one, same as a cancellation — the trued-up settlement is
+    // the correct baseline either way. Read-only here, purely to size what
+    // the client owes right now; applied for real during settlement.
     const basisAmount = leavesBulkBatch
       ? (await computeBulkWeeklySettlement(reg, isLateReschedule)).refundOrCreditAmount
       : null;
-    if (isLateReschedule) {
-      previewLateFeeCredited = basisAmount != null ? basisAmount : computeLateFeeAmounts(oldPaidAmount, oldFullPrice, newPriceKnown, newEffectivePrice).lateFeeCredited;
-      previewLateFeeCreditApplied = newPriceKnown && newEffectivePrice! > 0 && previewLateFeeCredited > 0
-        ? Math.min(previewLateFeeCredited, newEffectivePrice!)
-        : 0;
-      if (newPriceKnown && newEffectivePrice! > 0) {
-        const amountStillOwed = Math.round((newEffectivePrice! - previewLateFeeCreditApplied) * 100) / 100;
-        if (amountStillOwed > 0.005) {
-          priceReconciliation = { kind: "charge", amount: amountStillOwed };
-        }
-      }
-    } else if (newPriceKnown) {
-      const baseline = basisAmount != null ? basisAmount : oldPaidAmount;
-      const delta = Math.round((newEffectivePrice! - baseline) * 100) / 100;
-      if (delta < -0.005) {
-        priceReconciliation = { kind: "refund", amount: Math.round(Math.abs(delta) * 100) / 100 };
-      } else if (delta > 0.005) {
-        priceReconciliation = { kind: "charge", amount: Math.round(delta * 100) / 100 };
-      }
-    }
+    const money = computeRescheduleMoney({
+      stripePaidAmount: oldPaymentIntentId ? oldPaidAmount : 0,
+      creditPaidAmount: oldCreditPaid,
+      oldFullPrice,
+      isLate: isLateReschedule,
+      newPriceKnown,
+      newEffectivePrice,
+      bulkBasisAmount: basisAmount,
+    });
+    previewLateFeeCredited = money.lateFeeCredited;
+    previewLateFeeCreditApplied = money.lateFeeCreditApplied;
+    creditCarriedForward = money.creditCarriedForward;
+    if (money.kind !== "none") priceReconciliation = { kind: money.kind, amount: money.amount };
   }
 
   // A package-covered session has no Stripe payment on this row (it was
@@ -1251,6 +1259,9 @@ export async function PUT(
         claim_batch_id: topupBatchClaimToken ? reg.booking_batch_id! : "",
         claim_token: topupBatchClaimToken || "",
         topup_amount: String(priceReconciliation.amount),
+        // Account credit the old session was paid with — moved onto the new
+        // row (not handed back) once this payment confirms.
+        credit_carried_forward: String(creditCarriedForward || 0),
       },
       line_items: [
         {
@@ -1319,6 +1330,19 @@ export async function PUT(
   }
   const { lateFeeCredited, lateFeeCreditApplied, packageSessionForfeited } = settled;
 
+  // The settlement just handed the old row's account credit back to the
+  // family's balance (it does that for any cancellation). When that credit
+  // was paying for a session they're keeping — just at a different time — it
+  // belongs on the new row instead, so take it straight back out and stamp
+  // it. Same add-then-deduct-then-stamp convention the late-fee carry-forward
+  // uses, and stamped only if the deduction really succeeded.
+  let carriedCreditApplied = 0;
+  if (creditCarriedForward > 0) {
+    const took = await deductAccountCredit(reg.email, creditCarriedForward).catch(() => false);
+    if (took) carriedCreditApplied = creditCarriedForward;
+    else console.error(`Reschedule: could not carry $${creditCarriedForward} of account credit onto the new booking for ${reg.email}`);
+  }
+
   // A price decrease is credited to the account rather than refunded back
   // to the card: real Stripe refunds are reserved for actual cancellations
   // (24h+ notice) where the client is leaving — a reschedule keeps the
@@ -1372,7 +1396,7 @@ export async function PUT(
     // created already-confirmed, with no Stripe Checkout of its own to track.
     bookingBatchId: staysInBulkBatch ? reg.booking_batch_id! : undefined,
     isBulkDiscounted: staysInBulkBatch ? newIsBulkDiscounted : undefined,
-    appliedAccountCredit: lateFeeCreditApplied || undefined,
+    appliedAccountCredit: (lateFeeCreditApplied + carriedCreditApplied) || undefined,
     stripePaymentIntentId: newPriceKnown && !isLateReschedule ? oldPaymentIntentId : undefined,
     stripeCustomerId: newPriceKnown && !isLateReschedule ? (reg.stripe_customer_id || undefined) : undefined,
     packageId: newPackageId,

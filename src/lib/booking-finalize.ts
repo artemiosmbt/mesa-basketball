@@ -1311,6 +1311,108 @@ export function computeLateFeeAmounts(
   return { lateFeeCredited, lateFeeCreditApplied };
 }
 
+/**
+ * What money has to move when a booking is rescheduled.
+ *
+ * The important input is how much value was ALREADY collected for the old
+ * session, which is the card charge plus any account credit spent on it.
+ * Account credit is real money the family handed over earlier, so it counts
+ * exactly like a card payment here. Missing that was a live bug: a session
+ * paid entirely with account credit had no Stripe payment intent, the whole
+ * reconciliation was skipped, and switching it to a more expensive private
+ * session collected nothing — while the cancellation of the old row handed
+ * the credit back too, so the family got the upgrade free and kept their
+ * credit (2026-09-18, Christine Sirota: $50 credit group -> $125 private,
+ * charged $0, credit returned).
+ *
+ * Pure function — no DB, no Stripe, no clock — so the math can be tested
+ * directly (tools/test-reschedule-money.mjs).
+ */
+export function computeRescheduleMoney(params: {
+  /** Refundable amount still sitting on the old row's card charge (0 if none). */
+  stripePaidAmount: number;
+  /** Account credit that was spent on the old row. */
+  creditPaidAmount: number;
+  /** The old session's undiscounted price — the 50% late fee is half of this. */
+  oldFullPrice: number;
+  isLate: boolean;
+  newPriceKnown: boolean;
+  newEffectivePrice?: number;
+  /**
+   * Overrides the collected total when the old row is leaving a bulk-discount
+   * batch — that settlement already nets out the surviving sessions' re-pricing.
+   */
+  bulkBasisAmount?: number | null;
+}): {
+  /** "charge" = send them to Checkout for `amount`; "refund" = give `amount` back as account credit. */
+  kind: "charge" | "refund" | "none";
+  amount: number;
+  /** Account credit to re-apply to the NEW row (it was already spent, so it carries forward). */
+  creditCarriedForward: number;
+  lateFeeCredited: number;
+  lateFeeCreditApplied: number;
+} {
+  const round = (n: number) => Math.round(n * 100) / 100;
+  const stripePaid = Math.max(0, params.stripePaidAmount || 0);
+  const creditPaid = Math.max(0, params.creditPaidAmount || 0);
+  const collected = params.bulkBasisAmount != null
+    ? Math.max(0, round(params.bulkBasisAmount))
+    : round(stripePaid + creditPaid);
+  const newPrice = params.newPriceKnown && params.newEffectivePrice != null ? params.newEffectivePrice : undefined;
+
+  const none = { kind: "none" as const, amount: 0 };
+
+  if (params.isLate) {
+    // Policy: the old payment is forfeited as a flat 50%-of-full-price fee,
+    // and whatever is left over is credited straight onto the new session.
+    const { lateFeeCredited, lateFeeCreditApplied } = computeLateFeeAmounts(
+      collected,
+      params.oldFullPrice,
+      params.newPriceKnown,
+      newPrice
+    );
+    if (newPrice == null || newPrice <= 0) {
+      return { ...none, creditCarriedForward: 0, lateFeeCredited, lateFeeCreditApplied };
+    }
+    const owed = round(newPrice - lateFeeCreditApplied);
+    return {
+      kind: owed > 0.005 ? "charge" : "none",
+      amount: owed > 0.005 ? owed : 0,
+      // The forfeiture already accounts for everything collected, including
+      // the credit — carrying it forward on top would count it twice.
+      creditCarriedForward: 0,
+      lateFeeCredited,
+      lateFeeCreditApplied,
+    };
+  }
+
+  if (newPrice == null) {
+    return { ...none, creditCarriedForward: 0, lateFeeCredited: 0, lateFeeCreditApplied: 0 };
+  }
+
+  // On time: their money carries forward and only the difference moves.
+  const delta = round(newPrice - collected);
+  // Credit is consumed by the new session before anything is handed back, so
+  // a cheaper session returns the surplus rather than the credit itself.
+  const creditCarriedForward = Math.min(creditPaid, newPrice, collected);
+  if (delta > 0.005) {
+    return { kind: "charge", amount: delta, creditCarriedForward, lateFeeCredited: 0, lateFeeCreditApplied: 0 };
+  }
+  if (delta < -0.005) {
+    // Only CARD money can be handed back here. The credit side of a surplus
+    // needs no action at all: the old row's cancellation already returns its
+    // account credit to the balance, and only the part that covers the new
+    // session (creditCarriedForward) is taken back out — crediting the
+    // surplus again on top would pay the family twice for the same money.
+    const cardSurplus = Math.min(round(Math.abs(delta)), stripePaid);
+    if (cardSurplus > 0.005) {
+      return { kind: "refund", amount: cardSurplus, creditCarriedForward, lateFeeCredited: 0, lateFeeCreditApplied: 0 };
+    }
+    return { ...none, creditCarriedForward, lateFeeCredited: 0, lateFeeCreditApplied: 0 };
+  }
+  return { ...none, creditCarriedForward, lateFeeCredited: 0, lateFeeCreditApplied: 0 };
+}
+
 // Narrow, structural row shape for the bulk-discount pricing functions below
 // — mirrors resolvedSessionPrice's own approach (a structural subset rather
 // than the full Registration type) so callers with a partial `select()`
@@ -1604,7 +1706,16 @@ export async function settleOldBookingForReschedule(params: SettleOldBookingForR
   }
 
   const oldPaymentIntentId = reg.stripe_payment_intent_id || undefined;
-  const oldPaidAmount = Math.max(0, resolvedSessionPrice(reg) - (reg.applied_account_credit || 0));
+  // Everything that was actually collected for the old session: the card
+  // charge PLUS any account credit spent on it. Credit is money the family
+  // already handed over, so the late-fee math has to see it — otherwise a
+  // credit-paid session looks like it cost nothing, nothing is forfeited,
+  // nothing carries forward, and the client is asked for the new session's
+  // full price while their credit is quietly handed back (see
+  // computeRescheduleMoney, which sizes the charge off this same total).
+  // (The row's own price already IS card + credit: applied_account_credit is
+  // the slice of it the credit covered, the rest went through Stripe.)
+  const oldPaidAmount = Math.max(0, resolvedSessionPrice(reg));
 
   let lateFeeCredited = 0;
   let lateFeeCreditApplied = 0;
@@ -1699,6 +1810,12 @@ export interface FinalizeRescheduleTopupParams {
   totalParticipants: number;
   smsConsent: boolean;
   isLateReschedule: boolean;
+  // Account credit the OLD booking was paid with, which should end up on the
+  // new row instead of back in the family's spendable balance. Sized at
+  // request time by computeRescheduleMoney and carried through Checkout
+  // metadata; only applied for real here, after settlement has handed that
+  // credit back, so there is something to deduct.
+  creditCarriedForward?: number;
   // The old session's own full undiscounted price — see
   // SettleOldBookingForRescheduleParams.fullPrice.
   fullPrice: number;
@@ -1810,11 +1927,29 @@ export async function finalizeRescheduleTopup(params: FinalizeRescheduleTopupPar
   // It matters beyond bookkeeping: if this session is later cancelled, this
   // is the amount given back to the family, and revenue/payroll reporting
   // reads it to separate credit from cash.
-  if (lateFeeCreditApplied > 0) {
-    await setAppliedAccountCredit(params.manageToken, lateFeeCreditApplied).catch(async (err) => {
+  // Same idea for credit the OLD session was paid with: the settlement above
+  // returned it to the family's balance (as it does for any cancellation), so
+  // take it straight back out and record it against the session they're
+  // actually keeping. Without this a credit-paid booking that moves to a
+  // pricier session pays the difference AND gets its old credit back free.
+  let carriedCreditApplied = 0;
+  if ((params.creditCarriedForward || 0) > 0) {
+    const took = await deductAccountCredit(params.email, params.creditCarriedForward!).catch(() => false);
+    if (took) carriedCreditApplied = params.creditCarriedForward!;
+    else {
+      console.error(`finalizeRescheduleTopup: could not carry $${params.creditCarriedForward} of account credit onto ${params.email}'s new booking`);
+      await sendAdminSMS(
+        `⚠️ Reschedule for ${params.email} is paid, but $${fmtMoney(params.creditCarriedForward!)} of their old session's account credit could NOT be moved onto the new booking — they may be holding credit they already spent. Check their balance.`
+      ).catch(() => {});
+    }
+  }
+
+  const appliedTotal = Math.round((lateFeeCreditApplied + carriedCreditApplied) * 100) / 100;
+  if (appliedTotal > 0) {
+    await setAppliedAccountCredit(params.manageToken, appliedTotal).catch(async (err) => {
       console.error("Failed to record applied late-fee credit on rescheduled booking:", err);
       await sendAdminSMS(
-        `⚠️ Reschedule for ${params.email} is confirmed and paid, but $${fmtMoney(lateFeeCreditApplied)} of late-fee credit could NOT be recorded on the new booking. If that session is ever cancelled they'd be short that amount — set applied_account_credit manually.`
+        `⚠️ Reschedule for ${params.email} is confirmed and paid, but $${fmtMoney(appliedTotal)} of account credit could NOT be recorded on the new booking. If that session is ever cancelled they'd be short that amount — set applied_account_credit manually.`
       ).catch(() => {});
     });
   }
@@ -2232,6 +2367,7 @@ export async function finalizePaidCheckoutSession(session: Stripe.Checkout.Sessi
       fullPrice: metadata.old_session_full_price ? Number(metadata.old_session_full_price) : resolvedSessionPrice(reg),
       leavesBulkBatch: metadata.leaves_bulk_batch === "true",
       amountCharged: metadata.topup_amount ? Number(metadata.topup_amount) : 0,
+      creditCarriedForward: metadata.credit_carried_forward ? Number(metadata.credit_carried_forward) : 0,
       newEffectivePrice: resolvedSessionPrice(reg),
       discountBatchId: metadata.discount_batch_id || undefined,
       claimBatchId: metadata.claim_batch_id || undefined,
