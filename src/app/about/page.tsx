@@ -153,10 +153,11 @@ export default function AboutPage() {
               at its highest collegiate level.
             </p>
             <p>
-              I went on to continue my career internationally in Greece, gaining firsthand experience in European
-              professional basketball, a system known for its emphasis on skill, IQ, and fundamentals. That
-              combination of American Division I intensity and European technical discipline is the foundation
-              every Mesa session is built on.
+              I went on to continue my career internationally in Greece, where I&apos;m currently playing
+              professionally. European basketball puts its emphasis on skill, IQ, and fundamentals, and living in
+              that system every day keeps me sharp on what actually holds up at the highest level. That combination
+              of American Division I intensity and European technical discipline is the foundation every Mesa
+              session is built on.
             </p>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
