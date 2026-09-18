@@ -8,7 +8,7 @@ import {
 } from "@/lib/booking-finalize";
 import { logRegistrationTopupCharge } from "@/lib/supabase";
 import { calcServiceFee, fmtMoney } from "@/lib/pricing";
-import { sendAdminSMS, sendSMS } from "@/lib/sms";
+import { sendAdminSMS } from "@/lib/sms";
 
 // Charging a card with the client not present — for collecting money the site
 // itself didn't collect: a balance left over from a change made by hand, a
@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
 
   const { data: reg } = await supabase
     .from("registrations")
-    .select("id, email, parent_name, phone, sms_consent, kids, session_details, status, is_paid, stripe_customer_id, stripe_payment_intent_id, package_id")
+    .select("id, email, parent_name, kids, session_details, status, is_paid, stripe_customer_id, stripe_payment_intent_id, package_id")
     .eq("id", id)
     .single();
 
@@ -107,15 +107,10 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Tell the client what just came out of their card. Stripe emails its own
-  // receipt, but a line in plain English from Mesa is what stops a "what is
-  // this charge?" text at 9pm.
-  if (reg.sms_consent && reg.phone) {
-    await sendSMS(
-      reg.phone,
-      `Mesa Basketball: $${fmtMoney(total)} charged to your card on file${note ? ` — ${note}` : ""}.\n${label}\nQuestions? Just reply.\nReply STOP to opt out.`
-    ).catch(() => {});
-  }
+  // Deliberately silent to the client. An automatic text about a charge they
+  // weren't expecting confuses more than it explains — the owner is charging
+  // by hand precisely because the situation needs a human explanation, and he
+  // sends that himself. Stripe still emails its own receipt.
   await sendAdminSMS(
     `CHARGED: ${reg.parent_name || reg.email}\n$${fmtMoney(total)}${fee > 0 ? ` ($${fmtMoney(amount)} + $${fmtMoney(fee)} service fee)` : ""}\n${label}${note ? `\nNote: ${note}` : ""}`
   ).catch(() => {});
