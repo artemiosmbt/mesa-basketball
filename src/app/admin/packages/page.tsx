@@ -5,6 +5,44 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { authClient, resolveAuthRole, type AuthContext } from "@/lib/auth";
 
+interface PackageSession {
+  id: string;
+  booked_date: string | null;
+  booked_start_time: string | null;
+  booked_end_time: string | null;
+  booked_location: string | null;
+  booked_trainer?: string | null;
+  kids: string;
+  status: string;
+  package_id?: string | null;
+  // Filled in from the client's late-fee events — the only way to tell a
+  // session that was MOVED from one that was simply cancelled.
+  lateAction?: "cancel" | "reschedule";
+}
+
+/**
+ * What happened to this session, and what it meant for the package — the
+ * whole point of the list. "cancelled" alone doesn't say whether the session
+ * came back to the package or was burned, which is the thing worth knowing.
+ */
+function sessionOutcome(s: PackageSession, now: number): { label: string; detail: string; tone: "upcoming" | "done" | "lost" | "back" } {
+  const isPast = s.booked_date ? Date.parse(s.booked_date) < now : false;
+  if (s.status === "no_show") {
+    return { label: "no show", detail: "counts as used — the session is spent", tone: "lost" };
+  }
+  if (s.status === "cancelled") {
+    if (s.lateAction === "reschedule") {
+      return { label: "moved late", detail: "inside 24 hours, so this one was forfeited — the new date is its own line below", tone: "lost" };
+    }
+    if (s.lateAction === "cancel") {
+      return { label: "cancelled late", detail: "inside 24 hours, so the session was forfeited from the package", tone: "lost" };
+    }
+    return { label: "cancelled", detail: "24+ hours notice — the session went back to the package", tone: "back" };
+  }
+  if (isPast) return { label: "completed", detail: "session used", tone: "done" };
+  return { label: "scheduled", detail: "still to come", tone: "upcoming" };
+}
+
 interface Package {
   id: string;
   created_at: string;
@@ -57,7 +95,7 @@ export default function PackagesPage() {
   const [reassigning, setReassigning] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [expandedPkg, setExpandedPkg] = useState<string | null>(null);
-  const [pkgSessionsMap, setPkgSessionsMap] = useState<Record<string, { booked_date: string | null; booked_start_time: string | null; booked_end_time: string | null; booked_location: string | null; kids: string; status: string }[]>>({});
+  const [pkgSessionsMap, setPkgSessionsMap] = useState<Record<string, PackageSession[]>>({});
   const [loadingPkg, setLoadingPkg] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [monthFilter, setMonthFilter] = useState("all");
@@ -148,9 +186,19 @@ export default function PackagesPage() {
       headers: { Authorization: `Bearer ${token}` },
     });
     const data = await res.json();
-    const sessions = (data.registrations || []).filter(
-      (r: { type: string }) => r.type === "private" || r.type === "group-private"
-    );
+    const lateByReg = new Map<string, "cancel" | "reschedule">();
+    for (const e of (data.lateFeeEvents || []) as { registration_id: string; action: "cancel" | "reschedule" }[]) {
+      lateByReg.set(e.registration_id, e.action);
+    }
+    // Only the sessions that belong to THIS package. It used to list every
+    // private session the client had ever booked, which put May sessions
+    // under a September package and made the list impossible to trust.
+    const sessions: PackageSession[] = (data.registrations || [])
+      .filter((r: PackageSession & { type: string }) => r.package_id === pkg.id)
+      .map((r: PackageSession) => ({ ...r, lateAction: lateByReg.get(r.id) }))
+      .sort((a: PackageSession, b: PackageSession) =>
+        (a.booked_date || "").localeCompare(b.booked_date || "")
+      );
     setPkgSessionsMap((prev) => ({ ...prev, [pkg.id]: sessions }));
     setLoadingPkg(null);
   }
@@ -306,17 +354,26 @@ export default function PackagesPage() {
           {loadingPkg === pkg.id ? (
             <p className="text-xs text-brown-500">Loading sessions...</p>
           ) : sessions.length === 0 ? (
-            <p className="text-xs text-brown-500">No private sessions found.</p>
+            <p className="text-xs text-brown-500">Nothing booked against this package yet.</p>
           ) : (
             <div className="space-y-1.5">
               {sessions.map((s, i) => {
-                const isPast = s.booked_date ? Date.parse(s.booked_date) < now : false;
+                const out = sessionOutcome(s, now);
+                const tone = {
+                  upcoming: "bg-green-900/40 text-green-400",
+                  done: "bg-brown-800 text-brown-400",
+                  lost: "bg-red-900/30 text-red-400",
+                  back: "bg-blue-900/30 text-blue-300",
+                }[out.tone];
                 return (
-                  <div key={i} className="flex items-center justify-between gap-3 text-xs">
-                    <span className={isPast ? "text-brown-400" : "text-white"}>{s.booked_date} {s.booked_start_time}{s.booked_end_time ? `–${s.booked_end_time}` : ""}</span>
-                    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${s.status === "confirmed" && !isPast ? "bg-green-900/40 text-green-400" : s.status === "confirmed" && isPast ? "bg-brown-800 text-brown-400" : "bg-red-900/30 text-red-400"}`}>
-                      {s.status === "confirmed" ? (isPast ? "completed" : "scheduled") : s.status}
-                    </span>
+                  <div key={i} className="flex items-start justify-between gap-3 text-xs">
+                    <div className="min-w-0">
+                      <span className={out.tone === "upcoming" ? "text-white" : "text-brown-400"}>
+                        {s.booked_date} {s.booked_start_time}{s.booked_end_time ? `–${s.booked_end_time}` : ""}
+                      </span>
+                      <span className="block text-brown-500">{out.detail}</span>
+                    </div>
+                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${tone}`}>{out.label}</span>
                   </div>
                 );
               })}
@@ -594,16 +651,25 @@ export default function PackagesPage() {
                           {loadingPkg === pkg.id ? (
                             <p className="text-xs text-brown-500">Loading sessions...</p>
                           ) : sessions.length === 0 ? (
-                            <p className="text-xs text-brown-500">No private sessions found.</p>
+                            <p className="text-xs text-brown-500">Nothing booked against this package yet.</p>
                           ) : (
-                            <div className="flex flex-wrap gap-x-6 gap-y-1.5">
+                            <div className="grid gap-x-8 gap-y-2 sm:grid-cols-2">
                               {sessions.map((s, i) => {
-                                const isPast = s.booked_date ? Date.parse(s.booked_date) < now : false;
+                                const out = sessionOutcome(s, now);
+                                const tone = {
+                                  upcoming: "bg-green-900/40 text-green-400",
+                                  done: "bg-brown-800 text-brown-400",
+                                  lost: "bg-red-900/30 text-red-400",
+                                  back: "bg-blue-900/30 text-blue-300",
+                                }[out.tone];
                                 return (
-                                  <div key={i} className="flex items-center gap-2 text-xs">
-                                    <span className={isPast ? "text-brown-400" : "text-white"}>{s.booked_date} {s.booked_start_time}{s.booked_end_time ? `–${s.booked_end_time}` : ""}</span>
-                                    <span className={`rounded-full px-2 py-0.5 font-medium ${s.status === "confirmed" && !isPast ? "bg-green-900/40 text-green-400" : s.status === "confirmed" && isPast ? "bg-brown-800 text-brown-400" : "bg-red-900/30 text-red-400"}`}>
-                                      {s.status === "confirmed" ? (isPast ? "completed" : "scheduled") : s.status}
+                                  <div key={i} className="flex items-start gap-2 text-xs">
+                                    <span className={`shrink-0 rounded-full px-2 py-0.5 font-medium ${tone}`}>{out.label}</span>
+                                    <span className="min-w-0">
+                                      <span className={out.tone === "upcoming" ? "text-white" : "text-brown-400"}>
+                                        {s.booked_date} {s.booked_start_time}{s.booked_end_time ? `–${s.booked_end_time}` : ""}
+                                      </span>
+                                      <span className="block text-brown-500">{out.detail}</span>
                                     </span>
                                   </div>
                                 );

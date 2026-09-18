@@ -80,7 +80,21 @@ export async function GET(req: NextRequest) {
         supabase.from("profiles").select("email, phone, parent_name, kids, video_consent").eq("email", emailFilter.trim().toLowerCase()),
       ]);
       const enrichedClient = await attachComputedFields(supabase, clientRegs || [], clientPackages || []);
-      return NextResponse.json({ registrations: enrichedClient, profile: clientProfileRows?.[0] || null });
+      // Late cancels/reschedules for these exact bookings — the only way to
+      // tell a session that was moved from one that was simply cancelled, and
+      // the reason a package session was forfeited rather than handed back.
+      const clientRegIds = (clientRegs || []).map((r: { id: string }) => r.id);
+      const { data: clientLateFees } = clientRegIds.length
+        ? await supabase
+            .from("late_fee_events")
+            .select("registration_id, action, amount_kept, amount_credited")
+            .in("registration_id", clientRegIds)
+        : { data: [] as { registration_id: string; action: string }[] };
+      return NextResponse.json({
+        registrations: enrichedClient,
+        profile: clientProfileRows?.[0] || null,
+        lateFeeEvents: clientLateFees || [],
+      });
     }
 
     const { data: registrations } = await supabase
