@@ -44,8 +44,15 @@ function setUpWeekOverrides() {
   // that reads the trainer's name from column A finds an empty cell and
   // returns #REF!). Reading that back and writing it into the summary is how
   // this script wiped a whole sheet the first time it ran. Text, always.
+  var block = summary.getRange(FIRST_ROW, FIRST_COL, LAST_ROW - FIRST_ROW + 1, LAST_COL - FIRST_COL + 1);
+  var formulas = block.getFormulas();
+  var asText = formulas.map(function (row) {
+    return row.map(function (f) { return f ? "'" + f : ''; });
+  });
+
   // Sanity check before this is allowed to touch anything: the snapshot has to
-  // actually contain formulas.
+  // actually contain formulas. Nothing above this line writes to the file, so
+  // failing here leaves the spreadsheet exactly as it was found.
   var captured = 0;
   for (var r = 0; r < asText.length; r++) {
     for (var c = 0; c < asText[r].length; c++) {
@@ -59,11 +66,6 @@ function setUpWeekOverrides() {
 
   var store = ss.getSheetByName(FORMULAS) || ss.insertSheet(FORMULAS);
   store.clear();
-  var block = summary.getRange(FIRST_ROW, FIRST_COL, LAST_ROW - FIRST_ROW + 1, LAST_COL - FIRST_COL + 1);
-  var formulas = block.getFormulas();
-  var asText = formulas.map(function (row) {
-    return row.map(function (f) { return f ? "'" + f : ''; });
-  });
   store.getRange(1, 1, asText.length, asText[0].length).setValues(asText);
   store.hideSheet();
 
