@@ -37,10 +37,34 @@ function setUpWeekOverrides() {
 
   // Snapshot the formulas exactly as they are now — including each trainer's
   // own tab name and range — so a restored cell is byte-for-byte what it was.
+  //
+  // Stored as TEXT, with a leading apostrophe. Writing a string that starts
+  // with "=" into a cell makes it a live formula instead of a record of one —
+  // and a copied formula evaluated in the wrong row breaks (a flags formula
+  // that reads the trainer's name from column A finds an empty cell and
+  // returns #REF!). Reading that back and writing it into the summary is how
+  // this script wiped a whole sheet the first time it ran. Text, always.
+  // Sanity check before this is allowed to touch anything: the snapshot has to
+  // actually contain formulas.
+  var captured = 0;
+  for (var r = 0; r < asText.length; r++) {
+    for (var c = 0; c < asText[r].length; c++) {
+      if (String(asText[r][c]).charAt(1) === '=') captured++;
+    }
+  }
+  if (captured < 10) {
+    throw new Error('Only ' + captured + ' formulas found on the Weekly Summary — stopping rather than guessing. ' +
+      'Check that the trainer rows still hold their formulas, then run this again.');
+  }
+
   var store = ss.getSheetByName(FORMULAS) || ss.insertSheet(FORMULAS);
   store.clear();
   var block = summary.getRange(FIRST_ROW, FIRST_COL, LAST_ROW - FIRST_ROW + 1, LAST_COL - FIRST_COL + 1);
-  store.getRange(1, 1, block.getNumRows(), block.getNumColumns()).setValues(block.getFormulas());
+  var formulas = block.getFormulas();
+  var asText = formulas.map(function (row) {
+    return row.map(function (f) { return f ? "'" + f : ''; });
+  });
+  store.getRange(1, 1, asText.length, asText[0].length).setValues(asText);
   store.hideSheet();
 
   var log = ss.getSheetByName(OVERRIDES);
@@ -59,7 +83,8 @@ function setUpWeekOverrides() {
   ScriptApp.newTrigger('onWeeklySummaryEdit').forSpreadsheet(ss).onEdit().create();
 
   SpreadsheetApp.getUi().alert(
-    'Ready.\n\nType over any number on the Weekly Summary and it will stick to the week you are looking at. ' +
+    'Ready — ' + captured + ' formulas remembered.\n\n' +
+    'Type over any number on the Weekly Summary and it will stick to the week you are looking at. ' +
     'Clear the cell to go back to the formula.'
   );
 }
@@ -106,7 +131,6 @@ function onWeeklySummaryEdit(e) {
 function applyWeek_(sheet) {
   var ss = sheet.getParent();
   var week = weekKey_(sheet);
-  var store = ss.getSheetByName(FORMULAS);
   var map = overrideMap_(ss);
 
   for (var row = FIRST_ROW; row <= LAST_ROW; row++) {
@@ -118,9 +142,14 @@ function applyWeek_(sheet) {
         cell.setValue(map[key]);
         markOverride_(cell, week);
       } else {
-        var formula = store.getRange(row - FIRST_ROW + 1, col - FIRST_COL + 1).getValue();
-        if (formula) cell.setFormula(formula);
-        cell.setBackground(null).clearNote();
+        var formula = storedFormula_(ss, row, col);
+        // No saved formula means leave the cell exactly as it is. Writing a
+        // blank or an error over a working cell is the one thing this script
+        // must never do.
+        if (formula) {
+          cell.setFormula(formula);
+          cell.setBackground(null).clearNote();
+        }
       }
     }
   }
@@ -178,11 +207,22 @@ function removeOverride_(ss, week, trainer, col) {
 }
 
 function restoreFormula_(ss, sheet, row, col) {
-  var store = ss.getSheetByName(FORMULAS);
-  var formula = store.getRange(row - FIRST_ROW + 1, col - FIRST_COL + 1).getValue();
+  var formula = storedFormula_(ss, row, col);
   var cell = sheet.getRange(row, col);
   if (formula) cell.setFormula(formula);
   cell.setBackground(null).clearNote();
+}
+
+/** The saved formula for a cell, as text. Returns '' when there isn't a usable
+ * one — and never returns an error value, so a bad snapshot can't be written
+ * into the summary. */
+function storedFormula_(ss, row, col) {
+  var store = ss.getSheetByName(FORMULAS);
+  if (!store) return '';
+  var raw = store.getRange(row - FIRST_ROW + 1, col - FIRST_COL + 1).getValue();
+  var text = String(raw || '');
+  if (text.charAt(0) !== '=') return '';
+  return text;
 }
 
 function markOverride_(range, week) {
