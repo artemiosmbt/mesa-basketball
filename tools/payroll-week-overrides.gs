@@ -80,13 +80,18 @@ function setUpWeekOverrides() {
     originals.push([]);
     for (var c = 0; c < cols; c++) {
       var cur = current[r][c] || '';
+      var saved = store ? savedAt_(store, r + 1, c + 1) : '';
       if (cur && cur.indexOf(logRef_()) !== -1) {
-        var saved = store ? savedAt_(store, r + 1, c + 1) : '';
         if (!saved) {
           throw new Error('Row ' + (FIRST_ROW + r) + ', column ' + (FIRST_COL + c) +
             ' is already set up but its original formula is missing from the saved copy. ' +
             'Restore the sheet from File → Version history before running this again.');
         }
+        originals[r].push(saved);
+      } else if (!cur && saved) {
+        // The cell holds a typed-in value with no formula, but we have its
+        // formula from an earlier run. Keep it. Believing the stripped cell
+        // instead is how a formula gets lost for good.
         originals[r].push(saved);
       } else {
         originals[r].push(cur);
@@ -308,6 +313,47 @@ function setHighlightRule_(sheet, block) {
       .build()
   );
   sheet.setConditionalFormatRules(kept);
+}
+
+/**
+ * Run this if the setup message reports fewer formulas than there are trainer
+ * cells. It finds every cell with no formula on file and shows the matching
+ * cell from the other trainers' rows, which is what the missing one should
+ * look like.
+ */
+function showMissingFormulas() {
+  var ss = SpreadsheetApp.getActive();
+  var summary = ss.getSheetByName(SUMMARY_SHEET);
+  var html = '';
+
+  for (var row = FIRST_ROW; row <= LAST_ROW; row++) {
+    for (var col = FIRST_COL; col <= LAST_COL; col++) {
+      if (storedFormula_(ss, row, col)) continue;
+      var header = String(summary.getRange(FIRST_ROW - 1, col).getValue() || '');
+      html += '<p><b>Missing: ' + colLetter_(col) + row + '</b> — ' +
+        escape_(String(summary.getRange(row, 1).getValue())) +
+        (header ? ', ' + escape_(header) : '') + '</p>';
+      for (var other = FIRST_ROW; other <= LAST_ROW; other++) {
+        if (other === row) continue;
+        var f = storedFormula_(ss, other, col);
+        if (!f) continue;
+        html += '<p style="margin-left:1em">' + colLetter_(col) + other + ' (' +
+          escape_(String(summary.getRange(other, 1).getValue())) + '):<br>' +
+          '<code>' + escape_(f) + '</code></p>';
+      }
+    }
+  }
+
+  if (!html) html = '<p>Nothing missing — every trainer cell has its formula on file.</p>';
+  SpreadsheetApp.getUi().showModalDialog(
+    HtmlService.createHtmlOutput('<div style="font:13px -apple-system,sans-serif">' + html + '</div>')
+      .setWidth(700).setHeight(420),
+    'Formulas on file'
+  );
+}
+
+function escape_(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 /** A1-style column letter: 30 → "AD". */
