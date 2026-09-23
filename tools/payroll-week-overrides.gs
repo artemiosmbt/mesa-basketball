@@ -352,6 +352,62 @@ function showMissingFormulas() {
   );
 }
 
+/**
+ * Rebuild a lost formula from the other trainers' rows. Every trainer's row
+ * holds the same formula with their own tab name in it, so the missing one is
+ * a sibling's with the name swapped — and the swap is only accepted if the
+ * result no longer mentions the sibling anywhere, and the trainer really has a
+ * tab of that name.
+ */
+function repairMissingFormulas() {
+  var ss = SpreadsheetApp.getActive();
+  var summary = ss.getSheetByName(SUMMARY_SHEET);
+  var store = ss.getSheetByName(FORMULAS);
+  if (!store) throw new Error('No saved formulas yet — run setUpWeekOverrides first.');
+  var done = [];
+
+  for (var row = FIRST_ROW; row <= LAST_ROW; row++) {
+    for (var col = FIRST_COL; col <= LAST_COL; col++) {
+      if (storedFormula_(ss, row, col)) continue;
+
+      var trainer = String(summary.getRange(row, 1).getValue() || '');
+      if (!trainer) continue;
+      if (!ss.getSheetByName(trainer)) {
+        throw new Error('Row ' + row + ' is "' + trainer + '" but there is no tab with that name, ' +
+          'so the formula can\'t be rebuilt safely. Tell me and I\'ll do it by hand.');
+      }
+
+      var donorFormula = '', donorName = '';
+      for (var other = FIRST_ROW; other <= LAST_ROW && !donorFormula; other++) {
+        if (other === row) continue;
+        var f = storedFormula_(ss, other, col);
+        if (!f) continue;
+        donorFormula = f;
+        donorName = String(summary.getRange(other, 1).getValue() || '');
+      }
+      if (!donorFormula) {
+        throw new Error('Nothing to copy from for ' + colLetter_(col) + row + ' — every trainer is missing this column.');
+      }
+
+      var rebuilt = donorFormula.split("'" + donorName + "'").join("'" + trainer + "'");
+      if (rebuilt.indexOf(donorName) !== -1 || rebuilt.indexOf(trainer) === -1) {
+        throw new Error('Could not rebuild ' + colLetter_(col) + row + ' cleanly from ' + donorName + '\'s row. ' +
+          'Tell me and I\'ll do it by hand.');
+      }
+
+      store.getRange(row - FIRST_ROW + 1, col - FIRST_COL + 1).setValue("'" + rebuilt);
+      summary.getRange(row, col).setFormula(wrapFormula_(rebuilt, row, col));
+      done.push(colLetter_(col) + row + ' (' + trainer + ')');
+    }
+  }
+
+  SpreadsheetApp.getUi().alert(
+    done.length
+      ? 'Rebuilt ' + done.length + ' formula(s): ' + done.join(', ') + '.\n\nRun setUpWeekOverrides once more to confirm the count.'
+      : 'Nothing to rebuild — every trainer cell already has its formula.'
+  );
+}
+
 function escape_(s) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
