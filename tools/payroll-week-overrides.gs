@@ -225,18 +225,28 @@ function savedAt_(store, r, c) {
 }
 
 /** Yellow tint driven by the same lookup as the formula, so it follows the week
- * with no script and no delay. */
+ * with no script and no delay.
+ *
+ * A conditional format rule is not allowed to reference another sheet — but it
+ * is allowed to reference a named range, and a named range may live anywhere.
+ * So the corrections log gets three names and the rule reads those. */
 function setHighlightRule_(sheet, block) {
-  var L = logRef_();
-  var formula = '=COUNTIFS(' + L + '!$A:$A,$' + WEEK_CELL.charAt(0) + '$' + WEEK_CELL.substring(1) + ',' +
-    L + '!$B:$B,$A' + FIRST_ROW + ',' + L + '!$C:$C,COLUMN())>0';
+  var ss = sheet.getParent();
+  var log = ss.getSheetByName(OVERRIDES);
+  defineName_(ss, 'WO_Week', log.getRange('A:A'));
+  defineName_(ss, 'WO_Trainer', log.getRange('B:B'));
+  defineName_(ss, 'WO_Col', log.getRange('C:C'));
+
+  var formula = '=COUNTIFS(WO_Week,$' + WEEK_CELL.charAt(0) + '$' + WEEK_CELL.substring(1) +
+    ',WO_Trainer,$A' + FIRST_ROW + ',WO_Col,COLUMN())>0';
 
   var kept = [];
   var existing = sheet.getConditionalFormatRules();
   for (var i = 0; i < existing.length; i++) {
     var c = existing[i].getBooleanCondition();
     var vals = c ? c.getCriteriaValues() : null;
-    var isOurs = vals && vals.length && String(vals[0]).indexOf(OVERRIDES) !== -1;
+    var text = vals && vals.length ? String(vals[0]) : '';
+    var isOurs = text.indexOf('WO_Week') !== -1 || text.indexOf(OVERRIDES) !== -1;
     if (!isOurs) kept.push(existing[i]);
   }
   kept.push(
@@ -247,6 +257,15 @@ function setHighlightRule_(sheet, block) {
       .build()
   );
   sheet.setConditionalFormatRules(kept);
+}
+
+/** Point a name at a range, replacing any earlier definition of that name. */
+function defineName_(ss, name, range) {
+  var named = ss.getNamedRanges();
+  for (var i = 0; i < named.length; i++) {
+    if (named[i].getName() === name) named[i].remove();
+  }
+  ss.setNamedRange(name, range);
 }
 
 /** Take off the fixed tints and notes the earlier version painted on. Only
