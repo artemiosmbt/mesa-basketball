@@ -33,6 +33,12 @@ var LAST_COL = 12;             // L — Flags
 var OVERRIDES = '_WeekOverrides';
 var FORMULAS = '_WeekFormulas';
 var OVERRIDE_COLOR = '#fff0c2';
+// A hidden block on the summary itself, one cell per trainer cell, each saying
+// TRUE when that cell has a correction filed for the week showing. It exists
+// because a conditional format rule may not read another sheet — not directly
+// and not through a named range either — so the answer has to be sitting on
+// the same sheet for the rule to see it. Far right of anything in use.
+var HELPER_COL = 30;           // AD
 
 /** The overrides sheet, quoted for use inside a formula. Its presence in a
  * cell's formula is also how we recognise a cell we've already wrapped. */
@@ -101,6 +107,19 @@ function setUpWeekOverrides() {
       'Check that the trainer rows still hold their formulas, then run this again.');
   }
 
+  // Make room for the helper block and refuse to use the spot if anything of
+  // yours is sitting there. Adding empty columns off the right-hand end is the
+  // only thing this does to the sheet before the check.
+  var needed = HELPER_COL + cols - 1;
+  if (summary.getMaxColumns() < needed) {
+    summary.insertColumnsAfter(summary.getMaxColumns(), needed - summary.getMaxColumns());
+  }
+  if (!helperAreaFree_(summary, cols)) {
+    throw new Error('Columns ' + colLetter_(HELPER_COL) + '–' + colLetter_(needed) +
+      ' of the Weekly Summary have something in them, and this needs them for its own bookkeeping. ' +
+      'Clear those columns, or tell me to move the helper block somewhere else.');
+  }
+
   // Save the originals as TEXT. A string beginning with "=" written into a cell
   // becomes a live formula rather than a record of one, and a formula evaluated
   // in the wrong row breaks — that is how an earlier version of this script
@@ -132,7 +151,16 @@ function setUpWeekOverrides() {
   }
 
   clearOldMarks_(block);
+  setHelpers_(summary, rows, cols);
   setHighlightRule_(summary, block);
+
+  // An earlier attempt defined these names for a highlight rule that Sheets
+  // refused to accept. Nothing points at them now.
+  var stale = ['WO_Week', 'WO_Trainer', 'WO_Col'];
+  var named = ss.getNamedRanges();
+  for (var n = 0; n < named.length; n++) {
+    if (stale.indexOf(named[n].getName()) !== -1) named[n].remove();
+  }
 
   var triggers = ScriptApp.getProjectTriggers();
   for (var i = 0; i < triggers.length; i++) {
@@ -224,21 +252,44 @@ function savedAt_(store, r, c) {
   return text.charAt(0) === '=' ? text : '';
 }
 
-/** Yellow tint driven by the same lookup as the formula, so it follows the week
- * with no script and no delay.
- *
- * A conditional format rule is not allowed to reference another sheet — but it
- * is allowed to reference a named range, and a named range may live anywhere.
- * So the corrections log gets three names and the rule reads those. */
-function setHighlightRule_(sheet, block) {
-  var ss = sheet.getParent();
-  var log = ss.getSheetByName(OVERRIDES);
-  defineName_(ss, 'WO_Week', log.getRange('A:A'));
-  defineName_(ss, 'WO_Trainer', log.getRange('B:B'));
-  defineName_(ss, 'WO_Col', log.getRange('C:C'));
+/** Is this spot free for the helper block? Blank counts, and so does a helper
+ * block we put there ourselves on an earlier run. */
+function helperAreaFree_(summary, cols) {
+  var area = summary.getRange(1, HELPER_COL, summary.getMaxRows(), cols);
+  var values = area.getValues();
+  var formulas = area.getFormulas();
+  for (var r = 0; r < values.length; r++) {
+    for (var c = 0; c < values[r].length; c++) {
+      if (values[r][c] === '' || values[r][c] === null) continue;
+      if (formulas[r][c] && formulas[r][c].indexOf(OVERRIDES) !== -1) continue;
+      return false;
+    }
+  }
+  return true;
+}
 
-  var formula = '=COUNTIFS(WO_Week,$' + WEEK_CELL.charAt(0) + '$' + WEEK_CELL.substring(1) +
-    ',WO_Trainer,$A' + FIRST_ROW + ',WO_Col,COLUMN())>0';
+/** One TRUE/FALSE per trainer cell, then hidden away. */
+function setHelpers_(summary, rows, cols) {
+  var L = logRef_();
+  var week = '$' + WEEK_CELL.charAt(0) + '$' + WEEK_CELL.substring(1);
+  var out = [];
+  for (var r = 0; r < rows; r++) {
+    out.push([]);
+    for (var c = 0; c < cols; c++) {
+      out[r].push('=COUNTIFS(' + L + '!$A:$A,' + week + ',' +
+        L + '!$B:$B,$A' + (FIRST_ROW + r) + ',' +
+        L + '!$C:$C,' + (FIRST_COL + c) + ')>0');
+    }
+  }
+  summary.getRange(FIRST_ROW, HELPER_COL, rows, cols).setFormulas(out);
+  summary.hideColumns(HELPER_COL, cols);
+}
+
+/** Yellow tint driven by the helper block, so it follows the week with no
+ * script and no delay. The reference is deliberately relative: the rule is
+ * anchored at the top-left trainer cell, so each cell reads its own helper. */
+function setHighlightRule_(sheet, block) {
+  var formula = '=' + colLetter_(HELPER_COL) + FIRST_ROW;
 
   var kept = [];
   var existing = sheet.getConditionalFormatRules();
@@ -246,7 +297,7 @@ function setHighlightRule_(sheet, block) {
     var c = existing[i].getBooleanCondition();
     var vals = c ? c.getCriteriaValues() : null;
     var text = vals && vals.length ? String(vals[0]) : '';
-    var isOurs = text.indexOf('WO_Week') !== -1 || text.indexOf(OVERRIDES) !== -1;
+    var isOurs = text === formula || text.indexOf('WO_Week') !== -1 || text.indexOf(OVERRIDES) !== -1;
     if (!isOurs) kept.push(existing[i]);
   }
   kept.push(
@@ -259,13 +310,15 @@ function setHighlightRule_(sheet, block) {
   sheet.setConditionalFormatRules(kept);
 }
 
-/** Point a name at a range, replacing any earlier definition of that name. */
-function defineName_(ss, name, range) {
-  var named = ss.getNamedRanges();
-  for (var i = 0; i < named.length; i++) {
-    if (named[i].getName() === name) named[i].remove();
+/** A1-style column letter: 30 → "AD". */
+function colLetter_(n) {
+  var s = '';
+  while (n > 0) {
+    var m = (n - 1) % 26;
+    s = String.fromCharCode(65 + m) + s;
+    n = (n - m - 1) / 26;
   }
-  ss.setNamedRange(name, range);
+  return s;
 }
 
 /** Take off the fixed tints and notes the earlier version painted on. Only
