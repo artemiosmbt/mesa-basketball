@@ -83,6 +83,15 @@ const SYNC_LOG_TAB = "_SyncLog";
 // looked up live instead (see lookupGroupRate in runPayrollSync), since
 // different weekly groups can have different rates (e.g. a Pickup slot).
 const GROUP_CLIENT_RATE = 50;
+// A completed session is written to a trainer's tab only once it is this
+// old. The owner fixes mix-ups within a day or so of a session (a kid who
+// signed up under one trainer but was actually coached by another gets
+// moved to the right trainer's session the next day); writing the row the
+// morning after locked the session in under the wrong trainer before the
+// correction was made. 36 hours is the owner's own outer limit for those
+// corrections. No-shows and late cancellations are not held — they are the
+// admin's own action, not something still being sorted out.
+const COMPLETED_LOCK_MS = 36 * 60 * 60 * 1000;
 const DISCOUNT_TIERS = [0.15, 0.1, 0]; // checked in this order (largest first)
 
 // Per-run safety cap so a large historical backlog on the very first run
@@ -319,7 +328,7 @@ function deriveCancellationFlag(
     // file had its own independent, unfixed copy of the same pattern.
     const end = sessionEndDateTime(normalizeDate(reg.booked_date), reg.booked_end_time);
     if (!end) return null;
-    return end.getTime() < Date.now() ? "Completed" : null; // still upcoming — nothing to log yet
+    return end.getTime() + COMPLETED_LOCK_MS < Date.now() ? "Completed" : null; // upcoming, or inside the correction window — nothing to log yet
   }
   if (reg.status === "cancelled") {
     // is_late_cancel is not on this narrowed type; caller only passes
@@ -467,6 +476,20 @@ function rowToInputValues(r: DerivedRow): { range: string; values: unknown[] }[]
   ];
 }
 
+/** A session that changed trainer AFTER its row was written: the old row's
+ * input cells are blanked (the sheet's formulas then compute nothing for it)
+ * and a note says where it went. Rows are never deleted — deleting would
+ * shift every row the _SyncLog points at below it. */
+async function clearTrainerRow(spreadsheetId: string, tab: string, row: number, movedTo: string): Promise<void> {
+  await batchUpdateValues(
+    spreadsheetId,
+    rowToInputValues({ date: "", sessionType: "" as DerivedRow["sessionType"], participants: "" as unknown as number, startTime: "", endTime: "",
+      paymentType: "" as DerivedRow["paymentType"], packageSize: "", discount: "" as unknown as number, creditApplied: "" as unknown as number,
+      processingFee: "" as unknown as number, stripeFee: "" as unknown as number, cancellationFlag: null, notes: `moved to ${movedTo}'s tab` } as DerivedRow)
+      .map(({ range, values }) => ({ range: `${a1Quote(tab)}!${range}${row}`, values: [values] }))
+  );
+}
+
 async function writeTrainerRow(
   spreadsheetId: string,
   tab: string,
@@ -493,6 +516,7 @@ export interface PayrollSyncResult {
   sessionsConsidered: number;
   sessionsWritten: number;
   sessionsUpdated: number;
+  sessionsMoved: number;       // rows blanked on one trainer's tab and rewritten on another's after a trainer change
   sessionsSkippedUnknownTrainer: number;
   sessionsSkippedNoLoggableStatus: number;
   sessionsSkippedNonLateCancel: number;
@@ -524,7 +548,7 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
     .select("id");
   if (!claimed || claimed.length === 0) {
     return {
-      sessionsConsidered: 0, sessionsWritten: 0, sessionsUpdated: 0,
+      sessionsConsidered: 0, sessionsWritten: 0, sessionsUpdated: 0, sessionsMoved: 0,
       sessionsSkippedUnknownTrainer: 0, sessionsSkippedNoLoggableStatus: 0, sessionsSkippedNonLateCancel: 0,
       packagesConsidered: 0, packagesWritten: 0, packagesUpdated: 0,
       errors: ["Payroll sync already in progress — skipped to avoid interleaving writes."],
@@ -535,7 +559,7 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
   const result: PayrollSyncResult = {
     sessionsConsidered: 0,
     sessionsWritten: 0,
-    sessionsUpdated: 0,
+    sessionsUpdated: 0, sessionsMoved: 0,
     sessionsSkippedUnknownTrainer: 0,
     sessionsSkippedNoLoggableStatus: 0,
     sessionsSkippedNonLateCancel: 0,
@@ -721,7 +745,19 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
 
     try {
       const fingerprint = deriveRowFingerprint(derived);
-      const existing = log.get(reg.id);
+      let existing = log.get(reg.id);
+      // The trainer is not part of the fingerprint, so a session moved to
+      // another trainer AFTER its row was written used to read as "already
+      // synced, unchanged" and stayed on the first trainer's tab for good —
+      // the first trainer paid for a kid the second one coached. A row on a
+      // different tab than the session's current trainer is blanked there
+      // and written fresh on the right tab below.
+      if (existing && existing.tab !== trainer) {
+        await clearTrainerRow(spreadsheetId, existing.tab, existing.row, trainer);
+        log.delete(reg.id);
+        existing = undefined;
+        result.sessionsMoved++;
+      }
       if (existing) {
         if (existing.status === fingerprint) continue; // already synced, unchanged
         await writeTrainerRow(spreadsheetId, trainer, existing.row, derived);
