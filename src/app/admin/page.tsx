@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { authClient, resolveAuthRole, type AuthContext } from "@/lib/auth";
@@ -1562,6 +1562,17 @@ export default function AdminPage() {
   const [authCtx, setAuthCtx] = useState<AuthContext | null>(null);
   const [trainerFilter, setTrainerFilter] = useState("all");
   const [selectedClient, setSelectedClient] = useState<string | null>(null);
+  // Opening a client swaps the (long) client list for a (shorter) profile
+  // while the page keeps its scroll offset, so the viewport landed at the
+  // bottom of the profile; going back did the reverse. Open at the top,
+  // and put the reader back where they were in the list when they return.
+  const clientListScrollY = useRef(0);
+  useEffect(() => {
+    if (tab !== "clients") return;
+    const y = selectedClient ? 0 : clientListScrollY.current;
+    const id = requestAnimationFrame(() => window.scrollTo({ top: y }));
+    return () => cancelAnimationFrame(id);
+  }, [selectedClient, tab]);
   const [stats, setStats] = useState<{ total: number; confirmed: number; cancelled: number; camps: number; groups: number } | null>(null);
 
   // Past tab: last-30-days by default (pastWindowRegs), "Load all" upgrades
@@ -2740,7 +2751,7 @@ export default function AdminPage() {
               {filteredClients.map((c) => (
               <button
                 key={c.email || c.name}
-                onClick={() => setSelectedClient(c.email || c.name)}
+                onClick={() => { clientListScrollY.current = window.scrollY; setSelectedClient(c.email || c.name); }}
                 className="w-full text-left rounded-xl border-2 border-brown-600 bg-brown-900/40 hover:bg-brown-800/60 px-4 py-3 transition shadow-lg shadow-black/30"
               >
                 <div className="flex items-center justify-between gap-3">
