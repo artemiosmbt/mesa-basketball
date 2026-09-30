@@ -85,7 +85,7 @@ export default function LandingPage() {
         {/* Mobile: everything overlaid on photo, fades into dark */}
         <div className="md:hidden">
           <div className="relative w-full h-[115vw] overflow-hidden">
-            <HeroVideo className="absolute inset-0 h-full w-full object-cover object-center" />
+            <HeroVideo variant="mobile" className="absolute inset-0 h-full w-full object-cover object-center" />
             {/* Dark blue tint over whole photo — same feel as desktop */}
             <div className="absolute inset-0 bg-mesa-dark/55" />
             {/* Bottom fade — starts below shoes, just smooths the edge */}
@@ -112,7 +112,7 @@ export default function LandingPage() {
         {/* Desktop: cinematic full-bleed */}
         <div className="hidden md:flex relative overflow-hidden min-h-[85vh] items-center">
           <div className="absolute inset-0">
-            <HeroVideo className="absolute inset-0 h-full w-full object-cover object-[center_42%]" />
+            <HeroVideo variant="desktop" className="absolute inset-0 h-full w-full object-cover object-[center_42%]" />
             <div className="absolute inset-0 bg-gradient-to-br from-mesa-dark/95 via-mesa-dark/75 to-brown-900/60" />
             <div className="absolute inset-0 bg-gradient-to-t from-mesa-dark via-transparent to-transparent" />
           </div>

@@ -361,7 +361,20 @@ export async function POST(req: NextRequest) {
           // Re-checked live (not oldPkg's own possibly-stale sessions_used)
           // — the forfeiture bookkeeping row above, if this was late, has
           // already landed, so this reflects the true remaining capacity.
-          const usedSoFar = await countPackageSessionsUsed(oldPkg.id).catch(() => oldPkg.package_type);
+          //
+          // The row being moved is EXCLUDED from the count (the client-side
+          // reschedule does the same, booking/[token]/route.ts). It is still
+          // sitting in the DB as "confirmed" with this package_id, so
+          // counting it asks "is there room for this session on top of
+          // itself?" — and for a package with every session booked (the
+          // normal state a day before the last one) the answer was no: the
+          // session was unlinked and the saved card was charged the full
+          // individual rate for a same-month move, and the packages page
+          // then re-linked the row into the package as well (see
+          // backfillPackageLinks). On a late move the forfeiture row above
+          // already stands in for this session's used slot, so the row
+          // itself must not be counted a second time either.
+          const usedSoFar = await countPackageSessionsUsed(oldPkg.id, reg.id).catch(() => oldPkg.package_type);
           sameMonthCovered = usedSoFar < oldPkg.package_type;
         }
       }

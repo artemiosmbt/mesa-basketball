@@ -8,6 +8,7 @@ import {
   getActivePackage,
   getAccountCreditBalance,
   packageHasAnyBookedSession,
+  getLateFeeEventsForRegistrations,
 } from "@/lib/supabase";
 import { getWeeklySchedule, getPrivateSlots } from "@/lib/sheets";
 
@@ -48,6 +49,15 @@ export async function POST(req: NextRequest) {
       getPrivateSlots().catch(() => []),
       getAccountCreditBalance(email).catch(() => 0),
     ]);
+
+    // A cancelled / moved / no-show session stays in the parent's history
+    // with what happened to the money — the fee events for those rows.
+    const num = (v: number | string | null | undefined) => (typeof v === "string" ? parseFloat(v) : v) || 0;
+    const feeEvents = await getLateFeeEventsForRegistrations(
+      registrations.filter((r) => r.status === "cancelled" || r.status === "no_show" || r.is_late_cancel).map((r) => r.id),
+    ).catch(() => []);
+    const feeByReg = new Map<string, typeof feeEvents>();
+    for (const e of feeEvents) { const arr = feeByReg.get(e.registration_id) || []; arr.push(e); feeByReg.set(e.registration_id, arr); }
 
     // Build a location lookup keyed by "date|startTime" from the current sheet
     const locationLookup = new Map<string, string>();
@@ -102,6 +112,24 @@ export async function POST(req: NextRequest) {
           bookedTrainer: r.booked_trainer,
           status: r.status,
           manageToken: r.manage_token,
+          cancellation: (r.status === "cancelled" || r.status === "no_show" || r.is_late_cancel)
+            ? {
+                late: !!r.is_late_cancel,
+                packageSession: !!r.package_id,
+                campDayFee: num(r.camp_day_late_fee),
+                events: (feeByReg.get(r.id) || []).map((e) => ({
+                  action: e.action,
+                  by: e.initiated_by,
+                  at: e.created_at,
+                  kept: num(e.amount_kept),
+                  refunded: num(e.amount_refunded),
+                  credited: num(e.amount_credited),
+                  applied: num(e.amount_applied),
+                  chargedExtra: num(e.amount_charged_extra),
+                  movedTo: e.new_session_details,
+                })),
+              }
+            : null,
         };
       }),
       rewards: {

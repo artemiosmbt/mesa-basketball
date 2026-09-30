@@ -1491,7 +1491,7 @@ export async function backfillPackageLinks(pkg: { id: string; email: string; mon
 
   const { data, error } = await supabase
     .from("registrations")
-    .select("id, booked_date, booked_start_time")
+    .select("id, booked_date, booked_start_time, stripe_payment_intent_id, is_paid")
     .ilike("email", pkg.email)
     .in("type", ["private", "group-private"])
     .in("status", ["confirmed", "no_show"])
@@ -1499,11 +1499,27 @@ export async function backfillPackageLinks(pkg: { id: string; email: string; mon
   if (error || !data || data.length === 0) return alreadyLinked;
 
   const [year, month] = pkg.month_year.split("-").map(Number);
-  const inMonth = data.filter((r) => {
+  let inMonth = data.filter((r) => {
     if (!r.booked_date) return false;
     const d = new Date(r.booked_date);
     return !isNaN(d.getTime()) && d.getFullYear() === year && d.getMonth() + 1 === month;
   });
+  if (inMonth.length === 0) return alreadyLinked;
+
+  // A session the client PAID FOR INDIVIDUALLY is not a package session,
+  // however neatly it sits in the package's month: one that went through
+  // its own checkout (a payment intent / is_paid), or one that was moved
+  // out of the package and charged the individual rate off-session (a
+  // registration_topup_charges row). Absorbing those here made the client
+  // pay twice — the full price on the card AND a package slot.
+  inMonth = inMonth.filter((r) => !r.stripe_payment_intent_id && !r.is_paid);
+  if (inMonth.length === 0) return alreadyLinked;
+  const { data: topups } = await supabase
+    .from("registration_topup_charges")
+    .select("registration_id")
+    .in("registration_id", inMonth.map((r) => r.id));
+  const charged = new Set((topups || []).map((t) => t.registration_id));
+  inMonth = inMonth.filter((r) => !charged.has(r.id));
   if (inMonth.length === 0) return alreadyLinked;
 
   function toMins(t: string | null): number {
@@ -1530,6 +1546,32 @@ export async function backfillPackageLinks(pkg: { id: string; email: string; mon
     .update({ package_id: pkg.id })
     .in("id", toLink);
   return updateError ? alreadyLinked : alreadyLinked + toLink.length;
+}
+
+// The money story behind a cancelled or moved booking (late_fee_events),
+// for the parent's own history: what was kept, refunded, credited.
+export interface LateFeeEventRow {
+  registration_id: string;
+  action: string;
+  initiated_by: string;
+  amount_kept: number | string | null;
+  amount_refunded: number | string | null;
+  amount_credited: number | string | null;
+  amount_applied: number | string | null;
+  amount_charged_extra: number | string | null;
+  created_at: string;
+  new_session_details: string | null;
+}
+export async function getLateFeeEventsForRegistrations(registrationIds: string[]): Promise<LateFeeEventRow[]> {
+  if (registrationIds.length === 0) return [];
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from("late_fee_events")
+    .select("registration_id, action, initiated_by, amount_kept, amount_refunded, amount_credited, amount_applied, amount_charged_extra, created_at, new_session_details")
+    .in("registration_id", registrationIds)
+    .order("created_at", { ascending: true });
+  if (error || !data) return [];
+  return data as LateFeeEventRow[];
 }
 
 export async function getPackageById(packageId: string): Promise<MonthlyPackage | null> {

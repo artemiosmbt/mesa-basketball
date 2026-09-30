@@ -844,6 +844,14 @@ export default function Home() {
   const [showAllRecurring, setShowAllRecurring] = useState(false);
   const [showCalendar, setShowCalendar] = useState(false);
   const [showAllGroups, setShowAllGroups] = useState<Set<string>>(new Set());
+  // Collapsing a long "view more" list removes rows above the viewport's
+  // bottom edge while the page keeps its absolute scroll offset — so the
+  // reader was left far below the card they had just closed, somewhere down
+  // the programs page. After the collapse commits, bring that card back.
+  function keepCardInView(e: { currentTarget: HTMLElement }) {
+    const anchor = e.currentTarget.closest("[data-scroll-anchor]") ?? e.currentTarget.parentElement;
+    requestAnimationFrame(() => anchor?.scrollIntoView({ block: "nearest" }));
+  }
   const [groupTab, setGroupTab] = useState<"skills" | "pickup">("skills");
   const [upsellExtra, setUpsellExtra] = useState(0); // extra minutes accepted
   const [referralCode, setReferralCode] = useState("");
@@ -2328,6 +2336,7 @@ export default function Home() {
               return (
                 <div
                   key={group}
+                  data-scroll-anchor
                   className={`rounded-xl border-2 p-6 transition cursor-pointer shadow-lg shadow-black/30 ${
                     isActive
                       ? "border-mesa-accent bg-brown-900/60"
@@ -2532,12 +2541,12 @@ export default function Home() {
                           })}
                           {filteredSessions.length > 5 && (
                             <button
-                              onClick={() => setShowAllGroups((prev) => {
+                              onClick={(e) => { if (showAll) keepCardInView(e); setShowAllGroups((prev) => {
                                 const next = new Set(prev);
                                 if (next.has(group)) next.delete(group);
                                 else next.add(group);
                                 return next;
-                              })}
+                              }); }}
                               className="w-full rounded-lg border border-brown-700 py-1.5 text-xs text-brown-400 hover:border-brown-500 hover:text-white transition"
                             >
                               {showAll ? "Show less ↑" : `View ${filteredSessions.length - 5} more sessions ↓`}
@@ -2608,13 +2617,13 @@ export default function Home() {
                           })}
                           {pickupSessions.length > 5 && (
                             <button
-                              onClick={() => setShowAllGroups((prev) => {
+                              onClick={(e) => { if (showAllPickup) keepCardInView(e); setShowAllGroups((prev) => {
                                 const next = new Set(prev);
                                 const pickupKey = `${group}|pickup`;
                                 if (next.has(pickupKey)) next.delete(pickupKey);
                                 else next.add(pickupKey);
                                 return next;
-                              })}
+                              }); }}
                               className="w-full rounded-lg border border-brown-700 py-1.5 text-xs text-brown-400 hover:border-brown-500 hover:text-white transition"
                             >
                               {showAllPickup ? "Show less ↑" : `View ${pickupSessions.length - 5} more sessions ↓`}
@@ -3235,7 +3244,7 @@ export default function Home() {
                   )}
                   {showAllPrivate && dayGroups.length > 10 && (
                     <button
-                      onClick={() => setShowAllPrivate(false)}
+                      onClick={(e) => { keepCardInView(e); setShowAllPrivate(false); }}
                       className="mt-2 w-full rounded-lg border border-brown-700 py-2 text-sm text-brown-400 hover:border-brown-500 hover:text-white transition"
                     >
                       Show less ↑
@@ -4123,7 +4132,7 @@ export default function Home() {
                       {showAllRecurring && recurringWeeks.length > 3 && (
                         <button
                           type="button"
-                          onClick={() => setShowAllRecurring(false)}
+                          onClick={(e) => { keepCardInView(e); setShowAllRecurring(false); }}
                           className="mt-1 w-full border-t border-brown-600 pt-2 text-center text-xs text-mesa-accent hover:text-yellow-300"
                         >
                           Show less ↑

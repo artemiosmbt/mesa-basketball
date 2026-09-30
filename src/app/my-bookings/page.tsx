@@ -54,6 +54,46 @@ interface BookingRecord {
   bookedTrainer: string | null;
   status: string;
   manageToken: string;
+  cancellation?: {
+    late: boolean;
+    packageSession: boolean;
+    campDayFee: number;
+    events: { action: string; by: string; at: string; kept: number; refunded: number; credited: number; applied: number; chargedExtra: number; movedTo: string | null }[];
+  } | null;
+}
+
+// What happened to the money on a cancelled, moved or missed session — kept
+// in the history because money changed hands. Plain sentences, no jargon.
+function CancellationLines({ b }: { b: BookingRecord }) {
+  const c = b.cancellation;
+  if (!c) return null;
+  const $ = (n: number) => `$${n.toFixed(2)}`;
+  const lines: string[] = [];
+  for (const e of c.events) {
+    const when = new Date(e.at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    lines.push(`${e.action === "reschedule" ? "Rescheduled" : "Cancelled"} on ${when}${e.by === "admin" ? " by Mesa" : ""}${c.late ? " (late)" : ""}`);
+    if (e.kept > 0) lines.push(`${$(e.kept)} kept as the late fee`);
+    if (e.refunded > 0) lines.push(`${$(e.refunded)} refunded to your card`);
+    if (e.credited > 0) lines.push(`${$(e.credited)} returned to your account credit`);
+    if (e.applied > 0) lines.push(`${$(e.applied)} of credit applied to the new session`);
+    if (e.chargedExtra > 0) lines.push(`${$(e.chargedExtra)} charged for the new session`);
+    if (e.action === "reschedule" && e.movedTo) lines.push(`Moved to: ${e.movedTo.replace(/<[^>]+>/g, " ").trim()}`);
+  }
+  if (c.packageSession) {
+    if (b.status === "no_show") lines.push("No show — this package session counts as used");
+    else if (c.late) lines.push("Package session forfeited — it counts as one of your package sessions");
+    else if (b.status === "cancelled") lines.push("Your package session was returned to your package");
+  } else if (b.status === "no_show") {
+    lines.push("No show — the session was charged in full");
+  }
+  if (c.campDayFee > 0) lines.push(`Camp day late fee: ${$(c.campDayFee)} kept`);
+  if (b.status === "cancelled" && c.events.length === 0 && !c.campDayFee) lines.push(c.late ? "Cancelled late — the late fee was kept" : "Cancelled on time — no fee");
+  if (lines.length === 0) return null;
+  return (
+    <div className={`mt-2 rounded-lg border px-3 py-2 text-xs ${c.late || c.campDayFee > 0 || b.status === "no_show" ? "border-red-900/60 bg-red-950/30" : "border-brown-700 bg-brown-950/40"}`}>
+      {lines.map((l, i) => <p key={i} className="text-brown-200 leading-relaxed">{l}</p>)}
+    </div>
+  );
 }
 
 export default function MyBookings() {
@@ -410,6 +450,9 @@ export default function MyBookings() {
                         <p className="text-brown-400">
                           <span className="text-brown-500">Trainer:</span> {b.bookedTrainer}
                         </p>
+                      )}
+                      {b.cancellation && (
+                        <CancellationLines b={b} />
                       )}
                       <p className="text-brown-500 text-xs">
                         Registered{" "}

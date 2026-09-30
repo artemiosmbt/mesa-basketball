@@ -288,7 +288,8 @@ function daysAway(dateStr: string | null): { label: string; cls: string } | null
 
 // Shared status badge styling/label — used everywhere a registration's
 // status is shown (client detail view, upcoming, past).
-function statusBadge(status: string, isPast?: boolean): { cls: string; label: string } {
+function statusBadge(status: string, isPast?: boolean, feeKept?: boolean): { cls: string; label: string } {
+  if (status === "cancelled" && feeKept) return { cls: "bg-red-900/40 text-red-400", label: "cancelled · fee kept" };
   if (status === "pending_payment") return { cls: "bg-blue-900/40 text-blue-400", label: "awaiting payment" };
   if (status === "payment_abandoned") return { cls: "bg-brown-700 text-brown-300", label: "abandoned" };
   if (status === "no_show") return { cls: "bg-orange-900/40 text-orange-400", label: "no show" };
@@ -909,6 +910,7 @@ function CalendarView({ token, trainerFilter, weeklyCapacity, campCapacity, canE
   // depends on the very state it updates, is exactly the "cascading
   // renders" pattern React's own linter warns against.
   const calLoading = cached === undefined;
+  const [calFeeEvents, setCalFeeEvents] = useState<Map<string, FeeEvent[]>>(new Map());
 
   useEffect(() => {
     if (!token || monthCache.has(cacheKey)) return;
@@ -918,6 +920,7 @@ function CalendarView({ token, trainerFilter, weeklyCapacity, campCapacity, canE
       .then((r) => r.json())
       .then((data) => {
         setMonthCache((prev) => new Map(prev).set(cacheKey, data.registrations || []));
+        if (data.lateFeeEvents?.length) setCalFeeEvents((prev) => { const next = new Map(prev); for (const [id, evs] of groupFeeEvents(data.lateFeeEvents)) next.set(id, evs); return next; });
       })
       .catch(() => {
         setMonthCache((prev) => new Map(prev).set(cacheKey, []));
@@ -999,6 +1002,7 @@ function CalendarView({ token, trainerFilter, weeklyCapacity, campCapacity, canE
               <p className="text-brown-500 uppercase tracking-wider mb-0.5">Session Details</p>
               <p className="text-brown-200 whitespace-pre-line leading-relaxed">{fullSession}</p>
             </div>
+            <CancellationNote r={r} events={calFeeEvents.get(r.id)} />
 
             {r.status === "confirmed" && (
               <div className="flex flex-wrap gap-3 pt-1 border-t border-brown-800">
@@ -1186,6 +1190,329 @@ function CalendarView({ token, trainerFilter, weeklyCapacity, campCapacity, canE
   );
 }
 
+// One row of late_fee_events (api/admin/data sends them with every history
+// view). Amounts are dollars.
+interface FeeEvent {
+  registration_id: string;
+  action: string;          // 'cancel' | 'reschedule'
+  initiated_by: string;    // 'client' | 'admin'
+  amount_kept: number | string | null;
+  amount_refunded: number | string | null;
+  amount_credited: number | string | null;
+  amount_applied: number | string | null;
+  amount_charged_extra: number | string | null;
+  created_at: string;
+  new_session_details: string | null;
+}
+function groupFeeEvents(list: FeeEvent[] | undefined | null): Map<string, FeeEvent[]> {
+  const m = new Map<string, FeeEvent[]>();
+  for (const e of list || []) {
+    if (!e.registration_id) continue;
+    const arr = m.get(e.registration_id) || [];
+    arr.push(e);
+    m.set(e.registration_id, arr);
+  }
+  return m;
+}
+const feeKept = (r: Registration) => !!r.is_late_cancel || Number(r.camp_day_late_fee || 0) > 0;
+const money = (v: number | string | null | undefined) => {
+  const n = typeof v === "string" ? parseFloat(v) : v || 0;
+  return n > 0 ? `$${n.toFixed(2)}` : null;
+};
+
+// What happened to the money on a cancelled, forfeited or moved booking —
+// the reason a fee-bearing cancellation stays in the client's history at
+// all. Rendered inside an expanded card; nothing for a live booking.
+function CancellationNote({ r, events }: { r: Registration; events?: FeeEvent[] }) {
+  const cancelled = r.status === "cancelled";
+  const noShow = r.status === "no_show";
+  const campFee = r.camp_day_late_fee ? Number(r.camp_day_late_fee) : 0;
+  if (!cancelled && !noShow && !(events && events.length)) return null;
+  const lines: string[] = [];
+  const evs = events || [];
+  for (const e of evs) {
+    const when = new Date(e.created_at).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+    const who = e.initiated_by === "admin" ? "by admin" : "by the client";
+    lines.push(`${e.action === "reschedule" ? "Rescheduled" : "Cancelled"} ${when} ${who}${r.is_late_cancel || e.action === "reschedule" ? "" : " (on time)"}`);
+    const kept = money(e.amount_kept), refunded = money(e.amount_refunded), credited = money(e.amount_credited), applied = money(e.amount_applied), extra = money(e.amount_charged_extra);
+    if (kept) lines.push(`${kept} kept as the late fee`);
+    if (refunded) lines.push(`${refunded} refunded to the card`);
+    if (credited) lines.push(`${credited} returned to account credit`);
+    if (applied) lines.push(`${applied} of credit applied to the new session`);
+    if (extra) lines.push(`${extra} charged extra for the new session`);
+    if (e.action === "reschedule" && e.new_session_details) lines.push(`Moved to: ${e.new_session_details.replace(/<[^>]+>/g, " ").trim()}`);
+  }
+  if (r.within_package || r.package_id) {
+    if (cancelled && r.is_late_cancel) lines.push("Package session forfeited — it still counts as one of the package's sessions");
+    else if (cancelled) lines.push("Package session returned to the package");
+    else if (noShow) lines.push("No show — the package session counts as used");
+  } else if (noShow) {
+    lines.push("No show — the session was charged in full");
+  }
+  if (campFee > 0) lines.push(`Camp day late fee: $${campFee.toFixed(2)} kept`);
+  if (cancelled && evs.length === 0 && !campFee) lines.push(r.is_late_cancel ? "Cancelled late — the late fee was kept" : "Cancelled on time — no fee");
+  return (
+    <div className={`rounded-lg border px-3 py-2 ${r.is_late_cancel || campFee > 0 || noShow ? "border-red-900/60 bg-red-950/30" : "border-brown-700 bg-brown-950/40"}`}>
+      <p className="text-brown-500 uppercase tracking-wider mb-1">{noShow ? "No show" : cancelled ? "Cancellation" : "Reschedule"}</p>
+      {lines.map((l, i) => <p key={i} className="text-brown-200 leading-relaxed">{l}</p>)}
+    </div>
+  );
+}
+
+// Everything the three card components below reach for from the admin
+// page's state. They used to be declared INSIDE AdminPage's body, which made
+// React see a brand-new component type on every render of the page: each
+// expand/collapse (state on the page) unmounted and remounted the whole card
+// list, the document briefly lost its height, and the browser clamped the
+// scroll position to the top. Module-scope components with the page's state
+// handed in as one prop keep their identity across renders, so a toggle is
+// an update, not a remount, and the page stays where it was.
+interface CardCtx {
+  canEdit: boolean;
+  authCtx: AuthContext | null;
+  expandedCardIds: Set<string>;
+  toggleExpandedCard: (id: string) => void;
+  addPlayerOpenId: string | null;
+  addPlayerName: string;
+  setAddPlayerName: (v: string) => void;
+  submitAddPlayer: (id: string) => void;
+  addPlayerSaving: boolean;
+  setAddPlayerOpenId: (v: string | null) => void;
+  addPlayerError: string | null;
+  setAddPlayerError: (v: string | null) => void;
+  setCancelNoRefund: (v: boolean) => void;
+  setCancelPrompt: (r: Registration | null) => void;
+  cancelling: string | null;
+  openReschedule: (r: Registration) => void;
+  noShowConfirm: string | null;
+  setNoShowConfirm: (v: string | null) => void;
+  noShowing: string | null;
+  markNoShow: (id: string) => void;
+  deleteRegistration: (id: string) => void;
+  deleting: string | null;
+  weeklyCapacity: Map<string, number>;
+  campCapacity: Map<string, number>;
+  feeEvents: Map<string, FeeEvent[]>;
+}
+
+function RegCard({ r, isPast = false, ctx }: { r: Registration; isPast?: boolean; ctx: CardCtx }) {
+  const cardId = `reg-${r.id}`;
+  const expanded = ctx.expandedCardIds.has(cardId);
+  const fullSession = r.session_details
+    ? r.session_details.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim()
+    : "—";
+  return (
+    <div className="rounded-xl border-2 border-brown-600 bg-brown-900/40 overflow-hidden shadow-lg shadow-black/30">
+      {/* Tappable summary row */}
+      <button
+        type="button"
+        onClick={() => ctx.toggleExpandedCard(cardId)}
+        className="w-full text-left px-4 py-3 flex items-start justify-between gap-2"
+      >
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+            <span className="font-medium text-sm">{r.parent_name}</span>
+            <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${isPickup(r) ? "bg-orange-500 text-white" : "bg-amber-400 text-blue-900"}`}>{typePillLabel(r.type, r.session_details)}</span>
+            {r.within_package && (
+              <span className="rounded-full bg-teal-900/40 text-teal-400 px-2 py-0.5 text-xs font-medium">pkg</span>
+            )}
+            {(() => { const da = daysAway(r.booked_date); return da ? <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${da.cls}`}>{da.label}</span> : null; })()}
+            <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusBadge(r.status, isPast, feeKept(r)).cls}`}>
+              {statusBadge(r.status, isPast, feeKept(r)).label}
+            </span>
+          </div>
+          <div className="text-xs text-brown-300 mt-0.5 truncate">{athleteNames(r.kids || "")}</div>
+          <div className="flex flex-wrap gap-x-3 mt-1 text-xs text-brown-500">
+            {r.booked_date && <span className="text-mesa-accent">{formatDate(r.booked_date)}</span>}
+            {r.booked_start_time && (
+              <span>{r.booked_start_time}{r.booked_end_time ? `-${r.booked_end_time}` : ""}</span>
+            )}
+          </div>
+        </div>
+        <div className="shrink-0 flex flex-col items-end justify-between self-stretch">
+          <span className={`text-brown-500 transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}>▾</span>
+          {ctx.canEdit && !r.within_package && (
+            <span className="text-white font-medium text-xs">{priceDisplay(r)}</span>
+          )}
+        </div>
+      </button>
+
+      {/* Expanded detail */}
+      {expanded && (
+        <div className="border-t border-brown-700 px-4 py-3 space-y-3 text-xs">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+            <div>
+              <p className="text-brown-500 uppercase tracking-wider mb-0.5">Email</p>
+              <p className="text-brown-200 break-all">{r.email || "—"}</p>
+            </div>
+            <div>
+              <p className="text-brown-500 uppercase tracking-wider mb-0.5">Phone</p>
+              <p className="text-brown-200">{r.phone || "—"}</p>
+            </div>
+            <div>
+              <p className="text-brown-500 uppercase tracking-wider mb-0.5">Registered</p>
+              <p className="text-brown-200">{new Date(r.created_at).toLocaleDateString()}</p>
+            </div>
+            <div>
+              <p className="text-brown-500 uppercase tracking-wider mb-0.5">Session Date</p>
+              <p className="text-mesa-accent font-medium">
+                {formatDate(r.booked_date)}
+                {r.booked_start_time && ` · ${r.booked_start_time}${r.booked_end_time ? `-${r.booked_end_time}` : ""}`}
+              </p>
+            </div>
+            {r.booked_trainer && (
+              <div>
+                <p className="text-brown-500 uppercase tracking-wider mb-0.5">Trainer</p>
+                <p className="text-brown-200">{r.booked_trainer}</p>
+              </div>
+            )}
+            {ctx.canEdit && !r.within_package && (
+              <div>
+                <p className="text-brown-500 uppercase tracking-wider mb-0.5">Price</p>
+                <p className="text-green-400 font-medium">{priceDisplay(r)}</p>
+              </div>
+            )}
+          </div>
+          <div>
+            <p className="text-brown-500 uppercase tracking-wider mb-0.5">Athletes</p>
+            <p className="text-brown-200">{r.kids ? r.kids.split(",").map((k) => k.trim()).join("\n") : "—"}</p>
+            {ctx.authCtx?.role === "admin" && r.status === "confirmed" && (
+              ctx.addPlayerOpenId === r.id ? (
+                <div className="mt-2 flex gap-2">
+                  <input
+                    value={ctx.addPlayerName}
+                    onChange={(e) => ctx.setAddPlayerName(e.target.value)}
+                    placeholder="Player name"
+                    className="min-w-0 flex-1 rounded bg-brown-950 border border-brown-700 px-2 py-1 text-xs text-white"
+                  />
+                  <button onClick={() => ctx.submitAddPlayer(r.id)} disabled={ctx.addPlayerSaving} className="text-xs text-mesa-accent hover:text-yellow-300 font-semibold transition disabled:opacity-50 shrink-0">
+                    {ctx.addPlayerSaving ? "..." : "Add"}
+                  </button>
+                  <button onClick={() => { ctx.setAddPlayerOpenId(null); ctx.setAddPlayerName(""); ctx.setAddPlayerError(null); }} className="text-xs text-brown-500 hover:text-brown-300 transition shrink-0">
+                    ✕
+                  </button>
+                </div>
+              ) : (
+                <button onClick={() => { ctx.setAddPlayerOpenId(r.id); ctx.setAddPlayerName(""); ctx.setAddPlayerError(null); }} className="mt-1 text-xs text-blue-400 hover:text-blue-300 transition">
+                  + Add Player
+                </button>
+              )
+            )}
+            {ctx.addPlayerOpenId === r.id && ctx.addPlayerError && <p className="text-xs text-red-400 mt-1">{ctx.addPlayerError}</p>}
+          </div>
+          <div>
+            <p className="text-brown-500 uppercase tracking-wider mb-0.5">Session Details</p>
+            <p className="text-brown-200 whitespace-pre-line leading-relaxed">{fullSession}</p>
+          </div>
+          <CancellationNote r={r} events={ctx.feeEvents.get(r.id)} />
+
+          {/* Actions — Cancel/Reschedule/Delete are admin-only; No Show is
+              the one action every trainer tier can also take, since
+              they're the one who'd actually know a client didn't show. */}
+          {(r.status === "confirmed" || (ctx.canEdit && (isPast || isDeletablePending(r)))) && (
+            <div className="flex flex-wrap gap-3 pt-1 border-t border-brown-800">
+              {ctx.canEdit && r.status === "confirmed" && !isPast && (
+                <button onClick={() => { ctx.setCancelNoRefund(false); ctx.setCancelPrompt(r); }} disabled={ctx.cancelling === r.id} className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50">
+                  {ctx.cancelling === r.id ? "Cancelling..." : "Cancel"}
+                </button>
+              )}
+              {ctx.canEdit && r.status === "confirmed" && (
+                <button onClick={() => ctx.openReschedule(r)} className="text-xs text-blue-400 hover:text-blue-300 transition">
+                  Reschedule
+                </button>
+              )}
+              {r.status === "confirmed" && ctx.noShowConfirm !== r.id && (
+                <button onClick={() => ctx.setNoShowConfirm(r.id)} disabled={ctx.noShowing === r.id} className="text-xs text-orange-400 hover:text-orange-300 transition disabled:opacity-50">
+                  No Show
+                </button>
+              )}
+              {r.status === "confirmed" && ctx.noShowConfirm === r.id && (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-orange-300 font-semibold">Sure?</span>
+                  <button onClick={() => ctx.markNoShow(r.id)} disabled={ctx.noShowing === r.id} className="text-xs text-orange-400 hover:text-orange-300 font-semibold transition disabled:opacity-50">
+                    {ctx.noShowing === r.id ? "..." : "Yes"}
+                  </button>
+                  <button onClick={() => ctx.setNoShowConfirm(null)} className="text-xs text-brown-500 hover:text-brown-300 transition">
+                    No
+                  </button>
+                </div>
+              )}
+              {/* For a real (confirmed) booking, Delete only ever shows once
+                  its start time has passed — Cancel is the right tool for
+                  an active upcoming booking, and ctx.deleting one silently
+                  would mean no refund and no client notification. But a
+                  pending_payment/payment_abandoned row was never a real
+                  booking — nothing was charged, no slot needs freeing — so
+                  it's safe to delete right away, upcoming or not, rather
+                  than waiting on the automatic abandonment sweep. Admin only. */}
+              {ctx.canEdit && (isPast || isDeletablePending(r)) && (
+                <button onClick={() => ctx.deleteRegistration(r.id)} disabled={ctx.deleting === r.id} className="text-xs text-brown-600 hover:text-red-500 transition disabled:opacity-50">
+                  {ctx.deleting === r.id ? "Deleting..." : "Delete"}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// A collapsed folder for one real weekly/pickup/camp session — expands to
+// the individual RegCards (with each athlete's info) that make it up.
+function FolderCard({ folder, isPast = false, ctx }: { folder: Folder; isPast?: boolean; ctx: CardCtx }) {
+  const cardId = `folder-${folder.key}`;
+  const expanded = ctx.expandedCardIds.has(cardId);
+  const sample = folder.regs[0];
+  const timeLabel = sample.booked_start_time ? `${sample.booked_start_time}${sample.booked_end_time ? `-${sample.booked_end_time}` : ""}` : null;
+  const noShowCount = folder.regs.filter((r) => r.status === "no_show").length;
+  return (
+    <div className="rounded-xl border-2 border-brown-600 bg-brown-900/40 overflow-hidden shadow-lg shadow-black/30">
+      <button type="button" onClick={() => ctx.toggleExpandedCard(cardId)} className="w-full text-left px-4 py-3 flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+            <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${isPickup(sample) ? "bg-orange-500 text-white" : "bg-amber-400 text-blue-900"}`}>{typePillLabel(sample.type, sample.session_details)}</span>
+            <span className="font-medium text-sm">{folderLabel(sample)}</span>
+            {(() => { const da = daysAway(sample.booked_date); return da ? <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${da.cls}`}>{da.label}</span> : null; })()}
+            {noShowCount > 0 && (
+              <span className="rounded-full bg-orange-900/40 text-orange-400 px-2 py-0.5 text-xs font-medium">
+                {noShowCount === folder.regs.length ? "no show" : `${noShowCount} no show${noShowCount === 1 ? "" : "s"}`}
+              </span>
+            )}
+          </div>
+          <div className="text-xs text-brown-400 mt-1">
+            {timeLabel && <span>{timeLabel}</span>}{sample.booked_location ? ` · ${sample.booked_location}` : ""}
+          </div>
+        </div>
+        <div className="shrink-0 flex flex-col items-end justify-between self-stretch gap-1">
+          <span className={`text-brown-500 transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}>▾</span>
+          <span className="text-mesa-accent font-medium text-xs whitespace-nowrap">
+            {folderCountLabel(folder)}
+          </span>
+        </div>
+      </button>
+      {expanded && (
+        <div className="border-t border-brown-700 px-3 py-3 space-y-2 bg-brown-950/40">
+          {folder.regs.map((r) => <RegCard key={r.id} r={r} isPast={isPast} ctx={ctx} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FolderAwareCardList({ list, isPast = false, ctx }: { list: Registration[]; isPast?: boolean; ctx: CardCtx }) {
+  return (
+    <div className="space-y-3">
+      {buildFolders(list, ctx.weeklyCapacity, ctx.campCapacity).map((folder) =>
+        folder.grouped
+          ? <FolderCard key={folder.key} folder={folder} isPast={isPast} ctx={ctx} />
+          : <RegCard key={folder.regs[0].id} r={folder.regs[0]} isPast={isPast} ctx={ctx} />
+      )}
+    </div>
+  );
+}
+
+
 export default function AdminPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -1212,6 +1539,17 @@ export default function AdminPage() {
   // above). Keeping expanded/collapsed here instead survives that, since
   // this component itself never remounts.
   const [expandedCardIds, setExpandedCardIds] = useState<Set<string>>(new Set());
+  // late_fee_events by registration id, merged from every history fetch
+  // (Past windows, search, a client's profile) — read by the expanded cards.
+  const [feeEvents, setFeeEvents] = useState<Map<string, FeeEvent[]>>(new Map());
+  function absorbFeeEvents(list: FeeEvent[] | undefined) {
+    if (!list || list.length === 0) return;
+    setFeeEvents((prev) => {
+      const next = new Map(prev);
+      for (const [id, evs] of groupFeeEvents(list)) next.set(id, evs);
+      return next;
+    });
+  }
   function toggleExpandedCard(id: string) {
     setExpandedCardIds((prev) => {
       const next = new Set(prev);
@@ -1382,6 +1720,7 @@ export default function AdminPage() {
       .then((data) => {
         setPastWindowRegs(data.registrations || []);
         setPastHasMore(!!data.hasMore);
+        absorbFeeEvents(data.lateFeeEvents);
       })
       .catch(() => setPastWindowRegs([]))
       .finally(() => setPastLoading(false));
@@ -1415,6 +1754,7 @@ export default function AdminPage() {
       const res = await fetch("/api/admin/data?view=past&window=all", { headers: { Authorization: `Bearer ${token}` } });
       const data = await res.json();
       setPastAllRegs(data.registrations || []);
+      absorbFeeEvents(data.lateFeeEvents);
     } finally {
       setPastLoadingAll(false);
     }
@@ -1436,7 +1776,7 @@ export default function AdminPage() {
     const handle = setTimeout(() => {
       fetch(`/api/admin/data?view=past&search=${encodeURIComponent(search.trim())}`, { headers: { Authorization: `Bearer ${token}` } })
         .then((r) => r.json())
-        .then((data) => setPastSearchRegs(data.registrations || []))
+        .then((data) => { setPastSearchRegs(data.registrations || []); absorbFeeEvents(data.lateFeeEvents); })
         .catch(() => setPastSearchRegs([]))
         .finally(() => setPastSearchLoading(false));
     }, 300);
@@ -1472,6 +1812,7 @@ export default function AdminPage() {
         setClientDetailRegs(data.registrations || []);
         setClientDetailProfile(data.profile || null);
         setClientDetailFor(selectedClient);
+        absorbFeeEvents(data.lateFeeEvents);
       })
       .catch(() => {
         setClientDetailRegs([]);
@@ -2038,222 +2379,12 @@ export default function AdminPage() {
   // folders are — powers the "X signed up / Y" folder header.
   const weeklyCapacity = useMemo(() => buildWeeklyCapacityMap(scheduleData?.weeklySchedule || []), [scheduleData]);
   const campCapacity = useMemo(() => buildCampCapacityMap(scheduleData?.camps || []), [scheduleData]);
-
-  function RegCard({ r, isPast = false }: { r: Registration; isPast?: boolean }) {
-    const cardId = `reg-${r.id}`;
-    const expanded = expandedCardIds.has(cardId);
-    const fullSession = r.session_details
-      ? r.session_details.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim()
-      : "—";
-    return (
-      <div className="rounded-xl border-2 border-brown-600 bg-brown-900/40 overflow-hidden shadow-lg shadow-black/30">
-        {/* Tappable summary row */}
-        <button
-          type="button"
-          onClick={() => toggleExpandedCard(cardId)}
-          className="w-full text-left px-4 py-3 flex items-start justify-between gap-2"
-        >
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-              <span className="font-medium text-sm">{r.parent_name}</span>
-              <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${isPickup(r) ? "bg-orange-500 text-white" : "bg-amber-400 text-blue-900"}`}>{typePillLabel(r.type, r.session_details)}</span>
-              {r.within_package && (
-                <span className="rounded-full bg-teal-900/40 text-teal-400 px-2 py-0.5 text-xs font-medium">pkg</span>
-              )}
-              {(() => { const da = daysAway(r.booked_date); return da ? <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${da.cls}`}>{da.label}</span> : null; })()}
-              <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusBadge(r.status, isPast).cls}`}>
-                {statusBadge(r.status, isPast).label}
-              </span>
-            </div>
-            <div className="text-xs text-brown-300 mt-0.5 truncate">{athleteNames(r.kids || "")}</div>
-            <div className="flex flex-wrap gap-x-3 mt-1 text-xs text-brown-500">
-              {r.booked_date && <span className="text-mesa-accent">{formatDate(r.booked_date)}</span>}
-              {r.booked_start_time && (
-                <span>{r.booked_start_time}{r.booked_end_time ? `-${r.booked_end_time}` : ""}</span>
-              )}
-            </div>
-          </div>
-          <div className="shrink-0 flex flex-col items-end justify-between self-stretch">
-            <span className={`text-brown-500 transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}>▾</span>
-            {canEdit && !r.within_package && (
-              <span className="text-white font-medium text-xs">{priceDisplay(r)}</span>
-            )}
-          </div>
-        </button>
-
-        {/* Expanded detail */}
-        {expanded && (
-          <div className="border-t border-brown-700 px-4 py-3 space-y-3 text-xs">
-            <div className="grid grid-cols-2 gap-x-4 gap-y-2">
-              <div>
-                <p className="text-brown-500 uppercase tracking-wider mb-0.5">Email</p>
-                <p className="text-brown-200 break-all">{r.email || "—"}</p>
-              </div>
-              <div>
-                <p className="text-brown-500 uppercase tracking-wider mb-0.5">Phone</p>
-                <p className="text-brown-200">{r.phone || "—"}</p>
-              </div>
-              <div>
-                <p className="text-brown-500 uppercase tracking-wider mb-0.5">Registered</p>
-                <p className="text-brown-200">{new Date(r.created_at).toLocaleDateString()}</p>
-              </div>
-              <div>
-                <p className="text-brown-500 uppercase tracking-wider mb-0.5">Session Date</p>
-                <p className="text-mesa-accent font-medium">
-                  {formatDate(r.booked_date)}
-                  {r.booked_start_time && ` · ${r.booked_start_time}${r.booked_end_time ? `-${r.booked_end_time}` : ""}`}
-                </p>
-              </div>
-              {r.booked_trainer && (
-                <div>
-                  <p className="text-brown-500 uppercase tracking-wider mb-0.5">Trainer</p>
-                  <p className="text-brown-200">{r.booked_trainer}</p>
-                </div>
-              )}
-              {canEdit && !r.within_package && (
-                <div>
-                  <p className="text-brown-500 uppercase tracking-wider mb-0.5">Price</p>
-                  <p className="text-green-400 font-medium">{priceDisplay(r)}</p>
-                </div>
-              )}
-            </div>
-            <div>
-              <p className="text-brown-500 uppercase tracking-wider mb-0.5">Athletes</p>
-              <p className="text-brown-200">{r.kids ? r.kids.split(",").map((k) => k.trim()).join("\n") : "—"}</p>
-              {authCtx?.role === "admin" && r.status === "confirmed" && (
-                addPlayerOpenId === r.id ? (
-                  <div className="mt-2 flex gap-2">
-                    <input
-                      value={addPlayerName}
-                      onChange={(e) => setAddPlayerName(e.target.value)}
-                      placeholder="Player name"
-                      className="min-w-0 flex-1 rounded bg-brown-950 border border-brown-700 px-2 py-1 text-xs text-white"
-                    />
-                    <button onClick={() => submitAddPlayer(r.id)} disabled={addPlayerSaving} className="text-xs text-mesa-accent hover:text-yellow-300 font-semibold transition disabled:opacity-50 shrink-0">
-                      {addPlayerSaving ? "..." : "Add"}
-                    </button>
-                    <button onClick={() => { setAddPlayerOpenId(null); setAddPlayerName(""); setAddPlayerError(null); }} className="text-xs text-brown-500 hover:text-brown-300 transition shrink-0">
-                      ✕
-                    </button>
-                  </div>
-                ) : (
-                  <button onClick={() => { setAddPlayerOpenId(r.id); setAddPlayerName(""); setAddPlayerError(null); }} className="mt-1 text-xs text-blue-400 hover:text-blue-300 transition">
-                    + Add Player
-                  </button>
-                )
-              )}
-              {addPlayerOpenId === r.id && addPlayerError && <p className="text-xs text-red-400 mt-1">{addPlayerError}</p>}
-            </div>
-            <div>
-              <p className="text-brown-500 uppercase tracking-wider mb-0.5">Session Details</p>
-              <p className="text-brown-200 whitespace-pre-line leading-relaxed">{fullSession}</p>
-            </div>
-
-            {/* Actions — Cancel/Reschedule/Delete are admin-only; No Show is
-                the one action every trainer tier can also take, since
-                they're the one who'd actually know a client didn't show. */}
-            {(r.status === "confirmed" || (canEdit && (isPast || isDeletablePending(r)))) && (
-              <div className="flex flex-wrap gap-3 pt-1 border-t border-brown-800">
-                {canEdit && r.status === "confirmed" && !isPast && (
-                  <button onClick={() => { setCancelNoRefund(false); setCancelPrompt(r); }} disabled={cancelling === r.id} className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50">
-                    {cancelling === r.id ? "Cancelling..." : "Cancel"}
-                  </button>
-                )}
-                {canEdit && r.status === "confirmed" && (
-                  <button onClick={() => openReschedule(r)} className="text-xs text-blue-400 hover:text-blue-300 transition">
-                    Reschedule
-                  </button>
-                )}
-                {r.status === "confirmed" && noShowConfirm !== r.id && (
-                  <button onClick={() => setNoShowConfirm(r.id)} disabled={noShowing === r.id} className="text-xs text-orange-400 hover:text-orange-300 transition disabled:opacity-50">
-                    No Show
-                  </button>
-                )}
-                {r.status === "confirmed" && noShowConfirm === r.id && (
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-orange-300 font-semibold">Sure?</span>
-                    <button onClick={() => markNoShow(r.id)} disabled={noShowing === r.id} className="text-xs text-orange-400 hover:text-orange-300 font-semibold transition disabled:opacity-50">
-                      {noShowing === r.id ? "..." : "Yes"}
-                    </button>
-                    <button onClick={() => setNoShowConfirm(null)} className="text-xs text-brown-500 hover:text-brown-300 transition">
-                      No
-                    </button>
-                  </div>
-                )}
-                {/* For a real (confirmed) booking, Delete only ever shows once
-                    its start time has passed — Cancel is the right tool for
-                    an active upcoming booking, and deleting one silently
-                    would mean no refund and no client notification. But a
-                    pending_payment/payment_abandoned row was never a real
-                    booking — nothing was charged, no slot needs freeing — so
-                    it's safe to delete right away, upcoming or not, rather
-                    than waiting on the automatic abandonment sweep. Admin only. */}
-                {canEdit && (isPast || isDeletablePending(r)) && (
-                  <button onClick={() => deleteRegistration(r.id)} disabled={deleting === r.id} className="text-xs text-brown-600 hover:text-red-500 transition disabled:opacity-50">
-                    {deleting === r.id ? "Deleting..." : "Delete"}
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  // A collapsed folder for one real weekly/pickup/camp session — expands to
-  // the individual RegCards (with each athlete's info) that make it up.
-  function FolderCard({ folder, isPast = false }: { folder: Folder; isPast?: boolean }) {
-    const cardId = `folder-${folder.key}`;
-    const expanded = expandedCardIds.has(cardId);
-    const sample = folder.regs[0];
-    const timeLabel = sample.booked_start_time ? `${sample.booked_start_time}${sample.booked_end_time ? `-${sample.booked_end_time}` : ""}` : null;
-    const noShowCount = folder.regs.filter((r) => r.status === "no_show").length;
-    return (
-      <div className="rounded-xl border-2 border-brown-600 bg-brown-900/40 overflow-hidden shadow-lg shadow-black/30">
-        <button type="button" onClick={() => toggleExpandedCard(cardId)} className="w-full text-left px-4 py-3 flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-              <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${isPickup(sample) ? "bg-orange-500 text-white" : "bg-amber-400 text-blue-900"}`}>{typePillLabel(sample.type, sample.session_details)}</span>
-              <span className="font-medium text-sm">{folderLabel(sample)}</span>
-              {(() => { const da = daysAway(sample.booked_date); return da ? <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${da.cls}`}>{da.label}</span> : null; })()}
-              {noShowCount > 0 && (
-                <span className="rounded-full bg-orange-900/40 text-orange-400 px-2 py-0.5 text-xs font-medium">
-                  {noShowCount === folder.regs.length ? "no show" : `${noShowCount} no show${noShowCount === 1 ? "" : "s"}`}
-                </span>
-              )}
-            </div>
-            <div className="text-xs text-brown-400 mt-1">
-              {timeLabel && <span>{timeLabel}</span>}{sample.booked_location ? ` · ${sample.booked_location}` : ""}
-            </div>
-          </div>
-          <div className="shrink-0 flex flex-col items-end justify-between self-stretch gap-1">
-            <span className={`text-brown-500 transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}>▾</span>
-            <span className="text-mesa-accent font-medium text-xs whitespace-nowrap">
-              {folderCountLabel(folder)}
-            </span>
-          </div>
-        </button>
-        {expanded && (
-          <div className="border-t border-brown-700 px-3 py-3 space-y-2 bg-brown-950/40">
-            {folder.regs.map((r) => <RegCard key={r.id} r={r} isPast={isPast} />)}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  function FolderAwareCardList({ list, isPast = false }: { list: Registration[]; isPast?: boolean }) {
-    return (
-      <div className="space-y-3">
-        {buildFolders(list, weeklyCapacity, campCapacity).map((folder) =>
-          folder.grouped
-            ? <FolderCard key={folder.key} folder={folder} isPast={isPast} />
-            : <RegCard key={folder.regs[0].id} r={folder.regs[0]} isPast={isPast} />
-        )}
-      </div>
-    );
-  }
+  const cardCtx: CardCtx = {
+    canEdit, authCtx, expandedCardIds, toggleExpandedCard,
+    addPlayerOpenId, addPlayerName, setAddPlayerName, submitAddPlayer, addPlayerSaving, setAddPlayerOpenId, addPlayerError, setAddPlayerError,
+    setCancelNoRefund, setCancelPrompt, cancelling, openReschedule, noShowConfirm, setNoShowConfirm, noShowing, markNoShow, deleteRegistration, deleting,
+    weeklyCapacity, campCapacity, feeEvents,
+  };
 
   if (loading) {
     return <div className="min-h-screen bg-brown-950 flex items-center justify-center"><p className="text-brown-400">Loading...</p></div>;
@@ -2441,13 +2572,13 @@ export default function AdminPage() {
                       <div className="text-xs font-semibold text-mesa-accent border-b border-brown-700 pb-1.5 mb-2">Today — {todayLabel}</div>
                       {todaySessions.length === 0
                         ? <p className="text-xs text-brown-500 italic py-1">{hadSessionsToday ? "No more sessions scheduled for today." : "No sessions scheduled for today."}</p>
-                        : <FolderAwareCardList list={todaySessions} />
+                        : <FolderAwareCardList list={todaySessions} ctx={cardCtx} />
                       }
                     </div>
                     {groupByDate(futureSessions).map(({ key, label, sessions }) => (
                       <div key={key}>
                         <div className="text-xs font-semibold text-mesa-accent border-b border-brown-700 pb-1.5 mb-2">{label}</div>
-                        <FolderAwareCardList list={sessions} />
+                        <FolderAwareCardList list={sessions} ctx={cardCtx} />
                       </div>
                     ))}
                   </div>
@@ -2548,7 +2679,7 @@ export default function AdminPage() {
                   {groupByDate(displayedPast).map(({ key, label, sessions }) => (
                     <div key={key}>
                       <div className="text-xs font-semibold text-mesa-accent border-b border-brown-700 pb-1.5 mb-2">{label}</div>
-                      <FolderAwareCardList list={sessions} isPast />
+                      <FolderAwareCardList list={sessions} isPast ctx={cardCtx} />
                     </div>
                   ))}
                 </div>
@@ -2720,7 +2851,7 @@ export default function AdminPage() {
                   <p className="text-brown-500 text-sm">Loading…</p>
                 ) : (
                   <>
-                    {clientRegistrations.map((r) => <RegCard key={r.id} r={r} isPast={sessionMs(r.booked_date, r.booked_start_time) < Date.now()} />)}
+                    {clientRegistrations.map((r) => <RegCard key={r.id} r={r} isPast={sessionMs(r.booked_date, r.booked_start_time) < Date.now()} ctx={cardCtx} />)}
                     {clientRegistrations.length === 0 && <p className="text-brown-500 text-sm">No registrations found.</p>}
                   </>
                 )}

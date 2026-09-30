@@ -1,11 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { verifyDashboardAccess } from "@/lib/auth";
 import { requireTrainerNameConfigured, trainerScopeFilter, normalizeDropdownTrainer, deriveOwnClientEmails, scopeToOwnClients } from "@/lib/admin-data-scope";
 import { attachComputedFields } from "@/lib/admin-registration-enrichment";
 import { getWeeklySchedule, getPrivateSlots, parseTimeToMins } from "@/lib/sheets";
 import { getGroupSessionEnrollment } from "@/lib/supabase";
 import { trainerNamesMatch } from "@/lib/trainers";
+
+// The money story behind a cancelled or moved booking lives in
+// late_fee_events (fee kept, refund, credit issued, credit applied, extra
+// charge, what it became). Every history view (Past, Calendar, a client's
+// profile) sends the events for the bookings it returns, so an expanded
+// card can say what happened to the money instead of just "cancelled".
+const FEE_EVENT_COLUMNS = "registration_id, action, initiated_by, amount_kept, amount_refunded, amount_credited, amount_applied, amount_charged_extra, created_at, new_session_details";
+async function feeEventsFor(supabase: SupabaseClient, regs: { id: string }[] | null | undefined) {
+  const ids = (regs || []).map((r) => r.id);
+  if (ids.length === 0) return [];
+  const { data } = await supabase.from("late_fee_events").select(FEE_EVENT_COLUMNS).in("registration_id", ids).order("created_at", { ascending: true });
+  return data || [];
+}
 
 // Mirrors admin/page.tsx's identical client-side helpers exactly — moved
 // here too since ?view=clients now does this aggregation server-side.
@@ -83,17 +96,11 @@ export async function GET(req: NextRequest) {
       // Late cancels/reschedules for these exact bookings — the only way to
       // tell a session that was moved from one that was simply cancelled, and
       // the reason a package session was forfeited rather than handed back.
-      const clientRegIds = (clientRegs || []).map((r: { id: string }) => r.id);
-      const { data: clientLateFees } = clientRegIds.length
-        ? await supabase
-            .from("late_fee_events")
-            .select("registration_id, action, amount_kept, amount_credited")
-            .in("registration_id", clientRegIds)
-        : { data: [] as { registration_id: string; action: string }[] };
+      const clientLateFees = await feeEventsFor(supabase, clientRegs as { id: string }[] | null);
       return NextResponse.json({
         registrations: enrichedClient,
         profile: clientProfileRows?.[0] || null,
-        lateFeeEvents: clientLateFees || [],
+        lateFeeEvents: clientLateFees,
       });
     }
 
@@ -294,7 +301,7 @@ export async function GET(req: NextRequest) {
       supabase.from("monthly_packages").select("id, email, package_type, month_year, is_paid").neq("status", "payment_abandoned"),
     ]);
     const enrichedCal = await attachComputedFields(supabase, calRegs || [], calPackages || []);
-    return NextResponse.json({ registrations: enrichedCal });
+    return NextResponse.json({ registrations: enrichedCal, lateFeeEvents: await feeEventsFor(supabase, calRegs as { id: string }[] | null) });
   }
 
   // Upcoming loads eagerly on every dashboard open (see the lazy-loading
@@ -481,7 +488,7 @@ export async function GET(req: NextRequest) {
       supabase.from("monthly_packages").select("id, email, package_type, month_year, is_paid").neq("status", "payment_abandoned"),
     ]);
     const enrichedPast = await attachComputedFields(supabase, pastRegs || [], pastPackages || []);
-    return NextResponse.json({ registrations: enrichedPast, hasMore });
+    return NextResponse.json({ registrations: enrichedPast, hasMore, lateFeeEvents: await feeEventsFor(supabase, pastRegs as { id: string }[] | null) });
   }
 
   return NextResponse.json({ error: "Missing or unrecognized view parameter" }, { status: 400 });
