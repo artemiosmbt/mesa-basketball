@@ -204,6 +204,25 @@ function lastNameOf(fullName: string): string {
   return parts.length > 1 ? parts[parts.length - 1] : "";
 }
 
+// Shape returned by /api/admin/group-blast in preview mode. Mirrors
+// BlastPreview in src/lib/group-blast-sms.ts.
+interface BlastPreviewData {
+  targetDate: string;
+  dateLabel: string;
+  sessionsOnDate: number;
+  groupsOnDate: string[];
+  recipients: {
+    email: string;
+    parentName: string;
+    phone: string;
+    sessions: { group: string; timeLabel: string; location: string; athleteNames: string[] }[];
+    message: string;
+  }[];
+  skippedNoConsent: { email: string; parentName: string; reason: string }[];
+  skippedAlreadyBooked: number;
+  previousSends: { sentAt: string; textsSent: number }[];
+}
+
 // Groups-tab-only display fallback — an athlete saved with just a first
 // name borrows the parent's last name so there's something to show/sort
 // by. Purely cosmetic: never written back to the athlete's saved data.
@@ -1622,6 +1641,19 @@ export default function AdminPage() {
   const [groupsLoaded, setGroupsLoaded] = useState(false);
   const [groupsLoading, setGroupsLoading] = useState(false);
 
+  // "Spots open" text blast — manual only. blastPreview holds the computed
+  // recipient list for blastDate; nothing is ever sent until the preview is
+  // on screen and Send is pressed from it, so the confirm step is the
+  // preview itself rather than a blind yes/no dialog.
+  const [blastDate, setBlastDate] = useState("");
+  const [blastPreview, setBlastPreview] = useState<BlastPreviewData | null>(null);
+  const [blastBusy, setBlastBusy] = useState<"preview" | "send" | null>(null);
+  // Set only by pressing the button inside the "already texted" warning.
+  // Until then the Send button stays hidden for a date that's had a blast.
+  const [blastRepeatOk, setBlastRepeatOk] = useState(false);
+  const [blastError, setBlastError] = useState<string | null>(null);
+  const [blastSent, setBlastSent] = useState<{ sent: number; failed: number } | null>(null);
+
   // Admin reschedule state
   const [reschedulingId, setReschedulingId] = useState<string | null>(null);
   // The full row being rescheduled, captured at the moment the modal opens
@@ -2282,6 +2314,54 @@ export default function AdminPage() {
     }
   }
 
+  // Builds the recipient list for the chosen day. Sends nothing.
+  async function previewGroupBlast() {
+    if (!blastDate) return;
+    setBlastBusy("preview");
+    setBlastError(null);
+    setBlastSent(null);
+    setBlastPreview(null);
+    setBlastRepeatOk(false);
+    try {
+      const res = await fetch("/api/admin/group-blast", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ date: blastDate }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Could not build the preview.");
+      setBlastPreview(data);
+    } catch (err) {
+      setBlastError(err instanceof Error ? err.message : "Could not build the preview.");
+    } finally {
+      setBlastBusy(null);
+    }
+  }
+
+  // The only path that actually texts anyone. Reachable only from a preview
+  // that is already on screen, and the server recomputes the list again
+  // before sending, so a family who booked in the meantime drops out.
+  async function sendGroupBlast() {
+    if (!blastDate || !blastPreview || blastPreview.recipients.length === 0) return;
+    setBlastBusy("send");
+    setBlastError(null);
+    try {
+      const res = await fetch("/api/admin/group-blast", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ date: blastDate, confirm: true }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Send failed.");
+      setBlastSent({ sent: data.sent ?? 0, failed: (data.failed || []).length });
+      setBlastPreview(null);
+    } catch (err) {
+      setBlastError(err instanceof Error ? err.message : "Send failed.");
+    } finally {
+      setBlastBusy(null);
+    }
+  }
+
   // Cosmetic-only: removes an athlete from the Groups tab's rendered list.
   // Does not touch their `groups` (still drives reminder emails) or
   // anything on the client's own account.
@@ -2877,6 +2957,129 @@ export default function AdminPage() {
         )}
         {tab === "groups" && authCtx?.role === "admin" && groupsLoaded && (
           <div className="space-y-6">
+            {/* Manual "spots open" text blast. Nothing here is scheduled —
+                a text only goes out from the Send button inside a preview
+                that is already on screen. */}
+            <div className="rounded-xl border-2 border-brown-600 bg-brown-900/40 p-4 shadow-lg shadow-black/30">
+              <h3 className="text-lg font-extrabold uppercase tracking-wide text-mesa-accent">
+                Text “spots open” for a day
+              </h3>
+              <p className="mt-1 text-xs text-brown-400">
+                For quiet days. Texts every opted-in parent whose kid is in a group running that
+                day and who isn’t already booked into it. Nothing sends until you review the list.
+              </p>
+
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <input
+                  id="blast-date"
+                  type="date"
+                  value={blastDate}
+                  onChange={(e) => {
+                    setBlastDate(e.target.value);
+                    setBlastPreview(null);
+                    setBlastSent(null);
+                    setBlastError(null);
+                    setBlastRepeatOk(false);
+                  }}
+                  className="rounded-lg border-2 border-brown-600 bg-brown-950 px-3 py-2 text-sm text-brown-100"
+                />
+                <button
+                  type="button"
+                  onClick={previewGroupBlast}
+                  disabled={!blastDate || blastBusy !== null}
+                  className="rounded-lg bg-mesa-accent px-4 py-2 text-sm font-bold uppercase tracking-wide text-brown-900 disabled:opacity-50"
+                >
+                  {blastBusy === "preview" ? "Checking…" : "Check who'd get it"}
+                </button>
+              </div>
+
+              {blastError && <p className="mt-3 text-sm text-red-400">{blastError}</p>}
+
+              {blastSent && (
+                <p className="mt-3 text-sm font-semibold text-green-400">
+                  Sent {blastSent.sent} text{blastSent.sent === 1 ? "" : "s"}.
+                  {blastSent.failed > 0 && ` ${blastSent.failed} failed.`}
+                </p>
+              )}
+
+              {blastPreview && (
+                <div className="mt-4 space-y-3">
+                  <p className="text-sm text-brown-200">
+                    <strong className="text-mesa-accent">{blastPreview.dateLabel}</strong> —{" "}
+                    {blastPreview.sessionsOnDate} session
+                    {blastPreview.sessionsOnDate === 1 ? "" : "s"}
+                    {blastPreview.groupsOnDate.length > 0 && ` (${blastPreview.groupsOnDate.join(", ")})`}
+                  </p>
+
+                  {blastPreview.previousSends.length > 0 && (
+                    <p className="rounded-lg border border-yellow-600/60 bg-yellow-900/20 px-3 py-2 text-xs text-yellow-300">
+                      Already texted for this date{" "}
+                      {blastPreview.previousSends.length === 1 ? "once" : `${blastPreview.previousSends.length} times`}
+                      {" "}({blastPreview.previousSends.map((p) => `${p.textsSent} on ${new Date(p.sentAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`).join("; ")}).
+                      Sending again will text them a second time.
+                      {!blastRepeatOk && (
+                        <button
+                          type="button"
+                          onClick={() => setBlastRepeatOk(true)}
+                          className="ml-2 rounded border border-yellow-500 px-2 py-1 text-[11px] font-bold uppercase tracking-wide text-yellow-200 hover:bg-yellow-900/40"
+                        >
+                          Text them again anyway
+                        </button>
+                      )}
+                    </p>
+                  )}
+
+                  {blastPreview.recipients.length === 0 ? (
+                    <p className="text-sm text-brown-400">
+                      Nobody to text for this day
+                      {blastPreview.skippedAlreadyBooked > 0 && " — everyone who matches is already booked in"}
+                      {blastPreview.sessionsOnDate === 0 && " — no group sessions on the schedule"}.
+                    </p>
+                  ) : (
+                    <>
+                      <p className="text-sm font-semibold text-brown-100">
+                        {blastPreview.recipients.length} parent
+                        {blastPreview.recipients.length === 1 ? "" : "s"} would be texted
+                        {blastPreview.skippedAlreadyBooked > 0 && ` · ${blastPreview.skippedAlreadyBooked} skipped (already booked)`}
+                        {blastPreview.skippedNoConsent.length > 0 && ` · ${blastPreview.skippedNoConsent.length} skipped (no texts)`}
+                      </p>
+
+                      <div className="max-h-80 space-y-2 overflow-y-auto">
+                        {blastPreview.recipients.map((r) => (
+                          <div key={r.email} className="rounded-lg border border-brown-700 bg-brown-950/60 px-3 py-2">
+                            <p className="text-xs font-bold text-mesa-accent">
+                              {r.parentName || r.email}{" "}
+                              <span className="font-normal text-brown-400">{r.phone}</span>
+                            </p>
+                            <pre className="mt-1 whitespace-pre-wrap font-sans text-xs leading-relaxed text-brown-200">
+                              {r.message}
+                            </pre>
+                          </div>
+                        ))}
+                      </div>
+
+                      {blastPreview.previousSends.length > 0 && !blastRepeatOk ? (
+                        <p className="text-xs text-brown-400">
+                          Confirm above to text this date again.
+                        </p>
+                      ) : (
+                      <button
+                        type="button"
+                        onClick={sendGroupBlast}
+                        disabled={blastBusy !== null}
+                        className="rounded-lg bg-red-700 px-4 py-2 text-sm font-bold uppercase tracking-wide text-white disabled:opacity-50"
+                      >
+                        {blastBusy === "send"
+                          ? "Sending…"
+                          : `Confirm — send ${blastPreview.recipients.length} text${blastPreview.recipients.length === 1 ? "" : "s"}`}
+                      </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+
             {[...CANONICAL_GROUPS, { id: "all-else" as const, label: "All Else" }].map((g) => {
               const rows = groupBuckets[g.id];
               return (
