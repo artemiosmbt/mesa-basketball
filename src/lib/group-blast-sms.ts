@@ -112,7 +112,7 @@ export function buildBlastMessage(isoDate: string, sessions: BlastSession[]): st
   if (extra > 0) lines.push(`+${extra} more session${extra === 1 ? "" : "s"} that day`);
 
   return [
-    `Mesa Basketball: spots open ${when}${who}.`,
+    `Mesa Basketball: SPOTS STILL OPEN ${when}${who}.`,
     ...lines,
     `Book: ${SITE}`,
     "Reply STOP to opt out.",
