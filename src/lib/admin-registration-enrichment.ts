@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { registrationWasPaid, registrationPaidSource, type PaidSource } from "@/lib/booking-finalize";
+import { registrationPaidSource, resolveBatchPaymentIntents, type PaidSource } from "@/lib/booking-finalize";
 
 interface EnrichableRegistration {
   id: string;
@@ -11,6 +11,17 @@ interface EnrichableRegistration {
   referral_code?: string | null;
   session_price?: number | null;
 }
+
+// The payment columns this module reads off each row. They're always present
+// on the admin queries (which select *), but aren't part of the minimal
+// EnrichableRegistration contract callers have to satisfy.
+type PaymentFields = {
+  is_paid?: boolean | null;
+  stripe_payment_intent_id?: string | null;
+  applied_account_credit?: number | null;
+  package_id?: string | null;
+  booking_batch_id?: string | null;
+};
 
 interface PackageSummary {
   email: string;
@@ -31,6 +42,9 @@ export interface ComputedFields {
   // session had nothing to refund.
   was_paid?: boolean;
   paid_via?: PaidSource;
+  // True when the card charge had to be recovered from the booking's batch
+  // because this row is a reschedule replacement that didn't inherit it.
+  paid_via_batch?: boolean;
 }
 
 function toMonthYear(dateStr: string | null): string | null {
@@ -140,6 +154,29 @@ export async function attachComputedFields<T extends EnrichableRegistration>(
     })
   );
 
+  // Rows whose own payment reference is missing but which belong to a
+  // booking batch: one query recovers the batch's original charge for all of
+  // them at once (see resolveBatchPaymentIntents for why it's there).
+  const rowsNeedingBatch = registrations.filter((r) => {
+    const row = r as PaymentFields;
+    return !row.stripe_payment_intent_id && !row.package_id && !!row.booking_batch_id;
+  });
+  const batchIntents = await resolveBatchPaymentIntents(
+    supabase,
+    rowsNeedingBatch.map((r) => (r as PaymentFields).booking_batch_id)
+  );
+  const paidByRow = new Map<string, ComputedFields>();
+  for (const r of registrations) {
+    const row = r as PaymentFields;
+    const direct = registrationPaidSource(row);
+    const batchIntent = direct === "none" || direct === "credit" || direct === "manual"
+      ? (row.booking_batch_id ? batchIntents.get(row.booking_batch_id) : undefined)
+      : undefined;
+    paidByRow.set(r.id, batchIntent
+      ? { was_paid: true, paid_via: "card", paid_via_batch: true }
+      : { was_paid: direct !== "none", paid_via: direct, paid_via_batch: false });
+  }
+
   return registrations.map((r) => {
     const pkgInfo = withinPackageById.get(r.id);
     const rate = r.referral_code ? rateByCode.get(r.referral_code) : undefined;
@@ -147,8 +184,7 @@ export async function attachComputedFields<T extends EnrichableRegistration>(
       ...r,
       ...(pkgInfo ? { within_package: pkgInfo.withinPackage, package_paid: pkgInfo.packagePaid } : {}),
       ...(rate !== undefined ? { weekly_discount_rate: rate } : {}),
-      was_paid: registrationWasPaid(r as Parameters<typeof registrationWasPaid>[0]),
-      paid_via: registrationPaidSource(r as Parameters<typeof registrationPaidSource>[0]),
+      ...paidByRow.get(r.id),
     };
   });
 }

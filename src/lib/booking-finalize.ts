@@ -1,4 +1,5 @@
 import Stripe from "stripe";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { sendRegistrationNotification, sendReferralCreditNotification, sendRescheduleNotification, sendPackageConfirmation, sendAbandonedCheckoutEmail, sendAbandonedPackageEmail, sendPlayerUpdateNotification } from "@/lib/email";
 import { addPrivateSessionToCalendar, deletePrivateSessionFromCalendar, upsertGroupSessionCalendarEvent } from "@/lib/calendar";
 import { sendSMS, sendAdminSMS, formatDateWithDay, formatMonthYear, resolveLocationName } from "@/lib/sms";
@@ -2574,6 +2575,108 @@ export function registrationPaidSource(reg: {
 
 export function registrationWasPaid(reg: Parameters<typeof registrationPaidSource>[0]): boolean {
   return registrationPaidSource(reg) !== "none";
+}
+
+/**
+ * Finds the original card charge for a booking whose own row has lost its
+ * reference to it.
+ *
+ * A client-side reschedule does not move a booking — it cancels the row and
+ * inserts a replacement (see the reschedule handler in
+ * api/booking/[token]/route.ts), and the replacement only inherits
+ * `stripe_payment_intent_id` when the new price was resolvable from the live
+ * sheet AND the reschedule wasn't late. When either fails, the new row looks
+ * completely unpaid even though the family paid in full — the charge is
+ * sitting on the cancelled predecessor. Every later reschedule then rebuilds
+ * a correctly-priced row that still looks unpaid, so the damage persists.
+ *
+ * The recovery is the booking batch: one Stripe Checkout pays for the whole
+ * batch and `finalizePaidBookingBatch` stamps that single PaymentIntent onto
+ * every row in it, so any surviving row of the batch — cancelled ones
+ * included — still carries the charge this session was paid by.
+ *
+ * A reschedule top-up is inserted under its own batch id and then relinked
+ * into the discount batch, so a batch CAN hold a second intent that only
+ * covers a price delta. Rows from the original checkout are the ones that
+ * also carry `stripe_checkout_session_id` (nothing ever clears it, and
+ * reschedule-created rows never get one), so those win; `created_at` breaks
+ * any remaining tie in favour of the earliest charge.
+ */
+export async function resolveBatchPaymentIntents(
+  supabase: SupabaseClient,
+  batchIds: (string | null | undefined)[]
+): Promise<Map<string, string>> {
+  const found = new Map<string, string>();
+  const ids = [...new Set(batchIds.filter((b): b is string => !!b))];
+  if (ids.length === 0) return found;
+
+  const { data } = await supabase
+    .from("registrations")
+    .select("booking_batch_id, stripe_payment_intent_id, stripe_checkout_session_id, created_at")
+    .in("booking_batch_id", ids)
+    .not("stripe_payment_intent_id", "is", null);
+
+  type Candidate = { intent: string; fromCheckout: boolean; createdAt: string };
+  const best = new Map<string, Candidate>();
+  for (const row of (data || []) as {
+    booking_batch_id: string | null;
+    stripe_payment_intent_id: string | null;
+    stripe_checkout_session_id: string | null;
+    created_at: string | null;
+  }[]) {
+    if (!row.booking_batch_id || !row.stripe_payment_intent_id) continue;
+    const next: Candidate = {
+      intent: row.stripe_payment_intent_id,
+      fromCheckout: !!row.stripe_checkout_session_id,
+      createdAt: row.created_at || "",
+    };
+    const current = best.get(row.booking_batch_id);
+    if (!current) {
+      best.set(row.booking_batch_id, next);
+      continue;
+    }
+    if (next.fromCheckout !== current.fromCheckout) {
+      if (next.fromCheckout) best.set(row.booking_batch_id, next);
+      continue;
+    }
+    if (next.createdAt && (!current.createdAt || next.createdAt < current.createdAt)) {
+      best.set(row.booking_batch_id, next);
+    }
+  }
+  for (const [batchId, candidate] of best) found.set(batchId, candidate.intent);
+  return found;
+}
+
+export interface ResolvedPayment {
+  source: PaidSource;
+  /** The card charge to refund against, if there is one to find. */
+  paymentIntentId: string | null;
+  /**
+   * True when the charge was recovered from the booking's batch rather than
+   * from the row itself — i.e. this row is a reschedule replacement that
+   * lost its own reference. Worth surfacing: it's the difference between
+   * "this was never paid" and "this was paid, on the original booking".
+   */
+  viaBatch: boolean;
+}
+
+/** Single-row form of the above, for the cancel and preview routes. */
+export async function resolveRegistrationPayment(
+  supabase: SupabaseClient,
+  reg: Parameters<typeof registrationPaidSource>[0] & { booking_batch_id?: string | null }
+): Promise<ResolvedPayment> {
+  if (reg.stripe_payment_intent_id) {
+    return { source: "card", paymentIntentId: reg.stripe_payment_intent_id, viaBatch: false };
+  }
+  if (reg.package_id) {
+    return { source: "package", paymentIntentId: null, viaBatch: false };
+  }
+  if (reg.booking_batch_id) {
+    const intents = await resolveBatchPaymentIntents(supabase, [reg.booking_batch_id]);
+    const intent = intents.get(reg.booking_batch_id);
+    if (intent) return { source: "card", paymentIntentId: intent, viaBatch: true };
+  }
+  return { source: registrationPaidSource(reg), paymentIntentId: null, viaBatch: false };
 }
 
 /** Short human wording for the admin dashboard, e.g. "paid by card". */

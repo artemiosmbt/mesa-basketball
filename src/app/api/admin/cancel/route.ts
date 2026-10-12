@@ -5,7 +5,7 @@ import { deletePrivateSessionFromCalendar, upsertGroupSessionCalendarEvent } fro
 import { sendCancellationNotification } from "@/lib/email";
 import { getCurrentSheetLocation } from "@/lib/sheets";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
-import { issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome, isLateAction, parseSessionDateTimeET, computeBulkWeeklySettlement, registrationPaidSource } from "@/lib/booking-finalize";
+import { issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome, isLateAction, parseSessionDateTimeET, computeBulkWeeklySettlement, resolveRegistrationPayment } from "@/lib/booking-finalize";
 import { notifyTrainerOfCancellation } from "@/lib/trainer-notify";
 import {
   addAccountCredit,
@@ -364,7 +364,11 @@ export async function POST(req: NextRequest) {
   // leaves is_paid false, and a package-covered session has its money on
   // the package row instead. Reading is_paid alone is what made the
   // dashboard tell us a paid session had nothing to refund.
-  const paidSource = registrationPaidSource(reg);
+  // Resolves the card charge even when this row is a reschedule replacement
+  // that never inherited it — the money is then on the cancelled predecessor,
+  // reachable through the booking batch.
+  const resolvedPayment = await resolveRegistrationPayment(supabase, reg);
+  const paidSource = resolvedPayment.source;
 
   // A package-covered session's money sits on the package, so the normal
   // settlement for one is the slot handed back below — not a payout. Money
@@ -452,7 +456,7 @@ export async function POST(req: NextRequest) {
     const dueAmount = packagePayout ? packagePayout.amount : settlement!.refundOrCreditAmount;
     const refundIntentId = packagePayout
       ? packagePayout.paymentIntentId
-      : reg.stripe_payment_intent_id;
+      : resolvedPayment.paymentIntentId;
     // "credit" means all of it as account credit even when a card paid; any
     // other choice still falls back to credit when there's no card to hit.
     const sendToCard = refundTo !== "credit" && !!refundIntentId;

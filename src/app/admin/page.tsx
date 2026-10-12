@@ -54,6 +54,20 @@ interface Registration {
   paid_via?: "card" | "credit" | "package" | "manual" | "none";
 }
 
+interface CancelPreview {
+  paidVia: "card" | "credit" | "package" | "manual" | "none";
+  isLate: boolean;
+  previewUnavailable: boolean;
+  appliedCreditReturned: number;
+  referralCreditReturned: boolean;
+  onTimeAmount: number;
+  lateAmount: number;
+  lateFeeKept: number;
+  packageSessionValue: number | null;
+  hasOriginalCard: boolean;
+  paidViaBatch: boolean;
+}
+
 interface ProfileKid {
   id?: string;
   name: string;
@@ -1559,6 +1573,10 @@ export default function AdminPage() {
   // that paid, or the package slot back), so the box opens on the safe default
   // and only sends refundTo once a different destination is picked.
   const [cancelRefundTo, setCancelRefundTo] = useState<"original" | "credit" | "package" | null>(null);
+  // Real dollar amounts for the open cancel box, from the server — the
+  // browser can't compute these (no payment intent, and a package session's
+  // money lives on the package row).
+  const [cancelPreview, setCancelPreview] = useState<CancelPreview | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [noShowConfirm, setNoShowConfirm] = useState<string | null>(null);
   const [noShowing, setNoShowing] = useState<string | null>(null);
@@ -1897,6 +1915,27 @@ export default function AdminPage() {
       .catch(() => {})
       .finally(() => setGroupsLoading(false));
   }, [tab, token, groupsLoaded, groupsLoading]);
+
+  // Pulls the real amounts for the open cancel box. Read-only on the server;
+  // nothing is cancelled or refunded until the button is pressed.
+  useEffect(() => {
+    const id = cancelPrompt?.id;
+    if (!id || !token) {
+      setCancelPreview(null);
+      return;
+    }
+    let active = true;
+    setCancelPreview(null);
+    fetch("/api/admin/cancel-preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ id }),
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => { if (active && data && !data.error) setCancelPreview(data as CancelPreview); })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [cancelPrompt?.id, token]);
 
   async function deleteRegistration(id: string) {
     if (!token) return;
@@ -3446,6 +3485,38 @@ export default function AdminPage() {
           none: "Nothing paid",
         }[paidVia];
         const fromPackage = paidVia === "package";
+        const dest = cancelRefundTo ?? (fromPackage ? "package" : "original");
+        const pv = cancelPreview;
+
+        // The plain-English bottom line: exactly which money moves where, in
+        // dollars, for the destination currently selected.
+        const money = (n: number) => `$${n.toFixed(2)}`;
+        let outcome: string | null = null;
+        if (cancelNoRefund) {
+          outcome = "Nothing moves — no card refund, no account credit, no package slot returned.";
+        } else if (!pv) {
+          outcome = null; // still loading
+        } else if (pv.previewUnavailable) {
+          outcome = "This is a full-camp booking — the amount is worked out across every day of the camp when you cancel.";
+        } else {
+          const parts: string[] = [];
+          if (dest === "package") {
+            parts.push("the session goes back to their package");
+          } else {
+            const toCard = dest === "original" && pv.hasOriginalCard ? pv.onTimeAmount : 0;
+            const toCredit = pv.onTimeAmount - toCard;
+            if (toCard > 0) parts.push(`${money(toCard)} back to their card`);
+            if (toCredit > 0) parts.push(`${money(toCredit)} as account credit`);
+          }
+          if (pv.appliedCreditReturned > 0) {
+            parts.push(`${money(pv.appliedCreditReturned)} account credit returned`);
+          }
+          if (pv.referralCreditReturned) parts.push("their referral credit returned");
+          outcome = parts.length > 0
+            ? `${parts.join(", plus ")}.`
+            : "Nothing to move on this booking.";
+        }
+
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4" onClick={() => setCancelPrompt(null)}>
             <div className="w-full max-w-sm rounded-xl bg-brown-900 border border-brown-700 p-5" onClick={(e) => e.stopPropagation()}>
@@ -3485,8 +3556,20 @@ export default function AdminPage() {
                   <p className="text-[11px] uppercase tracking-wide text-brown-500">Refund as</p>
                   {[
                     ...(fromPackage ? [{ v: "package" as const, label: "Session back to their package", hint: "No money moves — the session returns to their package to rebook." }] : []),
-                    { v: "original" as const, label: fromPackage ? "Refund the package's original payment method" : "Refund the original payment method", hint: fromPackage ? "One session's worth of the package price, back to the card that bought it." : paidVia === "card" ? "Back to the card that paid." : "No card on this booking, so this lands as account credit." },
-                    { v: "credit" as const, label: "Account credit only", hint: "Keeps the money on file for them to use on a future booking." },
+                    {
+                      v: "original" as const,
+                      label: "Refund the original payment method",
+                      hint: !pv
+                        ? "Back to whatever paid for it."
+                        : pv.hasOriginalCard
+                          ? `${money(pv.onTimeAmount)} back to their card.`
+                          : `No card on file for this booking, so this lands as ${money(pv.onTimeAmount)} account credit.`,
+                    },
+                    {
+                      v: "credit" as const,
+                      label: "Account credit only",
+                      hint: pv ? `${money(pv.onTimeAmount)} on file for a future booking.` : "Kept on file for a future booking.",
+                    },
                   ].map((opt) => (
                     <label key={opt.v} className="flex items-start gap-2 mt-2 text-xs text-brown-200 cursor-pointer">
                       <input
@@ -3505,13 +3588,31 @@ export default function AdminPage() {
                 </div>
               )}
 
-              <p className="text-[11px] text-brown-500 mt-3">
-                {cancelNoRefund
-                  ? "They'll get a cancellation email and text that says the payment was handled separately."
-                  : paid
-                    ? `${paidLabel}. If it's within 24 hours you'll be asked about the late fee first.`
-                    : "Nothing was paid on this booking, so there's nothing to refund."}
-              </p>
+              <div className="mt-3 rounded-lg bg-brown-950 border border-brown-700 p-3">
+                <p className="text-[11px] uppercase tracking-wide text-brown-500">What happens</p>
+                <p className="text-xs text-white mt-1">
+                  {outcome ?? "Working out the amounts…"}
+                </p>
+                {!cancelNoRefund && pv && !pv.previewUnavailable && pv.isLate && (
+                  <p className="text-[11px] text-amber-400 mt-2">
+                    Within 24 hours — you&apos;ll be asked about the late fee first. Charge it and
+                    {pv.lateAmount > 0
+                      ? ` $${pv.lateAmount.toFixed(2)} goes to account credit instead, with $${pv.lateFeeKept.toFixed(2)} kept as the fee.`
+                      : ` the fee takes the full amount — nothing is refunded or credited.`}
+                  </p>
+                )}
+                {pv?.paidViaBatch && (
+                  <p className="text-[11px] text-brown-400 mt-2">
+                    This session was rescheduled at some point, so the card charge is recorded on the
+                    original booking rather than this one. The refund goes to that same card.
+                  </p>
+                )}
+                {cancelNoRefund && (
+                  <p className="text-[11px] text-brown-500 mt-2">
+                    They&apos;ll get a cancellation email and text saying the payment was handled separately.
+                  </p>
+                )}
+              </div>
 
               <div className="flex gap-3 mt-4">
                 <button
