@@ -5,7 +5,7 @@ import { deletePrivateSessionFromCalendar, upsertGroupSessionCalendarEvent } fro
 import { sendCancellationNotification } from "@/lib/email";
 import { getCurrentSheetLocation } from "@/lib/sheets";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
-import { issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome, isLateAction, parseSessionDateTimeET, computeBulkWeeklySettlement } from "@/lib/booking-finalize";
+import { issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome, isLateAction, parseSessionDateTimeET, computeBulkWeeklySettlement, registrationPaidSource } from "@/lib/booking-finalize";
 import { notifyTrainerOfCancellation } from "@/lib/trainer-notify";
 import {
   addAccountCredit,
@@ -33,10 +33,22 @@ export async function POST(req: NextRequest) {
   // For the case where the money was already settled outside the app (e.g. a
   // refund that fired by accident, or one done by hand in Stripe) and a second
   // automatic refund would pay the client twice.
-  const { id, feeChoice, noRefund } = await req.json();
+  //
+  // refundTo: where the money goes when a refund IS happening.
+  //   "original" — back to whatever paid for it (the card, if there is one)
+  //   "credit"    — all of it as account credit instead, even if a card paid
+  //   "package"   — hand the session back to the package it came out of
+  //                 (package-covered bookings only; this is the default for
+  //                 them, and the only one of the three that moves no money)
+  // Omitted means the historical behaviour: card refund where a card paid,
+  // account credit otherwise, slot-return for a package booking.
+  const { id, feeChoice, noRefund, refundTo } = await req.json();
   if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
   if (feeChoice && feeChoice !== "waive" && feeChoice !== "charge") {
     return NextResponse.json({ error: "Invalid feeChoice" }, { status: 400 });
+  }
+  if (refundTo && refundTo !== "original" && refundTo !== "credit" && refundTo !== "package") {
+    return NextResponse.json({ error: "Invalid refundTo" }, { status: 400 });
   }
 
   const supabase = createClient(
@@ -347,13 +359,27 @@ export async function POST(req: NextRequest) {
     await addAccountCredit(reg.email, reg.applied_account_credit).catch(() => {});
   }
 
+  // What actually paid for this session. The row's own `is_paid` flag is
+  // NOT the answer: a card payment stamps stripe_payment_intent_id and
+  // leaves is_paid false, and a package-covered session has its money on
+  // the package row instead. Reading is_paid alone is what made the
+  // dashboard tell us a paid session had nothing to refund.
+  const paidSource = registrationPaidSource(reg);
+
+  // A package-covered session's money sits on the package, so the normal
+  // settlement for one is the slot handed back below — not a payout. Money
+  // only moves for one when the admin explicitly asks for it instead, and
+  // then the slot must NOT also come back or the client gets both.
+  const payOutPackageSession =
+    paidSource === "package" && (refundTo === "original" || refundTo === "credit");
+
   // Cancelling a package-covered session frees its slot back — recompute
   // straight from this row's own package_id, same as the client-facing
   // cancel flow. Without this, an admin cancelling a package session on a
   // client's behalf (e.g. over the phone) never returns that session to
   // their package, permanently costing them one of the sessions they paid
   // for with no way to fix it from the admin dashboard.
-  if (reg.package_id && !noRefund) {
+  if (reg.package_id && !noRefund && !payOutPackageSession) {
     try {
       const used = await countPackageSessionsUsed(reg.package_id);
       await setPackageSessions(reg.package_id, used);
@@ -395,23 +421,51 @@ export async function POST(req: NextRequest) {
   // shortfall out of this refund/credit too. No new Stripe charge is ever
   // needed here either way — this only decides how much of the EXISTING
   // captured payment gets refunded back vs kept.
-  const wasPaid = !!reg.is_paid || !!reg.stripe_payment_intent_id;
+  const wasPaid = paidSource !== "none" && (paidSource !== "package" || payOutPackageSession);
   let stripeRefundResult: { refundedAmount: number; creditedAmount: number; failed: boolean } | undefined;
   let creditIssued = 0;
   let fullForfeitNoRefund = false;
   if (wasPaid && reg.email && !noRefund) {
-    const settlement = await computeBulkWeeklySettlement(reg, chargeLateFee);
-    const dueAmount = settlement.refundOrCreditAmount;
+    // Paying out a package session instead of returning its slot: the money
+    // for it is one session's worth of the package's own enrollment price
+    // (what was stamped at purchase, not today's rate), and the card to send
+    // it back to is the package's, since this row has no payment of its own.
+    // The service fee isn't split per session, so it isn't part of this.
+    let packagePayout: { amount: number; paymentIntentId: string | null } | null = null;
+    if (payOutPackageSession && reg.package_id) {
+      const { data: pkg } = await supabase
+        .from("monthly_packages")
+        .select("package_type, total_price, stripe_payment_intent_id")
+        .eq("id", reg.package_id)
+        .maybeSingle();
+      const sessions = pkg?.package_type || 0;
+      const total = pkg?.total_price ?? 0;
+      packagePayout = {
+        amount: sessions > 0 ? Math.round((total / sessions) * 100) / 100 : 0,
+        paymentIntentId: pkg?.stripe_payment_intent_id || null,
+      };
+    }
+
+    const settlement = packagePayout
+      ? null
+      : await computeBulkWeeklySettlement(reg, chargeLateFee);
+    const dueAmount = packagePayout ? packagePayout.amount : settlement!.refundOrCreditAmount;
+    const refundIntentId = packagePayout
+      ? packagePayout.paymentIntentId
+      : reg.stripe_payment_intent_id;
+    // "credit" means all of it as account credit even when a card paid; any
+    // other choice still falls back to credit when there's no card to hit.
+    const sendToCard = refundTo !== "credit" && !!refundIntentId;
     fullForfeitNoRefund = chargeLateFee && dueAmount <= 0;
     if (chargeLateFee) {
       creditIssued = dueAmount;
       if (creditIssued > 0) await addAccountCredit(reg.email, creditIssued).catch(() => {});
     } else if (dueAmount > 0) {
-      if (reg.stripe_payment_intent_id) {
+      if (sendToCard) {
         stripeRefundResult = await issueStripeRefund({
           email: reg.email,
           manageToken: reg.manage_token,
-          paymentIntentId: reg.stripe_payment_intent_id,
+          paymentIntentId: refundIntentId!,
           amountDollars: dueAmount,
           sessionLabel: reg.session_details || "",
         });
@@ -420,7 +474,7 @@ export async function POST(req: NextRequest) {
         creditIssued = dueAmount;
       }
     }
-    if (settlement.siblingUpdates.length > 0) {
+    if (settlement && settlement.siblingUpdates.length > 0) {
       await updateRegistrationsPricing(settlement.siblingUpdates).catch((err) =>
         console.error("Sibling re-pricing failed after bulk-discount tier true-up (admin cancel):", err)
       );
@@ -506,7 +560,7 @@ export async function POST(req: NextRequest) {
           ? "\nLate cancellation: this session is forfeited from your package — no additional charge."
           : fullForfeitNoRefund
             ? "\nLate cancellation: this session is non-refundable per our 24-hour policy."
-            : reg.package_id
+            : reg.package_id && !payOutPackageSession
               ? "\nYour package session is available for you to rebook."
               : moneyOutcome ? `\n${moneyOutcome}.` : "";
         await sendSMS(reg.phone, `Mesa Basketball: Session cancelled by your trainer.${sessionLine}\nAthlete: ${reg.kids}${moneyNote}\nQuestions? mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
@@ -517,7 +571,9 @@ export async function POST(req: NextRequest) {
       const adminPackageNote = packageSessionForfeited
         ? "\nPackage session — late cancellation, session forfeited, no fee charged"
         : reg.package_id
-          ? "\nPackage session — slot freed"
+          ? payOutPackageSession
+            ? "\nPackage session — paid back out instead of returning the slot"
+            : "\nPackage session — slot freed"
           : "";
       const adminForfeitNote = fullForfeitNoRefund ? "\nLate cancellation — fee consumed the full amount, no refund/credit due" : "";
       await sendAdminSMS(`CANCELLED: ${reg.parent_name}\n${sessionDetails}\nPlayers: ${reg.kids}${chargeLateFee ? "\n(Late fee charged)" : isLate ? "\n(Late fee waived)" : ""}${adminMoneyOutcome ? `\n${adminMoneyOutcome}` : ""}${adminPackageNote}${adminForfeitNote}`);
@@ -553,6 +609,8 @@ export async function POST(req: NextRequest) {
     packageSessionForfeited,
     fullForfeitNoRefund,
     noRefund: !!noRefund,
+    paidVia: paidSource,
+    packageSlotReturned: !!reg.package_id && !noRefund && !payOutPackageSession,
   });
   } finally {
     if (batchClaimToken) await releaseBulkBatch(reg.booking_batch_id, batchClaimToken).catch(() => {});

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { registrationWasPaid, registrationPaidSource, type PaidSource } from "@/lib/booking-finalize";
 
 interface EnrichableRegistration {
   id: string;
@@ -22,6 +23,14 @@ export interface ComputedFields {
   within_package?: boolean;
   package_paid?: boolean;
   weekly_discount_rate?: number;
+  // Computed server-side because the dashboard is never sent
+  // stripe_payment_intent_id (it's the one secret that could be used to
+  // act on a booking), so the client physically cannot work out whether a
+  // card payment exists. Without this the cancel dialog fell back to
+  // `is_paid`, which Stripe-paid rows never set, and told Artemios a paid
+  // session had nothing to refund.
+  was_paid?: boolean;
+  paid_via?: PaidSource;
 }
 
 function toMonthYear(dateStr: string | null): string | null {
@@ -138,6 +147,8 @@ export async function attachComputedFields<T extends EnrichableRegistration>(
       ...r,
       ...(pkgInfo ? { within_package: pkgInfo.withinPackage, package_paid: pkgInfo.packagePaid } : {}),
       ...(rate !== undefined ? { weekly_discount_rate: rate } : {}),
+      was_paid: registrationWasPaid(r as Parameters<typeof registrationWasPaid>[0]),
+      paid_via: registrationPaidSource(r as Parameters<typeof registrationPaidSource>[0]),
     };
   });
 }

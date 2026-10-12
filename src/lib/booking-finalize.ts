@@ -2540,3 +2540,49 @@ export async function finalizePaidCheckoutSession(session: Stripe.Checkout.Sessi
     });
   }
 }
+
+/**
+ * Whether a booking actually has money (or a paid package slot) behind it,
+ * and where that money came from.
+ *
+ * This exists because "was this paid?" was being asked in several places
+ * with different, partly-wrong answers. A Stripe-paid booking never sets
+ * `is_paid` — payment is recorded as `stripe_payment_intent_id` — so any
+ * check that looked only at `is_paid` reported a genuinely paid session as
+ * unpaid, and the admin cancel dialog then told Artemios there was nothing
+ * to refund. A package-covered session is worse: the money sits on the
+ * monthly_packages row, so NOTHING on the registration looks paid even
+ * though the family very much paid for that slot.
+ *
+ * `source` is the single source of truth for both the dashboard wording and
+ * what the cancel route is allowed to refund.
+ */
+export type PaidSource = "card" | "credit" | "package" | "manual" | "none";
+
+export function registrationPaidSource(reg: {
+  is_paid?: boolean | null;
+  stripe_payment_intent_id?: string | null;
+  applied_account_credit?: number | null;
+  package_id?: string | null;
+}): PaidSource {
+  if (reg.stripe_payment_intent_id) return "card";
+  if (reg.package_id) return "package";
+  if ((reg.applied_account_credit || 0) > 0) return "credit";
+  if (reg.is_paid) return "manual";
+  return "none";
+}
+
+export function registrationWasPaid(reg: Parameters<typeof registrationPaidSource>[0]): boolean {
+  return registrationPaidSource(reg) !== "none";
+}
+
+/** Short human wording for the admin dashboard, e.g. "paid by card". */
+export function describePaidSource(source: PaidSource): string {
+  switch (source) {
+    case "card": return "paid by card";
+    case "package": return "covered by their package";
+    case "credit": return "paid with account credit";
+    case "manual": return "marked paid";
+    default: return "nothing paid";
+  }
+}

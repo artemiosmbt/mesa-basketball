@@ -45,6 +45,13 @@ interface Registration {
   within_package?: boolean;
   package_paid?: boolean;
   weekly_discount_rate?: number;
+  // Whether anything was actually paid for this booking, and by what. Has to
+  // come from the server: a card payment lives on stripe_payment_intent_id
+  // (never sent to the browser) and a package-covered one lives on the
+  // package row, so `is_paid` alone — which neither of those sets — made the
+  // cancel box claim a paid session had nothing to refund.
+  was_paid?: boolean;
+  paid_via?: "card" | "credit" | "package" | "manual" | "none";
 }
 
 interface ProfileKid {
@@ -889,7 +896,7 @@ interface CalendarViewProps {
   weeklyCapacity: Map<string, number>;
   campCapacity: Map<string, number>;
   canEdit: boolean;
-  cancelRegistration: (id: string, feeChoice?: "waive" | "charge", regHint?: Registration, noRefund?: boolean) => Promise<void>;
+  cancelRegistration: (id: string, feeChoice?: "waive" | "charge", regHint?: Registration, noRefund?: boolean, refundTo?: "original" | "credit" | "package" | null) => Promise<void>;
   // Opens the parent's cancel confirm box, which carries the no-refund choice.
   requestCancel: (r: Registration) => void;
   markNoShow: (id: string) => Promise<void>;
@@ -1300,6 +1307,7 @@ interface CardCtx {
   addPlayerError: string | null;
   setAddPlayerError: (v: string | null) => void;
   setCancelNoRefund: (v: boolean) => void;
+  setCancelRefundTo: (v: "original" | "credit" | "package" | null) => void;
   setCancelPrompt: (r: Registration | null) => void;
   cancelling: string | null;
   openReschedule: (r: Registration) => void;
@@ -1431,7 +1439,7 @@ function RegCard({ r, isPast = false, ctx }: { r: Registration; isPast?: boolean
           {(r.status === "confirmed" || (ctx.canEdit && (isPast || isDeletablePending(r)))) && (
             <div className="flex flex-wrap gap-3 pt-1 border-t border-brown-800">
               {ctx.canEdit && r.status === "confirmed" && !isPast && (
-                <button onClick={() => { ctx.setCancelNoRefund(false); ctx.setCancelPrompt(r); }} disabled={ctx.cancelling === r.id} className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50">
+                <button onClick={() => { ctx.setCancelNoRefund(false); ctx.setCancelRefundTo(null); ctx.setCancelPrompt(r); }} disabled={ctx.cancelling === r.id} className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50">
                   {ctx.cancelling === r.id ? "Cancelling..." : "Cancel"}
                 </button>
               )}
@@ -1547,6 +1555,10 @@ export default function AdminPage() {
   // all (for when the money was already settled outside the app).
   const [cancelPrompt, setCancelPrompt] = useState<Registration | null>(null);
   const [cancelNoRefund, setCancelNoRefund] = useState(false);
+  // Where a refund goes. null = whatever's normal for this booking (the card
+  // that paid, or the package slot back), so the box opens on the safe default
+  // and only sends refundTo once a different destination is picked.
+  const [cancelRefundTo, setCancelRefundTo] = useState<"original" | "credit" | "package" | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [noShowConfirm, setNoShowConfirm] = useState<string | null>(null);
   const [noShowing, setNoShowing] = useState<string | null>(null);
@@ -1908,14 +1920,15 @@ export default function AdminPage() {
     id: string,
     feeChoice?: "waive" | "charge",
     regHint?: Registration,
-    noRefund?: boolean
+    noRefund?: boolean,
+    refundTo?: "original" | "credit" | "package" | null
   ) {
     if (!token) return;
     setCancelling(id);
     const res = await fetch("/api/admin/cancel", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ id, feeChoice, noRefund }),
+      body: JSON.stringify({ id, feeChoice, noRefund, refundTo: refundTo || undefined }),
     });
     const data = await res.json().catch(() => null);
     if (res.ok) {
@@ -1934,6 +1947,8 @@ export default function AdminPage() {
         alert("Cancelled (late). The session was forfeited from their package — no fee, no refund.");
       } else if (data?.fullForfeitNoRefund) {
         alert("Cancelled (late). Full forfeiture — nothing refunded or credited.");
+      } else if (data?.packageSlotReturned) {
+        alert("Cancelled. The session went back to their package for them to rebook.");
       } else if (data?.isLateCancel) {
         alert("Cancelled (late fee applies) — nothing to auto-refund/credit for this booking.");
       }
@@ -1951,7 +1966,7 @@ export default function AdminPage() {
       const charge = confirm(
         `This booking is within the 24-hour late-cancellation window.\n\n${feeExplainer}`
       );
-      return cancelRegistration(id, charge ? "charge" : "waive", reg, false);
+      return cancelRegistration(id, charge ? "charge" : "waive", reg, false, refundTo);
     } else {
       alert(data?.error || "Failed to cancel.");
     }
@@ -2473,7 +2488,7 @@ export default function AdminPage() {
   const cardCtx: CardCtx = {
     canEdit, authCtx, expandedCardIds, toggleExpandedCard,
     addPlayerOpenId, addPlayerName, setAddPlayerName, submitAddPlayer, addPlayerSaving, setAddPlayerOpenId, addPlayerError, setAddPlayerError,
-    setCancelNoRefund, setCancelPrompt, cancelling, openReschedule, noShowConfirm, setNoShowConfirm, noShowing, markNoShow, deleteRegistration, deleting,
+    setCancelNoRefund, setCancelRefundTo, setCancelPrompt, cancelling, openReschedule, noShowConfirm, setNoShowConfirm, noShowing, markNoShow, deleteRegistration, deleting,
     weeklyCapacity, campCapacity, feeEvents,
   };
 
@@ -2798,7 +2813,7 @@ export default function AdminPage() {
               campCapacity={campCapacity}
               canEdit={canEdit}
               cancelRegistration={cancelRegistration}
-            requestCancel={(r: Registration) => { setCancelNoRefund(false); setCancelPrompt(r); }}
+            requestCancel={(r: Registration) => { setCancelNoRefund(false); setCancelRefundTo(null); setCancelPrompt(r); }}
               markNoShow={markNoShow}
               openReschedule={openReschedule}
               deleteRegistration={deleteRegistration}
@@ -3421,7 +3436,16 @@ export default function AdminPage() {
 
       {cancelPrompt && (() => {
         const r = cancelPrompt;
-        const paid = !!r.is_paid;
+        const paidVia = r.paid_via ?? (r.is_paid ? "manual" : "none");
+        const paid = r.was_paid ?? !!r.is_paid;
+        const paidLabel = {
+          card: "Paid by card",
+          package: "Covered by their package",
+          credit: "Paid with account credit",
+          manual: "Marked paid",
+          none: "Nothing paid",
+        }[paidVia];
+        const fromPackage = paidVia === "package";
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4" onClick={() => setCancelPrompt(null)}>
             <div className="w-full max-w-sm rounded-xl bg-brown-900 border border-brown-700 p-5" onClick={(e) => e.stopPropagation()}>
@@ -3449,11 +3473,36 @@ export default function AdminPage() {
                 </span>
               </label>
 
+              {!cancelNoRefund && paid && (
+                <div className="mt-3 rounded-lg border border-brown-700 bg-brown-950 p-3">
+                  <p className="text-[11px] uppercase tracking-wide text-brown-500">Refund as</p>
+                  {[
+                    ...(fromPackage ? [{ v: "package" as const, label: "Session back to their package", hint: "No money moves — the session returns to their package to rebook." }] : []),
+                    { v: "original" as const, label: fromPackage ? "Refund the package's original payment method" : "Refund the original payment method", hint: fromPackage ? "One session's worth of the package price, back to the card that bought it." : paidVia === "card" ? "Back to the card that paid." : "No card on this booking, so this lands as account credit." },
+                    { v: "credit" as const, label: "Account credit only", hint: "Keeps the money on file for them to use on a future booking." },
+                  ].map((opt) => (
+                    <label key={opt.v} className="flex items-start gap-2 mt-2 text-xs text-brown-200 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="cancelRefundTo"
+                        checked={(cancelRefundTo ?? (fromPackage ? "package" : "original")) === opt.v}
+                        onChange={() => setCancelRefundTo(opt.v)}
+                        className="mt-0.5 accent-mesa-accent"
+                      />
+                      <span>
+                        <span className="font-semibold text-white">{opt.label}</span>
+                        <span className="block text-brown-400">{opt.hint}</span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              )}
+
               <p className="text-[11px] text-brown-500 mt-3">
                 {cancelNoRefund
                   ? "They'll get a cancellation email and text that says the payment was handled separately."
                   : paid
-                    ? "They paid, so this refunds their card automatically. If it's within 24 hours you'll be asked about the late fee first."
+                    ? `${paidLabel}. If it's within 24 hours you'll be asked about the late fee first.`
                     : "Nothing was paid on this booking, so there's nothing to refund."}
               </p>
 
@@ -3461,8 +3510,9 @@ export default function AdminPage() {
                 <button
                   onClick={() => {
                     const noRefund = cancelNoRefund;
+                    const refundTo = cancelRefundTo;
                     setCancelPrompt(null);
-                    cancelRegistration(r.id, undefined, r, noRefund);
+                    cancelRegistration(r.id, undefined, r, noRefund, refundTo);
                   }}
                   className={`flex-1 rounded-lg text-white text-sm font-semibold py-2 ${cancelNoRefund ? "bg-red-700" : "bg-mesa-accent"}`}
                 >
