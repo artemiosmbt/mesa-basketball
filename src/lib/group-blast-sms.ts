@@ -115,6 +115,7 @@ export function buildBlastMessage(isoDate: string, sessions: BlastSession[]): st
     `Mesa Basketball: SPOTS STILL OPEN ${when}${who}.`,
     ...lines,
     `Book: ${SITE}`,
+    `Full group schedule: ${SITE}/schedule`,
     "Reply STOP to opt out.",
   ].join("\n");
 }
