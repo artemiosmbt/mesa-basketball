@@ -4,6 +4,7 @@ import { verifyAdmin } from "@/lib/auth";
 import {
   resolveRegistrationPayment,
   computeBulkWeeklySettlement,
+  resolvedSessionPrice,
   isLateAction,
 } from "@/lib/booking-finalize";
 
@@ -63,6 +64,7 @@ export async function POST(req: NextRequest) {
       packageSessionValue: null,
       hasOriginalCard: false,
       paidViaBatch: false,
+      maxRefundAmount: 0,
     });
   }
 
@@ -101,6 +103,11 @@ export async function POST(req: NextRequest) {
     lateAmount: paidVia === "package" ? 0 : late.refundOrCreditAmount,
     lateFeeKept: paidVia === "package" ? 0 : late.lateFeeKept,
     packageSessionValue,
+    // Ceiling for a manual override: what this booking actually cost.
+    maxRefundAmount: Math.max(
+      paidVia === "package" ? (packageSessionValue ?? 0) : onTime.refundOrCreditAmount,
+      Math.max(0, resolvedSessionPrice(reg) - (reg.applied_account_credit || 0))
+    ),
     hasOriginalCard: !!resolvedPayment.paymentIntentId || packageCardOnFile,
     // The charge was found on the original booking, not on this row.
     paidViaBatch: resolvedPayment.viaBatch,

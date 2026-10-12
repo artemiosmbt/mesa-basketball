@@ -42,13 +42,25 @@ export async function POST(req: NextRequest) {
   //                 them, and the only one of the three that moves no money)
   // Omitted means the historical behaviour: card refund where a card paid,
   // account credit otherwise, slot-return for a package booking.
-  const { id, feeChoice, noRefund, refundTo } = await req.json();
+  //
+  // refundAmount: an explicit override for the dollar figure, for the
+  // occasional case the rules don't cover — e.g. cancelling a session out of
+  // a bulk-discount bundle normally refunds only the difference the bundle's
+  // tier drop leaves behind, and sometimes the right thing is to hand back
+  // what the session itself cost. Capped at what was actually paid, and when
+  // it's used the sibling re-pricing is skipped so the override changes this
+  // booking and nothing else.
+  const { id, feeChoice, noRefund, refundTo, refundAmount } = await req.json();
   if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
   if (feeChoice && feeChoice !== "waive" && feeChoice !== "charge") {
     return NextResponse.json({ error: "Invalid feeChoice" }, { status: 400 });
   }
   if (refundTo && refundTo !== "original" && refundTo !== "credit" && refundTo !== "package") {
     return NextResponse.json({ error: "Invalid refundTo" }, { status: 400 });
+  }
+  const hasCustomAmount = refundAmount !== undefined && refundAmount !== null;
+  if (hasCustomAmount && (typeof refundAmount !== "number" || !isFinite(refundAmount) || refundAmount < 0)) {
+    return NextResponse.json({ error: "Invalid refundAmount" }, { status: 400 });
   }
 
   const supabase = createClient(
@@ -453,7 +465,16 @@ export async function POST(req: NextRequest) {
     const settlement = packagePayout
       ? null
       : await computeBulkWeeklySettlement(reg, chargeLateFee);
-    const dueAmount = packagePayout ? packagePayout.amount : settlement!.refundOrCreditAmount;
+    const computedDue = packagePayout ? packagePayout.amount : settlement!.refundOrCreditAmount;
+    // Never hand back more than this booking actually cost — an override is
+    // there to correct the rules, not to invent money. Stripe caps it again
+    // at whatever is still refundable on the charge.
+    const paidForThisRow = Math.max(0, resolvedSessionPrice(reg) - (reg.applied_account_credit || 0));
+    const refundCap = Math.max(computedDue, paidForThisRow);
+    const customAmount = hasCustomAmount
+      ? Math.min(Math.round((refundAmount as number) * 100) / 100, refundCap)
+      : null;
+    const dueAmount = customAmount ?? computedDue;
     const refundIntentId = packagePayout
       ? packagePayout.paymentIntentId
       : resolvedPayment.paymentIntentId;
@@ -478,7 +499,7 @@ export async function POST(req: NextRequest) {
         creditIssued = dueAmount;
       }
     }
-    if (settlement && settlement.siblingUpdates.length > 0) {
+    if (settlement && settlement.siblingUpdates.length > 0 && customAmount === null) {
       await updateRegistrationsPricing(settlement.siblingUpdates).catch((err) =>
         console.error("Sibling re-pricing failed after bulk-discount tier true-up (admin cancel):", err)
       );

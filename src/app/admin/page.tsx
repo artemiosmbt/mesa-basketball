@@ -66,6 +66,7 @@ interface CancelPreview {
   packageSessionValue: number | null;
   hasOriginalCard: boolean;
   paidViaBatch: boolean;
+  maxRefundAmount: number;
 }
 
 interface ProfileKid {
@@ -275,9 +276,16 @@ function sessionText(details: string) {
   return details ? details.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, "").split("\n")[0] : "—";
 }
 
+// Money, never bare-float. A raw template literal rendered 42.5 as "$42.5",
+// which reads as broken rather than as a price. Whole dollars stay clean
+// ($50), anything with cents gets both of them ($42.50).
+function usd(amount: number): string {
+  return Number.isInteger(amount) ? `$${amount}` : `$${amount.toFixed(2)}`;
+}
+
 function formatPrice(price: number | null): string {
   if (price == null) return "—";
-  return `$${price}`;
+  return usd(price);
 }
 
 // Full session rate before any account credit is netted out — the base
@@ -306,8 +314,8 @@ function priceDisplay(r: Registration): string {
   const credit = Math.min(r.applied_account_credit || 0, total);
   const owed = Math.max(0, total - credit);
   if (credit <= 0) return formatPrice(owed);
-  if (owed <= 0) return `$${credit} credit`;
-  return `$${credit} credit, $${owed} card`;
+  if (owed <= 0) return `${usd(credit)} credit`;
+  return `${usd(credit)} credit, ${usd(owed)} card`;
 }
 
 function daysAway(dateStr: string | null): { label: string; cls: string } | null {
@@ -910,7 +918,7 @@ interface CalendarViewProps {
   weeklyCapacity: Map<string, number>;
   campCapacity: Map<string, number>;
   canEdit: boolean;
-  cancelRegistration: (id: string, feeChoice?: "waive" | "charge", regHint?: Registration, noRefund?: boolean, refundTo?: "original" | "credit" | "package" | null) => Promise<void>;
+  cancelRegistration: (id: string, feeChoice?: "waive" | "charge", regHint?: Registration, noRefund?: boolean, refundTo?: "original" | "credit" | "package" | null, refundAmount?: number | null) => Promise<void>;
   // Opens the parent's cancel confirm box, which carries the no-refund choice.
   requestCancel: (r: Registration) => void;
   markNoShow: (id: string) => Promise<void>;
@@ -1322,6 +1330,7 @@ interface CardCtx {
   setAddPlayerError: (v: string | null) => void;
   setCancelNoRefund: (v: boolean) => void;
   setCancelRefundTo: (v: "original" | "credit" | "package" | null) => void;
+  setCancelAmountOverride: (v: string | null) => void;
   setCancelPrompt: (r: Registration | null) => void;
   cancelling: string | null;
   openReschedule: (r: Registration) => void;
@@ -1453,7 +1462,7 @@ function RegCard({ r, isPast = false, ctx }: { r: Registration; isPast?: boolean
           {(r.status === "confirmed" || (ctx.canEdit && (isPast || isDeletablePending(r)))) && (
             <div className="flex flex-wrap gap-3 pt-1 border-t border-brown-800">
               {ctx.canEdit && r.status === "confirmed" && !isPast && (
-                <button onClick={() => { ctx.setCancelNoRefund(false); ctx.setCancelRefundTo(null); ctx.setCancelPrompt(r); }} disabled={ctx.cancelling === r.id} className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50">
+                <button onClick={() => { ctx.setCancelNoRefund(false); ctx.setCancelRefundTo(null); ctx.setCancelAmountOverride(null); ctx.setCancelPrompt(r); }} disabled={ctx.cancelling === r.id} className="text-xs text-red-400 hover:text-red-300 transition disabled:opacity-50">
                   {ctx.cancelling === r.id ? "Cancelling..." : "Cancel"}
                 </button>
               )}
@@ -1577,6 +1586,9 @@ export default function AdminPage() {
   // browser can't compute these (no payment intent, and a package session's
   // money lives on the package row).
   const [cancelPreview, setCancelPreview] = useState<CancelPreview | null>(null);
+  // Manual override of the refund figure, as typed. null = use the computed
+  // amount, which is the normal case.
+  const [cancelAmountOverride, setCancelAmountOverride] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [noShowConfirm, setNoShowConfirm] = useState<string | null>(null);
   const [noShowing, setNoShowing] = useState<string | null>(null);
@@ -1960,14 +1972,21 @@ export default function AdminPage() {
     feeChoice?: "waive" | "charge",
     regHint?: Registration,
     noRefund?: boolean,
-    refundTo?: "original" | "credit" | "package" | null
+    refundTo?: "original" | "credit" | "package" | null,
+    refundAmount?: number | null
   ) {
     if (!token) return;
     setCancelling(id);
     const res = await fetch("/api/admin/cancel", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ id, feeChoice, noRefund, refundTo: refundTo || undefined }),
+      body: JSON.stringify({
+        id,
+        feeChoice,
+        noRefund,
+        refundTo: refundTo || undefined,
+        refundAmount: refundAmount ?? undefined,
+      }),
     });
     const data = await res.json().catch(() => null);
     if (res.ok) {
@@ -2005,7 +2024,7 @@ export default function AdminPage() {
       const charge = confirm(
         `This booking is within the 24-hour late-cancellation window.\n\n${feeExplainer}`
       );
-      return cancelRegistration(id, charge ? "charge" : "waive", reg, false, refundTo);
+      return cancelRegistration(id, charge ? "charge" : "waive", reg, false, refundTo, refundAmount);
     } else {
       alert(data?.error || "Failed to cancel.");
     }
@@ -2527,7 +2546,7 @@ export default function AdminPage() {
   const cardCtx: CardCtx = {
     canEdit, authCtx, expandedCardIds, toggleExpandedCard,
     addPlayerOpenId, addPlayerName, setAddPlayerName, submitAddPlayer, addPlayerSaving, setAddPlayerOpenId, addPlayerError, setAddPlayerError,
-    setCancelNoRefund, setCancelRefundTo, setCancelPrompt, cancelling, openReschedule, noShowConfirm, setNoShowConfirm, noShowing, markNoShow, deleteRegistration, deleting,
+    setCancelNoRefund, setCancelRefundTo, setCancelAmountOverride, setCancelPrompt, cancelling, openReschedule, noShowConfirm, setNoShowConfirm, noShowing, markNoShow, deleteRegistration, deleting,
     weeklyCapacity, campCapacity, feeEvents,
   };
 
@@ -2852,7 +2871,7 @@ export default function AdminPage() {
               campCapacity={campCapacity}
               canEdit={canEdit}
               cancelRegistration={cancelRegistration}
-            requestCancel={(r: Registration) => { setCancelNoRefund(false); setCancelRefundTo(null); setCancelPrompt(r); }}
+            requestCancel={(r: Registration) => { setCancelNoRefund(false); setCancelRefundTo(null); setCancelAmountOverride(null); setCancelPrompt(r); }}
               markNoShow={markNoShow}
               openReschedule={openReschedule}
               deleteRegistration={deleteRegistration}
@@ -3487,10 +3506,13 @@ export default function AdminPage() {
         const fromPackage = paidVia === "package";
         const dest = cancelRefundTo ?? (fromPackage ? "package" : "original");
         const pv = cancelPreview;
+        const overrideNum = cancelAmountOverride === null ? null : parseFloat(cancelAmountOverride);
+        const overrideValid = overrideNum != null && isFinite(overrideNum) && overrideNum >= 0
+          && (!pv || overrideNum <= pv.maxRefundAmount);
+        const amount = overrideValid ? overrideNum! : (pv?.onTimeAmount ?? 0);
 
         // The plain-English bottom line: exactly which money moves where, in
         // dollars, for the destination currently selected.
-        const money = (n: number) => `$${n.toFixed(2)}`;
         let outcome: string | null = null;
         if (cancelNoRefund) {
           outcome = "Nothing moves — no card refund, no account credit, no package slot returned.";
@@ -3503,13 +3525,13 @@ export default function AdminPage() {
           if (dest === "package") {
             parts.push("the session goes back to their package");
           } else {
-            const toCard = dest === "original" && pv.hasOriginalCard ? pv.onTimeAmount : 0;
-            const toCredit = pv.onTimeAmount - toCard;
-            if (toCard > 0) parts.push(`${money(toCard)} back to their card`);
-            if (toCredit > 0) parts.push(`${money(toCredit)} as account credit`);
+            const toCard = dest === "original" && pv.hasOriginalCard ? amount : 0;
+            const toCredit = amount - toCard;
+            if (toCard > 0) parts.push(`${usd(toCard)} back to their card`);
+            if (toCredit > 0) parts.push(`${usd(toCredit)} as account credit`);
           }
           if (pv.appliedCreditReturned > 0) {
-            parts.push(`${money(pv.appliedCreditReturned)} account credit returned`);
+            parts.push(`${usd(pv.appliedCreditReturned)} account credit returned`);
           }
           if (pv.referralCreditReturned) parts.push("their referral credit returned");
           outcome = parts.length > 0
@@ -3562,13 +3584,13 @@ export default function AdminPage() {
                       hint: !pv
                         ? "Back to whatever paid for it."
                         : pv.hasOriginalCard
-                          ? `${money(pv.onTimeAmount)} back to their card.`
-                          : `No card on file for this booking, so this lands as ${money(pv.onTimeAmount)} account credit.`,
+                          ? `${usd(amount)} back to their card.`
+                          : `No card on file for this booking, so this lands as ${usd(amount)} account credit.`,
                     },
                     {
                       v: "credit" as const,
                       label: "Account credit only",
-                      hint: pv ? `${money(pv.onTimeAmount)} on file for a future booking.` : "Kept on file for a future booking.",
+                      hint: pv ? `${usd(amount)} on file for a future booking.` : "Kept on file for a future booking.",
                     },
                   ].map((opt) => (
                     <label key={opt.v} className="flex items-start gap-2 mt-2 text-xs text-brown-200 cursor-pointer">
@@ -3593,6 +3615,51 @@ export default function AdminPage() {
                 <p className="text-xs text-white mt-1">
                   {outcome ?? "Working out the amounts…"}
                 </p>
+                {!cancelNoRefund && pv && !pv.previewUnavailable && (
+                  <div className="mt-2 pt-2 border-t border-brown-800">
+                    {cancelAmountOverride === null ? (
+                      <button
+                        onClick={() => setCancelAmountOverride(pv.onTimeAmount.toFixed(2))}
+                        className="text-[11px] text-mesa-accent hover:underline"
+                      >
+                        Refund a different amount
+                      </button>
+                    ) : (
+                      <div>
+                        <label className="flex items-center gap-2 text-xs text-brown-200">
+                          <span>Refund</span>
+                          <span className="text-brown-400">$</span>
+                          <input
+                            id="cancel-amount-override"
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            max={pv.maxRefundAmount}
+                            value={cancelAmountOverride}
+                            onChange={(e) => setCancelAmountOverride(e.target.value)}
+                            className="w-24 rounded border border-brown-700 bg-brown-900 px-2 py-1 text-white"
+                          />
+                          <button
+                            onClick={() => setCancelAmountOverride(null)}
+                            className="text-[11px] text-brown-400 hover:text-brown-200 underline"
+                          >
+                            use {usd(pv.onTimeAmount)}
+                          </button>
+                        </label>
+                        {!overrideValid ? (
+                          <p className="text-[11px] text-red-400 mt-1">
+                            Enter an amount between $0 and {usd(pv.maxRefundAmount)} — what this booking actually cost.
+                          </p>
+                        ) : (
+                          <p className="text-[11px] text-brown-500 mt-1">
+                            Overriding the amount leaves their other sessions priced as they are — the
+                            bundle isn&apos;t re-priced.
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
                 {!cancelNoRefund && pv && !pv.previewUnavailable && pv.isLate && (
                   <p className="text-[11px] text-amber-400 mt-2">
                     Within 24 hours — you&apos;ll be asked about the late fee first. Charge it and
@@ -3619,10 +3686,12 @@ export default function AdminPage() {
                   onClick={() => {
                     const noRefund = cancelNoRefund;
                     const refundTo = cancelRefundTo;
+                    const custom = overrideValid ? overrideNum : null;
                     setCancelPrompt(null);
-                    cancelRegistration(r.id, undefined, r, noRefund, refundTo);
+                    cancelRegistration(r.id, undefined, r, noRefund, refundTo, custom);
                   }}
-                  className={`flex-1 rounded-lg text-white text-sm font-semibold py-2 ${cancelNoRefund ? "bg-red-700" : "bg-mesa-accent"}`}
+                  disabled={cancelAmountOverride !== null && !overrideValid}
+                  className={`flex-1 rounded-lg text-white text-sm font-semibold py-2 disabled:opacity-50 ${cancelNoRefund ? "bg-red-700" : "bg-mesa-accent"}`}
                 >
                   {cancelNoRefund ? "Cancel — no refund" : "Cancel session"}
                 </button>
