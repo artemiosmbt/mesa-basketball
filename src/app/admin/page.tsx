@@ -3455,6 +3455,13 @@ export default function AdminPage() {
                 {r.booked_group && <p className="text-brown-300">{r.booked_group}</p>}
                 <p className="text-white font-medium">{formatDate(r.booked_date)} · {r.booked_start_time}{r.booked_end_time ? `-${r.booked_end_time}` : ""}</p>
                 {r.booked_location && <p className="text-brown-400">{r.booked_location}</p>}
+                {/* Always shown, including "Nothing on record" — when a booking
+                    was definitely paid for but this says otherwise, the row
+                    itself is missing its payment reference, and that's worth
+                    seeing here rather than silently becoming "no refund". */}
+                <p className={paid ? "text-brown-400" : "text-amber-400"}>
+                  Payment on record: {paid ? paidLabel : "nothing on record"}
+                </p>
               </div>
 
               <label className="flex items-start gap-2 mt-4 text-xs text-brown-200 cursor-pointer">
