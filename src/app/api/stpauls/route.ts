@@ -10,7 +10,7 @@ import {
   type StPaulsCoach,
 } from "@/lib/stpauls";
 import { sendStPaulsBookingAdminEmail, sendStPaulsBookingCoachEmail } from "@/lib/email";
-import { sendAdminSMS } from "@/lib/sms";
+import { sendAdminSMS, sendSMS } from "@/lib/sms";
 import { getPracticesForEmail } from "@/lib/stpauls-server";
 
 // Coach-facing St. Paul's practice booking. Any signed-in account can use
@@ -105,8 +105,15 @@ export async function POST(req: NextRequest) {
   // A brand-new coach account gets a minimal profile: no players, no
   // reminder emails (those are about group sessions for kids). An existing
   // account's profile is never touched — a parent who also coaches keeps
-  // their kids and preferences exactly as they were.
-  const { data: existingProfile } = await supabase.from("profiles").select("id").eq("id", user.id).maybeSingle();
+  // their kids and preferences exactly as they were — except that checking
+  // the text box here opts them in (never out).
+  const { data: existingProfile } = await supabase.from("profiles").select("id, phone, sms_consent").eq("id", user.id).maybeSingle();
+  const optedIntoTexts = !!body.smsConsent || !!existingProfile?.sms_consent;
+  if (existingProfile && body.smsConsent && !existingProfile.sms_consent) {
+    const { error: consentError } = await supabase.from("profiles")
+      .update({ sms_consent: true, updated_at: new Date().toISOString() }).eq("id", user.id);
+    if (consentError) console.error("St. Paul's SMS opt-in save failed:", consentError);
+  }
   if (!existingProfile) {
     const primary = coaches.find((c) => c.email === user.email) || coaches[0];
     const { error: profileError } = await supabase.from("profiles").insert({
@@ -146,7 +153,15 @@ export async function POST(req: NextRequest) {
 
   const sorted = [...slots].sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start));
   const practices = sorted.map((s) => ({ date: formatDateLong(s.date), time: `${formatTime12(s.start)}–${formatTime12(s.end)}` }));
+  // Confirmation text only to the account that booked, and only with SMS
+  // consent — the other listed coaches never agreed to texts (they get the
+  // email). Sent to the phone they just typed for themselves.
+  const bookerPhone = coaches.find((c) => c.email === user.email)?.phone || existingProfile?.phone || coaches[0].phone;
+  const confirmText = optedIntoTexts && bookerPhone
+    ? sendSMS(bookerPhone, `Mesa Basketball: ${teamName}'s practice is booked for ${practices.map((p) => `${p.date}, ${p.time}`).join("; ")} at St. Paul's. $60 cash to your trainer at practice. To cancel or change, text Artemios at (631) 599-1280. Reply STOP to opt out.`)
+    : Promise.resolve();
   await Promise.allSettled([
+    confirmText,
     sendStPaulsBookingAdminEmail({ teamName, coaches, practices }),
     sendAdminSMS(`St. Paul's practice booked: ${teamName}, ${practices.map((p) => `${p.date} ${p.time}`).join("; ")}. Assign a trainer in admin.`),
     ...coaches.map((c) => sendStPaulsBookingCoachEmail({ to: c.email, coachName: c.name, teamName, practices })),

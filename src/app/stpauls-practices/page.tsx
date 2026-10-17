@@ -139,7 +139,7 @@ export default function StPaulsPracticesPage() {
   const [loadError, setLoadError] = useState("");
   const [taken, setTaken] = useState<Range[]>([]);
   const [mine, setMine] = useState<Mine[]>([]);
-  const [hasProfile, setHasProfile] = useState(false);
+  const [alreadyTexting, setAlreadyTexting] = useState(false);
   const [month, setMonth] = useState(() => bookableRange().from.slice(0, 7)); // YYYY-MM
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [selectedStart, setSelectedStart] = useState("");
@@ -159,7 +159,7 @@ export default function StPaulsPracticesPage() {
       if (!res.ok) throw new Error(data.error || "Couldn't load practice times.");
       setTaken(data.taken);
       setMine(data.mine);
-      setHasProfile(!!data.profile);
+      setAlreadyTexting(!!data.profile?.smsConsent);
       // Prefill the first coach from the account, but never clobber typing.
       setCoaches((prev) => prev.length === 1 && !prev[0].name && !prev[0].phone && !prev[0].email
         ? [{ name: data.profile?.name || "", phone: data.profile?.phone || "", email: data.email || "" }]
@@ -362,11 +362,11 @@ export default function StPaulsPracticesPage() {
                   <button type="button" onClick={() => setCoaches((prev) => [...prev, { name: "", phone: "", email: "" }])}
                     className="text-sm font-semibold text-mesa-accent hover:underline">+ Add another coach</button>
                 )}
-                {!hasProfile && (
+                {!alreadyTexting && (
                   <label className="flex items-start gap-3 cursor-pointer">
                     <input type="checkbox" checked={smsConsent} onChange={(e) => setSmsConsent(e.target.checked)} className="mt-1 h-4 w-4 accent-mesa-accent" />
                     <span className="text-xs text-brown-300 leading-relaxed">
-                      Text me a weekly reminder to book my team&apos;s practices (Mesa Basketball Training, about once a week). Message &amp; data rates may apply. Reply STOP to cancel, HELP for help.
+                      Text me my booking confirmations and a weekly reminder to book my team&apos;s practices (Mesa Basketball Training). Message frequency varies, about weekly. Message &amp; data rates may apply. Reply STOP to cancel, HELP for help.
                     </span>
                   </label>
                 )}
