@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import type { Session } from "@supabase/supabase-js";
 import { authClient } from "@/lib/auth";
+import LandingNav from "../LandingNav";
 import {
   addDays,
   bookableRange,
@@ -11,16 +12,16 @@ import {
   formatDateShort,
   formatTime12,
   nyNow,
+  dayOfWeek,
   overlaps,
   practiceEnd,
   startTimesForDate,
   STPAULS_PATH,
   STPAULS_PRICE,
   toMinutes,
-  weekStart,
 } from "@/lib/stpauls";
 
-// Unlisted coach page: church teams pick 1-hour practice times inside the
+// Unlisted coach page: church teams pick a 1-hour practice time inside the
 // St. Paul's practice blocks and a Mesa trainer runs the practice. Nothing
 // on the site links here — coaches get the link directly.
 
@@ -34,9 +35,6 @@ const labelClass = "block text-xs font-semibold uppercase tracking-widest text-b
 function Header() {
   return (
     <div className="text-center mb-8">
-      <div className="h-24 w-24 mx-auto mb-4 rounded-full bg-white overflow-hidden flex items-center justify-center">
-        <img src="/logo.png" alt="Mesa Basketball" className="h-24 w-24 object-contain scale-125" />
-      </div>
       <h1 className="font-[family-name:var(--font-oswald)] text-3xl font-bold text-white tracking-wide">ST. PAUL&apos;S TEAM PRACTICES</h1>
       <p className="text-brown-300 mt-2 text-sm max-w-md mx-auto">
         Have a Mesa Basketball trainer run your team&apos;s practice. ${STPAULS_PRICE} per 1-hour practice, paid in cash to your trainer at practice.
@@ -142,13 +140,15 @@ export default function StPaulsPracticesPage() {
   const [taken, setTaken] = useState<Range[]>([]);
   const [mine, setMine] = useState<Mine[]>([]);
   const [hasProfile, setHasProfile] = useState(false);
-  const [selected, setSelected] = useState<{ date: string; start: string }[]>([]);
+  const [month, setMonth] = useState(() => bookableRange().from.slice(0, 7)); // YYYY-MM
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [selectedStart, setSelectedStart] = useState("");
   const [teamName, setTeamName] = useState("");
   const [coaches, setCoaches] = useState<Coach[]>([{ name: "", phone: "", email: "" }]);
   const [smsConsent, setSmsConsent] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
-  const [success, setSuccess] = useState<string[] | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
 
   const load = useCallback(async (s: Session) => {
     setLoading(true);
@@ -184,66 +184,66 @@ export default function StPaulsPracticesPage() {
     if (data.session) load(data.session);
   }
 
-  // Weeks (Mon–Sun) from the first bookable date to the last, each with
-  // its practice days and every 1-hour start time.
-  const weeks = useMemo(() => {
-    const { from, to } = bookableRange();
-    const now = nyNow();
-    const out: { start: string; days: { date: string; times: string[] }[] }[] = [];
-    for (let ws = weekStart(from); ws <= to; ws = addDays(ws, 7)) {
-      const days: { date: string; times: string[] }[] = [];
-      for (let i = 0; i < 7; i++) {
-        const date = addDays(ws, i);
-        if (date < from || date > to) continue;
-        const times = startTimesForDate(date).filter((t) => date !== now.date || toMinutes(t) > now.minutes);
-        if (times.length) days.push({ date, times });
-      }
-      if (days.length) out.push({ start: ws, days });
-    }
-    return out;
-  }, []);
+  const range = useMemo(() => bookableRange(), []);
+  const today = useMemo(() => nyNow(), []);
 
-  function slotState(date: string, start: string): "mine" | "taken" | "selected" | "blocked" | "open" {
-    const end = practiceEnd(start);
-    if (mine.some((m) => m.date === date && m.start === start)) return "mine";
-    if (taken.some((t) => t.date === date && overlaps(start, end, t.start, t.end))) return "taken";
-    if (selected.some((s) => s.date === date && s.start === start)) return "selected";
-    if (selected.some((s) => s.date === date && overlaps(start, end, s.start, practiceEnd(s.start)))) return "blocked";
-    return "open";
-  }
+  // Start times on a date that are still open: inside the block, not
+  // already started, and not overlapping any booked practice.
+  const openTimes = useCallback((date: string) => {
+    if (date < range.from || date > range.to) return [];
+    return startTimesForDate(date).filter((t) =>
+      (date !== today.date || toMinutes(t) > today.minutes) &&
+      !taken.some((b) => b.date === date && overlaps(t, practiceEnd(t), b.start, b.end)));
+  }, [range, today, taken]);
 
-  function toggle(date: string, start: string) {
+  // Month grid, Sunday-first, padded with blanks before the 1st.
+  const monthCells = useMemo(() => {
+    const first = `${month}-01`;
+    const cells: (string | null)[] = Array(dayOfWeek(first)).fill(null);
+    for (let d = first; d.startsWith(month); d = addDays(d, 1)) cells.push(d);
+    return cells;
+  }, [month]);
+  const shiftMonth = (n: number) => {
+    const [y, m] = month.split("-").map(Number);
+    const d = new Date(Date.UTC(y, m - 1 + n, 1));
+    setMonth(d.toISOString().slice(0, 7));
+  };
+  const canPrev = month > range.from.slice(0, 7);
+  const canNext = month < range.to.slice(0, 7);
+
+  function pickDate(date: string) {
     setSuccess(null);
-    setSelected((prev) => prev.some((s) => s.date === date && s.start === start)
-      ? prev.filter((s) => !(s.date === date && s.start === start))
-      : [...prev, { date, start }]);
+    setSubmitError("");
+    setSelectedDate(date);
+    setSelectedStart("");
+    setTimeout(() => document.getElementById("team-form")?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
   }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!session) return;
+    if (!session || !selectedDate) return;
     setSubmitError("");
-    if (selected.length === 0) return setSubmitError("Pick at least one practice time above.");
+    if (!selectedStart) return setSubmitError("Pick a start time.");
     setSubmitting(true);
     try {
       const res = await fetch("/api/stpauls", {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
-        body: JSON.stringify({ slots: selected, teamName, coaches, smsConsent }),
+        body: JSON.stringify({ slots: [{ date: selectedDate, start: selectedStart }], teamName, coaches, smsConsent }),
       });
       const data = await res.json();
       if (!res.ok) {
-        setSubmitError(data.error || "Couldn't book those practices.");
-        if (res.status === 409) { setSelected([]); load(session); }
+        setSubmitError(data.error || "Couldn't book that practice.");
+        if (res.status === 409) { setSelectedStart(""); load(session); }
       } else {
-        const sorted = [...selected].sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start));
-        setSuccess(sorted.map((s) => `${formatDateLong(s.date)}, ${formatTime12(s.start)}–${formatTime12(practiceEnd(s.start))}`));
-        setSelected([]);
+        setSuccess(`${formatDateLong(selectedDate)}, ${formatTime12(selectedStart)}–${formatTime12(practiceEnd(selectedStart))}`);
+        setSelectedDate(null);
+        setSelectedStart("");
         load(session);
         window.scrollTo({ top: 0, behavior: "smooth" });
       }
     } catch {
-      setSubmitError("Couldn't book those practices. Please try again.");
+      setSubmitError("Couldn't book that practice. Please try again.");
     }
     setSubmitting(false);
   }
@@ -252,8 +252,9 @@ export default function StPaulsPracticesPage() {
     setCoaches((prev) => prev.map((c, idx) => (idx === i ? { ...c, [field]: value } : c)));
 
   return (
-    <div className="min-h-screen bg-brown-950 px-4 sm:px-6 pt-10 pb-24">
-      <div className="w-full max-w-2xl mx-auto">
+    <div className="min-h-screen bg-brown-950 text-white">
+      <LandingNav />
+      <main className="w-full max-w-2xl mx-auto px-4 sm:px-6 py-10">
         <Header />
 
         {!authChecked ? (
@@ -265,8 +266,8 @@ export default function StPaulsPracticesPage() {
             {success && (
               <div className="rounded-xl border border-green-600/60 bg-green-900/30 px-5 py-4">
                 <p className="font-bold text-green-300">You&apos;re booked!</p>
-                <ul className="mt-1 text-sm text-green-100">{success.map((s) => <li key={s}>{s}</li>)}</ul>
-                <p className="mt-2 text-sm text-green-200">A Mesa trainer will run your practice. Bring ${STPAULS_PRICE} cash per practice for your trainer.</p>
+                <p className="mt-1 text-sm text-green-100">{success}</p>
+                <p className="mt-2 text-sm text-green-200">A Mesa trainer will run your practice. Bring ${STPAULS_PRICE} cash for your trainer.</p>
               </div>
             )}
 
@@ -282,101 +283,151 @@ export default function StPaulsPracticesPage() {
               </div>
             )}
 
-            <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-5 py-5">
-              <h2 className="font-[family-name:var(--font-oswald)] text-xl font-bold text-white tracking-wide">1. PICK YOUR PRACTICE TIMES</h2>
-              <p className="text-brown-400 text-sm mt-1">Each practice is 1 hour. Tap every time you want — you can pick more than one.</p>
-              {loading && <p className="text-brown-400 text-sm mt-3">Loading times...</p>}
-              {loadError && <p className="text-red-400 text-sm mt-3">{loadError}</p>}
-              <div className="mt-4 space-y-6">
-                {weeks.map((w) => (
-                  <div key={w.start}>
-                    <p className="text-xs font-semibold uppercase tracking-widest text-mesa-accent mb-2">Week of {formatDateShort(w.start)}</p>
-                    <div className="space-y-3">
-                      {w.days.map((d) => (
-                        <div key={d.date}>
-                          <p className="text-sm font-semibold text-white mb-1.5">{formatDateShort(d.date)}</p>
-                          <div className="flex flex-wrap gap-2">
-                            {d.times.map((t) => {
-                              const st = slotState(d.date, t);
-                              const label = `${formatTime12(t)}–${formatTime12(practiceEnd(t))}`;
-                              const cls = {
-                                open: "border-brown-600 text-brown-100 hover:border-mesa-accent",
-                                selected: "border-mesa-accent bg-mesa-accent text-white",
-                                taken: "border-brown-800 text-brown-600 line-through cursor-not-allowed",
-                                blocked: "border-brown-800 text-brown-600 cursor-not-allowed",
-                                mine: "border-green-600 bg-green-900/40 text-green-200 cursor-default",
-                              }[st];
-                              return (
-                                <button key={t} type="button" disabled={st !== "open" && st !== "selected"} onClick={() => toggle(d.date, t)}
-                                  className={`rounded-lg border px-3 py-2 text-xs font-semibold transition ${cls}`}>
-                                  {label}{st === "mine" ? " ✓" : ""}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+            <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 sm:px-5 py-5">
+              <h2 className="font-[family-name:var(--font-oswald)] text-xl font-bold text-white tracking-wide">1. PICK A DAY</h2>
+              {loading && <p className="text-brown-400 text-sm mt-2">Loading times...</p>}
+              {loadError && <p className="text-red-400 text-sm mt-2">{loadError}</p>}
+              <div className="mt-4 flex items-center justify-between">
+                <button type="button" disabled={!canPrev} onClick={() => shiftMonth(-1)}
+                  className="rounded-lg border border-brown-700 px-3 py-1.5 text-brown-200 hover:text-white disabled:opacity-30">←</button>
+                <p className="font-semibold text-white">
+                  {new Date(`${month}-01T12:00:00Z`).toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" })}
+                </p>
+                <button type="button" disabled={!canNext} onClick={() => shiftMonth(1)}
+                  className="rounded-lg border border-brown-700 px-3 py-1.5 text-brown-200 hover:text-white disabled:opacity-30">→</button>
+              </div>
+              <div className="mt-3 grid grid-cols-7 gap-1 text-center">
+                {["S", "M", "T", "W", "T", "F", "S"].map((d, i) => (
+                  <p key={i} className="py-1 text-xs font-semibold text-brown-500">{d}</p>
                 ))}
+                {monthCells.map((d, i) => {
+                  if (!d) return <div key={`b${i}`} />;
+                  const isPracticeDay = startTimesForDate(d).length > 0 && d >= range.from && d <= range.to && (d > today.date || (d === today.date && startTimesForDate(d).some((t) => toMinutes(t) > today.minutes)));
+                  const open = isPracticeDay && openTimes(d).length > 0;
+                  const hasMine = mine.some((m) => m.date === d);
+                  const isSelected = d === selectedDate;
+                  const cls = isSelected
+                    ? "bg-mesa-accent text-white font-bold shadow-lg shadow-mesa-accent/30"
+                    : open
+                    ? "bg-brown-800 text-white hover:bg-brown-700 font-semibold"
+                    : isPracticeDay
+                    ? "bg-brown-900 text-brown-500 line-through"
+                    : "text-brown-700";
+                  return (
+                    <button key={d} type="button" disabled={!open} onClick={() => pickDate(d)}
+                      className={`relative h-11 sm:h-12 rounded-lg text-sm transition ${cls} ${d === today.date && !isSelected ? "ring-1 ring-mesa-accent/60" : ""}`}>
+                      {Number(d.slice(8))}
+                      {hasMine && <span className={`absolute bottom-1 left-1/2 h-1.5 w-1.5 -translate-x-1/2 rounded-full ${isSelected ? "bg-white" : "bg-green-400"}`} />}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-brown-400">
+                <span className="flex items-center gap-1.5"><span className="inline-block h-3 w-3 rounded bg-brown-800" /> Open</span>
+                <span className="flex items-center gap-1.5"><span className="inline-block h-3 w-3 rounded bg-brown-900 border border-brown-700" /> Full</span>
+                <span className="flex items-center gap-1.5"><span className="inline-block h-1.5 w-1.5 rounded-full bg-green-400" /> Your practice</span>
               </div>
             </div>
 
-            <form id="team-form" onSubmit={submit} className="rounded-xl border border-brown-700 bg-brown-900/40 px-5 py-5 space-y-5">
-              <h2 className="font-[family-name:var(--font-oswald)] text-xl font-bold text-white tracking-wide">2. YOUR TEAM</h2>
-              <div>
-                <label className={labelClass}>Team Name</label>
-                <input required value={teamName} onChange={(e) => setTeamName(e.target.value)} className={inputClass} placeholder="e.g. St. Paul's 7th Grade Boys" />
-              </div>
-              {coaches.map((c, i) => (
-                <div key={i} className="rounded-lg border border-brown-800 p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-semibold text-white">{i === 0 ? "Head Coach" : `Coach ${i + 1}`}</p>
-                    {i > 0 && (
-                      <button type="button" onClick={() => setCoaches((prev) => prev.filter((_, idx) => idx !== i))} className="text-xs text-brown-400 hover:text-red-400">Remove</button>
-                    )}
-                  </div>
-                  <input required value={c.name} onChange={(e) => updateCoach(i, "name", e.target.value)} className={inputClass} placeholder="Full name" />
-                  <input required type="tel" value={c.phone} onChange={(e) => updateCoach(i, "phone", e.target.value)} className={inputClass} placeholder="Phone" />
-                  <input required type="email" value={c.email} onChange={(e) => updateCoach(i, "email", e.target.value)} className={inputClass} placeholder="Email" />
+            {selectedDate && (
+              <form id="team-form" onSubmit={submit} className="scroll-mt-24 rounded-xl border border-mesa-accent/60 bg-brown-900/40 px-5 py-5 space-y-5">
+                <div>
+                  <h2 className="font-[family-name:var(--font-oswald)] text-xl font-bold text-white tracking-wide">2. {formatDateLong(selectedDate).toUpperCase()}</h2>
+                  <label className={`${labelClass} mt-4`}>Start Time (1-hour practice)</label>
+                  <select required value={selectedStart} onChange={(e) => setSelectedStart(e.target.value)} className={inputClass}>
+                    <option value="">Select a time</option>
+                    {openTimes(selectedDate).map((t) => (
+                      <option key={t} value={t}>{formatTime12(t)} – {formatTime12(practiceEnd(t))}</option>
+                    ))}
+                  </select>
                 </div>
-              ))}
-              {coaches.length < 6 && (
-                <button type="button" onClick={() => setCoaches((prev) => [...prev, { name: "", phone: "", email: "" }])}
-                  className="text-sm font-semibold text-mesa-accent hover:underline">+ Add another coach</button>
-              )}
-              {!hasProfile && (
-                <label className="flex items-start gap-3 cursor-pointer">
-                  <input type="checkbox" checked={smsConsent} onChange={(e) => setSmsConsent(e.target.checked)} className="mt-1 h-4 w-4 accent-mesa-accent" />
-                  <span className="text-xs text-brown-300 leading-relaxed">
-                    Text me a weekly reminder to book my team&apos;s practices (Mesa Basketball Training, about once a week). Message &amp; data rates may apply. Reply STOP to cancel, HELP for help.
-                  </span>
-                </label>
-              )}
-              <div className="rounded-lg bg-brown-950/60 px-4 py-3 text-sm text-brown-200">
-                <p><span className="font-semibold text-white">{selected.length}</span> practice{selected.length === 1 ? "" : "s"} selected · ${STPAULS_PRICE} each, cash to your trainer at practice.</p>
-                <p className="mt-1 text-xs text-brown-400">Any available Mesa trainer may run your practice. Practices can&apos;t be cancelled online — call or text Artemios at (631) 599-1280.</p>
-              </div>
-              {submitError && <p className="text-red-400 text-sm">{submitError}</p>}
-              <button type="submit" disabled={submitting || selected.length === 0}
-                className="w-full rounded-lg bg-mesa-accent py-3 font-bold text-white hover:bg-mesa-accent/90 transition disabled:opacity-50">
-                {submitting ? "Booking..." : `Book ${selected.length || ""} Practice${selected.length === 1 ? "" : "s"}`}
-              </button>
-            </form>
+                <div>
+                  <label className={labelClass}>Team Name</label>
+                  <input required value={teamName} onChange={(e) => setTeamName(e.target.value)} className={inputClass} placeholder="e.g. St. Paul's 7th Grade Boys" />
+                </div>
+                {coaches.map((c, i) => (
+                  <div key={i} className="rounded-lg border border-brown-800 p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-semibold text-white">{i === 0 ? "Head Coach" : `Coach ${i + 1}`}</p>
+                      {i > 0 && (
+                        <button type="button" onClick={() => setCoaches((prev) => prev.filter((_, idx) => idx !== i))} className="text-xs text-brown-400 hover:text-red-400">Remove</button>
+                      )}
+                    </div>
+                    <input required value={c.name} onChange={(e) => updateCoach(i, "name", e.target.value)} className={inputClass} placeholder="Full name" />
+                    <input required type="tel" value={c.phone} onChange={(e) => updateCoach(i, "phone", e.target.value)} className={inputClass} placeholder="Phone" />
+                    <input required type="email" value={c.email} onChange={(e) => updateCoach(i, "email", e.target.value)} className={inputClass} placeholder="Email" />
+                  </div>
+                ))}
+                {coaches.length < 6 && (
+                  <button type="button" onClick={() => setCoaches((prev) => [...prev, { name: "", phone: "", email: "" }])}
+                    className="text-sm font-semibold text-mesa-accent hover:underline">+ Add another coach</button>
+                )}
+                {!hasProfile && (
+                  <label className="flex items-start gap-3 cursor-pointer">
+                    <input type="checkbox" checked={smsConsent} onChange={(e) => setSmsConsent(e.target.checked)} className="mt-1 h-4 w-4 accent-mesa-accent" />
+                    <span className="text-xs text-brown-300 leading-relaxed">
+                      Text me a weekly reminder to book my team&apos;s practices (Mesa Basketball Training, about once a week). Message &amp; data rates may apply. Reply STOP to cancel, HELP for help.
+                    </span>
+                  </label>
+                )}
+                <div className="rounded-lg bg-brown-950/60 px-4 py-3 text-sm text-brown-200">
+                  <p>${STPAULS_PRICE}, paid in cash to your trainer at practice.</p>
+                  <p className="mt-1 text-xs text-brown-400">Any available Mesa trainer may run your practice. Practices can&apos;t be cancelled online — call or text Artemios at (631) 599-1280.</p>
+                </div>
+                {submitError && <p className="text-red-400 text-sm">{submitError}</p>}
+                <button type="submit" disabled={submitting || !selectedStart}
+                  className="w-full rounded-lg bg-mesa-accent py-3 font-bold text-white hover:bg-mesa-accent/90 transition disabled:opacity-50">
+                  {submitting ? "Booking..." : "Book Practice"}
+                </button>
+              </form>
+            )}
           </div>
         )}
-      </div>
-      {session && selected.length > 0 && (
-        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-brown-700 bg-brown-950/95 px-4 py-3 backdrop-blur">
-          <div className="mx-auto flex max-w-2xl items-center justify-between gap-3">
-            <p className="text-sm text-white">{selected.length} practice{selected.length === 1 ? "" : "s"} selected</p>
-            <button type="button" onClick={() => document.getElementById("team-form")?.scrollIntoView({ behavior: "smooth" })}
-              className="rounded-lg bg-mesa-accent px-4 py-2 text-sm font-bold text-white hover:bg-mesa-accent/90">
-              Continue to Team Info ↓
-            </button>
+      </main>
+
+      {/* Footer */}
+      <footer className="border-t border-brown-800 bg-mesa-dark py-12">
+        <div className="mx-auto max-w-4xl px-6 text-center">
+          <h2 className="font-[family-name:var(--font-oswald)] text-2xl font-bold tracking-wide">Get in Touch</h2>
+          <div className="mt-4 space-y-1 text-brown-300">
+            <p>
+              <span className="font-semibold text-white">Call / Text:</span>{" "}
+              <a href="tel:6315991280" className="hover:text-mesa-accent">(631) 599-1280</a>
+            </p>
+            <p>
+              <span className="font-semibold text-white">Email:</span>{" "}
+              <a href="mailto:artemios@mesabasketballtraining.com" className="hover:text-mesa-accent">
+                artemios@mesabasketballtraining.com
+              </a>
+            </p>
+          </div>
+          <div className="mt-3 flex flex-col items-center gap-2">
+            <a href="/my-bookings" className="text-sm text-mesa-accent hover:text-yellow-300">
+              My Bookings &mdash; Look Up Your Registrations
+            </a>
+            <a
+              href="https://www.instagram.com/mesabasketballtraining"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Instagram"
+              className="text-brown-400 hover:text-white transition"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <rect x="2" y="2" width="20" height="20" rx="5" ry="5" />
+                <circle cx="12" cy="12" r="4" />
+                <circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none" />
+              </svg>
+            </a>
+          </div>
+          <p className="mt-4 text-sm text-brown-600">
+            &copy; 2025&ndash;{new Date().getFullYear()} Mesa Basketball Training LLC. All rights reserved.
+          </p>
+          <div className="mt-3 flex justify-center gap-8 text-sm">
+            <a href="/privacy-policy" className="text-mesa-accent hover:text-yellow-300">Privacy Policy</a>
+            <a href="/terms" className="text-mesa-accent hover:text-yellow-300">Terms &amp; Conditions</a>
           </div>
         </div>
-      )}
+      </footer>
     </div>
   );
 }
