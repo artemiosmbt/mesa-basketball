@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { authClient } from "@/lib/auth";
+import { authClient, safeRedirectPath } from "@/lib/auth";
 
 export default function AuthCallbackPage() {
   const router = useRouter();
@@ -52,7 +52,13 @@ export default function AuthCallbackPage() {
             }
           }
 
-          router.replace("/login?confirmed=1");
+          // A page that sent someone through signup (e.g. the unlisted St.
+          // Paul's practices page, which nothing on the site links to)
+          // stashes where to come back to — carried through login's ?next=.
+          const returnTo = localStorage.getItem("mesa_post_auth_next");
+          localStorage.removeItem("mesa_post_auth_next");
+          const next = returnTo ? safeRedirectPath(returnTo) : "/";
+          router.replace(next === "/" ? "/login?confirmed=1" : `/login?confirmed=1&next=${encodeURIComponent(next)}`);
         }
       }
     );

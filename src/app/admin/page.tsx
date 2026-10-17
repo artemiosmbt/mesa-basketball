@@ -9,6 +9,7 @@ import { fullPriceForType, calcPrivatePrice as calcPrivatePricePreview, getTrain
 import { trainerNamesMatch, normalizeTrainerNameForComparison, ALL_TRAINER_NAMES, sortTrainerNames } from "@/lib/trainers";
 import { type CanonicalGroupId } from "@/lib/athletes";
 import { CANONICAL_GROUPS } from "@/lib/group-matching";
+import StPaulsPracticesTab from "./StPaulsPracticesTab";
 
 interface Registration {
   id: string;
@@ -1568,7 +1569,7 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true);
   const [registrations, setRegistrations] = useState<Registration[]>([]);
   const [profilesMap, setProfilesMap] = useState<Record<string, { phone: string; parentName: string; kids: ProfileKid[] }>>({});
-  const [tab, setTab] = useState<"upcoming" | "past" | "clients" | "calendar" | "groups" | "schedule">("upcoming");
+  const [tab, setTab] = useState<"upcoming" | "past" | "clients" | "calendar" | "groups" | "schedule" | "stpauls">("upcoming");
   const [typeFilter, setTypeFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [clientSearch, setClientSearch] = useState("");
@@ -2660,7 +2661,7 @@ export default function AdminPage() {
 
         {/* Tabs */}
         <div className="flex flex-wrap gap-2 mb-6">
-          {(authCtx?.role === "admin" ? (["upcoming", "schedule", "past", "calendar", "clients", "groups"] as const) : (["upcoming", "schedule", "past", "calendar"] as const)).map((t) => (
+          {(authCtx?.role === "admin" ? (["upcoming", "schedule", "past", "calendar", "clients", "groups", "stpauls"] as const) : (["upcoming", "schedule", "past", "calendar", "stpauls"] as const)).map((t) => (
             <button
               key={t}
               onClick={() => { setTab(t); setSelectedClient(null); }}
@@ -2671,13 +2672,13 @@ export default function AdminPage() {
                   <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
                   Calendar
                 </span>
-              ) : t === "clients" ? "Clients" : "Groups"}
+              ) : t === "clients" ? "Clients" : t === "stpauls" ? "St. Paul's Practices" : "Groups"}
             </button>
           ))}
         </div>
 
         {/* Trainer filter — admin and elevated trainer accounts only; applies across Upcoming/Past/Calendar (admin also gets Clients, elevated trainer does not) */}
-        {(authCtx?.role === "admin" || authCtx?.role === "elevated_trainer") && availableTrainers.length > 0 && (
+        {(authCtx?.role === "admin" || authCtx?.role === "elevated_trainer") && availableTrainers.length > 0 && tab !== "stpauls" && (
           <div className="flex flex-wrap items-center gap-2 mb-6">
             <span className="text-xs uppercase tracking-wider text-brown-500">Trainer</span>
             <select
@@ -2709,6 +2710,11 @@ export default function AdminPage() {
               ))}
             </div>
           </div>
+        )}
+
+        {/* St. Paul's team practices — own table, never mixed into the tabs above */}
+        {tab === "stpauls" && token && (
+          <StPaulsPracticesTab token={token} isAdmin={authCtx?.role === "admin"} />
         )}
 
         {/* Upcoming */}

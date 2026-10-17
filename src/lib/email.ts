@@ -1462,3 +1462,52 @@ export async function sendReminderEmailAdminSummary(data: {
   });
   if (result.error) console.error("Resend reminder-email admin summary error:", result.error);
 }
+
+// St. Paul's team practices (src/lib/stpauls.ts) — no money moves through
+// the site, so these are plain who/when notices. The admin email goes to
+// Artemios on every new booking so he can assign a trainer; the coach email
+// confirms what they booked.
+export async function sendStPaulsBookingAdminEmail(data: {
+  teamName: string;
+  coaches: { name: string; phone: string; email: string }[];
+  practices: { date: string; time: string }[];
+}) {
+  const resend = getResend();
+  const result = await resend.emails.send({
+    from: FROM_EMAIL,
+    to: ARTEMI_EMAIL,
+    subject: `St. Paul's Practice Booked: ${data.teamName}`,
+    html: `
+      <h2>New St. Paul's Practice Booking</h2>
+      <p><strong>Team:</strong> ${escapeHtml(data.teamName)}</p>
+      <p><strong>Practice(s):</strong><br/>${data.practices.map((p) => `${escapeHtml(p.date)}, ${escapeHtml(p.time)}`).join("<br/>")}</p>
+      <p><strong>Coach(es):</strong><br/>${data.coaches.map((c) => `${escapeHtml(c.name)} · ${escapeHtml(c.phone)} · ${escapeHtml(c.email)}`).join("<br/>")}</p>
+      <p>Assign a trainer in the admin dashboard's St. Paul's Practices tab.</p>
+    `,
+  });
+  if (result.error) console.error("Resend St. Paul's admin email error:", result.error);
+}
+
+export async function sendStPaulsBookingCoachEmail(data: {
+  to: string;
+  coachName: string;
+  teamName: string;
+  practices: { date: string; time: string }[];
+}) {
+  const resend = getResend();
+  const result = await resend.emails.send({
+    from: FROM_EMAIL,
+    to: data.to,
+    subject: `Practice Booked: ${data.teamName}`,
+    html: `
+      <h2>Your Practice Is Booked</h2>
+      <p>Hi ${escapeHtml(data.coachName)},</p>
+      <p>A Mesa Basketball trainer will run ${escapeHtml(data.teamName)}'s practice at St. Paul's Cathedral:</p>
+      <p>${data.practices.map((p) => `${escapeHtml(p.date)}, ${escapeHtml(p.time)}`).join("<br/>")}</p>
+      <p><strong>Price:</strong> $60 per practice, paid in cash to your trainer at practice.</p>
+      <p>Need to cancel or change a practice? Call or text Artemios at (631) 599-1280.</p>
+      <p style="color: #999; font-size: 13px;">— Mesa Basketball Training</p>
+    `,
+  });
+  if (result.error) console.error("Resend St. Paul's coach email error:", result.error);
+}

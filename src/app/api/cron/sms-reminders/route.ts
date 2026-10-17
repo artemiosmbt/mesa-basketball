@@ -104,6 +104,37 @@ export async function GET(req: NextRequest) {
     phonesToText.push(r.phone);
   }
 
+  // St. Paul's team coaches (src/lib/stpauls.ts) get their own nudge to
+  // book a practice. They never have registrations rows, so consent comes
+  // from their profile; anyone already getting the regular text above, or
+  // whose team already has a practice next week, is skipped.
+  const { data: coachRows, error: coachError } = await supabase
+    .from("stpauls_practices")
+    .select("booked_by_email, practice_date, status");
+  if (coachError) console.error("Failed to fetch St. Paul's coaches:", coachError);
+  const coachEmails = new Set((coachRows || []).map((r) => r.booked_by_email));
+  const coachesBookedNextWeek = new Set(
+    (coachRows || [])
+      .filter((r) => r.status === "booked" && r.practice_date >= mondayStr && r.practice_date <= sundayStr)
+      .map((r) => r.booked_by_email)
+  );
+  const coachPhonesToText: string[] = [];
+  if (coachEmails.size > 0) {
+    const { data: coachProfiles } = await supabase
+      .from("profiles")
+      .select("email, phone, sms_consent")
+      .in("email", Array.from(coachEmails))
+      .eq("sms_consent", true);
+    for (const p of coachProfiles || []) {
+      const email = (p.email || "").toLowerCase().trim();
+      if (!p.phone || coachesBookedNextWeek.has(email)) continue;
+      const norm = normalizePhone(p.phone);
+      if (!norm || seenNormalized.has(norm) || bookedPhones.has(norm)) continue;
+      seenNormalized.add(norm);
+      coachPhonesToText.push(p.phone);
+    }
+  }
+
   // Re-check consent right before sending, not just at the top of the run —
   // an opt-out (STOP reply) landing partway through this loop must not still
   // get texted just because they were opted-in when phonesToText was built.
@@ -135,6 +166,32 @@ export async function GET(req: NextRequest) {
     } catch (err) {
       console.error(`Failed to send SMS to ${phone}:`, err);
       failed++;
+    }
+  }
+
+  if (coachPhonesToText.length > 0) {
+    // Same just-in-time consent re-check, against profiles (STOP replies
+    // update profiles too — see twilio/incoming).
+    const { data: stillCoachOptedIn } = await supabase
+      .from("profiles")
+      .select("phone")
+      .in("email", Array.from(coachEmails))
+      .eq("sms_consent", true);
+    const stillCoachNorm = new Set((stillCoachOptedIn || []).map((r) => normalizePhone(r.phone || "")).filter(Boolean));
+    const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://www.mesabasketballtraining.com";
+    for (const phone of coachPhonesToText) {
+      if (!stillCoachNorm.has(normalizePhone(phone))) continue;
+      try {
+        await client.messages.create({
+          body: `Mesa Basketball: Don't forget to book a Mesa trainer for your team's practice this week! Pick your times at ${baseUrl}/stpauls-practices. Reply STOP to opt out.`,
+          from: process.env.TWILIO_PHONE_NUMBER,
+          to: formatPhone(phone),
+        });
+        sent++;
+      } catch (err) {
+        console.error(`Failed to send coach SMS to ${phone}:`, err);
+        failed++;
+      }
     }
   }
 

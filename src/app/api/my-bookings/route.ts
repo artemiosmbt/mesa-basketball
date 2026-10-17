@@ -11,6 +11,8 @@ import {
   getLateFeeEventsForRegistrations,
 } from "@/lib/supabase";
 import { getWeeklySchedule, getPrivateSlots } from "@/lib/sheets";
+import { getPracticesForEmail } from "@/lib/stpauls-server";
+import { formatTime12 } from "@/lib/stpauls";
 
 // This returns every past/future booking's manage_token (the sole secret
 // needed to cancel/reschedule it), plus kids' names, session prices,
@@ -82,7 +84,35 @@ export async function POST(req: NextRequest) {
         registrations.length > 0 ? registrations[0].parent_name : email.split("@")[0]
       ));
 
+    // St. Paul's team practices this account booked or coaches. Shown like
+    // a session, but with no manage link: coaches can't cancel online.
+    const practices = await getPracticesForEmail(email).catch((e) => {
+      console.error("My bookings: St. Paul's practices load failed:", e);
+      return [];
+    });
+    const practiceRecords = practices.map((p) => {
+      const start = formatTime12(String(p.start_time).slice(0, 5));
+      const end = formatTime12(String(p.end_time).slice(0, 5));
+      return {
+        id: p.id,
+        createdAt: p.created_at,
+        parentName: p.booked_by_name,
+        kids: p.team_name,
+        type: "stpauls-practice",
+        sessionDetails: `Team Practice — ${p.practice_date}, ${start}–${end} at St. Paul's`,
+        bookedDate: p.practice_date,
+        bookedStartTime: start,
+        bookedEndTime: end,
+        bookedLocation: "St. Paul's Cathedral",
+        bookedTrainer: null,
+        status: p.status === "booked" ? "confirmed" : "cancelled",
+        manageToken: null,
+        cancellation: null,
+      };
+    });
+
     return NextResponse.json({
+      practices: practiceRecords,
       registrations: registrations.map((r) => {
         let sessionDetails = r.session_details;
         let bookedLocation = r.booked_location;

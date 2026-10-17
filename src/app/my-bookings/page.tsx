@@ -53,7 +53,7 @@ interface BookingRecord {
   bookedLocation: string | null;
   bookedTrainer: string | null;
   status: string;
-  manageToken: string;
+  manageToken: string | null;
   cancellation?: {
     late: boolean;
     packageSession: boolean;
@@ -143,7 +143,8 @@ export default function MyBookings() {
       if (data.error) {
         setError(data.error);
       } else {
-        setBookings(data.registrations);
+        // St. Paul's team practices ride along as their own booking type.
+        setBookings([...(data.registrations || []), ...(data.practices || [])]);
         setRewards(data.rewards || null);
         setAccountCredit(data.accountCredit || 0);
         setActivePackage(data.activePackage || null);
@@ -423,13 +424,15 @@ export default function MyBookings() {
           function renderCard(b: BookingRecord, isPast = false) {
             const isConfirmed = b.status === "confirmed";
             const isCancelled = b.status === "cancelled";
-            const isClickable = isConfirmed && !isPast;
+            const isPractice = b.type === "stpauls-practice";
+            const isClickable = isConfirmed && !isPast && !isPractice;
 
             const typeLabel =
               b.type === "group-private" ? "Group Private"
               : b.type === "private" ? "Private"
               : b.type === "weekly" ? "Group Session"
               : b.type === "camp" ? "Camp"
+              : isPractice ? "Team Practice"
               : b.type;
 
             const inner = (
@@ -441,7 +444,7 @@ export default function MyBookings() {
                     </p>
                     <div className="mt-2 space-y-1 text-sm">
                       <p className="text-brown-400">
-                        <span className="text-brown-500">Players:</span> {b.kids}
+                        <span className="text-brown-500">{isPractice ? "Team:" : "Players:"}</span> {b.kids}
                       </p>
                       <p className="text-brown-400">
                         <span className="text-brown-500">Type:</span> {typeLabel}
@@ -450,6 +453,14 @@ export default function MyBookings() {
                         <p className="text-brown-400">
                           <span className="text-brown-500">Trainer:</span> {b.bookedTrainer}
                         </p>
+                      )}
+                      {isPractice && (
+                        <p className="text-brown-400">
+                          <span className="text-brown-500">Trainer:</span> A Mesa Basketball trainer · $60 cash at practice
+                        </p>
+                      )}
+                      {isPractice && isConfirmed && !isPast && (
+                        <p className="text-brown-500 text-xs">To cancel or change, call or text Artemios at (631) 599-1280.</p>
                       )}
                       {b.cancellation && (
                         <CancellationLines b={b} />
