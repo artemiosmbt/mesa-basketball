@@ -12,7 +12,7 @@ export async function getPracticesForEmail(email: string) {
   const supabase = getSupabaseAdmin();
   const [byBooker, byCoach] = await Promise.all([
     supabase.from("stpauls_practices").select("*").eq("booked_by_email", email),
-    supabase.from("stpauls_practices").select("*").contains("coaches", [{ email }]),
+    supabase.from("stpauls_practices").select("*").contains("coaches", JSON.stringify([{ email }])),
   ]);
   if (byBooker.error) throw byBooker.error;
   if (byCoach.error) throw byCoach.error;

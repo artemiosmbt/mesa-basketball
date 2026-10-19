@@ -6,7 +6,8 @@ import Link from "next/link";
 import { authClient, resolveAuthRole, type AuthContext } from "@/lib/auth";
 import type { WeeklySession, Camp, PrivateSlot } from "@/lib/sheets";
 import { fullPriceForType, calcPrivatePrice as calcPrivatePricePreview, getTrainerTier, effectiveSessionPrice, REFERRAL_CREDIT_SESSION_PRICE } from "@/lib/pricing";
-import { trainerNamesMatch, normalizeTrainerNameForComparison, ALL_TRAINER_NAMES, sortTrainerNames } from "@/lib/trainers";
+import { trainerNamesMatch, normalizeTrainerNameForComparison, ALL_TRAINER_NAMES, sortTrainerNames, OWNER_TRAINER_NAME } from "@/lib/trainers";
+import { formatTime12 as stpaulsTime12, nyNow as stpaulsNyNow, toMinutes as stpaulsToMinutes } from "@/lib/stpauls";
 import { type CanonicalGroupId } from "@/lib/athletes";
 import { CANONICAL_GROUPS } from "@/lib/group-matching";
 import StPaulsPracticesTab from "./StPaulsPracticesTab";
@@ -813,6 +814,30 @@ function formatDateHeader(d: string | null): string {
   if (!key) return d;
   const [y, m, day] = key.split("-").map(Number);
   return new Date(y, m - 1, day).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+}
+
+// A St. Paul's team practice assigned to the viewer, shown in their own
+// Upcoming list (they still live in their own table — see StPaulsPracticesTab).
+type MyStPaulsPractice = { id: string; assignedTrainer: string | null; date: string; start: string; end: string; teamName: string; coaches: { name?: string; phone?: string }[] };
+
+function StPaulsUpcomingCard({ p, onOpen }: { p: MyStPaulsPractice; onOpen: () => void }) {
+  const coach = p.coaches.find((c) => c?.name || c?.phone);
+  return (
+    <button type="button" onClick={onOpen} className="mb-2 w-full text-left rounded-xl border-2 border-green-700/70 bg-green-950/30 px-4 py-3 hover:border-green-500">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-full bg-green-800/60 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-green-200">St. Paul&apos;s Practice</span>
+            <span className="font-medium text-sm text-white">{p.teamName}</span>
+          </div>
+          <p className="mt-1 text-xs text-brown-300">
+            {stpaulsTime12(p.start)}–{stpaulsTime12(p.end)} · St. Paul&apos;s Cathedral · $60 cash
+            {coach ? ` · Coach: ${[coach.name, coach.phone].filter(Boolean).join(" ")}` : ""}
+          </p>
+        </div>
+      </div>
+    </button>
+  );
 }
 
 function groupByDate(list: Registration[]): { key: string; label: string; sessions: Registration[] }[] {
@@ -1622,6 +1647,7 @@ export default function AdminPage() {
   }
   const [token, setToken] = useState<string | null>(null);
   const [authCtx, setAuthCtx] = useState<AuthContext | null>(null);
+  const [myStPauls, setMyStPauls] = useState<MyStPaulsPractice[]>([]);
   const [trainerFilter, setTrainerFilter] = useState("all");
   const [selectedClient, setSelectedClient] = useState<string | null>(null);
   // Opening a client swaps the (long) client list for a (shorter) profile
@@ -1832,6 +1858,17 @@ export default function AdminPage() {
       .finally(() => setRosterLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, token, trainerFilter]);
+
+  // St. Paul's practices for the Upcoming list (the API already limits a
+  // trainer to their own; filtered to the viewer's own name below).
+  useEffect(() => {
+    if (!token || !authCtx || tab !== "upcoming") return;
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+    fetch(`/api/admin/stpauls?from=${today}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => (r.ok ? r.json() : { practices: [] }))
+      .then((d) => setMyStPauls(d.practices || []))
+      .catch(() => {});
+  }, [token, authCtx, tab]);
 
   async function loadAllPast() {
     if (!token) return;
@@ -2555,6 +2592,18 @@ export default function AdminPage() {
     return <div className="min-h-screen bg-brown-950 flex items-center justify-center"><p className="text-brown-400">Loading...</p></div>;
   }
 
+  // Practices assigned to whoever is viewing (Artemios included, when he
+  // assigns himself) — shown in Upcoming; every other practice stays in
+  // the St. Paul's Practices tab only.
+  const myName = authCtx?.role === "admin" ? OWNER_TRAINER_NAME : authCtx?.trainerName || null;
+  const stpaulsNow = stpaulsNyNow();
+  const shownStPauls = !myName || search.trim() || typeFilter !== "all" || (trainerFilter !== "all" && !trainerNamesMatch(trainerFilter, myName))
+    ? []
+    : myStPauls
+      .filter((p) => trainerNamesMatch(p.assignedTrainer, myName))
+      .filter((p) => p.date > stpaulsNow.date || (p.date === stpaulsNow.date && stpaulsToMinutes(p.start) > stpaulsNow.minutes))
+      .sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start));
+
   const displayedUpcoming = applyFilters(upcoming);
   const displayedPast = applyFilters(past, true);
 
@@ -2667,7 +2716,7 @@ export default function AdminPage() {
               onClick={() => { setTab(t); setSelectedClient(null); }}
               className={`px-3 py-2 rounded-lg text-sm font-semibold capitalize transition ${tab === t ? "bg-mesa-accent text-white" : "bg-brown-900 text-brown-400 hover:text-white"}`}
             >
-              {t === "upcoming" ? `Upcoming (${upcoming.length})` : t === "schedule" ? "My Schedule" : t === "past" ? "Past" : t === "calendar" ? (
+              {t === "upcoming" ? `Upcoming (${upcoming.length + shownStPauls.length})` : t === "schedule" ? "My Schedule" : t === "past" ? "Past" : t === "calendar" ? (
                 <span className="flex items-center gap-1.5">
                   <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
                   Calendar
@@ -2734,23 +2783,39 @@ export default function AdminPage() {
               const hadSessionsToday = applyFilters(
                 visibleRegistrations.filter(r => r.booked_date && parseDateKey(r.booked_date) === todayKey)
               ).length > 0;
+              const openPractices = () => setTab("stpauls");
+              const todayPractices = shownStPauls.filter((p) => p.date === todayKey);
+              const futurePractices = shownStPauls.filter((p) => p.date !== todayKey);
+              // Session date groups plus any date that only has a practice.
+              const sessionGroups = groupByDate(futureSessions);
+              const dayKeys = Array.from(new Set([
+                ...sessionGroups.map((g) => (g.key === "__none__" ? "__none__" : parseDateKey(g.key) || g.key)),
+                ...futurePractices.map((p) => p.date),
+              ])).sort((a, b) => (a === "__none__" ? -1 : b === "__none__" ? 1 : a.localeCompare(b)));
+              const total = displayedUpcoming.length + shownStPauls.length;
               return (
                 <>
-                  <p className="text-xs text-brown-500 mb-3">{displayedUpcoming.length} session{displayedUpcoming.length !== 1 ? "s" : ""}</p>
+                  <p className="text-xs text-brown-500 mb-3">{total} session{total !== 1 ? "s" : ""}</p>
                   <div className="space-y-4">
                     <div>
                       <div className="text-xs font-semibold text-mesa-accent border-b border-brown-700 pb-1.5 mb-2">Today — {todayLabel}</div>
+                      {todayPractices.map((p) => <StPaulsUpcomingCard key={p.id} p={p} onOpen={openPractices} />)}
                       {todaySessions.length === 0
-                        ? <p className="text-xs text-brown-500 italic py-1">{hadSessionsToday ? "No more sessions scheduled for today." : "No sessions scheduled for today."}</p>
+                        ? todayPractices.length === 0 && <p className="text-xs text-brown-500 italic py-1">{hadSessionsToday ? "No more sessions scheduled for today." : "No sessions scheduled for today."}</p>
                         : <FolderAwareCardList list={todaySessions} ctx={cardCtx} />
                       }
                     </div>
-                    {groupByDate(futureSessions).map(({ key, label, sessions }) => (
-                      <div key={key}>
-                        <div className="text-xs font-semibold text-mesa-accent border-b border-brown-700 pb-1.5 mb-2">{label}</div>
-                        <FolderAwareCardList list={sessions} ctx={cardCtx} />
-                      </div>
-                    ))}
+                    {dayKeys.map((dayKey) => {
+                      const sessions = sessionGroups.filter((g) => (g.key === "__none__" ? "__none__" : parseDateKey(g.key) || g.key) === dayKey).flatMap((g) => g.sessions);
+                      const practices = futurePractices.filter((p) => p.date === dayKey);
+                      return (
+                        <div key={dayKey}>
+                          <div className="text-xs font-semibold text-mesa-accent border-b border-brown-700 pb-1.5 mb-2">{dayKey === "__none__" ? "No Date" : formatDateHeader(dayKey)}</div>
+                          {practices.map((p) => <StPaulsUpcomingCard key={p.id} p={p} onOpen={openPractices} />)}
+                          {sessions.length > 0 && <FolderAwareCardList list={sessions} ctx={cardCtx} />}
+                        </div>
+                      );
+                    })}
                   </div>
                 </>
               );

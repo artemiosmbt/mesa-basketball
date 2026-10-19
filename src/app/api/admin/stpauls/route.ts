@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { verifyAdmin, verifyDashboardAccess } from "@/lib/auth";
 import { requireTrainerNameConfigured } from "@/lib/admin-data-scope";
-import { ALL_TRAINER_NAMES, trainerNamesMatch } from "@/lib/trainers";
+import { ALL_TRAINER_NAMES, OWNER_TRAINER_NAME, trainerNamesMatch } from "@/lib/trainers";
 import { formatDateLong, formatTime12, STPAULS_LOCATION, STPAULS_SESSION_LABEL } from "@/lib/stpauls";
 import { sendStPaulsCancelCoachEmail } from "@/lib/email";
 import { sendAdminSMS, sendSMS } from "@/lib/sms";
@@ -102,6 +102,9 @@ export async function PATCH(req: NextRequest) {
     await Promise.allSettled([
       previous ? notifyTrainerOfCancellation(notifyParams(practice, previous)) : Promise.resolve(),
       trainer ? notifyTrainerOfNewBooking({ ...notifyParams(practice, trainer), smsText: assignedText(practice) }) : Promise.resolve(),
+      // Artemios has no trainer contact entry — he gets the same text on his
+      // own phone when he assigns himself.
+      trainerNamesMatch(trainer, OWNER_TRAINER_NAME) ? sendAdminSMS(assignedText(practice)) : Promise.resolve(),
     ]);
   }
   return NextResponse.json({ ok: true, assignedTrainer: trainer });
