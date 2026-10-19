@@ -1488,6 +1488,74 @@ export async function sendStPaulsBookingAdminEmail(data: {
   if (result.error) console.error("Resend St. Paul's admin email error:", result.error);
 }
 
+// Coach-facing St. Paul's emails use the same branded shell as
+// sendReminderEmail (logo, navy/gold/cream, Outlook dark-mode overrides).
+function stPaulsBrandedEmail(heading: string, body: string): string {
+  return `<!doctype html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="color-scheme" content="light" />
+<meta name="supported-color-schemes" content="light" />
+<title>Mesa Basketball Training</title>
+<style>
+  [data-ogsc] .mesa-outer-bg { background-color: #091530 !important; }
+  [data-ogsc] .mesa-card-bg { background-color: #0f1f42 !important; }
+  [data-ogsc] .mesa-content-bg { background-color: #fffbeb !important; }
+  [data-ogsc] .mesa-session-card { background-color: #ffffff !important; }
+  [data-ogsc] .mesa-gold-text { color: #d4af37 !important; }
+  [data-ogsc] .mesa-navy-text { color: #091530 !important; }
+  [data-ogsc] .mesa-body-text { color: #3a3a3a !important; }
+  @media (prefers-color-scheme: dark) {
+    .mesa-outer-bg { background-color: #091530 !important; }
+    .mesa-card-bg { background-color: #0f1f42 !important; }
+    .mesa-content-bg { background-color: #fffbeb !important; }
+    .mesa-session-card { background-color: #ffffff !important; }
+    .mesa-gold-text { color: #d4af37 !important; }
+    .mesa-navy-text { color: #091530 !important; }
+    .mesa-body-text { color: #3a3a3a !important; }
+  }
+</style>
+</head>
+<body class="mesa-outer-bg" bgcolor="#091530" style="margin: 0; padding: 0; background-color: #091530;">
+      <div class="mesa-outer-bg" style="background: #091530; padding: 32px 16px; font-family: Arial, Helvetica, sans-serif;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="mesa-card-bg" style="max-width: 560px; margin: 0 auto; background: #0f1f42; border-radius: 12px; overflow: hidden; border: 1px solid #1e3a6e;">
+          <tr>
+            <td class="mesa-outer-bg" style="background: #091530; padding: 28px 24px; text-align: center; border-bottom: 2px solid #d4af37;">
+              <img src="${BASE_URL}/logo-circle.png" width="72" height="72" alt="Mesa Basketball Training" style="display: block; margin: 0 auto;" />
+              <p class="mesa-gold-text" style="margin: 10px 0 0; color: #d4af37; font-size: 12px; letter-spacing: 2px; text-transform: uppercase; font-weight: bold;">Mesa Basketball Training</p>
+            </td>
+          </tr>
+          <tr>
+            <td class="mesa-content-bg" style="padding: 32px 28px; background: #fffbeb;">
+              <h1 class="mesa-navy-text" style="margin: 0 0 20px; color: #091530; font-size: 24px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.5px; font-family: Arial, Helvetica, sans-serif;">${heading}</h1>
+              ${body}
+            </td>
+          </tr>
+          <tr>
+            <td class="mesa-outer-bg" style="background: #091530; padding: 20px 24px; text-align: center;">
+              <p style="margin: 0; color: #fffbeb; font-size: 13px;">
+                Questions? Call/text (631) 599-1280 or email <a href="mailto:artemios@mesabasketballtraining.com" class="mesa-gold-text" style="color: #d4af37;">artemios@mesabasketballtraining.com</a>
+              </p>
+            </td>
+          </tr>
+        </table>
+      </div>
+</body>
+</html>`;
+}
+
+function stPaulsPracticeCard(teamName: string, lines: string[]): string {
+  return `
+        <div class="mesa-session-card" style="background: #ffffff; border: 1px solid #e5decf; border-left: 4px solid #d4af37; border-radius: 8px; padding: 14px 16px; margin-bottom: 12px;">
+          <p class="mesa-navy-text" style="margin: 0 0 6px; color: #091530; font-size: 15px; font-weight: bold;">${escapeHtml(teamName)}</p>
+          <p class="mesa-body-text" style="margin: 0; color: #3a3a3a; font-size: 13px; line-height: 1.5;">${lines.join("<br/>")}</p>
+        </div>`;
+}
+
+const stPaulsP = (html: string) => `<p class="mesa-body-text" style="margin: 0 0 14px; color: #3a3a3a; font-size: 14px; line-height: 1.55;">${html}</p>`;
+
 export async function sendStPaulsBookingCoachEmail(data: {
   to: string;
   coachName: string;
@@ -1498,16 +1566,18 @@ export async function sendStPaulsBookingCoachEmail(data: {
   const result = await resend.emails.send({
     from: FROM_EMAIL,
     to: data.to,
-    subject: `Practice Booked: ${data.teamName}`,
-    html: `
-      <h2>Your Practice Is Booked</h2>
-      <p>Hi ${escapeHtml(data.coachName)},</p>
-      <p>A Mesa Basketball trainer will run ${escapeHtml(data.teamName)}'s practice at St. Paul's Cathedral:</p>
-      <p>${data.practices.map((p) => `${escapeHtml(p.date)}, ${escapeHtml(p.time)}`).join("<br/>")}</p>
-      <p><strong>Price:</strong> $60 per practice, paid in cash to your trainer at practice.</p>
-      <p>Need to cancel or change a practice? Call or text Artemios at (631) 599-1280.</p>
-      <p style="color: #999; font-size: 13px;">— Mesa Basketball Training</p>
-    `,
+    replyTo: ARTEMI_EMAIL,
+    subject: `Practice Confirmed — ${data.teamName}`,
+    html: stPaulsBrandedEmail("Practice Confirmed", `
+      ${stPaulsP(`Hi ${escapeHtml(data.coachName)}, you're all set. A Mesa Basketball trainer will run your team's practice.`)}
+      ${stPaulsPracticeCard(data.teamName, [
+        ...data.practices.map((p) => `<strong class="mesa-navy-text" style="color: #091530;">${escapeHtml(p.date)}, ${escapeHtml(p.time)}</strong>`),
+        "St. Paul's Cathedral",
+      ])}
+      <p class="mesa-outer-bg mesa-gold-text" style="background: #091530; color: #d4af37; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center; margin: 18px 0;">$60 cash to your trainer at practice</p>
+      ${stPaulsP(`Need to cancel or change a practice? Call or text Artemios at (631) 599-1280.`)}
+      ${stPaulsP(`<a href="${BASE_URL}/my-bookings" class="mesa-navy-text" style="color: #091530; font-weight: bold;">View My Bookings</a> &middot; <a href="${BASE_URL}/stpauls-practices" class="mesa-navy-text" style="color: #091530; font-weight: bold;">Book another practice</a>`)}
+    `),
   });
   if (result.error) console.error("Resend St. Paul's coach email error:", result.error);
 }
@@ -1523,14 +1593,16 @@ export async function sendStPaulsCancelCoachEmail(data: {
   const result = await resend.emails.send({
     from: FROM_EMAIL,
     to: data.to,
-    subject: `Practice Cancelled: ${data.teamName}`,
-    html: `
-      <h2>Your Practice Was Cancelled</h2>
-      <p>Hi ${escapeHtml(data.coachName)},</p>
-      <p>${escapeHtml(data.teamName)}'s practice at St. Paul's Cathedral on ${escapeHtml(data.date)}, ${escapeHtml(data.time)} has been cancelled.</p>
-      <p>Questions, or want a new time? Call or text Artemios at (631) 599-1280.</p>
-      <p style="color: #999; font-size: 13px;">— Mesa Basketball Training</p>
-    `,
+    replyTo: ARTEMI_EMAIL,
+    subject: `Practice Cancelled — ${data.teamName}`,
+    html: stPaulsBrandedEmail("Practice Cancelled", `
+      ${stPaulsP(`Hi ${escapeHtml(data.coachName)}, this practice has been cancelled:`)}
+      ${stPaulsPracticeCard(data.teamName, [
+        `<strong class="mesa-navy-text" style="color: #091530; text-decoration: line-through;">${escapeHtml(data.date)}, ${escapeHtml(data.time)}</strong>`,
+        "St. Paul's Cathedral",
+      ])}
+      ${stPaulsP(`Want a new time? <a href="${BASE_URL}/stpauls-practices" class="mesa-navy-text" style="color: #091530; font-weight: bold;">Book another practice</a>, or call/text Artemios at (631) 599-1280.`)}
+    `),
   });
   if (result.error) console.error("Resend St. Paul's cancel email error:", result.error);
 }
