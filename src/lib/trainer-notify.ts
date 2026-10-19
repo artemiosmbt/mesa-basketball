@@ -19,13 +19,16 @@ export async function notifyTrainerOfNewBooking(params: {
   startTime: string;
   endTime: string;
   location: string;
+  // Replaces the default text wording (e.g. St. Paul's "you were assigned").
+  smsText?: string;
 }): Promise<void> {
+  const { smsText, ...emailParams } = params;
   const contact = getTrainerContact(params.trainer);
   if (!contact) return;
   const trainerName = contact.trainerName!;
   if (contact.email) {
     try {
-      await sendTrainerNewBookingEmail({ to: contact.email, trainerName, ...params });
+      await sendTrainerNewBookingEmail({ to: contact.email, trainerName, ...emailParams });
     } catch (err) {
       console.error("Trainer new-booking email failed:", err);
     }
@@ -33,6 +36,7 @@ export async function notifyTrainerOfNewBooking(params: {
   if (contact.phone) {
     await sendSMS(
       contact.phone,
+      smsText ||
       `New booking: ${params.sessionLabel} with ${params.kids || params.parentName} on ${params.date} ${params.startTime}-${params.endTime} at ${params.location}.`
     );
   }

@@ -16,6 +16,7 @@ import {
   overlaps,
   practiceEnd,
   startTimesForDate,
+  STPAULS_LOCATION,
   STPAULS_PATH,
   STPAULS_PRICE,
   toMinutes,
@@ -148,7 +149,7 @@ export default function StPaulsPracticesPage() {
   const [smsConsent, setSmsConsent] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
-  const [success, setSuccess] = useState<string | null>(null);
+  const [success, setSuccess] = useState<{ when: string; team: string; coaches: string[]; texted: boolean } | null>(null);
 
   const load = useCallback(async (s: Session) => {
     setLoading(true);
@@ -236,11 +237,15 @@ export default function StPaulsPracticesPage() {
         setSubmitError(data.error || "Couldn't book that practice.");
         if (res.status === 409) { setSelectedStart(""); load(session); }
       } else {
-        setSuccess(`${formatDateLong(selectedDate)}, ${formatTime12(selectedStart)}–${formatTime12(practiceEnd(selectedStart))}`);
+        setSuccess({
+          when: `${formatDateLong(selectedDate)}, ${formatTime12(selectedStart)}–${formatTime12(practiceEnd(selectedStart))}`,
+          team: teamName.trim(),
+          coaches: coaches.map((c) => c.name.trim()).filter(Boolean),
+          texted: smsConsent || alreadyTexting,
+        });
         setSelectedDate(null);
         setSelectedStart("");
         load(session);
-        window.scrollTo({ top: 0, behavior: "smooth" });
       }
     } catch {
       setSubmitError("Couldn't book that practice. Please try again.");
@@ -254,6 +259,30 @@ export default function StPaulsPracticesPage() {
   return (
     <div className="min-h-screen bg-brown-950 text-white">
       <LandingNav />
+      {success && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4" onClick={() => setSuccess(null)}>
+          <div role="dialog" aria-modal="true" aria-labelledby="stpauls-confirmed"
+            className="relative w-full max-w-md rounded-2xl border border-mesa-accent bg-brown-900 px-6 py-7 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}>
+            <button type="button" aria-label="Close" onClick={() => setSuccess(null)}
+              className="absolute right-3 top-3 h-9 w-9 rounded-full text-2xl leading-none text-brown-300 hover:bg-brown-800 hover:text-white">×</button>
+            <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-green-600 text-3xl font-bold text-white">✓</div>
+            <h2 id="stpauls-confirmed" className="text-center text-2xl font-bold text-white">Practice Confirmed</h2>
+            <dl className="mt-5 space-y-3 text-sm">
+              <div><dt className="text-xs uppercase tracking-widest text-brown-400">Team</dt><dd className="text-base font-semibold text-white">{success.team}</dd></div>
+              <div><dt className="text-xs uppercase tracking-widest text-brown-400">When</dt><dd className="text-base font-semibold text-white">{success.when}</dd></div>
+              <div><dt className="text-xs uppercase tracking-widest text-brown-400">Where</dt><dd className="text-white">{STPAULS_LOCATION}</dd></div>
+              {success.coaches.length > 0 && (
+                <div><dt className="text-xs uppercase tracking-widest text-brown-400">Coaches</dt><dd className="text-white">{success.coaches.join(", ")}</dd></div>
+              )}
+              <div><dt className="text-xs uppercase tracking-widest text-brown-400">Payment</dt><dd className="text-white">${STPAULS_PRICE} cash to your trainer at practice</dd></div>
+            </dl>
+            <p className="mt-5 text-sm text-brown-300">A Mesa trainer will run your practice. A confirmation email is on its way{success.texted ? " and you'll get a text" : ""}. To cancel or change, call or text Artemios at (631) 599-1280.</p>
+            <button type="button" onClick={() => setSuccess(null)}
+              className="mt-6 w-full rounded-xl bg-mesa-accent py-3 font-bold text-brown-950 hover:bg-mesa-accent/90">Done</button>
+          </div>
+        </div>
+      )}
       <main className="w-full max-w-2xl mx-auto px-4 sm:px-6 py-10">
         <Header />
 
@@ -263,14 +292,6 @@ export default function StPaulsPracticesPage() {
           <div className="max-w-md mx-auto"><AuthForm onDone={afterAuth} /></div>
         ) : (
           <div className="space-y-6">
-            {success && (
-              <div className="rounded-xl border border-green-600/60 bg-green-900/30 px-5 py-4">
-                <p className="font-bold text-green-300">You&apos;re booked!</p>
-                <p className="mt-1 text-sm text-green-100">{success}</p>
-                <p className="mt-2 text-sm text-green-200">A Mesa trainer will run your practice. Bring ${STPAULS_PRICE} cash for your trainer.</p>
-              </div>
-            )}
-
             {mine.length > 0 && (
               <div className="rounded-xl border border-brown-700 bg-brown-900/40 px-5 py-4">
                 <h2 className="text-xs font-semibold uppercase tracking-widest text-brown-400 mb-2">Your Booked Practices</h2>

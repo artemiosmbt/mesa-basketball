@@ -70,6 +70,13 @@ function notifyParams(p: { team_name: string; practice_date: string; start_time:
   };
 }
 
+// Text the trainer gets when Artemios assigns them a practice.
+function assignedText(p: { team_name: string; practice_date: string; start_time: string; end_time: string; coaches: { name?: string; phone?: string }[] | null }) {
+  const coach = (p.coaches || []).find((c) => c?.name || c?.phone);
+  const coachLine = coach ? ` Coach: ${[coach.name, coach.phone].filter(Boolean).join(" ")}.` : "";
+  return `Mesa: You were assigned a St. Paul's team practice — ${p.team_name}, ${formatDateLong(p.practice_date)} ${formatTime12(hhmm(p.start_time))}-${formatTime12(hhmm(p.end_time))} at ${STPAULS_LOCATION}. Collect $60 cash at practice.${coachLine} It's in your dashboard under St. Paul's Practices.`;
+}
+
 // Assign (or clear, with null) the trainer running a practice.
 export async function PATCH(req: NextRequest) {
   if (!(await verifyAdmin(req))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -92,7 +99,7 @@ export async function PATCH(req: NextRequest) {
   if (!trainerNamesMatch(previous, trainer)) {
     await Promise.allSettled([
       previous ? notifyTrainerOfCancellation(notifyParams(practice, previous)) : Promise.resolve(),
-      trainer ? notifyTrainerOfNewBooking(notifyParams(practice, trainer)) : Promise.resolve(),
+      trainer ? notifyTrainerOfNewBooking({ ...notifyParams(practice, trainer), smsText: assignedText(practice) }) : Promise.resolve(),
     ]);
   }
   return NextResponse.json({ ok: true, assignedTrainer: trainer });
