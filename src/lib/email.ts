@@ -1606,3 +1606,39 @@ export async function sendStPaulsCancelCoachEmail(data: {
   });
   if (result.error) console.error("Resend St. Paul's cancel email error:", result.error);
 }
+
+// To Artemios whenever a trainer is assigned to a St. Paul's practice —
+// worded as "you have this practice" when he assigned himself.
+export async function sendStPaulsAssignedAdminEmail(data: {
+  trainerName: string;
+  isSelf: boolean;
+  teamName: string;
+  date: string;
+  time: string;
+  coaches: { name?: string; phone?: string; email?: string }[];
+}) {
+  const resend = getResend();
+  const coachLines = data.coaches
+    .filter((c) => c?.name || c?.phone || c?.email)
+    .map((c) => `Coach: ${escapeHtml([c.name, c.phone, c.email].filter(Boolean).join(" · "))}`);
+  const result = await resend.emails.send({
+    from: FROM_EMAIL,
+    to: ARTEMI_EMAIL,
+    subject: data.isSelf
+      ? `You're Assigned: ${data.teamName} — ${data.date}`
+      : `Trainer Confirmed: ${data.trainerName} — ${data.teamName}, ${data.date}`,
+    html: stPaulsBrandedEmail(data.isSelf ? "New Practice for You" : "Trainer Confirmed", `
+      ${stPaulsP(data.isSelf
+        ? "You're now running this St. Paul's team practice. It's on your Upcoming list in the admin dashboard."
+        : `<strong>${escapeHtml(data.trainerName)}</strong> is confirmed for this St. Paul's team practice and has been notified by text and email.`)}
+      ${stPaulsPracticeCard(data.teamName, [
+        `<strong class="mesa-navy-text" style="color: #091530;">${escapeHtml(data.date)}, ${escapeHtml(data.time)}</strong>`,
+        "St. Paul's Cathedral",
+        `Trainer: ${escapeHtml(data.trainerName)}`,
+        ...coachLines,
+      ])}
+      <p class="mesa-outer-bg mesa-gold-text" style="background: #091530; color: #d4af37; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center; margin: 18px 0;">$60 cash to the trainer at practice</p>
+    `),
+  });
+  if (result.error) console.error("Resend St. Paul's assigned email error:", result.error);
+}

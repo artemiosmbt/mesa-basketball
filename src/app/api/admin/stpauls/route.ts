@@ -4,7 +4,7 @@ import { verifyAdmin, verifyDashboardAccess } from "@/lib/auth";
 import { requireTrainerNameConfigured } from "@/lib/admin-data-scope";
 import { ALL_TRAINER_NAMES, OWNER_TRAINER_NAME, trainerNamesMatch } from "@/lib/trainers";
 import { formatDateLong, formatTime12, STPAULS_LOCATION, STPAULS_SESSION_LABEL } from "@/lib/stpauls";
-import { sendStPaulsCancelCoachEmail } from "@/lib/email";
+import { sendStPaulsAssignedAdminEmail, sendStPaulsCancelCoachEmail } from "@/lib/email";
 import { sendAdminSMS, sendSMS } from "@/lib/sms";
 import { notifyTrainerOfCancellation, notifyTrainerOfNewBooking } from "@/lib/trainer-notify";
 
@@ -105,6 +105,16 @@ export async function PATCH(req: NextRequest) {
       // Artemios has no trainer contact entry — he gets the same text on his
       // own phone when he assigns himself.
       trainerNamesMatch(trainer, OWNER_TRAINER_NAME) ? sendAdminSMS(assignedText(practice)) : Promise.resolve(),
+      trainer
+        ? sendStPaulsAssignedAdminEmail({
+            trainerName: trainer,
+            isSelf: trainerNamesMatch(trainer, OWNER_TRAINER_NAME),
+            teamName: practice.team_name,
+            date: formatDateLong(practice.practice_date),
+            time: `${formatTime12(hhmm(practice.start_time))}–${formatTime12(hhmm(practice.end_time))}`,
+            coaches: practice.coaches || [],
+          })
+        : Promise.resolve(),
     ]);
   }
   return NextResponse.json({ ok: true, assignedTrainer: trainer });
