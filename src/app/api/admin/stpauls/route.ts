@@ -4,6 +4,8 @@ import { verifyAdmin, verifyDashboardAccess } from "@/lib/auth";
 import { requireTrainerNameConfigured } from "@/lib/admin-data-scope";
 import { ALL_TRAINER_NAMES, trainerNamesMatch } from "@/lib/trainers";
 import { formatDateLong, formatTime12, STPAULS_LOCATION, STPAULS_SESSION_LABEL } from "@/lib/stpauls";
+import { sendStPaulsCancelCoachEmail } from "@/lib/email";
+import { sendAdminSMS, sendSMS } from "@/lib/sms";
 import { notifyTrainerOfCancellation, notifyTrainerOfNewBooking } from "@/lib/trainer-notify";
 
 // Admin dashboard's St. Paul's Practices tab. Reading: the admin sees
@@ -119,8 +121,21 @@ export async function DELETE(req: NextRequest) {
     console.error("St. Paul's cancel failed:", error);
     return NextResponse.json({ error: "Couldn't cancel." }, { status: 500 });
   }
-  if (practice.assigned_trainer) {
-    await notifyTrainerOfCancellation(notifyParams(practice, practice.assigned_trainer)).catch(() => {});
-  }
+  // Everyone involved hears about it: Artemios, the assigned trainer, and
+  // the coaches (text to the booker if they agreed to texts; email to all).
+  const when = `${formatDateLong(practice.practice_date)}, ${formatTime12(hhmm(practice.start_time))}–${formatTime12(hhmm(practice.end_time))}`;
+  const coaches: { name?: string; phone?: string; email?: string }[] = practice.coaches || [];
+  const { data: booker } = practice.booked_by_user_id
+    ? await getSupabaseAdmin().from("profiles").select("phone, sms_consent").eq("id", practice.booked_by_user_id).maybeSingle()
+    : { data: null };
+  const bookerPhone = coaches.find((c) => c.email === practice.booked_by_email)?.phone || booker?.phone || coaches[0]?.phone;
+  await Promise.allSettled([
+    practice.assigned_trainer ? notifyTrainerOfCancellation(notifyParams(practice, practice.assigned_trainer)) : Promise.resolve(),
+    sendAdminSMS(`St. Paul's practice CANCELLED: ${practice.team_name}, ${when}${practice.assigned_trainer ? ` (trainer ${practice.assigned_trainer} notified)` : ""}.`),
+    booker?.sms_consent && bookerPhone
+      ? sendSMS(bookerPhone, `Mesa Basketball: ${practice.team_name}'s practice on ${when} at St. Paul's has been cancelled. Questions or a new time? Text Artemios at (631) 599-1280. Reply STOP to opt out.`)
+      : Promise.resolve(),
+    ...coaches.filter((c) => c.email).map((c) => sendStPaulsCancelCoachEmail({ to: c.email!, coachName: c.name || "Coach", teamName: practice.team_name, date: formatDateLong(practice.practice_date), time: `${formatTime12(hhmm(practice.start_time))}–${formatTime12(hhmm(practice.end_time))}` })),
+  ]);
   return NextResponse.json({ ok: true });
 }

@@ -1511,3 +1511,26 @@ export async function sendStPaulsBookingCoachEmail(data: {
   });
   if (result.error) console.error("Resend St. Paul's coach email error:", result.error);
 }
+
+export async function sendStPaulsCancelCoachEmail(data: {
+  to: string;
+  coachName: string;
+  teamName: string;
+  date: string;
+  time: string;
+}) {
+  const resend = getResend();
+  const result = await resend.emails.send({
+    from: FROM_EMAIL,
+    to: data.to,
+    subject: `Practice Cancelled: ${data.teamName}`,
+    html: `
+      <h2>Your Practice Was Cancelled</h2>
+      <p>Hi ${escapeHtml(data.coachName)},</p>
+      <p>${escapeHtml(data.teamName)}'s practice at St. Paul's Cathedral on ${escapeHtml(data.date)}, ${escapeHtml(data.time)} has been cancelled.</p>
+      <p>Questions, or want a new time? Call or text Artemios at (631) 599-1280.</p>
+      <p style="color: #999; font-size: 13px;">— Mesa Basketball Training</p>
+    `,
+  });
+  if (result.error) console.error("Resend St. Paul's cancel email error:", result.error);
+}
