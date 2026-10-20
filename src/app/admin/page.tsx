@@ -1648,6 +1648,7 @@ export default function AdminPage() {
   const [token, setToken] = useState<string | null>(null);
   const [authCtx, setAuthCtx] = useState<AuthContext | null>(null);
   const [myStPauls, setMyStPauls] = useState<MyStPaulsPractice[]>([]);
+  const [stpaulsVersion, setStpaulsVersion] = useState(0); // bump to refetch after an approve/decline
   const [trainerFilter, setTrainerFilter] = useState("all");
   const [selectedClient, setSelectedClient] = useState<string | null>(null);
   // Opening a client swaps the (long) client list for a (shorter) profile
@@ -1860,15 +1861,17 @@ export default function AdminPage() {
   }, [tab, token, trainerFilter]);
 
   // St. Paul's practices for the Upcoming list (the API already limits a
-  // trainer to their own; filtered to the viewer's own name below).
+  // trainer to their own; filtered to the viewer's own name below), and for
+  // the admin's pending-request count on the St. Paul's tab label.
   useEffect(() => {
-    if (!token || !authCtx || tab !== "upcoming") return;
+    if (!token || !authCtx) return;
     const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
     fetch(`/api/admin/stpauls?from=${today}`, { headers: { Authorization: `Bearer ${token}` } })
       .then((r) => (r.ok ? r.json() : { practices: [] }))
       .then((d) => setMyStPauls(d.practices || []))
       .catch(() => {});
-  }, [token, authCtx, tab]);
+  }, [token, authCtx, tab, stpaulsVersion]);
+  const stpaulsPending = authCtx?.role === "admin" ? myStPauls.filter((p) => !p.assignedTrainer).length : 0;
 
   async function loadAllPast() {
     if (!token) return;
@@ -2721,7 +2724,9 @@ export default function AdminPage() {
                   <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
                   Calendar
                 </span>
-              ) : t === "clients" ? "Clients" : t === "stpauls" ? "St. Paul's Practices" : "Groups"}
+              ) : t === "clients" ? "Clients" : t === "stpauls" ? (
+                <>St. Paul&apos;s Practices{stpaulsPending > 0 && <span className="ml-1.5 rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold text-brown-950">{stpaulsPending} pending</span>}</>
+              ) : "Groups"}
             </button>
           ))}
         </div>
@@ -2763,7 +2768,7 @@ export default function AdminPage() {
 
         {/* St. Paul's team practices — own table, never mixed into the tabs above */}
         {tab === "stpauls" && token && (
-          <StPaulsPracticesTab token={token} isAdmin={authCtx?.role === "admin"} />
+          <StPaulsPracticesTab token={token} isAdmin={authCtx?.role === "admin"} onChanged={() => setStpaulsVersion((v) => v + 1)} />
         )}
 
         {/* Upcoming */}

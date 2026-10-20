@@ -54,7 +54,9 @@ export async function GET(req: NextRequest) {
     taken: (booked || []).map((b) => ({ date: b.practice_date, start: hhmm(b.start_time), end: hhmm(b.end_time) })),
     mine: mine
       .filter((p) => p.status === "booked")
-      .map((p) => ({ id: p.id, date: p.practice_date, start: hhmm(p.start_time), end: hhmm(p.end_time), teamName: p.team_name }))
+      // Pending until Artemios approves it by assigning a trainer. The coach
+      // only ever sees Pending/Confirmed — never who or how.
+      .map((p) => ({ id: p.id, date: p.practice_date, start: hhmm(p.start_time), end: hhmm(p.end_time), teamName: p.team_name, pending: !p.assigned_trainer }))
       .sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start)),
     profile: profile ? { name: profile.parent_name || "", phone: profile.phone || "", smsConsent: !!profile.sms_consent } : null,
     email: user.email,
@@ -153,17 +155,19 @@ export async function POST(req: NextRequest) {
 
   const sorted = [...slots].sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start));
   const practices = sorted.map((s) => ({ date: formatDateLong(s.date), time: `${formatTime12(s.start)}–${formatTime12(s.end)}` }));
-  // Confirmation text only to the account that booked, and only with SMS
+  // A booking is only a REQUEST until Artemios approves it (by assigning a
+  // trainer in admin) — every message here says so plainly. "Request
+  // received" text only to the account that booked, and only with SMS
   // consent — the other listed coaches never agreed to texts (they get the
   // email). Sent to the phone they just typed for themselves.
   const bookerPhone = coaches.find((c) => c.email === user.email)?.phone || existingProfile?.phone || coaches[0].phone;
   const confirmText = optedIntoTexts && bookerPhone
-    ? sendSMS(bookerPhone, `Mesa Basketball: ${teamName}'s practice is booked for ${practices.map((p) => `${p.date}, ${p.time}`).join("; ")} at St. Paul's. $60 cash to your trainer at practice. To cancel or change, text Artemios at (631) 599-1280. Reply STOP to opt out.`)
+    ? sendSMS(bookerPhone, `Mesa Basketball: We got ${teamName}'s practice request for ${practices.map((p) => `${p.date}, ${p.time}`).join("; ")} at St. Paul's. It is NOT confirmed yet - we'll text you once it's confirmed. Questions? Text Artemios at (631) 599-1280. Reply STOP to opt out.`)
     : Promise.resolve();
   await Promise.allSettled([
     confirmText,
     sendStPaulsBookingAdminEmail({ teamName, coaches, practices }),
-    sendAdminSMS(`St. Paul's practice booked: ${teamName}, ${practices.map((p) => `${p.date} ${p.time}`).join("; ")}. Assign a trainer in admin.`),
+    sendAdminSMS(`NEW St. Paul's practice REQUEST (pending): ${teamName}, ${practices.map((p) => `${p.date} ${p.time}`).join("; ")}. Assign a trainer in admin to approve it, or cancel it to decline.`),
     ...coaches.map((c) => sendStPaulsBookingCoachEmail({ to: c.email, coachName: c.name, teamName, practices })),
   ]);
 

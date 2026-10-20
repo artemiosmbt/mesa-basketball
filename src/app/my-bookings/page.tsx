@@ -54,6 +54,7 @@ interface BookingRecord {
   bookedTrainer: string | null;
   status: string;
   manageToken: string | null;
+  practicePending?: boolean; // St. Paul's practice request not confirmed yet
   cancellation?: {
     late: boolean;
     packageSession: boolean;
@@ -425,6 +426,7 @@ export default function MyBookings() {
             const isConfirmed = b.status === "confirmed";
             const isCancelled = b.status === "cancelled";
             const isPractice = b.type === "stpauls-practice";
+            const isPending = isPractice && isConfirmed && !!b.practicePending;
             const isClickable = isConfirmed && !isPast && !isPractice;
 
             const typeLabel =
@@ -456,7 +458,12 @@ export default function MyBookings() {
                       )}
                       {isPractice && (
                         <p className="text-brown-400">
-                          <span className="text-brown-500">Trainer:</span> A Mesa Basketball trainer · $60 cash at practice
+                          <span className="text-brown-500">Trainer:</span> {isPending ? "To be confirmed" : "A Mesa Basketball trainer · $60 cash at practice"}
+                        </p>
+                      )}
+                      {isPending && !isPast && (
+                        <p className="rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-200">
+                          Request sent — this practice is NOT confirmed yet. We&apos;ll email you once it&apos;s confirmed.
                         </p>
                       )}
                       {isPractice && isConfirmed && !isPast && (
@@ -472,10 +479,13 @@ export default function MyBookings() {
                     </div>
                   </div>
                   <div className="flex flex-col items-end gap-2 shrink-0">
-                    {isConfirmed && !isPast && (
-                      <span className="inline-block rounded-full bg-green-900/40 px-3 py-1 text-xs font-medium text-green-400">Scheduled</span>
+                    {isPending && (
+                      <span className="inline-block rounded-full bg-amber-500/20 px-3 py-1 text-xs font-semibold text-amber-300">{isPast ? "Not Confirmed" : "Pending"}</span>
                     )}
-                    {isConfirmed && isPast && (
+                    {isConfirmed && !isPending && !isPast && (
+                      <span className="inline-block rounded-full bg-green-900/40 px-3 py-1 text-xs font-medium text-green-400">{isPractice ? "Confirmed" : "Scheduled"}</span>
+                    )}
+                    {isConfirmed && !isPending && isPast && (
                       <span className="inline-block rounded-full bg-brown-800 px-3 py-1 text-xs font-medium text-brown-400">Completed</span>
                     )}
                     {isCancelled && (

@@ -4,7 +4,7 @@ import { verifyAdmin, verifyDashboardAccess } from "@/lib/auth";
 import { requireTrainerNameConfigured } from "@/lib/admin-data-scope";
 import { ALL_TRAINER_NAMES, OWNER_TRAINER_NAME, trainerNamesMatch } from "@/lib/trainers";
 import { formatDateLong, formatTime12, STPAULS_LOCATION, STPAULS_SESSION_LABEL } from "@/lib/stpauls";
-import { sendStPaulsAssignedAdminEmail, sendStPaulsCancelCoachEmail } from "@/lib/email";
+import { sendStPaulsAssignedAdminEmail, sendStPaulsCancelCoachEmail, sendStPaulsConfirmedCoachEmail } from "@/lib/email";
 import { sendAdminSMS, sendSMS } from "@/lib/sms";
 import { notifyTrainerOfCancellation, notifyTrainerOfNewBooking } from "@/lib/trainer-notify";
 
@@ -79,7 +79,21 @@ function assignedText(p: { team_name: string; practice_date: string; start_time:
   return `Mesa: You were assigned a St. Paul's team practice — ${p.team_name}, ${formatDateLong(p.practice_date)} ${formatTime12(hhmm(p.start_time))}-${formatTime12(hhmm(p.end_time))} at ${STPAULS_LOCATION}. Collect $60 cash at practice.${coachLine} It's in your dashboard under St. Paul's Practices.`;
 }
 
-// Assign (or clear, with null) the trainer running a practice.
+// Look up the booking coach's text consent and phone (texts go only to the
+// account that booked, and only with consent).
+async function bookerTextTarget(p: { booked_by_user_id: string | null; booked_by_email: string; coaches: { phone?: string; email?: string }[] | null }) {
+  const coaches = p.coaches || [];
+  const { data: booker } = p.booked_by_user_id
+    ? await getSupabaseAdmin().from("profiles").select("phone, sms_consent").eq("id", p.booked_by_user_id).maybeSingle()
+    : { data: null };
+  const phone = coaches.find((c) => c.email === p.booked_by_email)?.phone || booker?.phone || coaches[0]?.phone;
+  return booker?.sms_consent && phone ? phone : null;
+}
+
+// Assign the trainer running a practice. A coach's booking is a pending
+// REQUEST until its first trainer is assigned — that is Artemios's approval,
+// and it's when the coaches get their confirmation. After that the trainer
+// can be swapped, but not cleared back to pending (cancel it instead).
 export async function PATCH(req: NextRequest) {
   if (!(await verifyAdmin(req))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const body = await req.json().catch(() => null);
@@ -92,6 +106,10 @@ export async function PATCH(req: NextRequest) {
   if (!practice || practice.status !== "booked") return NextResponse.json({ error: "Practice not found." }, { status: 404 });
 
   const previous: string | null = practice.assigned_trainer;
+  if (previous && !trainer) {
+    return NextResponse.json({ error: "This practice is already confirmed with the coach. Pick a different trainer to swap, or cancel the practice." }, { status: 400 });
+  }
+  const approving = !previous && !!trainer;
   const { error } = await getSupabaseAdmin().from("stpauls_practices").update({ assigned_trainer: trainer }).eq("id", id).eq("status", "booked");
   if (error) {
     console.error("St. Paul's assign failed:", error);
@@ -99,7 +117,18 @@ export async function PATCH(req: NextRequest) {
   }
 
   if (!trainerNamesMatch(previous, trainer)) {
+    const date = formatDateLong(practice.practice_date);
+    const time = `${formatTime12(hhmm(practice.start_time))}–${formatTime12(hhmm(practice.end_time))}`;
+    const coachPhone = approving ? await bookerTextTarget(practice) : null;
     await Promise.allSettled([
+      // Approval: the coaches' real confirmation (text to the booker, email to all).
+      coachPhone
+        ? sendSMS(coachPhone, `Mesa Basketball: CONFIRMED - ${practice.team_name}'s practice on ${date}, ${time} at St. Paul's is confirmed. A Mesa trainer will run it. $60 cash to your trainer at practice. To cancel or change, text Artemios at (631) 599-1280. Reply STOP to opt out.`)
+        : Promise.resolve(),
+      ...(approving
+        ? ((practice.coaches || []) as { name?: string; email?: string }[]).filter((c) => c.email)
+            .map((c) => sendStPaulsConfirmedCoachEmail({ to: c.email!, coachName: c.name || "Coach", teamName: practice.team_name, date, time }))
+        : []),
       previous ? notifyTrainerOfCancellation(notifyParams(practice, previous)) : Promise.resolve(),
       trainer ? notifyTrainerOfNewBooking({ ...notifyParams(practice, trainer), smsText: assignedText(practice) }) : Promise.resolve(),
       // Artemios has no trainer contact entry — he gets the same text on his
@@ -136,19 +165,22 @@ export async function DELETE(req: NextRequest) {
   }
   // Everyone involved hears about it: Artemios, the assigned trainer, and
   // the coaches (text to the booker if they agreed to texts; email to all).
+  // Cancelling a still-pending request is declining it, and is worded so.
+  const wasPending = !practice.assigned_trainer;
   const when = `${formatDateLong(practice.practice_date)}, ${formatTime12(hhmm(practice.start_time))}–${formatTime12(hhmm(practice.end_time))}`;
   const coaches: { name?: string; phone?: string; email?: string }[] = practice.coaches || [];
-  const { data: booker } = practice.booked_by_user_id
-    ? await getSupabaseAdmin().from("profiles").select("phone, sms_consent").eq("id", practice.booked_by_user_id).maybeSingle()
-    : { data: null };
-  const bookerPhone = coaches.find((c) => c.email === practice.booked_by_email)?.phone || booker?.phone || coaches[0]?.phone;
+  const bookerPhone = await bookerTextTarget(practice);
   await Promise.allSettled([
     practice.assigned_trainer ? notifyTrainerOfCancellation(notifyParams(practice, practice.assigned_trainer)) : Promise.resolve(),
-    sendAdminSMS(`St. Paul's practice CANCELLED: ${practice.team_name}, ${when}${practice.assigned_trainer ? ` (trainer ${practice.assigned_trainer} notified)` : ""}.`),
-    booker?.sms_consent && bookerPhone
-      ? sendSMS(bookerPhone, `Mesa Basketball: ${practice.team_name}'s practice on ${when} at St. Paul's has been cancelled. Questions or a new time? Text Artemios at (631) 599-1280. Reply STOP to opt out.`)
+    sendAdminSMS(wasPending
+      ? `St. Paul's practice request DECLINED: ${practice.team_name}, ${when}. Coach notified.`
+      : `St. Paul's practice CANCELLED: ${practice.team_name}, ${when} (trainer ${practice.assigned_trainer} notified).`),
+    bookerPhone
+      ? sendSMS(bookerPhone, wasPending
+          ? `Mesa Basketball: Sorry, we couldn't confirm ${practice.team_name}'s practice request for ${when} at St. Paul's. Want another time? Text Artemios at (631) 599-1280. Reply STOP to opt out.`
+          : `Mesa Basketball: ${practice.team_name}'s practice on ${when} at St. Paul's has been cancelled. Questions or a new time? Text Artemios at (631) 599-1280. Reply STOP to opt out.`)
       : Promise.resolve(),
-    ...coaches.filter((c) => c.email).map((c) => sendStPaulsCancelCoachEmail({ to: c.email!, coachName: c.name || "Coach", teamName: practice.team_name, date: formatDateLong(practice.practice_date), time: `${formatTime12(hhmm(practice.start_time))}–${formatTime12(hhmm(practice.end_time))}` })),
+    ...coaches.filter((c) => c.email).map((c) => sendStPaulsCancelCoachEmail({ to: c.email!, coachName: c.name || "Coach", teamName: practice.team_name, date: formatDateLong(practice.practice_date), time: `${formatTime12(hhmm(practice.start_time))}–${formatTime12(hhmm(practice.end_time))}`, wasPending })),
   ]);
   return NextResponse.json({ ok: true });
 }

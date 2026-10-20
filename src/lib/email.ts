@@ -1464,9 +1464,11 @@ export async function sendReminderEmailAdminSummary(data: {
 }
 
 // St. Paul's team practices (src/lib/stpauls.ts) — no money moves through
-// the site, so these are plain who/when notices. The admin email goes to
-// Artemios on every new booking so he can assign a trainer; the coach email
-// confirms what they booked.
+// the site, so these are plain who/when notices. A coach's booking is only a
+// REQUEST until Artemios assigns a trainer — that assignment is the
+// approval. The admin email goes to Artemios on every new request so he can
+// approve it; the coach gets "request received (not confirmed)" now and the
+// real confirmation (sendStPaulsConfirmedCoachEmail) once it's approved.
 export async function sendStPaulsBookingAdminEmail(data: {
   teamName: string;
   coaches: { name: string; phone: string; email: string }[];
@@ -1476,13 +1478,13 @@ export async function sendStPaulsBookingAdminEmail(data: {
   const result = await resend.emails.send({
     from: FROM_EMAIL,
     to: ARTEMI_EMAIL,
-    subject: `St. Paul's Practice Booked: ${data.teamName}`,
+    subject: `St. Paul's Practice REQUEST (needs approval): ${data.teamName}`,
     html: `
-      <h2>New St. Paul's Practice Booking</h2>
+      <h2>New St. Paul's Practice Request — Pending</h2>
       <p><strong>Team:</strong> ${escapeHtml(data.teamName)}</p>
       <p><strong>Practice(s):</strong><br/>${data.practices.map((p) => `${escapeHtml(p.date)}, ${escapeHtml(p.time)}`).join("<br/>")}</p>
       <p><strong>Coach(es):</strong><br/>${data.coaches.map((c) => `${escapeHtml(c.name)} · ${escapeHtml(c.phone)} · ${escapeHtml(c.email)}`).join("<br/>")}</p>
-      <p>Assign a trainer in the admin dashboard's St. Paul's Practices tab.</p>
+      <p><strong>Not confirmed yet.</strong> Assign a trainer in the admin dashboard's St. Paul's Practices tab to approve it — the coach is told it's confirmed only then. To turn it down, cancel it there.</p>
     `,
   });
   if (result.error) console.error("Resend St. Paul's admin email error:", result.error);
@@ -1567,22 +1569,26 @@ export async function sendStPaulsBookingCoachEmail(data: {
     from: FROM_EMAIL,
     to: data.to,
     replyTo: ARTEMI_EMAIL,
-    subject: `Practice Confirmed — ${data.teamName}`,
-    html: stPaulsBrandedEmail("Practice Confirmed", `
-      ${stPaulsP(`Hi ${escapeHtml(data.coachName)}, you're all set. A Mesa Basketball trainer will run your team's practice.`)}
+    subject: `Practice Request Received (Not Confirmed Yet) — ${data.teamName}`,
+    html: stPaulsBrandedEmail("Request Received", `
+      ${stPaulsP(`Hi ${escapeHtml(data.coachName)}, we got your team's practice request. <strong>It is not confirmed yet.</strong>`)}
       ${stPaulsPracticeCard(data.teamName, [
         ...data.practices.map((p) => `<strong class="mesa-navy-text" style="color: #091530;">${escapeHtml(p.date)}, ${escapeHtml(p.time)}</strong>`),
         "St. Paul's Cathedral",
+        "Status: <strong>Pending</strong>",
       ])}
-      <p class="mesa-outer-bg mesa-gold-text" style="background: #091530; color: #d4af37; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center; margin: 18px 0;">$60 cash to your trainer at practice</p>
-      ${stPaulsP(`Need to cancel or change a practice? Call or text Artemios at (631) 599-1280.`)}
+      <p style="background: #fff4d6; color: #7a5200; border: 1px solid #e8c766; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center; margin: 18px 0;">PENDING — please don't plan on this practice until you get a confirmation email.</p>
+      ${stPaulsP(`We'll email you as soon as it's confirmed. Once confirmed, it's $60 cash to your trainer at practice.`)}
+      ${stPaulsP(`Questions, or need to change the request? Call or text Artemios at (631) 599-1280.`)}
       ${stPaulsP(`<a href="${BASE_URL}/my-bookings" class="mesa-navy-text" style="color: #091530; font-weight: bold;">View My Bookings</a> &middot; <a href="${BASE_URL}/stpauls-practices" class="mesa-navy-text" style="color: #091530; font-weight: bold;">Book another practice</a>`)}
     `),
   });
   if (result.error) console.error("Resend St. Paul's coach email error:", result.error);
 }
 
-export async function sendStPaulsCancelCoachEmail(data: {
+// Sent to every listed coach when Artemios approves a request (assigns a
+// trainer). This is the coach's real confirmation.
+export async function sendStPaulsConfirmedCoachEmail(data: {
   to: string;
   coachName: string;
   teamName: string;
@@ -1594,9 +1600,40 @@ export async function sendStPaulsCancelCoachEmail(data: {
     from: FROM_EMAIL,
     to: data.to,
     replyTo: ARTEMI_EMAIL,
-    subject: `Practice Cancelled — ${data.teamName}`,
-    html: stPaulsBrandedEmail("Practice Cancelled", `
-      ${stPaulsP(`Hi ${escapeHtml(data.coachName)}, this practice has been cancelled:`)}
+    subject: `Practice Confirmed — ${data.teamName}, ${data.date}`,
+    html: stPaulsBrandedEmail("Practice Confirmed", `
+      ${stPaulsP(`Hi ${escapeHtml(data.coachName)}, good news — your practice request is <strong>confirmed</strong>. A Mesa Basketball trainer will run your team's practice.`)}
+      ${stPaulsPracticeCard(data.teamName, [
+        `<strong class="mesa-navy-text" style="color: #091530;">${escapeHtml(data.date)}, ${escapeHtml(data.time)}</strong>`,
+        "St. Paul's Cathedral",
+        "Status: <strong>Confirmed</strong>",
+      ])}
+      <p class="mesa-outer-bg mesa-gold-text" style="background: #091530; color: #d4af37; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center; margin: 18px 0;">$60 cash to your trainer at practice</p>
+      ${stPaulsP(`Need to cancel or change it? Call or text Artemios at (631) 599-1280.`)}
+      ${stPaulsP(`<a href="${BASE_URL}/my-bookings" class="mesa-navy-text" style="color: #091530; font-weight: bold;">View My Bookings</a> &middot; <a href="${BASE_URL}/stpauls-practices" class="mesa-navy-text" style="color: #091530; font-weight: bold;">Request another practice</a>`)}
+    `),
+  });
+  if (result.error) console.error("Resend St. Paul's confirmed email error:", result.error);
+}
+
+export async function sendStPaulsCancelCoachEmail(data: {
+  to: string;
+  coachName: string;
+  teamName: string;
+  date: string;
+  time: string;
+  wasPending?: boolean; // a request that was never confirmed
+}) {
+  const resend = getResend();
+  const result = await resend.emails.send({
+    from: FROM_EMAIL,
+    to: data.to,
+    replyTo: ARTEMI_EMAIL,
+    subject: data.wasPending ? `Practice Request Not Confirmed — ${data.teamName}` : `Practice Cancelled — ${data.teamName}`,
+    html: stPaulsBrandedEmail(data.wasPending ? "Request Not Confirmed" : "Practice Cancelled", `
+      ${stPaulsP(data.wasPending
+        ? `Hi ${escapeHtml(data.coachName)}, sorry — we weren't able to confirm this practice request:`
+        : `Hi ${escapeHtml(data.coachName)}, this practice has been cancelled:`)}
       ${stPaulsPracticeCard(data.teamName, [
         `<strong class="mesa-navy-text" style="color: #091530; text-decoration: line-through;">${escapeHtml(data.date)}, ${escapeHtml(data.time)}</strong>`,
         "St. Paul's Cathedral",

@@ -108,6 +108,9 @@ export async function POST(req: NextRequest) {
         status: p.status === "booked" ? "confirmed" : "cancelled",
         manageToken: null,
         cancellation: null,
+        // A coach's booking is a request until Artemios approves it (by
+        // assigning a trainer); until then it shows as Pending.
+        practicePending: p.status === "booked" && !p.assigned_trainer,
       };
     });
 
