@@ -27,7 +27,7 @@ import {
 // on the site links here — coaches get the link directly.
 
 type Range = { date: string; start: string; end: string };
-type Mine = Range & { id: string; teamName: string; pending: boolean };
+type Mine = Range & { id: string; teamName: string; pending: boolean; trainer: string | null };
 type Coach = { name: string; phone: string; email: string };
 
 const inputClass = "w-full rounded-lg border border-brown-700 bg-brown-800/60 px-4 py-2.5 text-white placeholder-brown-500 focus:border-mesa-accent focus:outline-none";
@@ -308,7 +308,10 @@ export default function StPaulsPracticesPage() {
                       <span>{formatDateShort(m.date)} · {formatTime12(m.start)}–{formatTime12(m.end)} · <span className="text-brown-300">{m.teamName}</span></span>
                       {m.pending
                         ? <span className="rounded-full bg-amber-500/20 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-300">Pending — not confirmed</span>
-                        : <span className="rounded-full bg-green-900/40 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-green-400">Confirmed</span>}
+                        : <>
+                            <span className="rounded-full bg-green-900/40 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-green-400">Confirmed</span>
+                            {m.trainer && <span className="text-xs text-brown-300">Trainer: {m.trainer}</span>}
+                          </>}
                     </li>
                   ))}
                 </ul>

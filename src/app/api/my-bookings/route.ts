@@ -104,7 +104,8 @@ export async function POST(req: NextRequest) {
         bookedStartTime: start,
         bookedEndTime: end,
         bookedLocation: "St. Paul's Cathedral",
-        bookedTrainer: null,
+        // Named once confirmed (a trainer assigned); null while pending.
+        bookedTrainer: p.status === "booked" ? p.assigned_trainer || null : null,
         status: p.status === "booked" ? "confirmed" : "cancelled",
         manageToken: null,
         cancellation: null,

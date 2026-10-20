@@ -1594,18 +1594,25 @@ export async function sendStPaulsConfirmedCoachEmail(data: {
   teamName: string;
   date: string;
   time: string;
+  trainerName: string;
+  trainerChanged?: boolean; // already confirmed; only the trainer changed
 }) {
   const resend = getResend();
   const result = await resend.emails.send({
     from: FROM_EMAIL,
     to: data.to,
     replyTo: ARTEMI_EMAIL,
-    subject: `Practice Confirmed — ${data.teamName}, ${data.date}`,
-    html: stPaulsBrandedEmail("Practice Confirmed", `
-      ${stPaulsP(`Hi ${escapeHtml(data.coachName)}, good news — your practice request is <strong>confirmed</strong>. A Mesa Basketball trainer will run your team's practice.`)}
+    subject: data.trainerChanged
+      ? `Trainer Update — ${data.teamName}, ${data.date}`
+      : `Practice Confirmed — ${data.teamName}, ${data.date}`,
+    html: stPaulsBrandedEmail(data.trainerChanged ? "Trainer Update" : "Practice Confirmed", `
+      ${stPaulsP(data.trainerChanged
+        ? `Hi ${escapeHtml(data.coachName)}, your practice is still confirmed — <strong>${escapeHtml(data.trainerName)}</strong> will now be running it.`
+        : `Hi ${escapeHtml(data.coachName)}, good news — your practice request is <strong>confirmed</strong>. <strong>${escapeHtml(data.trainerName)}</strong> from Mesa Basketball will run your team's practice.`)}
       ${stPaulsPracticeCard(data.teamName, [
         `<strong class="mesa-navy-text" style="color: #091530;">${escapeHtml(data.date)}, ${escapeHtml(data.time)}</strong>`,
         "St. Paul's Cathedral",
+        `Trainer: <strong>${escapeHtml(data.trainerName)}</strong>`,
         "Status: <strong>Confirmed</strong>",
       ])}
       <p class="mesa-outer-bg mesa-gold-text" style="background: #091530; color: #d4af37; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center; margin: 18px 0;">$60 cash to your trainer at practice</p>

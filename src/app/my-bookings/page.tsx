@@ -451,14 +451,14 @@ export default function MyBookings() {
                       <p className="text-brown-400">
                         <span className="text-brown-500">Type:</span> {typeLabel}
                       </p>
-                      {b.bookedTrainer && (
+                      {b.bookedTrainer && !isPractice && (
                         <p className="text-brown-400">
                           <span className="text-brown-500">Trainer:</span> {b.bookedTrainer}
                         </p>
                       )}
                       {isPractice && (
                         <p className="text-brown-400">
-                          <span className="text-brown-500">Trainer:</span> {isPending ? "To be confirmed" : "A Mesa Basketball trainer · $60 cash at practice"}
+                          <span className="text-brown-500">Trainer:</span> {isPending ? "To be confirmed" : `${b.bookedTrainer || "A Mesa Basketball trainer"} · $60 cash at practice`}
                         </p>
                       )}
                       {isPending && !isPast && (

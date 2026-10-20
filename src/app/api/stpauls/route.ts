@@ -54,9 +54,9 @@ export async function GET(req: NextRequest) {
     taken: (booked || []).map((b) => ({ date: b.practice_date, start: hhmm(b.start_time), end: hhmm(b.end_time) })),
     mine: mine
       .filter((p) => p.status === "booked")
-      // Pending until Artemios approves it by assigning a trainer. The coach
-      // only ever sees Pending/Confirmed — never who or how.
-      .map((p) => ({ id: p.id, date: p.practice_date, start: hhmm(p.start_time), end: hhmm(p.end_time), teamName: p.team_name, pending: !p.assigned_trainer }))
+      // Pending until Artemios approves it by assigning a trainer; once
+      // confirmed the coach sees who their trainer is.
+      .map((p) => ({ id: p.id, date: p.practice_date, start: hhmm(p.start_time), end: hhmm(p.end_time), teamName: p.team_name, pending: !p.assigned_trainer, trainer: p.assigned_trainer || null }))
       .sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start)),
     profile: profile ? { name: profile.parent_name || "", phone: profile.phone || "", smsConsent: !!profile.sms_consent } : null,
     email: user.email,

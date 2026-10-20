@@ -119,15 +119,19 @@ export async function PATCH(req: NextRequest) {
   if (!trainerNamesMatch(previous, trainer)) {
     const date = formatDateLong(practice.practice_date);
     const time = `${formatTime12(hhmm(practice.start_time))}–${formatTime12(hhmm(practice.end_time))}`;
-    const coachPhone = approving ? await bookerTextTarget(practice) : null;
+    // Approval (first trainer) = the coaches' real confirmation, naming the
+    // trainer. A later swap tells them who the new trainer is.
+    const swapped = !!previous && !!trainer;
+    const coachPhone = trainer ? await bookerTextTarget(practice) : null;
     await Promise.allSettled([
-      // Approval: the coaches' real confirmation (text to the booker, email to all).
       coachPhone
-        ? sendSMS(coachPhone, `Mesa Basketball: CONFIRMED - ${practice.team_name}'s practice on ${date}, ${time} at St. Paul's is confirmed. A Mesa trainer will run it. $60 cash to your trainer at practice. To cancel or change, text Artemios at (631) 599-1280. Reply STOP to opt out.`)
+        ? sendSMS(coachPhone, approving
+            ? `Mesa Basketball: CONFIRMED - ${practice.team_name}'s practice on ${date}, ${time} at St. Paul's is confirmed. Your trainer is ${trainer}. $60 cash to your trainer at practice. To cancel or change, text Artemios at (631) 599-1280. Reply STOP to opt out.`
+            : `Mesa Basketball: Trainer update - ${practice.team_name}'s practice on ${date}, ${time} at St. Paul's is still confirmed. Your trainer is now ${trainer}. Questions? Text Artemios at (631) 599-1280. Reply STOP to opt out.`)
         : Promise.resolve(),
-      ...(approving
+      ...(trainer
         ? ((practice.coaches || []) as { name?: string; email?: string }[]).filter((c) => c.email)
-            .map((c) => sendStPaulsConfirmedCoachEmail({ to: c.email!, coachName: c.name || "Coach", teamName: practice.team_name, date, time }))
+            .map((c) => sendStPaulsConfirmedCoachEmail({ to: c.email!, coachName: c.name || "Coach", teamName: practice.team_name, date, time, trainerName: trainer, trainerChanged: swapped }))
         : []),
       previous ? notifyTrainerOfCancellation(notifyParams(practice, previous)) : Promise.resolve(),
       trainer ? notifyTrainerOfNewBooking({ ...notifyParams(practice, trainer), smsText: assignedText(practice) }) : Promise.resolve(),
