@@ -881,6 +881,25 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
 const GROUP_HELPER_COL = "AB";
 const GROUP_HELPER_HEADER = "[helper] Group";
 
+// AA "Session Start?" marks ONE row per session (same date + start + end +
+// group) so Weekly Summary counts the session once. It used to mark the
+// session's first row whatever its status — but Weekly Summary only counts
+// rows that are Completed/No Show, so when the first kid logged for a
+// session had a late cancel/reschedule, the whole session vanished from
+// Sessions Run and Hours Worked (Joe's 10/19 7 PM group, week of 10/19).
+// Now AA marks the first WORKED row; a session with no worked rows still
+// marks its first row, so a pickup's flat fee still counts once.
+// The header text doubles as a version marker: a tab whose AA3 doesn't
+// match gets every AA formula rewritten on the next run.
+const SESSION_START_HEADER = "[helper] Session Start? (first worked row)";
+function sessionStartFormula(r: number): string {
+  const key = (end: string) =>
+    `$A$4:$A${end},$A${r},$E$4:$E${end},$E${r},$F$4:$F${end},$F${r},$AB$4:$AB${end},"="&$AB${r}`;
+  const worked = (end: string) =>
+    `(COUNTIFS(${key(end)},$V$4:$V${end},"Completed")+COUNTIFS(${key(end)},$V$4:$V${end},"No Show"))`;
+  return `=IF($A${r}="",0,IF(OR($V${r}="Completed",$V${r}="No Show"),IF(${worked(String(r))}=1,1,0),IF(AND(${worked("")}=0,COUNTIFS(${key(String(r))})=1),1,0)))`;
+}
+
 /** The session identity a row's group-session dedupe should use. When the
  * trainer has exactly one schedule row at that date+time, every booking
  * there is the same session — use that row's label, so a combo session
@@ -930,15 +949,16 @@ async function syncGroupHelperColumn(
 
     const writes: { range: string; values: unknown[][] }[] = [];
     if (cell(3) !== GROUP_HELPER_HEADER) {
-      // First run on this tab: switch AA to also key on the group. Row 4 is
-      // the template every new row is cloned from, so later rows inherit it.
       writes.push({ range: `${a1Quote(trainer)}!${GROUP_HELPER_COL}3`, values: [[GROUP_HELPER_HEADER]] });
+    }
+    // Rewrite AA whenever its formula is out of date (see SESSION_START_HEADER).
+    // Row 4 is the template every new row is cloned from, so later rows inherit it.
+    const aaHeader = await getValues(spreadsheetId, `${a1Quote(trainer)}!AA3`);
+    if (String(aaHeader[0]?.[0] ?? "") !== SESSION_START_HEADER) {
+      writes.push({ range: `${a1Quote(trainer)}!AA3`, values: [[SESSION_START_HEADER]] });
       writes.push({
         range: `${a1Quote(trainer)}!AA${TRAINER_FIRST_ROW}:AA${lastRow}`,
-        values: Array.from({ length: lastRow - TRAINER_FIRST_ROW + 1 }, (_, i) => {
-          const r = TRAINER_FIRST_ROW + i;
-          return [`=IF($A${r}="",0,IF(COUNTIFS($A$4:$A${r},$A${r},$E$4:$E${r},$E${r},$F$4:$F${r},$F${r},$AB$4:$AB${r},"="&$AB${r})=1,1,0))`];
-        }),
+        values: Array.from({ length: lastRow - TRAINER_FIRST_ROW + 1 }, (_, i) => [sessionStartFormula(TRAINER_FIRST_ROW + i)]),
       });
     }
     for (const [row, value] of desired) {
