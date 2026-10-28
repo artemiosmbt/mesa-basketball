@@ -8,7 +8,7 @@ import { REFERRAL_PROGRAM_ENABLED, REFERRAL_CREDIT_REDEMPTION_ENABLED, NEW_CLIEN
 import { getTrainerBioSlug, getTrainerTier, normalizeTrainerTier, formatTrainerForDisplay, athleteTriggersCoachZNcaaNotice, COACH_Z_NCAA_NOTICE_MESSAGE, trainerNamesMatch, OWNER_TRAINER_NAME, ALL_TRAINER_NAMES, sortTrainerNames, type TrainerTier } from "@/lib/trainers";
 import { calcServiceFee, serviceFeeLabel, serviceFeeItemName, isPercentServiceFee, SERVICE_FEE_PERCENT_TEXT, packagePrice, PRIVATE_RATE_BY_TIER, GROUP_PRIVATE_RATE_BY_TIER, calcPrivatePrice as getPrivatePrice, REFERRAL_CREDIT_SESSION_PRICE, packageCoversTrainerTier } from "@/lib/pricing";
 import { ALL_GRADES, normalizedAthleteName } from "@/lib/athletes";
-import { getSessionGender, getGradesForGroup } from "@/lib/group-matching";
+import { getSessionGender } from "@/lib/group-matching";
 
 const SUBSTITUTE_TRAINER_LABEL = "Any Available Trainer";
 
@@ -3808,12 +3808,10 @@ export default function Home() {
                                   className="w-full rounded-lg border border-mesa-accent/40 bg-brown-800 px-3 py-2 text-white text-sm focus:border-mesa-accent focus:outline-none"
                                 >
                                   <option value="">Select grade...</option>
-                                  {(modal.type === "weekly"
-                                    ? getGradesForGroup(modal.sessionDetails.replace(/ — \d+ sessions?$/, ""))
-                                    : modal.type === "camp" && camps[modal.sessionIndex]?.gradeGroup
-                                    ? getGradesForGroup(camps[modal.sessionIndex].gradeGroup)
-                                    : ALL_GRADES
-                                  ).map((g) => (
+                                  {/* Every grade, whatever the group: a younger player can be
+                                      placed with an older group, and their real grade is what
+                                      should be recorded. */}
+                                  {ALL_GRADES.map((g) => (
                                     <option key={g.value} value={g.value}>{g.label}</option>
                                   ))}
                                 </select>

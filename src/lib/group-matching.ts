@@ -1,4 +1,4 @@
-import { ALL_GRADES, GRADE_ORDER, OTHER_GRADE_SENTINEL, type Athlete, type CanonicalGroupId } from "@/lib/athletes";
+import { GRADE_ORDER, OTHER_GRADE_SENTINEL, type Athlete, type CanonicalGroupId } from "@/lib/athletes";
 
 // --- Ported verbatim from schedule/page.tsx (was module-level there) ---
 // Used to parse a LIVE session/group label for gender, both for the
@@ -10,33 +10,6 @@ export function getSessionGender(groupName: string): "boys" | "girls" | null {
   if (hasBoys && !hasGirls) return "boys";
   if (hasGirls && !hasBoys) return "girls";
   return null;
-}
-
-// --- Ported verbatim from schedule/page.tsx (was component-local there) ---
-// Parses a live session group label's free-text grade range ("Grades 5-8",
-// "Grade 5 & Below") into the selectable ALL_GRADES options, always
-// appending the "Other" sentinel. Used only for the booking-form grade
-// dropdown/mismatch-warning — unrelated to an athlete's persisted `groups`.
-export function getGradesForGroup(groupName: string) {
-  const belowMatch = groupName.match(/Grade\s+(\d+)\s*&\s*Below/i);
-  if (belowMatch) {
-    const ei = GRADE_ORDER.indexOf(belowMatch[1]);
-    if (ei !== -1) {
-      const filtered = ALL_GRADES.filter((g) => GRADE_ORDER.indexOf(g.value) <= ei);
-      return [...filtered, { value: "Other", label: "Other" }];
-    }
-  }
-  const match = groupName.match(/Grades?\s+(K|\d+)[–\-](\d+|College\s*\+?)/i);
-  if (!match) return ALL_GRADES;
-  const start = match[1].toUpperCase();
-  const end = match[2].replace(/\s+/g, " ").trim();
-  const endVal = end.toLowerCase().startsWith("college") ? "College +" : end;
-  const si = GRADE_ORDER.indexOf(start);
-  const ei = GRADE_ORDER.indexOf(endVal);
-  if (si === -1 || ei === -1) return ALL_GRADES;
-  const allowed = new Set(GRADE_ORDER.slice(si, ei + 1));
-  const filtered = ALL_GRADES.filter((g) => allowed.has(g.value));
-  return [...filtered, { value: "Other", label: "Other" }];
 }
 
 // Normalizes a hand-typed group/location label for EQUALITY COMPARISONS only
