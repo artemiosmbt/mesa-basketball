@@ -101,24 +101,26 @@ const PRIVATE_TRAINER_RATE_4PLUS = 90;
 const PICKUP_FLAT_PAY = 120;
 // STRIPE_PCT_CARD/STRIPE_FIXED are imported from ./stripe-payment-method (shared with payroll-sync.ts).
 
-// The gyms listed in each month's Location Breakdown. Rent is never filled
-// in automatically (2026-10-28: rentals change month to month, so Artemios
-// enters what he actually paid each month himself; an empty box counts as
-// $0). `name` is the row label — also the key his entered rent is kept under
+// The gyms that get their own line in a month's Location Breakdown — only
+// the main ones Artemios rents; any other gym (Holy Resurrection, Cherry
+// Valley from November on, a one-off rental) goes on the "Other gyms" line.
+// Rent is never filled in automatically (2026-10-28: rentals change month to
+// month, so he enters what he actually paid; an empty box counts as $0).
+// `name` is the row label — also the key his entered rent is kept under
 // across rebuilds, so an existing label must not be renamed or that month's
 // rent is lost. `match` is what the session's Place (the schedule's raw
-// location text) must contain for its revenue to count here — kept short so
-// "St. Pauls" / "St. Paul's Cathedral" / "Cherry Valley" all still match.
-// Cherry Valley stays listed (not in use right now, may come back).
+// location text) must contain for its revenue to count on that line — kept
+// short so "St. Pauls" / "St. Paul's Cathedral" / "Cherry Valley" all match.
 interface LocationSeed { name: string; match: string }
-const KNOWN_LOCATIONS: LocationSeed[] = [
-  { name: "St. Paul's", match: "St. Paul" },
-  { name: "Diamond Charter School", match: "Diamond Charter" },
-  { name: "Holy Resurrection Brookville", match: "Holy Resurrection" },
-  { name: "Cherry Valley Sports", match: "Cherry Valley" },
-];
-// One more editable rent line under the gyms, for a one-off rental at any
-// other gym; its revenue is everything not at a listed gym.
+function knownLocations(year: number, month1: number): LocationSeed[] {
+  const stPauls = { name: "St. Paul's", match: "St. Paul" };
+  // Through October 2026: St. Paul's and Cherry Valley. From November:
+  // St. Paul's and Diamond Charter.
+  if (year < 2026 || (year === 2026 && month1 <= 10)) return [stPauls, { name: "Cherry Valley Sports", match: "Cherry Valley" }];
+  return [stPauls, { name: "Diamond Charter School", match: "Diamond Charter" }];
+}
+// One more editable rent line under the gyms, for any other gym used that
+// month; its revenue is everything not at a listed gym.
 const OTHER_LOCATION_NAME = "Other gyms (one-off rentals)";
 
 // booked_location is free text typed into the live schedule, not a fixed
@@ -1058,7 +1060,7 @@ async function buildMonthTab(
     const rent = existingRentByName.get(name);
     return rent === undefined ? {} : { userEnteredValue: { numberValue: rent } };
   };
-  for (const loc of KNOWN_LOCATIONS) {
+  for (const loc of knownLocations(year, month1)) {
     const locRowNum1 = row0 + 1;
     const matchText = loc.match.replace(/"/g, '""');
     // St. Paul's is the only location where the owner runs cash pickup
@@ -1083,7 +1085,7 @@ async function buildMonthTab(
     });
     row0 += 1;
   }
-  const lastLocRow1 = row0; // 1-indexed last KNOWN_LOCATIONS row
+  const lastLocRow1 = row0; // 1-indexed last listed-gym row
   const otherRowNum1 = row0 + 1;
   requests.push({
     updateCells: {
