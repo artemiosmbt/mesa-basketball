@@ -15,6 +15,11 @@ import { fmtMoney } from "@/lib/pricing";
 import { notifyTrainerOfCancellation, notifyTrainerOfNewBooking } from "@/lib/trainer-notify";
 import { getTrainerTier, normalizeTrainerTier, packageCoversTrainerTier } from "@/lib/trainers";
 
+// A time change emails and texts every player one at a time after moving
+// them; the move can't be redone, so the run must not be cut off before
+// everyone is told (the platform default is far shorter).
+export const maxDuration = 60;
+
 // A session the trainer removed from the schedule is never the client's
 // fault — this is always treated as an on-time cancellation (full refund,
 // never a late fee), unlike every client-initiated cancel path. Mirrors the

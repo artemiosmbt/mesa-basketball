@@ -679,6 +679,17 @@ async function buildMonthTab(
   // own row/grand totals ARE formulas over these cells.
   const trainerPayByWeek = new Map<string, Map<string, number>>(); // week -> trainer -> pay
 
+  // Per-gym revenue in the Location Breakdown is a SUMIFS over single-gym
+  // days (so a hand-edited day still counts), plus this correction per gym:
+  //  + on a day at two or more gyms (Place "St. Paul's / Diamond Charter"),
+  //    each session's own price goes to its own gym — summing the whole day
+  //    into every gym named in Place counted it twice.
+  //  - a package bought on a single-gym day isn't that gym's revenue (it
+  //    belongs on Other), but the day's Gross includes it.
+  const gyms = knownLocations(year, month1);
+  const gymFor = (location: string) => gyms.find((g) => location.toLowerCase().includes(g.match.toLowerCase()));
+  const gymAdjust = new Map<string, number>(gyms.map((g) => [g.name, 0]));
+
   for (let d = 1; d <= nDays; d++) {
     const dateStr = `${monthPrefix}-${String(d).padStart(2, "0")}`; // ISO — internal keying only (day-log, session/package date matching)
     const dateDisplay = new Date(dateStr + "T12:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }); // "August 1, 2026" — what actually shows in column A
@@ -721,7 +732,7 @@ async function buildMonthTab(
     // (not mixed into the numbered session list) and folded straight into
     // the day's totals. Not attributed to any location (packages aren't
     // gym-specific), so — like any other unattributed revenue — it lands in
-    // "Other/Unlisted" in the Location Breakdown below, which is correct.
+    // "Other gyms" in the Location Breakdown below (see gymAdjust).
     for (const p of packagesByDate.get(dateStr) || []) {
       privateSegs.push({ text: `[Package Purchased] ${p.label}`, color: { red: 0, green: 0, blue: 0 }, bold: true });
       gPriceOnly += p.totalPrice;
@@ -734,6 +745,16 @@ async function buildMonthTab(
     const privateCell = privateSegs.length > 0 ? richTextCellData(privateSegs) : null;
     const groupCell = groupSegs.length > 0 ? richTextCellData(groupSegs) : null;
     const placesStr = Array.from(places).join(" / ");
+    if (places.size > 1) {
+      for (const s of daySessions) {
+        const g = s.location ? gymFor(s.location) : undefined;
+        if (g) gymAdjust.set(g.name, round2(gymAdjust.get(g.name)! + s.grossRevenue));
+      }
+    } else if (places.size === 1) {
+      const g = gymFor(placesStr);
+      const dayPackages = (packagesByDate.get(dateStr) || []).reduce((sum, p) => sum + p.totalPrice, 0);
+      if (g && dayPackages) gymAdjust.set(g.name, round2(gymAdjust.get(g.name)! - dayPackages));
+    }
 
     // Text-locked and fee-locked are checked INDEPENDENTLY — a day's
     // session-list text and its Processing/Stripe Fee are edited (or left
@@ -1060,15 +1081,15 @@ async function buildMonthTab(
     const rent = existingRentByName.get(name);
     return rent === undefined ? {} : { userEnteredValue: { numberValue: rent } };
   };
-  for (const loc of knownLocations(year, month1)) {
+  for (const loc of gyms) {
     const locRowNum1 = row0 + 1;
     const matchText = loc.match.replace(/"/g, '""');
     // St. Paul's is the only location where the owner runs cash pickup
     // games — see the PICKUPS table above — so its Revenue folds in the
     // pickups TOTAL cell on top of the normal SUMIF over booked sessions.
-    const revenueFormula = loc.name === "St. Paul's"
-      ? `=SUMIF(E${firstDayRow1}:E${lastDayRow1},"*${matchText}*",F${firstDayRow1}:F${lastDayRow1})+${PICKUPS_TOTAL_CELL}`
-      : `=SUMIF(E${firstDayRow1}:E${lastDayRow1},"*${matchText}*",F${firstDayRow1}:F${lastDayRow1})`;
+    const adjust = gymAdjust.get(loc.name) || 0;
+    const singleGymDays = `SUMIFS(F${firstDayRow1}:F${lastDayRow1},E${firstDayRow1}:E${lastDayRow1},"*${matchText}*",E${firstDayRow1}:E${lastDayRow1},"<>* / *")`;
+    const revenueFormula = `=${singleGymDays}${adjust >= 0 ? "+" : "-"}${Math.abs(adjust)}${loc.name === "St. Paul's" ? `+${PICKUPS_TOTAL_CELL}` : ""}`;
     requests.push({
       updateCells: {
         rows: [{

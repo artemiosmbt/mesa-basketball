@@ -11,6 +11,11 @@ import { notifyTrainerOfCancellation, notifyTrainerOfNewBooking } from "@/lib/tr
 import { getPackageById } from "@/lib/supabase";
 import { getTrainerTier, normalizeTrainerTier, packageCoversTrainerTier } from "@/lib/trainers";
 
+// A time change emails and texts every player one at a time after moving
+// them; the move can't be redone, so the run must not be cut off before
+// everyone is told (the platform default is far shorter).
+export const maxDuration = 60;
+
 
 interface WeeklyRegistration extends WeeklyRegKeyFields {
   parent_name: string;

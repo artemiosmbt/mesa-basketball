@@ -127,15 +127,11 @@ export async function POST(req: NextRequest) {
   const effectiveType: string = (typeof newType === "string" && newType) ? newType : reg.type;
   const isNewPrivate = isPrivateType(effectiveType);
 
-  // staysInBulkBatch: a weekly->weekly reschedule swaps one session for
-  // another within the same bulk-discount batch — the batch's total count
-  // (and therefore its tier) doesn't change, so the new price should carry
-  // the SAME discount forward rather than being priced at the raw live rate.
-  // leavesBulkBatch: a type-switch reschedule takes the OLD session out of
+  // A weekly->weekly reschedule keeps the discount the session was bought
+  // at (see rescheduleDiscountPct). leavesBulkBatch: a type-switch reschedule takes the OLD session out of
   // its batch entirely — the count actually shrinks by one here, same as a
   // cancellation, so the survivors need the same tier true-up
   // computeBulkWeeklySettlement gives a cancellation.
-  const staysInBulkBatch = reg.type === "weekly" && effectiveType === "weekly" && !!reg.booking_batch_id;
   const leavesBulkBatch = reg.type === "weekly" && !!reg.booking_batch_id && effectiveType !== "weekly";
 
   // Rebuild session_details by swapping only the trailing "date time at location"
@@ -492,7 +488,10 @@ export async function POST(req: NextRequest) {
         admin_action_claim_token: null,
         ...(newFullPrice !== undefined ? { session_price: newFullPrice } : {}),
         ...(newBulkFullPrice !== undefined ? { full_session_price: newBulkFullPrice } : {}),
-        ...(staysInBulkBatch ? { is_bulk_discounted: newIsBulkDiscounted } : {}),
+        // Whether it's still discounted, whenever its weekly price was actually
+        // re-worked out (not when the admin kept the price unchanged, and also
+        // for an older discounted row with no batch id).
+        ...(reg.type === "weekly" && newBulkFullPrice !== undefined ? { is_bulk_discounted: newIsBulkDiscounted } : {}),
         ...(leavesBulkBatch ? { is_bulk_discounted: false, booking_batch_id: null } : {}),
         ...(clearPackageId ? { package_id: null } : {}),
       })

@@ -49,7 +49,7 @@ export function regGroupKey(r: Pick<WeeklyRegKeyFields, "booked_group" | "sessio
 // after, a dashboard load, or the first run timing out mid-way), it saw
 // some players already at the new time "claiming" the only row and the rest
 // still at the old time with no row left — and cancelled and refunded them.
-// Moves are now one statement per session (claimWeeklyTimeChangeBatch), and
+// Moves are now one statement per session (applyWeeklyTimeChanges), and
 // even if a mixed state ever shows up again, it can only ever produce a
 // review text, never a cancellation.
 //
@@ -141,6 +141,25 @@ export function buildWeeklyPlan<T extends WeeklyRegKeyFields>(sheetRows: WeeklyS
     });
     if (stillListed || renamed) { flag(); continue; }
 
+    // Or it was moved rather than removed: a row for this group with no
+    // bookings yet appeared within a few days (moved to another day — next
+    // week's regular session, 7+ days out, doesn't count), or a one-off
+    // group name with no bookings appeared that same day (renamed and
+    // retimed in one edit).
+    const dayMs = (d: string) => new Date(d).setHours(12, 0, 0, 0);
+    const thisDay = dayMs(date);
+    const movedDay = !isNaN(thisDay) && sheetRows.some((s) => {
+      if (normLabel(s.group) !== group || regsByKey.has(`${s.date}|${group}`)) return false;
+      const days = Math.round(Math.abs(dayMs(s.date) - thisDay) / 86400000);
+      return days >= 1 && days <= 6;
+    });
+    const renamedAndRetimed = sheetRows.some((s) =>
+      s.date === date &&
+      !regsByKey.has(`${s.date}|${normLabel(s.group)}`) &&
+      !allSheetRows.some((o) => o.date !== date && normLabel(o.group) === normLabel(s.group))
+    );
+    if (movedDay || renamedAndRetimed) { flag(); continue; }
+
     for (const bucket of unresolvedBuckets) for (const r of bucket.regs) deletions.push(r);
   }
 
@@ -187,7 +206,7 @@ export function findWeeklyTrainerReassignments<T extends WeeklyRegKeyFields & { 
   return result;
 }
 
-// Same optimistic-concurrency pattern as claimWeeklyTimeChange, scoped to
+// Optimistic concurrency (same idea as applyWeeklyTimeChanges), scoped to
 // just booked_trainer — whichever of the two sync routes' UPDATE actually
 // lands first "wins"; the loser's WHERE clause matches zero rows and it's a
 // silent no-op, not a duplicate write.
@@ -201,33 +220,6 @@ export async function claimWeeklyTrainerReassignment(
     .update({ booked_trainer: newTrainer })
     .eq("id", reg.id);
   query = reg.booked_trainer === null ? query.is("booked_trainer", null) : query.eq("booked_trainer", reg.booked_trainer);
-  const { data } = await query.select("id");
-  return !!data && data.length > 0;
-}
-
-// The automatic cron (fires on every sheet edit, via Apps Script) and the
-// admin-dashboard-triggered sync (fires on every dashboard load) both watch
-// for the exact same weekly time/location changes with no coordination
-// between them — if an admin edits the sheet and then happens to reload the
-// dashboard shortly after, both can independently see the same registration
-// as "stale" before either one's write has landed, and both would notify
-// the client. This makes the update conditional on the OLD start/end/
-// location still matching what was actually read (optimistic concurrency,
-// no new schema needed) — whichever request's UPDATE actually lands first
-// "wins" and is the only one that proceeds to send the notification; the
-// loser's WHERE clause matches zero rows and it skips sending anything.
-export async function claimWeeklyTimeChange(
-  supabase: SupabaseClient,
-  reg: WeeklyRegKeyFields,
-  updates: { booked_start_time: string; booked_end_time: string; booked_location?: string; session_details: string }
-): Promise<boolean> {
-  let query = supabase
-    .from("registrations")
-    .update({ ...updates, admin_change_at: new Date().toISOString() })
-    .eq("id", reg.id)
-    .eq("booked_start_time", reg.booked_start_time);
-  query = reg.booked_end_time === null ? query.is("booked_end_time", null) : query.eq("booked_end_time", reg.booked_end_time);
-  query = reg.booked_location === null ? query.is("booked_location", null) : query.eq("booked_location", reg.booked_location);
   const { data } = await query.select("id");
   return !!data && data.length > 0;
 }

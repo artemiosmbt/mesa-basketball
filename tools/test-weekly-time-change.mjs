@@ -92,12 +92,29 @@ console.log("\nmid-edit and rename");
 }
 
 console.log("\nreal deletions still cancel");
+const NEXT_WEEK = "11/11/2026";
 {
   n = 0;
   const regs = [reg("Varsity", "6:00 PM", "7:00 PM"), reg("Varsity", "6:00 PM", "7:00 PM")];
-  check("row removed from the sheet: both bookings cancelled",
-    plan([row("JV", "5:00 PM", "6:00 PM")], regs),
+  check("row removed from the sheet (other groups and next week's Varsity still on): both cancelled",
+    plan([row("JV", "5:00 PM", "6:00 PM"), row("JV", "5:00 PM", "6:00 PM", "Mesa Gym", NEXT_WEEK), row("Varsity", "6:00 PM", "7:00 PM", "Mesa Gym", NEXT_WEEK)], regs),
     { changes: [], deletions: ["r1", "r2"], ambiguous: [] });
+}
+
+console.log("\nmoved, not removed: never cancelled");
+{
+  n = 0;
+  const regs = [reg("Varsity", "6:00 PM", "7:00 PM")];
+  check("session moved to the next day: flagged, nobody cancelled",
+    plan([row("Varsity", "6:00 PM", "7:00 PM", "Mesa Gym", "11/5/2026")], regs),
+    { changes: [], deletions: [], ambiguous: [1] });
+}
+{
+  n = 0;
+  const regs = [reg("Varsity", "6:00 PM", "7:00 PM")];
+  check("renamed AND retimed in one edit: flagged, nobody cancelled",
+    plan([row("Varsity Boys", "7:00 PM", "8:00 PM")], regs),
+    { changes: [], deletions: [], ambiguous: [1] });
 }
 
 console.log("\nsame group twice in one day");

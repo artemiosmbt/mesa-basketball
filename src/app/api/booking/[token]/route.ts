@@ -1412,7 +1412,9 @@ export async function PUT(
     // payment-batch conflict here (unlike the topup path above): this row is
     // created already-confirmed, with no Stripe Checkout of its own to track.
     bookingBatchId: staysInBulkBatch ? reg.booking_batch_id! : undefined,
-    isBulkDiscounted: staysInBulkBatch ? newIsBulkDiscounted : undefined,
+    // Set whenever the weekly price was re-worked out — including an older
+    // discounted row with no batch id, which keeps its discount too.
+    isBulkDiscounted: reg.type === "weekly" && newFullSessionPrice !== undefined ? newIsBulkDiscounted : undefined,
     appliedAccountCredit: (lateFeeCreditApplied + carriedCreditApplied) || undefined,
     stripePaymentIntentId: newPriceKnown && !isLateReschedule ? oldPaymentIntentId : undefined,
     stripeCustomerId: newPriceKnown && !isLateReschedule ? (reg.stripe_customer_id || undefined) : undefined,
