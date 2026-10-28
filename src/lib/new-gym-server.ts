@@ -28,7 +28,7 @@ export function trainerHelpContact(trainer: string | null | undefined): { name: 
   return { name: SHORT_NAME[contact.trainerName] || contact.trainerName.split(" ")[0], phone: contact.phone };
 }
 
-function helpLine(trainers: (string | null | undefined)[]): string {
+export function helpLine(trainers: (string | null | undefined)[]): string {
   const seen = new Map<string, { name: string; phone: string }>();
   for (const t of trainers) {
     const c = trainerHelpContact(t);

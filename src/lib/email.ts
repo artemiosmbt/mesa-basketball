@@ -1699,3 +1699,39 @@ export async function sendStPaulsAssignedAdminEmail(data: {
   });
   if (result.error) console.error("Resend St. Paul's assigned email error:", result.error);
 }
+
+// The evening before a family's FIRST session at the new gym (Diamond
+// Charter) — the only day-before reminder Mesa sends (Artemios, 2026-10-28).
+export async function sendNewGymFirstSessionReminder(data: {
+  to: string;
+  parentName: string;
+  sessions: { label: string; dateLabel: string; timeLabel: string }[];
+  helpLine: string;
+}) {
+  const resend = getResend();
+  const lines = data.sessions
+    .map((s) => `<li><strong>${escapeHtml(s.label)}</strong> — ${escapeHtml(s.dateLabel)}, ${escapeHtml(s.timeLabel)}</li>`)
+    .join("");
+  const result = await resend.emails.send({
+    from: FROM_EMAIL,
+    to: data.to,
+    replyTo: ARTEMI_EMAIL,
+    subject: "Tomorrow: New Location — Diamond Charter School",
+    html: `
+      <h2>See you tomorrow — at our new location</h2>
+      <p>Hi ${escapeHtml(data.parentName)},</p>
+      <p>A reminder about tomorrow:</p>
+      <ul>${lines}</ul>
+      <div style="border: 2px solid #c4833e; background: #fdf8f6; border-radius: 8px; padding: 12px 14px; margin: 12px 0;">
+        <p style="margin: 0 0 4px; font-weight: bold; color: #5c3d2e;">⚠️ NEW LOCATION — not St. Paul's</p>
+        <p style="margin: 0;"><strong>${NEW_GYM.name}</strong>, <a href="${NEW_GYM.mapsUrl}">${NEW_GYM.address}</a> (about 3 minutes from St. Paul's).</p>
+        <p style="margin: 6px 0 0;">${escapeHtml(data.helpLine)}</p>
+      </div>
+      <p>Not every session is at St. Paul's anymore, so check the location on each one you book.</p>
+      <p><a href="${BASE_URL}/my-bookings" style="color: #d4af37; font-weight: bold;">View My Bookings</a></p>
+      <p>— Mesa Basketball Training</p>
+    `,
+  });
+  if (result.error) throw new Error(`Resend: ${result.error.message}`);
+}
+
