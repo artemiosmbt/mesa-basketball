@@ -12,6 +12,8 @@ const LOCATION_NAMES: Record<string, string> = {
   "Cherry Valley": "Cherry Valley Sports",
   "Holy Resurrection": "Holy Resurrection Brookville",
   "Holy Resurrection Brookville": "Holy Resurrection Brookville",
+  "Diamond Charter": "Diamond Charter School",
+  "Diamond Charter School": "Diamond Charter School",
 };
 
 function formatSessionDetails(details: string, bookedDate?: string | null): string {

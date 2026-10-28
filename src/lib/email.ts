@@ -24,6 +24,8 @@ const LOCATION_MAP: Record<string, { name: string; url: string }> = {
   "Cherry Valley Sports": { name: "Cherry Valley Sports", url: "https://share.google/YKRoCTFuLP33bpSUZ" },
   "Holy Resurrection": { name: "Holy Resurrection Brookville", url: "https://www.google.com/search?q=holy+resurrection+brookville" },
   "Holy Resurrection Brookville": { name: "Holy Resurrection Brookville", url: "https://www.google.com/search?q=holy+resurrection+brookville" },
+  "Diamond Charter": { name: "Diamond Charter School", url: "https://www.google.com/maps/search/?api=1&query=Diamond+Charter+School+12+Westminster+Rd+West+Hempstead+NY+11552" },
+  "Diamond Charter School": { name: "Diamond Charter School", url: "https://www.google.com/maps/search/?api=1&query=Diamond+Charter+School+12+Westminster+Rd+West+Hempstead+NY+11552" },
 };
 
 // Every notification here embeds client-submitted strings (parent/kid names,

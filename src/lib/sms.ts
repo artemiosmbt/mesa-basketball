@@ -8,6 +8,8 @@ const FULL_LOCATION_NAMES: Record<string, string> = {
   "Cherry Valley Sports": "Cherry Valley Sports",
   "Holy Resurrection": "Holy Resurrection Brookville",
   "Holy Resurrection Brookville": "Holy Resurrection Brookville",
+  "Diamond Charter": "Diamond Charter School",
+  "Diamond Charter School": "Diamond Charter School",
 };
 
 export function resolveLocationName(location: string): string {
