@@ -832,6 +832,10 @@ export default function Home() {
   // athlete, this just surfaces the NCAA heads-up before checkout so the
   // client can make an informed call (same shape as the warnings above).
   const [showCoachZNotice, setShowCoachZNotice] = useState(false);
+  // New-gym heads-up (Diamond Charter, from November 2026): families are
+  // used to every session being at St. Paul's. The first time someone books
+  // a session there, they confirm the new address before paying.
+  const [newGymNoticeDates, setNewGymNoticeDates] = useState<string[] | null>(null);
   const [isGroupRate, setIsGroupRate] = useState(false);
   const [hideUpsell, setHideUpsell] = useState(false);
   const [filterDays, setFilterDays] = useState<Set<number>>(new Set());
@@ -1442,6 +1446,34 @@ export default function Home() {
     }
   }
 
+  // Dates of the sessions in this booking that are at Diamond Charter.
+  function diamondCharterDates(): string[] {
+    const isDiamond = (loc?: string) => !!loc && loc.toLowerCase().includes("diamond charter");
+    if (modal.type === "weekly") return (modal.selectedGroupSessions || []).filter((x) => isDiamond(x.location)).map((x) => x.date);
+    if (modal.type === "camp") {
+      const camp = camps[modal.sessionIndex];
+      return camp && isDiamond(camp.location) ? (camp.campDays?.length ? camp.campDays.filter((d) => campSelectedDays.has(d)) : [camp.startDate]) : [];
+    }
+    return [
+      { date: modal.bookedDate, location: modal.bookedLocation },
+      ...recurringWeeks.filter((w) => w.selected).map((w) => ({ date: w.date, location: w.location })),
+    ].filter((x) => isDiamond(x.location)).map((x) => x.date || "");
+  }
+  const newGymAckKey = () => `mesa-new-gym-ack:diamond:${email.trim().toLowerCase()}`;
+
+  // The last step before booking/payment, after every other warning: the
+  // new-gym heads-up, once per person (per browser).
+  async function submitAfterNotices() {
+    const dates = diamondCharterDates();
+    let acked = false;
+    try { acked = localStorage.getItem(newGymAckKey()) === "1"; } catch { /* storage blocked: show it */ }
+    if (dates.length > 0 && !acked) {
+      setNewGymNoticeDates(dates);
+      return;
+    }
+    await performSubmit();
+  }
+
   async function performSubmit() {
     setSubmitting(true);
     setSubmitResult(null);
@@ -1779,7 +1811,7 @@ export default function Home() {
       }
     }
 
-    await performSubmit();
+    await submitAfterNotices();
   }
 
   async function handlePackageSubmit(e: React.FormEvent) {
@@ -3403,7 +3435,7 @@ export default function Home() {
                 Go Back
               </button>
               <button
-                onClick={() => { setShowGenderWarning(false); performSubmit(); }}
+                onClick={() => { setShowGenderWarning(false); submitAfterNotices(); }}
                 className="flex-1 rounded-lg bg-yellow-700 px-4 py-2 text-sm font-semibold text-white hover:bg-yellow-600"
               >
                 Continue Anyway
@@ -3432,7 +3464,7 @@ export default function Home() {
                 Go Back
               </button>
               <button
-                onClick={() => { setShowPackageTierWarning(false); performSubmit(); }}
+                onClick={() => { setShowPackageTierWarning(false); submitAfterNotices(); }}
                 className="flex-1 rounded-lg bg-yellow-700 px-4 py-2 text-sm font-semibold text-white hover:bg-yellow-600"
               >
                 Continue Anyway
@@ -3456,10 +3488,56 @@ export default function Home() {
                 Choose a Different Trainer
               </button>
               <button
-                onClick={() => { setShowCoachZNotice(false); performSubmit(); }}
+                onClick={() => { setShowCoachZNotice(false); submitAfterNotices(); }}
                 className="flex-1 rounded-lg bg-yellow-700 px-4 py-2 text-sm font-semibold text-white hover:bg-yellow-600"
               >
                 Continue Anyway
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* New gym heads-up — Diamond Charter */}
+      {newGymNoticeDates && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-sm rounded-2xl border border-yellow-700 bg-brown-900 p-6 shadow-2xl">
+            <h3 className="text-lg font-bold text-yellow-400">New Location for This Session</h3>
+            <p className="mt-2 text-sm text-brown-300">
+              {newGymNoticeDates.length > 1 ? `${newGymNoticeDates.length} of the sessions you're booking are` : "This session is"} at{" "}
+              <span className="font-semibold text-white">Diamond Charter School</span>, not St. Paul&apos;s:
+            </p>
+            <a
+              href={LOCATION_LINKS["Diamond Charter"].url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-2 block rounded-lg bg-brown-800 px-3 py-2 text-sm font-semibold text-mesa-accent underline"
+            >
+              12 Westminster Rd, West Hempstead, NY 11552
+            </a>
+            <p className="mt-1 text-xs text-brown-400">About 3 minutes from St. Paul&apos;s.</p>
+            {newGymNoticeDates.length > 1 && newGymNoticeDates.every(Boolean) && (
+              <p className="mt-2 text-xs text-brown-300">At Diamond Charter: {newGymNoticeDates.join(" · ")}</p>
+            )}
+            <p className="mt-3 text-sm text-brown-300">
+              Make sure to go to this address for {newGymNoticeDates.length > 1 ? "these sessions" : "this session"}. Not every session is at St. Paul&apos;s anymore, so check the location on each session you book.
+            </p>
+            <div className="mt-5 flex gap-3">
+              <button
+                onClick={() => setNewGymNoticeDates(null)}
+                className="flex-1 rounded-lg bg-brown-700 px-4 py-2 text-sm text-brown-300 hover:bg-brown-600"
+              >
+                Go Back
+              </button>
+              <button
+                onClick={() => {
+                  setNewGymNoticeDates(null);
+                  try { localStorage.setItem(newGymAckKey(), "1"); } catch { /* fine: they'll just see it again next time */ }
+                  performSubmit();
+                }}
+                className="flex-1 rounded-lg bg-yellow-700 px-4 py-2 text-sm font-semibold text-white hover:bg-yellow-600"
+              >
+                Got It — Continue
               </button>
             </div>
           </div>
