@@ -37,13 +37,27 @@ export function regGroupKey(r: Pick<WeeklyRegKeyFields, "booked_group" | "sessio
 //     is unchanged — no action needed.
 //   - if exactly one bucket is left unmatched and exactly one sheet row is
 //     unclaimed, that's an unambiguous time/location change.
-//   - if every sheet row for that date+group ends up claimed by some other
-//     bucket (zero unclaimed rows left), the remaining unmatched bucket(s)
-//     were genuinely deleted.
-//   - anything else (multiple unmatched buckets and/or multiple unclaimed
-//     rows at once) can't be resolved without guessing which bucket maps to
-//     which row — flagged as ambiguous instead of risking a wrong
-//     auto-cancel/refund or auto-reschedule of a real booking.
+//   - a bucket is only ever treated as DELETED when that group has no row
+//     at all on that date anymore (see the guards below).
+//   - anything else is flagged as ambiguous for Artemios to review —
+//     nothing is cancelled, refunded or moved.
+//
+// Why a leftover bucket is never cancelled while the group still has a row
+// that day: a real time change used to be able to cancel a player. The
+// players of one session were moved to the new time one at a time; if a
+// second sync ran before the first finished (a second sheet edit right
+// after, a dashboard load, or the first run timing out mid-way), it saw
+// some players already at the new time "claiming" the only row and the rest
+// still at the old time with no row left — and cancelled and refunded them.
+// Moves are now one statement per session (claimWeeklyTimeChangeBatch), and
+// even if a mixed state ever shows up again, it can only ever produce a
+// review text, never a cancellation.
+//
+// allSheetRows: the whole sheet, before filtering to upcoming/complete rows.
+// A group whose row is still on the sheet but momentarily filtered out (its
+// time cell blank mid-edit, or moved to a time earlier today that has already
+// passed) must not look deleted; neither must a row whose group was renamed
+// in the same edit (same date, start time and location, different name).
 //
 // Shared between src/app/api/cron/detect-time-changes/route.ts (the
 // automatic sheet-edit-triggered sync) and
@@ -52,7 +66,7 @@ export function regGroupKey(r: Pick<WeeklyRegKeyFields, "booked_group" | "sessio
 // between them, so keeping the matching logic in one place is what stops
 // them drifting out of sync with each other again (they already did once:
 // only the cron got the exact-booked_group fix until this refactor).
-export function buildWeeklyPlan<T extends WeeklyRegKeyFields>(sheetRows: WeeklySession[], regs: T[]) {
+export function buildWeeklyPlan<T extends WeeklyRegKeyFields>(sheetRows: WeeklySession[], regs: T[], allSheetRows: WeeklySession[] = sheetRows) {
   const changes: { reg: T; newSession: WeeklySession }[] = [];
   const deletions: T[] = [];
   const ambiguous: { date: string; group: string; regCount: number }[] = [];
@@ -112,13 +126,22 @@ export function buildWeeklyPlan<T extends WeeklyRegKeyFields>(sheetRows: WeeklyS
       continue;
     }
 
-    if (unclaimedRows.length === 0) {
-      for (const bucket of unresolvedBuckets) for (const r of bucket.regs) deletions.push(r);
-      continue;
-    }
-
     const [date, group] = key.split("|");
-    ambiguous.push({ date, group, regCount: unresolvedBuckets.reduce((n, b) => n + b.regs.length, 0) });
+    const flag = () => ambiguous.push({ date, group, regCount: unresolvedBuckets.reduce((n, b) => n + b.regs.length, 0) });
+
+    // The group still runs that day: never a deletion, whatever else.
+    if (sheetRowsForKey.length > 0) { flag(); continue; }
+
+    // No upcoming row left for this group on this date. Still not a
+    // deletion if the row is on the sheet in some other form.
+    const stillListed = allSheetRows.some((s) => s.date === date && normLabel(s.group) === group);
+    const renamed = unresolvedBuckets.some((b) => {
+      const r = b.regs[0];
+      return allSheetRows.some((s) => s.date === date && s.startTime === r.booked_start_time && normLabel(s.location) === normLabel(r.booked_location));
+    });
+    if (stillListed || renamed) { flag(); continue; }
+
+    for (const bucket of unresolvedBuckets) for (const r of bucket.regs) deletions.push(r);
   }
 
   return { changes, deletions, ambiguous };

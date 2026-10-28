@@ -61,9 +61,14 @@ function parseCSV(text: string): string[][] {
   });
 }
 
-export async function getWeeklySchedule(options?: { noCache?: boolean }): Promise<WeeklySession[]> {
+// strict: for the time-change / deletion sync only. A failed or garbled
+// read (an HTTP error, Google's HTML error page, an empty body) must never be
+// taken as "every session is gone" — that would cancel and refund real
+// bookings. Throws instead, so the caller does nothing this run.
+export async function getWeeklySchedule(options?: { noCache?: boolean; strict?: boolean }): Promise<WeeklySession[]> {
   const url = process.env.SHEET_CSV_WEEKLY_SCHEDULE;
   if (!url) {
+    if (options?.strict) throw new Error("SHEET_CSV_WEEKLY_SCHEDULE is not set");
     console.error("SHEET_CSV_WEEKLY_SCHEDULE is not set — returning an empty schedule instead of the real one.");
     return [];
   }
@@ -71,7 +76,15 @@ export async function getWeeklySchedule(options?: { noCache?: boolean }): Promis
     ? { cache: "no-store" as const }
     : { next: { revalidate: 60 } };
   const res = await fetch(url, fetchOptions);
-  const rows = parseCSV(await res.text());
+  const text = await res.text();
+  if (options?.strict) {
+    if (!res.ok) throw new Error(`Weekly schedule fetch failed: HTTP ${res.status}`);
+    if (/^\s*</.test(text)) throw new Error("Weekly schedule fetch returned HTML, not CSV");
+  }
+  const rows = parseCSV(text);
+  if (options?.strict && !rows.slice(1).some((r) => (r[0] || "").trim() && (r[1] || "").trim())) {
+    throw new Error("Weekly schedule fetch returned no sessions");
+  }
   // Skip header row
   return rows.slice(1).map((row) => ({
     group: row[0] || "",

@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { verifyCronSecret } from "@/lib/auth";
 import { createClient } from "@supabase/supabase-js";
-import { getWeeklySchedule, getPrivateSlots, type WeeklySession } from "@/lib/sheets";
+import { getWeeklySchedule, getPrivateSlots } from "@/lib/sheets";
 import { deletePrivateSessionFromCalendar } from "@/lib/calendar";
-import { buildWeeklyPlan, claimWeeklyTimeChange, findWeeklyTrainerReassignments, claimWeeklyTrainerReassignment, regGroupKey, type WeeklyRegKeyFields } from "@/lib/weekly-schedule-matching";
+import { buildWeeklyPlan, findWeeklyTrainerReassignments, claimWeeklyTrainerReassignment, regGroupKey } from "@/lib/weekly-schedule-matching";
 import { parseTimeMins, intervalsCoverRange, findPrivateTrainerReassignments, claimPrivateTrainerReassignment, findPrivateLocationChanges, claimPrivateLocationChange } from "@/lib/private-schedule-matching";
 import { notifyPrivateLocationChange } from "@/lib/private-location-notify";
-import { sendTimeChangeNotification, sendCancellationNotification } from "@/lib/email";
+import { sendCancellationNotification } from "@/lib/email";
+import { applyWeeklyTimeChanges } from "@/lib/weekly-time-change";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import { addAccountCredit, addReferralCredit, countPackageSessionsUsed, setPackageSessions, getPackageById } from "@/lib/supabase";
 import { issueStripeRefund, resolvedSessionPrice, type StripeRefundResult } from "@/lib/booking-finalize";
@@ -141,24 +142,6 @@ function privateBookingStillOnSheet(
   return Object.values(byLocation).some((rows) => intervalsCoverRange(rows, regStart, regEnd));
 }
 
-interface WeeklyRegLike extends WeeklyRegKeyFields {
-  parent_name: string;
-  email: string;
-  kids: string;
-  phone: string;
-  sms_consent: boolean | null;
-  type: string;
-  manage_token: string;
-  used_referral_credit: boolean | null;
-  applied_account_credit: number | null;
-  is_paid: boolean | null;
-  stripe_payment_intent_id: string | null;
-  package_id: string | null;
-  session_price: number | null;
-  is_free: boolean | null;
-  booked_trainer: string | null;
-}
-
 function sessionIsUpcoming(dateStr: string, startTimeStr: string): boolean {
   try {
     const now = new Date();
@@ -203,7 +186,7 @@ export async function GET(req: NextRequest) {
 
   let sessions;
   try {
-    sessions = await getWeeklySchedule({ noCache: true });
+    sessions = await getWeeklySchedule({ noCache: true, strict: true });
   } catch (err) {
     console.error("detect-time-changes: failed to fetch schedule", err);
     return NextResponse.json({ error: "Failed to fetch schedule" }, { status: 500 });
@@ -226,8 +209,9 @@ export async function GET(req: NextRequest) {
   // it was deleted; if the confirmation fetch itself fails, confirm nothing
   // this run rather than act on a single read.
   let upcomingConfirm: typeof upcoming | null = null;
+  let confirmSessions: typeof sessions = [];
   try {
-    const confirmSessions = await getWeeklySchedule({ noCache: true });
+    confirmSessions = await getWeeklySchedule({ noCache: true, strict: true });
     upcomingConfirm = confirmSessions.filter(
       (s) => sessionIsUpcoming(s.date, s.startTime) && s.startTime && s.group
     );
@@ -245,115 +229,46 @@ export async function GET(req: NextRequest) {
   );
 
   // === TIME / LOCATION CHANGE + DELETION DETECTION — WEEKLY SESSIONS ===
-  const firstPlan = buildWeeklyPlan(upcoming, weeklyRegsUpcoming);
-  const confirmPlan = upcomingConfirm === null ? null : buildWeeklyPlan(upcomingConfirm, weeklyRegsUpcoming);
+  const firstPlan = buildWeeklyPlan(upcoming, weeklyRegsUpcoming, sessions);
+  const confirmPlan = upcomingConfirm === null ? null : buildWeeklyPlan(upcomingConfirm, weeklyRegsUpcoming, confirmSessions);
   const confirmedDeletionIds = confirmPlan === null ? new Set<string>() : new Set(confirmPlan.deletions.map((r) => r.id));
-  const weeklyDeletions = confirmPlan === null ? [] : firstPlan.deletions.filter((r) => confirmedDeletionIds.has(r.id));
+  let weeklyDeletions = confirmPlan === null ? [] : firstPlan.deletions.filter((r) => confirmedDeletionIds.has(r.id));
+
+  // Many sessions vanishing in one run is far more likely an accident (rows
+  // deleted or overwritten by mistake, a sort gone wrong) than real
+  // cancellations: don't cancel anyone, ask Artemios instead.
+  const deletedSessionKeys = new Set(weeklyDeletions.map((r) => `${r.booked_date}|${regGroupKey(r)}|${r.booked_start_time}`));
+  if (deletedSessionKeys.size > 3) {
+    await sendAdminSMS(
+      `NEEDS MANUAL REVIEW:\n${deletedSessionKeys.size} group sessions (${weeklyDeletions.length} bookings) disappeared from the sheet at once. Nothing was cancelled or refunded. If you really removed them, cancel them from the admin dashboard; if not, put the rows back.`
+    ).catch((err) => console.error("Mass-deletion admin SMS failed:", err));
+    weeklyDeletions = [];
+  }
 
   if (firstPlan.ambiguous.length > 0) {
     const summary = firstPlan.ambiguous
       .map((a) => `• ${a.date} "${a.group}" — ${a.regCount} booking${a.regCount !== 1 ? "s" : ""}`)
       .join("\n");
     await sendAdminSMS(
-      `NEEDS MANUAL REVIEW:\nCan't tell which booking goes with which sheet row without guessing (same group name, multiple sessions changed on the same day at once):\n${summary}\nPlease check these manually — nothing was auto-cancelled or auto-rescheduled for them.`
+      `NEEDS MANUAL REVIEW:\nThese bookings don't match their session's row on the sheet, and it isn't certain which row they belong to (or the row looks mid-edit or renamed):\n${summary}\nNothing was cancelled, refunded or moved. Check them in the admin dashboard.`
     ).catch((err) => console.error("Ambiguous-weekly-change admin SMS failed:", err));
   }
 
-  // Group the resolved (unambiguous) time/location moves back by target
-  // session so the admin summary reads one line per session, not one per
-  // registrant — mirrors how this worked before bucketing was introduced.
-  const changesBySession = new Map<string, { session: WeeklySession; regs: WeeklyRegLike[] }>();
-  for (const { reg, newSession } of firstPlan.changes) {
-    const key = `${newSession.date}|${newSession.group}|${newSession.startTime}|${newSession.endTime}|${newSession.location}`;
-    if (!changesBySession.has(key)) changesBySession.set(key, { session: newSession, regs: [] });
-    changesBySession.get(key)!.regs.push(reg);
-  }
-
-  for (const { session, regs: stale } of changesBySession.values()) {
-    const firstOldStart: string = stale[0].booked_start_time;
-    const firstOldEnd: string = stale[0].booked_end_time || firstOldStart;
-    const firstOldLocation: string = stale[0].booked_location || "";
-    const timeChangedAny = stale.some((r) => r.booked_start_time !== session.startTime || r.booked_end_time !== session.endTime);
-    const locationChangedAny = stale.some((r) => r.booked_location !== session.location);
-    let changeDesc = `${session.date} "${session.group}"`;
-    if (timeChangedAny) changeDesc += `: ${firstOldStart}-${firstOldEnd} → ${session.startTime}-${session.endTime}`;
-    if (locationChangedAny) {
-      const locChangeStr = `${resolveLocationName(firstOldLocation)} → ${resolveLocationName(session.location)}`;
-      changeDesc += timeChangedAny ? `, location: ${locChangeStr}` : `: ${locChangeStr}`;
+  // Moves each changed session's players to the new time in one statement,
+  // and notifies them and the trainer (see applyWeeklyTimeChanges).
+  const applied = await applyWeeklyTimeChanges(supabase, firstPlan.changes);
+  for (const c of applied.sessions) {
+    let changeDesc = `${c.session.date} "${c.session.group}"`;
+    if (c.timeChanged) changeDesc += `: ${c.oldStart}-${c.oldEnd} → ${c.session.startTime}-${c.session.endTime}`;
+    if (c.locationChanged) {
+      const locChangeStr = `${resolveLocationName(c.oldLocation)} → ${resolveLocationName(c.session.location)}`;
+      changeDesc += c.timeChanged ? `, location: ${locChangeStr}` : `: ${locChangeStr}`;
     }
     changesDetected.push(changeDesc);
-
-    for (const r of stale) {
-      const timeChanged = r.booked_start_time !== session.startTime || r.booked_end_time !== session.endTime;
-      const locationChanged = r.booked_location !== session.location;
-      const changeType: "time" | "location" | "both" =
-        timeChanged && locationChanged ? "both" : timeChanged ? "time" : "location";
-
-      const rOldStart: string = r.booked_start_time;
-      const rOldEnd: string = r.booked_end_time || rOldStart;
-      const rOldLocation: string = r.booked_location || "";
-
-      let newDetails = r.session_details || "";
-      if (timeChanged) {
-        newDetails = newDetails
-          .replace(`${rOldStart}-${rOldEnd}`, `${session.startTime}-${session.endTime}`)
-          .replace(`${rOldStart}–${rOldEnd}`, `${session.startTime}–${session.endTime}`);
-      }
-      if (locationChanged && rOldLocation) {
-        newDetails = newDetails.replace(`at ${rOldLocation}`, `at ${session.location}`);
-      }
-
-      const won = await claimWeeklyTimeChange(supabase, r, {
-        booked_start_time: session.startTime,
-        booked_end_time: session.endTime,
-        ...(locationChanged ? { booked_location: session.location } : {}),
-        session_details: newDetails,
-      });
-      if (!won) continue; // the admin-dashboard sync already caught and notified this one
-
-      try {
-        await sendTimeChangeNotification({
-          parentName: r.parent_name,
-          email: r.email,
-          kids: r.kids,
-          date: session.date,
-          sessionLabel: session.group,
-          oldStartTime: rOldStart,
-          oldEndTime: rOldEnd,
-          newStartTime: session.startTime,
-          newEndTime: session.endTime,
-          location: session.location,
-          changeType,
-          oldLocation: locationChanged ? rOldLocation : undefined,
-        });
-        totalEmailsSent++;
-      } catch (err) {
-        console.error("Change notification email failed for", r.email, err);
-      }
-
-      if (r.sms_consent) {
-        const dateStr = formatDateWithDay(session.date);
-        const locName = resolveLocationName(session.location);
-        let smsBody: string;
-        const oldLocName = resolveLocationName(rOldLocation);
-        if (changeType === "both") {
-          smsBody = `TIME & LOCATION CHANGE\nMesa Basketball: ${session.group} on ${dateStr}\nTime: ${rOldStart}-${rOldEnd} → ${session.startTime}-${session.endTime}\nLocation: ${oldLocName} → ${locName}\nQuestions? (631) 599-1280. Reply STOP to opt out.`;
-        } else if (changeType === "time") {
-          smsBody = `TIME CHANGE\nMesa Basketball: ${session.group} on ${dateStr}\nTime: ${rOldStart}-${rOldEnd} → ${session.startTime}-${session.endTime}\nLocation: ${locName}\nQuestions? (631) 599-1280. Reply STOP to opt out.`;
-        } else {
-          smsBody = `LOCATION CHANGE\nMesa Basketball: ${session.group} on ${dateStr}\nLocation: ${oldLocName} → ${locName}\nTime: ${session.startTime}-${session.endTime}\nQuestions? (631) 599-1280. Reply STOP to opt out.`;
-        }
-        try {
-          await sendSMS(r.phone, smsBody);
-          totalSmsSent++;
-        } catch (err) {
-          console.error("Change notification SMS failed for", r.phone, err);
-        }
-      }
-
-      totalRegistrantsNotified++;
-    }
+    totalRegistrantsNotified += c.regs.length;
   }
+  totalEmailsSent += applied.emailsSent;
+  totalSmsSent += applied.smsSent;
 
   if (changesDetected.length > 0) {
     const summary = changesDetected.map((c) => `• ${c}`).join("\n");
