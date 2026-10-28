@@ -267,6 +267,7 @@ interface DerivedSession {
   // them and leave the rest at $0.
   pickupKey: string | null;
   location: string;
+  packageId: string | null; // the package that covered it, if any — its share of that package's price is filled in by the package-split pass in runMonthlyRevenueSync
 }
 
 function deriveSession(reg: RegRow, isLateCancel: boolean, lateFeeAmountKept: number): DerivedSession | null {
@@ -301,12 +302,11 @@ function deriveSession(reg: RegRow, isLateCancel: boolean, lateFeeAmountKept: nu
   const isPackage = !!reg.package_id;
 
   const stripePortion = isPackage || (credit > 0 && credit >= price) ? 0 : Math.max(price - credit, 0);
-  // Package-covered sessions recognize $0 incremental revenue here — the
-  // full package price was already counted as revenue on the day it was
-  // purchased (see derivePackage/buildMonthTab), so counting session_price
-  // again on every date the client uses a session would double-count real
-  // cash that only came in once. Confirmed with the owner this is the
-  // wanted behavior over the previous (wrong) per-session face-value count.
+  // Package-covered sessions start at $0 here: they never count their own
+  // session_price (the cash only came in once, as the package). Their real
+  // figure is an equal share of the package's price, set by the package-
+  // split pass in runMonthlyRevenueSync once every session it covered is
+  // known.
   //
   // Late-cancel/reschedule revenue is NOT a flat 50% of price — the real
   // "amount kept" varies by case (bulk-discounted weekly bookings are full
@@ -382,10 +382,16 @@ function deriveSession(reg: RegRow, isLateCancel: boolean, lateFeeAmountKept: nu
     trainerPay,
     pickupKey,
     location: reg.booked_location || "",
+    packageId: reg.package_id,
   };
 }
 
 interface DerivedPackage {
+  id: string;
+  // How many sessions this package's price is split across (see the
+  // package-split pass in runMonthlyRevenueSync); 0 = none used yet, so the
+  // price stays on the purchase day.
+  splitAcross: number;
   date: string;
   label: string;
   totalPrice: number; // the raw package price (excl. fee) — counted as real Gross Revenue (plus processingFee, see buildMonthTab) on this date; see deriveSession's grossRevenue=0 for package-covered sessions for why this can't also be counted again per-session later
@@ -429,7 +435,7 @@ function derivePackage(pkg: PackageRow): DerivedPackage | null {
   // next to a fee sized off $175 is exactly the audit-trail mismatch this
   // tracker exists to prevent (same reasoning as deriveSession's amountText).
   const creditNote = appliedCredit > 0 ? ` ($${appliedCredit.toFixed(2)} credit, $${amountCharged.toFixed(2)} charged)` : "";
-  return { date, label: `${buyer} — ${size} $${price.toFixed(2)}${creditNote}`, totalPrice: price, amountCharged, processingFee, stripeFee, paymentIntentId: pkg.stripe_payment_intent_id };
+  return { id: pkg.id, splitAcross: 0, date, label: `${buyer} — ${size} $${price.toFixed(2)}${creditNote}`, totalPrice: price, amountCharged, processingFee, stripeFee, paymentIntentId: pkg.stripe_payment_intent_id };
 }
 
 // ---------------------------------------------------------------------------
@@ -684,8 +690,10 @@ async function buildMonthTab(
   //  + on a day at two or more gyms (Place "St. Paul's / Diamond Charter"),
   //    each session's own price goes to its own gym — summing the whole day
   //    into every gym named in Place counted it twice.
-  //  - a package bought on a single-gym day isn't that gym's revenue (it
-  //    belongs on Other), but the day's Gross includes it.
+  //  - a package bought on a single-gym day that hasn't covered a session
+  //    yet isn't that gym's revenue (it belongs on Other), but the day's
+  //    Gross includes it. (Once it covers sessions, its price is on those
+  //    sessions, at their own gyms.)
   const gyms = knownLocations(year, month1);
   const gymFor = (location: string) => gyms.find((g) => location.toLowerCase().includes(g.match.toLowerCase()));
   const gymAdjust = new Map<string, number>(gyms.map((g) => [g.name, 0]));
@@ -734,8 +742,12 @@ async function buildMonthTab(
     // gym-specific), so — like any other unattributed revenue — it lands in
     // "Other gyms" in the Location Breakdown below (see gymAdjust).
     for (const p of packagesByDate.get(dateStr) || []) {
-      privateSegs.push({ text: `[Package Purchased] ${p.label}`, color: { red: 0, green: 0, blue: 0 }, bold: true });
-      gPriceOnly += p.totalPrice;
+      // Once it has covered a session, its price is counted on those
+      // sessions instead (see the package-split pass); its fees stay here,
+      // the day the card was charged.
+      const splitNote = p.splitAcross > 0 ? ` — counted on the ${p.splitAcross} session${p.splitAcross !== 1 ? "s" : ""} it covered` : "";
+      privateSegs.push({ text: `[Package Purchased] ${p.label}${splitNote}`, color: { red: 0, green: 0, blue: 0 }, bold: true });
+      if (p.splitAcross === 0) gPriceOnly += p.totalPrice;
       gProcessing += p.processingFee;
       gStripe += p.stripeFee;
     }
@@ -752,7 +764,7 @@ async function buildMonthTab(
       }
     } else if (places.size === 1) {
       const g = gymFor(placesStr);
-      const dayPackages = (packagesByDate.get(dateStr) || []).reduce((sum, p) => sum + p.totalPrice, 0);
+      const dayPackages = (packagesByDate.get(dateStr) || []).reduce((sum, p) => sum + (p.splitAcross === 0 ? p.totalPrice : 0), 0);
       if (g && dayPackages) gymAdjust.set(g.name, round2(gymAdjust.get(g.name)! - dayPackages));
     }
 
@@ -794,6 +806,15 @@ async function buildMonthTab(
       // removing/editing a line item is, by itself, enough to correct the
       // total.
       priceComponent = round2(parseDollarSum(String(liveRow[0] ?? "")) + parseDollarSum(String(liveRow[1] ?? "")));
+      // A hand-edited day from before packages were split still lists its
+      // package sessions as "(Package — already paid)", with no amount — add
+      // their shares, since the purchase day no longer counts that money.
+      const liveText = String(liveRow[0] ?? "") + String(liveRow[1] ?? "");
+      const oldMarkers = liveText.split("(Package — already paid)").length - 1;
+      if (oldMarkers > 0) {
+        const shares = daySessions.filter((x) => x.packageId && x.label.includes("(Package, 1 of ")).map((x) => x.grossRevenue);
+        priceComponent = round2(priceComponent + shares.slice(0, oldMarkers).reduce((sum, v) => sum + v, 0));
+      }
     } else {
       priceComponent = gPriceOnly;
       dayLogWrites.set(logKey, { text: freshTextFp });
@@ -1371,6 +1392,36 @@ export async function runMonthlyRevenueSync(): Promise<MonthlyRevenueSyncResult>
     if (!pkg.paymentIntentId || pkg.amountCharged <= 0) continue;
     const pct = await resolveStripePct(pkg.paymentIntentId, pmCache, pmCacheWrites, stripeLookupBudget);
     pkg.stripeFee = round2((pkg.amountCharged + pkg.processingFee) * pct + STRIPE_FIXED);
+  }
+
+  // PACKAGE SPLIT (Artemios, 2026-10-28): a package's price is counted on
+  // the sessions it actually covered, an equal share each, at each
+  // session's own gym — a $475 4-pack used 4 times is $118.75 a session;
+  // used 3 times, a third each. Re-split on every run, so the shares adjust
+  // as more of it is used (and earlier months' figures with them). Until it
+  // covers its first session the whole price stays on its purchase day.
+  // Its fees stay on the purchase day either way. Packages bought before the
+  // tracker started aren't in `packages`, so their sessions stay at $0, as
+  // before (that money was never on this sheet). Shares are whole cents;
+  // the last session takes the leftover cent so they add up exactly.
+  const pkgById = new Map(packages.map((p) => [p.id, p]));
+  const coveredByPkg = new Map<string, DerivedSession[]>();
+  for (const s of sessions) {
+    if (!s.packageId || !pkgById.has(s.packageId)) continue;
+    if (!coveredByPkg.has(s.packageId)) coveredByPkg.set(s.packageId, []);
+    coveredByPkg.get(s.packageId)!.push(s);
+  }
+  for (const [pkgId, covered] of coveredByPkg) {
+    const pkg = pkgById.get(pkgId)!;
+    covered.sort((a, b) => a.date.localeCompare(b.date) || a.startHours - b.startHours);
+    const n = covered.length;
+    const share = Math.floor((pkg.totalPrice * 100) / n) / 100;
+    covered.forEach((s, i) => {
+      const amount = i === n - 1 ? round2(pkg.totalPrice - share * (n - 1)) : share;
+      s.grossRevenue = amount;
+      s.label = s.label.replace("(Package — already paid)", `(Package, 1 of ${n} — $${amount.toFixed(2)})`);
+    });
+    pkg.splitAcross = n;
   }
 
   // Day-row edit protection (see the file header comment, textFingerprint,
