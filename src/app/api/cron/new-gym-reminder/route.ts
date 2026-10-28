@@ -24,6 +24,7 @@ interface Row {
   booked_end_time: string | null;
   booked_trainer: string | null;
   status: string;
+  admin_change_at: string | null;
 }
 
 // Runs at 6pm ET (vercel.json: 22:00 UTC). The ONLY day-before reminder Mesa
@@ -45,7 +46,7 @@ export async function GET(req: NextRequest) {
   const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false } });
   const { data, error } = await supabase
     .from("registrations")
-    .select("id, email, parent_name, phone, sms_consent, kids, type, booked_group, booked_date, booked_start_time, booked_end_time, booked_trainer, status")
+    .select("id, email, parent_name, phone, sms_consent, kids, type, booked_group, booked_date, booked_start_time, booked_end_time, booked_trainer, status, admin_change_at")
     .ilike("booked_location", "%diamond charter%")
     .in("status", ["confirmed", "no_show"]);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -72,11 +73,15 @@ export async function GET(req: NextRequest) {
     const time = (r: Row) => `${r.booked_start_time}${r.booked_end_time ? `-${r.booked_end_time}` : ""}`;
     const help = helpLine(tomorrowRows.map((r) => r.booked_trainer));
     const parentName = tomorrowRows[0].parent_name || "there";
-    reminded.push(`${parentName} (${tomorrowRows.map((r) => `${r.booked_group || r.type} ${r.booked_start_time}`).join(", ")})`);
+    reminded.push(`${parentName} (${tomorrowRows.map((r) => `${r.booked_group || r.type} ${r.booked_start_time}`).join(", ")})${tomorrowRows.every((r) => !!r.admin_change_at) ? " — email only (you moved it)" : ""}`);
     if (dryRun) continue;
 
+    // A session Artemios moved there himself (a sheet change, which stamps
+    // admin_change_at) gets the email only: he texts those families
+    // personally (2026-10-28). Booked there directly: text and email.
+    const movedByArtemios = tomorrowRows.every((r) => !!r.admin_change_at);
     const consented = tomorrowRows.find((r) => r.sms_consent && r.phone);
-    if (consented) {
+    if (consented && !movedByArtemios) {
       try {
         await sendSMS(
           consented.phone!,
