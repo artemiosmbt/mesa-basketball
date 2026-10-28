@@ -13,6 +13,7 @@ import { addAccountCredit, deductAccountCredit, setAppliedAccountCredit, addRefe
 import { isLateAction, resolveOffSessionPaymentSource, chargeSavedCardOffSession, issueStripeRefund, computeBulkWeeklySettlement, fullPriceForWeeklyRow, rescheduleDiscountPct } from "@/lib/booking-finalize";
 import { calcServiceFee, serviceFeeLabel, fmtMoney, calcPrivatePrice, fullPriceForType, getTrainerTier, normalizeTrainerTier, effectiveSessionPrice, packageCoversTrainerTier } from "@/lib/pricing";
 import { notifyTrainerOfCancellation, notifyTrainerOfReschedule, notifyTrainerOfNewBooking } from "@/lib/trainer-notify";
+import { newGymSmsNote } from "@/lib/new-gym";
 
 
 function parseMinsFromTime(t: string): number {
@@ -816,7 +817,7 @@ export async function POST(req: NextRequest) {
       if (reg.sms_consent && reg.phone) {
         await sendSMS(
           reg.phone,
-          `Mesa Basketball: Your session has been rescheduled by your trainer.\n${fromLine ? `${fromLine}\n` : ""}${toLine}\nAthlete: ${reg.kids}${priceNote}${creditRefundNote}\nManage: mesabasketballtraining.com/booking/${reg.manage_token}\nReply STOP to opt out.`
+          `Mesa Basketball: Your session has been rescheduled by your trainer.\n${fromLine ? `${fromLine}\n` : ""}${toLine}${newGymSmsNote(toLine)}\nAthlete: ${reg.kids}${priceNote}${creditRefundNote}\nManage: mesabasketballtraining.com/booking/${reg.manage_token}\nReply STOP to opt out.`
         );
       }
     }

@@ -1,6 +1,7 @@
 import { sendTimeChangeNotification } from "./email";
 import { sendSMS, formatDateWithDay, resolveLocationName } from "./sms";
 import { addPrivateSessionToCalendar, deletePrivateSessionFromCalendar } from "./calendar";
+import { newGymSmsNote } from "./new-gym";
 
 // Shared by src/app/api/cron/detect-time-changes/route.ts (fires on every
 // sheet edit) and src/app/api/admin/sync-time-changes/route.ts (fires on
@@ -55,7 +56,7 @@ export async function notifyPrivateLocationChange(params: {
     try {
       await sendSMS(
         params.phone,
-        `LOCATION CHANGE\nMesa Basketball: Private Session on ${dateStr}\nLocation: ${oldLocName} → ${locName}\nTime: ${timeStr}\nQuestions? (631) 599-1280. Reply STOP to opt out.`
+        `LOCATION CHANGE\nMesa Basketball: Private Session on ${dateStr}\nLocation: ${oldLocName} → ${locName}${newGymSmsNote(params.newLocation)}\nTime: ${timeStr}\nQuestions? (631) 599-1280. Reply STOP to opt out.`
       );
       smsSent = true;
     } catch (err) {
