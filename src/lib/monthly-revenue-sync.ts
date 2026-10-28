@@ -101,11 +101,25 @@ const PRIVATE_TRAINER_RATE_4PLUS = 90;
 const PICKUP_FLAT_PAY = 120;
 // STRIPE_PCT_CARD/STRIPE_FIXED are imported from ./stripe-payment-method (shared with payroll-sync.ts).
 
-interface LocationSeed { name: string; monthlyRent: number }
+// The gyms listed in each month's Location Breakdown. Rent is never filled
+// in automatically (2026-10-28: rentals change month to month, so Artemios
+// enters what he actually paid each month himself; an empty box counts as
+// $0). `name` is the row label — also the key his entered rent is kept under
+// across rebuilds, so an existing label must not be renamed or that month's
+// rent is lost. `match` is what the session's Place (the schedule's raw
+// location text) must contain for its revenue to count here — kept short so
+// "St. Pauls" / "St. Paul's Cathedral" / "Cherry Valley" all still match.
+// Cherry Valley stays listed (not in use right now, may come back).
+interface LocationSeed { name: string; match: string }
 const KNOWN_LOCATIONS: LocationSeed[] = [
-  { name: "St. Paul's", monthlyRent: 900 },
-  { name: "Cherry Valley Sports", monthlyRent: 300 },
+  { name: "St. Paul's", match: "St. Paul" },
+  { name: "Diamond Charter School", match: "Diamond Charter" },
+  { name: "Holy Resurrection Brookville", match: "Holy Resurrection" },
+  { name: "Cherry Valley Sports", match: "Cherry Valley" },
 ];
+// One more editable rent line under the gyms, for a one-off rental at any
+// other gym; its revenue is everything not at a listed gym.
+const OTHER_LOCATION_NAME = "Other gyms (one-off rentals)";
 
 // booked_location is free text typed into the live schedule, not a fixed
 // enum — a live spot-check once caught it stored as "St. Paul's", not the
@@ -604,7 +618,7 @@ async function buildMonthTab(
   // Row 1: title
   requests.push(titleRowRequest(sheetId, 0, `MESA BASKETBALL TRAINING — ${tabName.toUpperCase()}`));
   // Row 2: subtitle
-  requests.push(subtitleRowRequest(sheetId, 1, "Every session, no matter the trainer. Auto-generated — nothing to enter except the rent cells below."));
+  requests.push(subtitleRowRequest(sheetId, 1, "Every session, no matter the trainer. Auto-generated — the only thing to enter is the rent each gym cost this month (Location Breakdown, below)."));
 
   // Row 4 (index 3): trainer color key
   const keySegments: TextSegment[] = [
@@ -1017,7 +1031,7 @@ async function buildMonthTab(
   row0 += 1;
   requests.push(subtitleHeaderRequest(sheetId, row0, "LOCATION BREAKDOWN"));
   row0 += 1;
-  const locHeaders = ["Location", "Monthly Rent (edit me)", "Revenue This Month", "Net"];
+  const locHeaders = ["Location", "Rent Paid This Month (enter it)", "Revenue This Month", "Net"];
   requests.push({
     repeatCell: {
       range: { sheetId, startRowIndex: row0, endRowIndex: row0 + 1, startColumnIndex: 0, endColumnIndex: locHeaders.length },
@@ -1038,21 +1052,27 @@ async function buildMonthTab(
   // it only takes effect once batchUpdate runs at the end of this
   // function) executes, so this still sees whatever rent was really there.
   const existingRentByName = await readExistingRentByName(tabName, totalsRow0 + 1, 120);
+  // Whatever Artemios entered stays; a box he hasn't filled (or cleared)
+  // stays empty — never a default amount.
+  const rentCell = (name: string) => {
+    const rent = existingRentByName.get(name);
+    return rent === undefined ? {} : { userEnteredValue: { numberValue: rent } };
+  };
   for (const loc of KNOWN_LOCATIONS) {
-    const rent = existingRentByName.get(loc.name) ?? loc.monthlyRent;
     const locRowNum1 = row0 + 1;
+    const matchText = loc.match.replace(/"/g, '""');
     // St. Paul's is the only location where the owner runs cash pickup
     // games — see the PICKUPS table above — so its Revenue folds in the
     // pickups TOTAL cell on top of the normal SUMIF over booked sessions.
     const revenueFormula = loc.name === "St. Paul's"
-      ? `=SUMIF(E${firstDayRow1}:E${lastDayRow1},"*"&A${locRowNum1}&"*",F${firstDayRow1}:F${lastDayRow1})+${PICKUPS_TOTAL_CELL}`
-      : `=SUMIF(E${firstDayRow1}:E${lastDayRow1},"*"&A${locRowNum1}&"*",F${firstDayRow1}:F${lastDayRow1})`;
+      ? `=SUMIF(E${firstDayRow1}:E${lastDayRow1},"*${matchText}*",F${firstDayRow1}:F${lastDayRow1})+${PICKUPS_TOTAL_CELL}`
+      : `=SUMIF(E${firstDayRow1}:E${lastDayRow1},"*${matchText}*",F${firstDayRow1}:F${lastDayRow1})`;
     requests.push({
       updateCells: {
         rows: [{
           values: [
             { userEnteredValue: { stringValue: loc.name } },
-            { userEnteredValue: { numberValue: rent } },
+            rentCell(loc.name),
             { userEnteredValue: { formulaValue: revenueFormula } },
             { userEnteredValue: { formulaValue: `=C${locRowNum1}-B${locRowNum1}` } },
           ],
@@ -1069,8 +1089,8 @@ async function buildMonthTab(
     updateCells: {
       rows: [{
         values: [
-          { userEnteredValue: { stringValue: "Other / Unlisted" } },
-          { userEnteredValue: { numberValue: 0 } },
+          { userEnteredValue: { stringValue: OTHER_LOCATION_NAME } },
+          rentCell(OTHER_LOCATION_NAME),
           // +PICKUPS_TOTAL_CELL here isn't pickups revenue landing in
           // "Other" — it's cancelling out the same amount that was just
           // added to St. Paul's above, so the location rows still
@@ -1095,7 +1115,7 @@ async function buildMonthTab(
           { userEnteredValue: { stringValue: "NET PROFIT TO MESA THIS MONTH" }, userEnteredFormat: { textFormat: { bold: true, fontSize: 12 } } },
           { userEnteredValue: { stringValue: "" } },
           {
-            userEnteredValue: { formulaValue: `=I${totalsRow1}+${PICKUPS_TOTAL_CELL}-${trainerGrandTotalCell}-SUM(B${firstLocRow1}:B${lastLocRow1})` },
+            userEnteredValue: { formulaValue: `=I${totalsRow1}+${PICKUPS_TOTAL_CELL}-${trainerGrandTotalCell}-SUM(B${firstLocRow1}:B${otherRowNum1})` },
             userEnteredFormat: { textFormat: { bold: true, fontSize: 12 }, ...currencyFmt },
           },
           { userEnteredValue: { stringValue: "= Net Revenue + Pickups − Trainer Pay − Rent" } },
