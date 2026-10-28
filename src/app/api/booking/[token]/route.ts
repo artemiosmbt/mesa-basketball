@@ -42,7 +42,7 @@ import {
   deletePrivateSessionFromCalendar,
   upsertGroupSessionCalendarEvent,
 } from "@/lib/calendar";
-import { newGymSmsNote } from "@/lib/new-gym";
+import { newGymNotes } from "@/lib/new-gym-server";
 
 // GET — fetch booking details
 export async function GET(
@@ -1519,7 +1519,7 @@ export async function PUT(
         ? `\n$${fmtMoney(lateFeeCredited)} credited to your account (late reschedule fee).`
         : "";
     const refundNote = refundOutcomeText ? `\n${refundOutcomeText}.` : "";
-    await sendSMS(reg.phone, `Mesa Basketball: ${rescheduleLabel} rescheduled!\n${formatDateWithDay(bookedDate)} | ${bookedStartTime}-${bookedEndTime}\nLocation: ${resolveLocationName(bookedLocation)}${newGymSmsNote(bookedLocation)}${rescheduleTrainerLine}\nAthlete: ${kidsToUse}${lateNote}${creditNote}${refundNote}\nManage: mesabasketballtraining.com/booking/${newToken}\nReply STOP to opt out.`);
+    await sendSMS(reg.phone, `Mesa Basketball: ${rescheduleLabel} rescheduled!\n${formatDateWithDay(bookedDate)} | ${bookedStartTime}-${bookedEndTime}\nLocation: ${resolveLocationName(bookedLocation)}${(await newGymNotes(reg.email, [{ location: bookedLocation, trainer: resolvedTrainer }])).sms}${rescheduleTrainerLine}\nAthlete: ${kidsToUse}${lateNote}${creditNote}${refundNote}\nManage: mesabasketballtraining.com/booking/${newToken}\nReply STOP to opt out.`);
   }
   const adminCreditNote = lateFeeCreditApplied > 0
     ? `\n$${fmtMoney(lateFeeCreditApplied)} late-fee credit applied to new session${leftoverLateFeeCredit > 0 ? ` ($${fmtMoney(leftoverLateFeeCredit)} left in account)` : ""}`

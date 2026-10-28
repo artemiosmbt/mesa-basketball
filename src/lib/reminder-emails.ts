@@ -40,6 +40,7 @@ interface SessionGroup {
   timeLabel: string;
   location: string;
   athleteNames: string[];
+  trainer?: string;
 }
 
 // Internal-only tracking shape, kept separate from the public SessionGroup
@@ -58,6 +59,7 @@ interface SessionGroupInternal {
   timeLabel: string;
   location: string;
   athleteNames: string[];
+  trainer?: string;
 }
 
 // "JV Boys" for a JV-only match, "Varsity Boys" for a Varsity-only match,
@@ -192,6 +194,7 @@ export async function runReminderEmailWindow(window: ReminderWindow, options?: {
                 timeLabel: s.endTime ? `${s.startTime}–${s.endTime}` : s.startTime,
                 location: s.location,
                 athleteNames: [],
+                trainer: s.trainer,
               });
             }
             const sessionGroup = parentEntry.sessionsByKey.get(key)!;

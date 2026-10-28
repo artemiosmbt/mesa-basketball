@@ -5,7 +5,7 @@ import { sendTimeChangeNotification } from "@/lib/email";
 import { sendSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import { notifyTrainerOfReschedule } from "@/lib/trainer-notify";
 import { normalizeTrainerNameForComparison } from "@/lib/trainers";
-import { newGymSmsNote } from "@/lib/new-gym";
+import { newGymNotes } from "@/lib/new-gym-server";
 
 export interface WeeklyChangeReg extends WeeklyRegKeyFields {
   parent_name: string;
@@ -131,6 +131,7 @@ export async function applyWeeklyTimeChanges<T extends WeeklyChangeReg>(
             location: session.location,
             changeType,
             oldLocation: locationChanged ? oldLocation : undefined,
+            trainer: session.trainer,
           });
           emailsSent++;
         } catch (err) {
@@ -149,7 +150,7 @@ export async function applyWeeklyTimeChanges<T extends WeeklyChangeReg>(
           } else {
             smsBody = `LOCATION CHANGE\nMesa Basketball: ${session.group} on ${dateStr}\nLocation: ${oldLocName} → ${locName}\nTime: ${session.startTime}-${session.endTime}\nQuestions? (631) 599-1280. Reply STOP to opt out.`;
           }
-          smsBody = smsBody.replace("\nQuestions?", `${newGymSmsNote(session.location)}\nQuestions?`);
+          smsBody = smsBody.replace("\nQuestions?", `${(await newGymNotes(r.email, [{ location: session.location, trainer: session.trainer }])).sms}\nQuestions?`);
           try {
             await sendSMS(r.phone, smsBody);
             smsSent++;

@@ -36,7 +36,7 @@ import {
   releaseBulkBatch,
   type Registration,
 } from "@/lib/supabase";
-import { newGymSmsNote } from "@/lib/new-gym";
+import { newGymNotes } from "@/lib/new-gym-server";
 
 // Parse a session date + hours/mins (Eastern time) into a UTC Date for comparison.
 // The server runs UTC; without this, "2:00 PM" is treated as 2pm UTC instead of 2pm ET.
@@ -511,7 +511,7 @@ export async function finalizeConfirmedPrivateBooking(params: FinalizePrivateBoo
     const privateTrainerLine = isPrivateType && params.bookedTrainer ? `\nTrainer: ${params.bookedTrainer}` : "";
     const creditLine = params.accountCreditApplied > 0 ? `\n$${fmtMoney(params.accountCreditApplied)} account credit applied.` : "";
     const chargeLine = amountCharged > 0 ? `\nCharged: $${fmtMoney(amountCharged + calcServiceFee(amountCharged))}.` : "";
-    await sendSMS(params.phone, `Mesa Basketball: Your ${typeStr} is confirmed!${dateLine}${newGymSmsNote(params.bookedLocation)}${privateTrainerLine}${pkgNote}${creditLine}${chargeLine}\nAthlete: ${params.kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
+    await sendSMS(params.phone, `Mesa Basketball: Your ${typeStr} is confirmed!${dateLine}${(await newGymNotes(params.email, [{ location: params.bookedLocation, trainer: params.bookedTrainer }])).sms}${privateTrainerLine}${pkgNote}${creditLine}${chargeLine}\nAthlete: ${params.kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
   }
 
   const adminDateLine = `${formatDateWithDay(params.bookedDate)} | ${params.bookedStartTime}${params.bookedEndTime ? `-${params.bookedEndTime}` : ""}${params.bookedLocation ? `\nLocation: ${resolveLocationName(params.bookedLocation)}` : ""}`;
@@ -684,7 +684,7 @@ export async function finalizeConfirmedWeeklyBooking(params: FinalizeWeeklyBooki
     ).join("\n");
     const creditLine = weeklyCreditApplied > 0 ? `\n$${fmtMoney(weeklyCreditApplied)} account credit applied.` : "";
     const chargeLine = weeklyAmountCharged > 0 ? `\nCharged: $${fmtMoney(weeklyTotalWithFee)}.` : "";
-    await sendSMS(params.phone, `Mesa Basketball: ${confirmLabel} confirmed!\n${sessionLines}${newGymSmsNote(...weeklySessions.map((s) => s.location))}${weeklyTrainerLine}\nAthlete: ${params.kids}${creditLine}${chargeLine}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
+    await sendSMS(params.phone, `Mesa Basketball: ${confirmLabel} confirmed!\n${sessionLines}${(await newGymNotes(params.email, weeklySessions.map((s) => ({ location: s.location, trainer: s.trainer })))).sms}${weeklyTrainerLine}\nAthlete: ${params.kids}${creditLine}${chargeLine}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
   }
 
   const adminLines = weeklySessions.map((s) =>
@@ -821,7 +821,7 @@ export async function finalizeConfirmedCampBooking(params: FinalizeCampBookingPa
     const priceText = campTotalPrice
       ? `${campCreditApplied > 0 ? ` Total: ${campTotalPrice}, $${fmtMoney(campCreditApplied)} credit applied.` : ` Total: ${campTotalPrice}.`}${campAmountCharged > 0 ? ` Charged: $${fmtMoney(campTotalWithFee)}.` : ""}`
       : "";
-    await sendSMS(params.phone, `Mesa Basketball: Camp confirmed (${campSessions.length} day${campSessions.length !== 1 ? "s" : ""})!${priceText}\n${campDayLines}${newGymSmsNote(...campSessions.map((s) => s.location))}\nAthlete: ${params.kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
+    await sendSMS(params.phone, `Mesa Basketball: Camp confirmed (${campSessions.length} day${campSessions.length !== 1 ? "s" : ""})!${priceText}\n${campDayLines}${(await newGymNotes(params.email, campSessions.map((s) => ({ location: s.location })))).sms}\nAthlete: ${params.kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
   }
 
   const adminCampLines = campSessions.map((s) =>
@@ -1022,7 +1022,7 @@ export async function finalizeConfirmedPrivateSeriesBooking(params: FinalizePriv
     const trainerLine = privateSessions[0]?.trainer && allSameTrainer ? `\nTrainer: ${formatTrainerForDisplay(privateSessions[0].trainer)}` : "";
     const creditLine = params.accountCreditApplied > 0 ? `\n$${fmtMoney(params.accountCreditApplied)} account credit applied.` : "";
     const chargeLine = seriesAmountCharged > 0 ? `\nCharged: $${fmtMoney(seriesTotalWithFee)}.` : "";
-    await sendSMS(params.phone, `Mesa Basketball: ${privateSessions.length} private sessions confirmed!\n${sessionLines}${newGymSmsNote(...privateSessions.map((s) => s.location))}${trainerLine}${pkgNote}${creditLine}${chargeLine}\nAthlete: ${params.kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
+    await sendSMS(params.phone, `Mesa Basketball: ${privateSessions.length} private sessions confirmed!\n${sessionLines}${(await newGymNotes(params.email, privateSessions.map((s) => ({ location: s.location, trainer: s.trainer })))).sms}${trainerLine}${pkgNote}${creditLine}${chargeLine}\nAthlete: ${params.kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
   }
 
   const adminLines = privateSessions.map((s) =>
@@ -2060,7 +2060,7 @@ export async function finalizeRescheduleTopup(params: FinalizeRescheduleTopupPar
       : "";
   if (params.smsConsent && params.phone) {
     const trainerLine = params.bookedTrainer ? `\nTrainer: ${params.bookedTrainer}` : "";
-    await sendSMS(params.phone, `Mesa Basketball: Reschedule confirmed — $${fmtMoney(topupTotalWithFee)} charged${creditAppliedNote}${forfeitSmsNote}!\n${formatDateWithDay(params.bookedDate)} | ${params.bookedStartTime}-${params.bookedEndTime}\nLocation: ${resolveLocationName(params.bookedLocation)}${newGymSmsNote(params.bookedLocation)}${trainerLine}\nAthlete: ${params.kids}\nManage: mesabasketballtraining.com/booking/${params.manageToken}\nReply STOP to opt out.`);
+    await sendSMS(params.phone, `Mesa Basketball: Reschedule confirmed — $${fmtMoney(topupTotalWithFee)} charged${creditAppliedNote}${forfeitSmsNote}!\n${formatDateWithDay(params.bookedDate)} | ${params.bookedStartTime}-${params.bookedEndTime}\nLocation: ${resolveLocationName(params.bookedLocation)}${(await newGymNotes(params.email, [{ location: params.bookedLocation, trainer: params.bookedTrainer }])).sms}${trainerLine}\nAthlete: ${params.kids}\nManage: mesabasketballtraining.com/booking/${params.manageToken}\nReply STOP to opt out.`);
   }
 
   await sendAdminSMS(`RESCHEDULED (paid $${fmtMoney(topupTotalWithFee)}${creditAppliedNote}${packageSessionForfeited ? " — package session forfeited" : fullForfeitNoRefund ? " — weekly full forfeiture" : ""}): ${params.parentName}\nFrom: ${params.oldSessionDetails}\nTo: ${params.newSessionDetails}\nPlayers: ${params.kids}`).catch(() => {});

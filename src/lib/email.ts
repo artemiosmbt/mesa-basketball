@@ -4,7 +4,8 @@ import { formatTrainerForDisplay } from "./trainers";
 import { formatMonthYear } from "./sms";
 import { REFERRAL_PROGRAM_ENABLED } from "./feature-flags";
 import { buildUnsubscribeUrl } from "./unsubscribe";
-import { NEW_GYM, mentionsNewGym, newGymEmailNote } from "./new-gym";
+import { NEW_GYM, mentionsNewGym } from "./new-gym";
+import { newGymNotes, hasNewGymBooking, trainerHelpContact } from "./new-gym-server";
 
 const ARTEMI_EMAIL = "artemios@mesabasketballtraining.com";
 const FROM_EMAIL = "Mesa Basketball <noreply@mesabasketballtraining.com>";
@@ -349,7 +350,7 @@ export async function sendRegistrationNotification(data: {
       <p>Hi ${escapeHtml(data.parentName)},</p>
       <p>Your ${typeLabel.toLowerCase()} has been confirmed.</p>
       <p><strong>Session:</strong> ${formatSessionDetailsForEmail(data.sessionDetails, data.sessionDetailsIsHtml)}</p>
-      ${newGymEmailNote(data.sessionDetails, data.calendarEvent?.location, ...(data.calendarEvents || []).map((e) => e.location))}
+      ${(await newGymNotes(data.email, (data.calendarEvents || (data.calendarEvent ? [data.calendarEvent] : [{ location: data.sessionDetails }])).map((e) => ({ location: e.location, trainer: data.trainer })))).html}
       ${data.trainer && !data.suppressTrainerAndRateLines ? `<p><strong>Trainer:</strong> ${escapeHtml(formatTrainerForDisplay(data.trainer))}</p>` : ""}
       <p><strong>Players:</strong> ${escapeHtml(data.kids)}</p>
       ${packageNote}
@@ -850,6 +851,7 @@ export async function sendTimeChangeNotification(data: {
   location: string;
   changeType?: "time" | "location" | "both";
   oldLocation?: string;
+  trainer?: string | null; // who runs it (for the new-gym "trouble finding it?" contact)
 }) {
   const resend = getResend();
   const changeType = data.changeType ?? "time";
@@ -915,7 +917,7 @@ export async function sendTimeChangeNotification(data: {
       <table style="border-collapse: collapse; width: 100%; margin: 16px 0; border-radius: 8px; overflow: hidden;">
         ${rows.join("")}
       </table>
-      ${newGymEmailNote(data.location)}
+      ${(await newGymNotes(data.email, [{ location: data.location, trainer: data.trainer }])).html}
       <p>We apologize for any inconvenience. Please update your calendar to reflect the change.</p>
       <p><a href="${BASE_URL}/my-bookings" style="color: #d4af37; font-weight: bold;">View My Bookings</a></p>
       <br/>
@@ -1037,7 +1039,7 @@ export async function sendRescheduleNotification(data: {
       <p><strong>Parent:</strong> ${escapeHtml(data.parentName)}</p>
       <p><strong>Old Session:</strong> ${formatSessionDetailsForEmail(data.oldSessionDetails)}</p>
       <p><strong>New Session:</strong> ${formatSessionDetailsForEmail(data.newSessionDetails)}</p>
-      ${newGymEmailNote(data.newSessionDetails)}
+      ${(await newGymNotes(data.email, [{ location: data.newSessionDetails, trainer: data.newTrainer }])).html}
       ${data.newTrainer ? `<p><strong>Trainer:</strong> ${escapeHtml(data.newTrainer)}</p>` : ""}
       ${data.priceAdjustment
         ? data.priceAdjustment.kind === "refund"
@@ -1067,7 +1069,7 @@ export async function sendRescheduleNotification(data: {
       <p>Your session has been rescheduled.</p>
       <p><strong>Old Session:</strong> ${formatSessionDetailsForEmail(data.oldSessionDetails)}</p>
       <p><strong>New Session:</strong> ${formatSessionDetailsForEmail(data.newSessionDetails)}</p>
-      ${newGymEmailNote(data.newSessionDetails)}
+      ${(await newGymNotes(data.email, [{ location: data.newSessionDetails, trainer: data.newTrainer }])).html}
       ${data.newTrainer ? `<p><strong>Trainer:</strong> ${escapeHtml(data.newTrainer)}</p>` : ""}
       ${packageForfeitNote}
       ${fullForfeitNote}
@@ -1292,10 +1294,13 @@ export async function sendReminderEmail(data: {
     timeLabel: string;
     location: string;
     athleteNames: string[];
+    trainer?: string;
   }[];
 }) {
   const resend = getResend();
   const whenLabel = data.isToday ? "Today" : "Tomorrow";
+  // The new-gym callout only for someone who hasn't booked there yet.
+  const firstAtNewGym = data.sessions.some((s) => mentionsNewGym(s.location)) && !(await hasNewGymBooking(data.to));
   const unsubscribeUrl = buildUnsubscribeUrl(BASE_URL, data.to);
 
   const sessionBlocks = data.sessions
@@ -1306,7 +1311,7 @@ export async function sendReminderEmail(data: {
           <p class="mesa-body-text" style="margin: 0; color: #3a3a3a; font-size: 13px; line-height: 1.5;">
             <strong class="mesa-navy-text" style="color: #091530;">${escapeHtml(s.group)}</strong><br/>
             ${escapeHtml(s.dateLabel)}, ${escapeHtml(s.timeLabel)} &middot; ${escapeHtml(s.location)}
-            ${mentionsNewGym(s.location) ? `<br/><strong style="color: #c4833e;">⚠️ New location — ${NEW_GYM.address}, not St. Paul's</strong>` : ""}
+            ${firstAtNewGym && mentionsNewGym(s.location) ? `<br/><strong style="color: #c4833e;">⚠️ New location — ${NEW_GYM.address}, not St. Paul's.</strong> Trouble finding it? Text or call ${trainerHelpContact(s.trainer).name} at ${trainerHelpContact(s.trainer).phone}.` : ""}
           </p>
         </div>`
     )

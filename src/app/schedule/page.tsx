@@ -836,6 +836,8 @@ export default function Home() {
   // used to every session being at St. Paul's. The first time someone books
   // a session there, they confirm the new address before paying.
   const [newGymNoticeDates, setNewGymNoticeDates] = useState<string[] | null>(null);
+  // Who to text/call if they can't find it (the trainer running it).
+  const [newGymContacts, setNewGymContacts] = useState<{ name: string; phone: string }[]>([]);
   const [isGroupRate, setIsGroupRate] = useState(false);
   const [hideUpsell, setHideUpsell] = useState(false);
   const [filterDays, setFilterDays] = useState<Set<number>>(new Set());
@@ -1446,29 +1448,36 @@ export default function Home() {
     }
   }
 
-  // Dates of the sessions in this booking that are at Diamond Charter.
-  function diamondCharterDates(): string[] {
+  // The sessions in this booking that are at Diamond Charter (date + who runs it).
+  function diamondCharterSessions(): { date: string; trainer?: string }[] {
     const isDiamond = (loc?: string) => !!loc && loc.toLowerCase().includes("diamond charter");
-    if (modal.type === "weekly") return (modal.selectedGroupSessions || []).filter((x) => isDiamond(x.location)).map((x) => x.date);
+    if (modal.type === "weekly") return (modal.selectedGroupSessions || []).filter((x) => isDiamond(x.location)).map((x) => ({ date: x.date, trainer: x.trainer }));
     if (modal.type === "camp") {
       const camp = camps[modal.sessionIndex];
-      return camp && isDiamond(camp.location) ? (camp.campDays?.length ? camp.campDays.filter((d) => campSelectedDays.has(d)) : [camp.startDate]) : [];
+      return camp && isDiamond(camp.location) ? (camp.campDays?.length ? camp.campDays.filter((d) => campSelectedDays.has(d)) : [camp.startDate]).map((d) => ({ date: d })) : [];
     }
     return [
-      { date: modal.bookedDate, location: modal.bookedLocation },
-      ...recurringWeeks.filter((w) => w.selected).map((w) => ({ date: w.date, location: w.location })),
-    ].filter((x) => isDiamond(x.location)).map((x) => x.date || "");
+      { date: modal.bookedDate, location: modal.bookedLocation, trainer: modal.bookedTrainer },
+      ...recurringWeeks.filter((w) => w.selected).map((w) => ({ date: w.date, location: w.location, trainer: w.trainer })),
+    ].filter((x) => isDiamond(x.location)).map((x) => ({ date: x.date || "", trainer: x.trainer }));
   }
   const newGymAckKey = () => `mesa-new-gym-ack:diamond:${email.trim().toLowerCase()}`;
 
   // The last step before booking/payment, after every other warning: the
   // new-gym heads-up, once per person (per browser).
   async function submitAfterNotices() {
-    const dates = diamondCharterDates();
+    const there = diamondCharterSessions();
     let acked = false;
     try { acked = localStorage.getItem(newGymAckKey()) === "1"; } catch { /* storage blocked: show it */ }
-    if (dates.length > 0 && !acked) {
-      setNewGymNoticeDates(dates);
+    if (there.length > 0 && !acked) {
+      const trainers = Array.from(new Set(there.map((x) => x.trainer || "")));
+      const found = await Promise.all(trainers.map((t) =>
+        fetch(`/api/new-gym-contact?trainer=${encodeURIComponent(t)}`).then((r) => r.json()).catch(() => null)
+      ));
+      const byPhone = new Map<string, { name: string; phone: string }>();
+      for (const c of found) if (c?.phone) byPhone.set(c.phone, c);
+      setNewGymContacts(Array.from(byPhone.values()));
+      setNewGymNoticeDates(there.map((x) => x.date));
       return;
     }
     await performSubmit();
@@ -3522,6 +3531,19 @@ export default function Home() {
             <p className="mt-3 text-sm text-brown-300">
               Make sure to go to this address for {newGymNoticeDates.length > 1 ? "these sessions" : "this session"}. Not every session is at St. Paul&apos;s anymore, so check the location on each session you book.
             </p>
+            {newGymContacts.length > 0 && (
+              <p className="mt-2 text-sm text-brown-300">
+                Trouble finding the gym? Text or call{" "}
+                {newGymContacts.map((c, i) => (
+                  <span key={c.phone}>
+                    {i > 0 ? (i === newGymContacts.length - 1 ? " or " : ", ") : ""}
+                    <span className="font-semibold text-white">{c.name}</span> at{" "}
+                    <a href={`tel:${c.phone.replace(/[^\d+]/g, "")}`} className="font-semibold text-mesa-accent underline">{c.phone}</a>
+                  </span>
+                ))}
+                .
+              </p>
+            )}
             <div className="mt-5 flex gap-3">
               <button
                 onClick={() => setNewGymNoticeDates(null)}
