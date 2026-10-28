@@ -25,10 +25,10 @@ import {
   releaseBulkBatch,
 } from "@/lib/supabase";
 import {
-  computeRescheduleMoney, issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome, isLateAction, parseSessionDateTimeET, computeLateFeeAmounts, computeBulkWeeklySettlement, fullPriceForWeeklyRow, countConfirmedInBatch, settleOldBookingForReschedule, computePlayerEditPricing, parseKidsList } from "@/lib/booking-finalize";
+  computeRescheduleMoney, issueStripeRefund, resolvedSessionPrice, describeMoneyOutcome, isLateAction, parseSessionDateTimeET, computeLateFeeAmounts, computeBulkWeeklySettlement, fullPriceForWeeklyRow, rescheduleDiscountPct, settleOldBookingForReschedule, computePlayerEditPricing, parseKidsList } from "@/lib/booking-finalize";
 import { getStripe } from "@/lib/stripe";
 import { issueOnTimeToken, verifyOnTimeToken } from "@/lib/reschedule-grace";
-import { calcServiceFee, serviceFeeItemName, fmtMoney, calcPrivatePrice, getTrainerTier, normalizeTrainerTier, packageCoversTrainerTier, volumeDiscountPct } from "@/lib/pricing";
+import { calcServiceFee, serviceFeeItemName, fmtMoney, calcPrivatePrice, getTrainerTier, normalizeTrainerTier, packageCoversTrainerTier } from "@/lib/pricing";
 import {
   sendCancellationNotification,
   sendRescheduleNotification,
@@ -1034,7 +1034,7 @@ export async function PUT(
         // the raw live rate — an on-time reschedule that doesn't actually
         // change anything about the batch shouldn't look like a price
         // increase equal to the discount itself.
-        const pct = staysInBulkBatch ? volumeDiscountPct(await countConfirmedInBatch(reg.booking_batch_id!)) : 0;
+        const pct = reg.type === "weekly" ? await rescheduleDiscountPct(reg) : 0; // the discount it was bought at (see rescheduleDiscountPct)
         newIsBulkDiscounted = pct > 0;
         newSessionPrice = Math.round(newFullSessionPrice * (1 - pct) * 100) / 100;
       } else {

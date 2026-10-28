@@ -10,8 +10,8 @@ import { sendRescheduleNotification } from "@/lib/email";
 import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@/lib/sms";
 import { getWeeklySchedule } from "@/lib/sheets";
 import { addAccountCredit, deductAccountCredit, setAppliedAccountCredit, addReferralCredit, addRegistration, cancelRegistration, logLateFeeEvent, logRegistrationTopupCharge, getPackageById, countPackageSessionsUsed, setPackageSessions, checkGroupSessionCapacity, updateRegistrationsPricing, claimBulkBatch, releaseBulkBatch } from "@/lib/supabase";
-import { isLateAction, resolveOffSessionPaymentSource, chargeSavedCardOffSession, issueStripeRefund, computeBulkWeeklySettlement, fullPriceForWeeklyRow, countConfirmedInBatch } from "@/lib/booking-finalize";
-import { calcServiceFee, serviceFeeLabel, fmtMoney, calcPrivatePrice, fullPriceForType, getTrainerTier, normalizeTrainerTier, effectiveSessionPrice, packageCoversTrainerTier, volumeDiscountPct } from "@/lib/pricing";
+import { isLateAction, resolveOffSessionPaymentSource, chargeSavedCardOffSession, issueStripeRefund, computeBulkWeeklySettlement, fullPriceForWeeklyRow, rescheduleDiscountPct } from "@/lib/booking-finalize";
+import { calcServiceFee, serviceFeeLabel, fmtMoney, calcPrivatePrice, fullPriceForType, getTrainerTier, normalizeTrainerTier, effectiveSessionPrice, packageCoversTrainerTier } from "@/lib/pricing";
 import { notifyTrainerOfCancellation, notifyTrainerOfReschedule, notifyTrainerOfNewBooking } from "@/lib/trainer-notify";
 
 
@@ -212,7 +212,7 @@ export async function POST(req: NextRequest) {
           // than the raw live rate — otherwise an on-time reschedule that
           // doesn't actually change anything about the batch looks like a
           // price increase equal to the discount itself.
-          const pct = staysInBulkBatch ? volumeDiscountPct(await countConfirmedInBatch(reg.booking_batch_id!)) : 0;
+          const pct = reg.type === "weekly" ? await rescheduleDiscountPct(reg) : 0; // the discount it was bought at (see rescheduleDiscountPct)
           newIsBulkDiscounted = pct > 0;
           newFullPrice = Math.round(newBulkFullPrice * (1 - pct) * 100) / 100;
         }

@@ -1515,6 +1515,34 @@ export async function countConfirmedInBatch(bookingBatchId: string): Promise<num
   return rows.filter((r) => r.status === "confirmed").length;
 }
 
+// The volume discount a weekly session keeps when it's rescheduled to
+// another weekly session: the one it was bought at. Artemios's rule
+// (2026-10-28): a client who booked a discounted bundle can reschedule any
+// session in it without paying the discount back.
+//
+// Re-counting the bundle at reschedule time used to decide this, and the
+// count drops whenever one of its sessions is no longer "confirmed" — no-
+// showed, cancelled by the trainer (the sheet-deletion cron doesn't re-price
+// the bundle), or moved out by an admin. Below 4 the discount vanished and
+// the client was charged the difference for simply moving a session. Now a
+// session marked discounted keeps the tier its own stored prices show (15%
+// or 10%; at least 10% when its full price wasn't stored), and the bundle
+// count can only raise it, never take it away. A bundle the client shrank
+// themselves by cancelling is already re-priced at that cancellation
+// (computeBulkWeeklySettlement clears is_bulk_discounted on the survivors),
+// so this doesn't hand the discount back to anyone who gave it up.
+export async function rescheduleDiscountPct(row: WeeklyPricingRow): Promise<number> {
+  if (row.type !== "weekly") return 0;
+  const bundlePct = row.booking_batch_id ? volumeDiscountPct(await countConfirmedInBatch(row.booking_batch_id)) : 0;
+  if (!row.is_bulk_discounted) return bundlePct;
+  let boughtPct = 0.10;
+  if (row.full_session_price && row.full_session_price > 0 && row.session_price != null) {
+    const paidPct = 1 - row.session_price / row.full_session_price;
+    if (paidPct >= 0.125) boughtPct = 0.15;
+  }
+  return Math.max(boughtPct, bundlePct);
+}
+
 export interface BulkWeeklySettlement {
   // Net of this row's own applied_account_credit (which the caller refunds
   // separately, unconditionally, same as always) and — when late — the flat
