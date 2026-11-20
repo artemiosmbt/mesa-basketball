@@ -2867,8 +2867,8 @@ export default function Home() {
                             <span key={i} className="festive-flake" style={{ left: `${f.left}%`, fontSize: `${f.size}rem`, opacity: f.opacity, animationDuration: `${f.duration}s`, animationDelay: `${f.delay}s` }}>❄</span>
                           ))}
                         </div>
-                        {/* Big faded snowman in the background, behind the right-hand registration card */}
-                        <svg aria-hidden viewBox="0 0 200 300" className="pointer-events-none absolute bottom-0 right-[3%] h-[92%] w-auto opacity-[0.22]">
+                        {/* Faded snowman peeking in from the bottom-right corner (the card edge cuts him off) */}
+                        <svg aria-hidden viewBox="0 0 200 300" className="pointer-events-none absolute -bottom-2 right-0 h-[68%] w-auto translate-x-[22%] opacity-[0.22]">
                           <defs>
                             <radialGradient id="snowball" cx="38%" cy="32%" r="70%">
                               <stop offset="0%" stopColor="#ffffff" />
