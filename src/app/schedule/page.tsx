@@ -3769,7 +3769,7 @@ export default function Home() {
                     </div>
                   )}
                   <p className="mt-2 text-[11px] text-brown-300">
-                    24-hour cancellation policy applies — details in your confirmation email.
+                    24-hour cancellation policy applies.
                   </p>
                   {selectedCount === 0 && !fullOnly && (
                     <p className="mt-2 text-xs text-yellow-500">Select at least one day to continue.</p>
