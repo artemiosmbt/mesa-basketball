@@ -3768,8 +3768,8 @@ export default function Home() {
                       )}
                     </div>
                   )}
-                  <p className="mt-3 rounded border border-yellow-700/50 bg-yellow-900/20 px-3 py-2 text-xs text-yellow-200">
-                    <strong>24-hour cancellation policy:</strong> cancel at least 24 hours before the camp starts for a full refund. Within 24 hours, 50% is kept as a late fee and the other 50% comes back as account credit. No rescheduling{fullOnly ? " or single days" : ""}.
+                  <p className="mt-2 text-[11px] text-brown-300">
+                    24-hour cancellation policy applies — details in your confirmation email.
                   </p>
                   {selectedCount === 0 && !fullOnly && (
                     <p className="mt-2 text-xs text-yellow-500">Select at least one day to continue.</p>
