@@ -2868,7 +2868,7 @@ export default function Home() {
                           ))}
                         </div>
                         {/* Faded snowman peeking in from the bottom-right corner (the card edge cuts him off) */}
-                        <svg aria-hidden viewBox="0 0 200 300" className="pointer-events-none absolute -bottom-2 right-0 h-[68%] w-auto translate-x-[22%] opacity-[0.22]">
+                        <svg aria-hidden viewBox="0 0 200 300" className="pointer-events-none absolute -bottom-2 right-0 hidden h-[68%] w-auto translate-x-[22%] opacity-[0.22] sm:block">
                           <defs>
                             <radialGradient id="snowball" cx="38%" cy="32%" r="70%">
                               <stop offset="0%" stopColor="#ffffff" />
