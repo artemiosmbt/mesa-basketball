@@ -2867,22 +2867,45 @@ export default function Home() {
                             <span key={i} className="festive-flake" style={{ left: `${f.left}%`, fontSize: `${f.size}rem`, opacity: f.opacity, animationDuration: `${f.duration}s`, animationDelay: `${f.delay}s` }}>❄</span>
                           ))}
                         </div>
-                        {/* Snowman in the background, bottom right (tablet/desktop) */}
-                        <svg aria-hidden viewBox="0 0 100 140" className="pointer-events-none absolute bottom-2 right-6 hidden h-20 w-auto opacity-75 drop-shadow sm:block">
-                          <circle cx="50" cy="105" r="30" fill="#f8fafc" />
-                          <circle cx="50" cy="62" r="21" fill="#f8fafc" />
-                          <circle cx="50" cy="30" r="15" fill="#f8fafc" />
-                          <rect x="36" y="4" width="28" height="13" rx="2" fill="#1e3a5f" />
-                          <rect x="30" y="15" width="40" height="4" rx="2" fill="#1e3a5f" />
-                          <path d="M35 44 Q50 51 65 44 L65 49 Q50 56 35 49 Z" fill="#dc2626" />
-                          <rect x="57" y="47" width="6" height="16" rx="2" fill="#dc2626" />
-                          <circle cx="45" cy="27" r="1.8" fill="#1e3a5f" />
-                          <circle cx="55" cy="27" r="1.8" fill="#1e3a5f" />
-                          <path d="M50 31 L60 33 L50 35 Z" fill="#f97316" />
-                          <circle cx="50" cy="60" r="1.8" fill="#1e3a5f" />
-                          <circle cx="50" cy="69" r="1.8" fill="#1e3a5f" />
-                          <path d="M30 60 L10 48 M16 52 L12 44" stroke="#7c5a3a" strokeWidth="2.5" strokeLinecap="round" />
-                          <path d="M70 60 L90 48 M84 52 L88 44" stroke="#7c5a3a" strokeWidth="2.5" strokeLinecap="round" />
+                        {/* Big faded snowman in the background, behind the right-hand registration card */}
+                        <svg aria-hidden viewBox="0 0 200 300" className="pointer-events-none absolute bottom-0 right-[3%] h-[92%] w-auto opacity-[0.22]">
+                          <defs>
+                            <radialGradient id="snowball" cx="38%" cy="32%" r="70%">
+                              <stop offset="0%" stopColor="#ffffff" />
+                              <stop offset="70%" stopColor="#e0f2fe" />
+                              <stop offset="100%" stopColor="#93c5fd" />
+                            </radialGradient>
+                          </defs>
+                          {/* body */}
+                          <ellipse cx="100" cy="240" rx="68" ry="58" fill="url(#snowball)" />
+                          <ellipse cx="100" cy="150" rx="50" ry="45" fill="url(#snowball)" />
+                          <circle cx="100" cy="78" r="36" fill="url(#snowball)" />
+                          {/* stick arms */}
+                          <path d="M54 140 L14 108 M28 119 L18 100 M28 119 L8 118" stroke="#8b6b4a" strokeWidth="5" strokeLinecap="round" fill="none" />
+                          <path d="M146 140 L186 108 M172 119 L182 100 M172 119 L192 118" stroke="#8b6b4a" strokeWidth="5" strokeLinecap="round" fill="none" />
+                          {/* scarf with candy-cane stripes */}
+                          <path d="M66 104 Q100 122 134 104 L134 116 Q100 134 66 116 Z" fill="#dc2626" />
+                          <path d="M78 110 L84 124 M94 114 L98 128 M110 114 L106 128 M124 110 L118 124" stroke="#ffffff" strokeWidth="3" />
+                          <path d="M116 116 L124 160 L110 162 L104 120 Z" fill="#dc2626" />
+                          <path d="M108 136 L120 134 M110 148 L122 146" stroke="#ffffff" strokeWidth="3" />
+                          {/* top hat */}
+                          <rect x="70" y="40" width="60" height="8" rx="4" fill="#1e293b" />
+                          <rect x="80" y="6" width="40" height="38" rx="3" fill="#1e293b" />
+                          <rect x="80" y="30" width="40" height="7" fill="#dc2626" />
+                          {/* face */}
+                          <circle cx="88" cy="72" r="4" fill="#1e293b" />
+                          <circle cx="112" cy="72" r="4" fill="#1e293b" />
+                          <path d="M100 80 L128 86 L100 90 Z" fill="#f97316" />
+                          <circle cx="86" cy="94" r="2.2" fill="#1e293b" />
+                          <circle cx="93" cy="98" r="2.2" fill="#1e293b" />
+                          <circle cx="100" cy="99" r="2.2" fill="#1e293b" />
+                          <circle cx="107" cy="98" r="2.2" fill="#1e293b" />
+                          <circle cx="114" cy="94" r="2.2" fill="#1e293b" />
+                          {/* buttons */}
+                          <circle cx="100" cy="142" r="5" fill="#1e293b" />
+                          <circle cx="100" cy="162" r="5" fill="#1e293b" />
+                          <circle cx="100" cy="222" r="5" fill="#1e293b" />
+                          <circle cx="100" cy="245" r="5" fill="#1e293b" />
                         </svg>
                         {/* Snow bank along the bottom edge (all screen sizes) */}
                         <svg aria-hidden viewBox="0 0 400 30" preserveAspectRatio="none" className="pointer-events-none absolute inset-x-0 bottom-0 h-7 w-full">
@@ -2931,7 +2954,7 @@ export default function Home() {
                         const startTime = camp.time.split("-")[0]?.trim() || camp.time;
                         const groupFull = fullOnly && camp.campDays.some((d) => (groupEnrollment[`${d}|${startTime}|${camp.name}`] || 0) >= camp.maxSpots);
                         return (
-                          <div key={camp.id} className={`rounded-lg border p-4 flex flex-col gap-2 text-center sm:text-left ${festive ? "border-sky-200/50 bg-blue-950/75 backdrop-blur-sm" : "border-brown-600 bg-brown-800/50"}`}>
+                          <div key={camp.id} className={`rounded-lg border p-4 flex flex-col gap-2 text-center sm:text-left ${festive ? "border-sky-200/50 bg-blue-950/60" : "border-brown-600 bg-brown-800/50"}`}>
                             <p className="font-semibold text-white text-sm">{camp.gradeGroup}</p>
                             <p className="text-xs text-brown-400">
                               {camp.time}
@@ -2951,7 +2974,7 @@ export default function Home() {
                         );
                       })}
                     </div>
-                    <p className={`relative mt-3 text-center text-xs text-brown-400 sm:text-left ${festive ? "sm:pr-24" : ""}`}>
+                    <p className="relative mt-3 text-center text-xs text-brown-400 sm:text-left">
                       <span className="font-semibold text-brown-200">24-hour cancellation policy:</span> cancelling within 24 hours of the camp start keeps 50% as a late fee (the other 50% comes back as account credit). No rescheduling{fullOnly ? " or single days" : ""}.
                     </p>
                     {!fullOnly && firstCamp.campDays.filter((d) => isFutureCampDay(d, firstCamp.time)).length > 0 && (
