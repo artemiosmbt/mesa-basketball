@@ -258,6 +258,11 @@ function DobInput({ value, onChange, required }: { value: string; onChange: (v: 
   );
 }
 
+// December camps get the winter look (card and registration form).
+function isFestiveCamp(camp: Camp | undefined): boolean {
+  return !!camp && parseDateForDisplay(camp.campDays[0] || camp.startDate).getMonth() === 11;
+}
+
 // Falling snowflakes on December camp cards — fixed values so server and
 // browser render the same thing.
 const FESTIVE_FLAKES = [
@@ -2848,7 +2853,7 @@ export default function Home() {
               if (isMultiGroup) {
                 const groupCols = group.camps.length >= 3 ? "sm:grid-cols-3" : group.camps.length === 2 ? "sm:grid-cols-2" : "sm:grid-cols-1";
                 // December camps get the holiday look automatically.
-                const festive = parseDateForDisplay(firstCamp.campDays[0] || firstCamp.startDate).getMonth() === 11;
+                const festive = isFestiveCamp(firstCamp);
                 return (
                   <div key={group.name} className={festive
                     ? "relative mt-8 overflow-hidden rounded-xl border-2 border-sky-200/70 bg-gradient-to-b from-sky-300/45 via-sky-600/40 to-blue-800/50 p-6 pt-8 shadow-lg shadow-sky-400/30"
@@ -3633,9 +3638,15 @@ export default function Home() {
       )}
 
       {/* Registration Modal */}
-      {modal.open && (
+      {modal.open && (() => {
+        // Winter camp form: light-blue panel inside a candy-cane border.
+        const festiveForm = modal.type === "camp" && isFestiveCamp(camps[modal.sessionIndex]);
+        return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-          <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl bg-brown-900 p-6 shadow-2xl">
+          <div className={festiveForm ? "candy-stripe w-full max-w-lg rounded-2xl p-1.5 shadow-2xl shadow-sky-400/20" : "contents"}>
+          <div className={festiveForm
+            ? "w-full max-h-[calc(90vh-12px)] overflow-y-auto rounded-xl bg-gradient-to-b from-[#3d7cab] via-[#24548c] to-[#1c3f7a] p-6"
+            : "w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl bg-brown-900 p-6 shadow-2xl"}>
             <div className="flex items-center justify-between">
               <h3 className="text-xl font-bold">
                 {modal.type === "camp"
@@ -4402,8 +4413,10 @@ export default function Home() {
               </form>
             )}
           </div>
+          </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* Package Enrollment Modal */}
       {pkgModal.open && (
