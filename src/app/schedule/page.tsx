@@ -258,6 +258,29 @@ function DobInput({ value, onChange, required }: { value: string; onChange: (v: 
   );
 }
 
+// Falling snowflakes on December camp cards — fixed values so server and
+// browser render the same thing.
+const FESTIVE_FLAKES = [
+  { left: 1.3, size: 1.1, opacity: 0.69, duration: 9.3, delay: -7.6 },
+  { left: 6.0, size: 1.9, opacity: 0.57, duration: 12.6, delay: -0.5 },
+  { left: 13.0, size: 0.9, opacity: 0.63, duration: 12.9, delay: -0.8 },
+  { left: 19.2, size: 1.1, opacity: 0.77, duration: 13.1, delay: -0.8 },
+  { left: 24.9, size: 0.9, opacity: 0.89, duration: 9.3, delay: -8.0 },
+  { left: 29.4, size: 1.1, opacity: 0.74, duration: 13.0, delay: -7.3 },
+  { left: 36.6, size: 0.9, opacity: 0.75, duration: 13.5, delay: -5.0 },
+  { left: 41.7, size: 0.9, opacity: 0.75, duration: 13.3, delay: -6.6 },
+  { left: 47.3, size: 1.3, opacity: 0.71, duration: 15.5, delay: -5.6 },
+  { left: 51.8, size: 1.1, opacity: 0.79, duration: 10.7, delay: -6.1 },
+  { left: 58.6, size: 1.3, opacity: 0.81, duration: 11.0, delay: -10.8 },
+  { left: 62.6, size: 1.6, opacity: 0.61, duration: 11.4, delay: -10.6 },
+  { left: 69.5, size: 2.2, opacity: 0.58, duration: 12.9, delay: -10.2 },
+  { left: 76.7, size: 1.3, opacity: 0.79, duration: 13.2, delay: -7.7 },
+  { left: 80.9, size: 0.9, opacity: 0.88, duration: 12.3, delay: -8.2 },
+  { left: 84.9, size: 2.2, opacity: 0.66, duration: 13.0, delay: -8.9 },
+  { left: 92.1, size: 2.2, opacity: 0.69, duration: 13.7, delay: -0.3 },
+  { left: 97.8, size: 1.1, opacity: 0.76, duration: 12.5, delay: -2.7 },
+];
+
 // Dollars saved by registering early bird, or 0.
 function earlyBirdSavings(camp: Camp): number {
   const regular = priceNumber(camp.price) || 0;
@@ -2828,21 +2851,25 @@ export default function Home() {
                 const festive = parseDateForDisplay(firstCamp.campDays[0] || firstCamp.startDate).getMonth() === 11;
                 return (
                   <div key={group.name} className={festive
-                    ? "relative mt-8 overflow-hidden rounded-xl border-2 border-red-700/70 bg-gradient-to-br from-emerald-950/80 via-brown-900/60 to-red-950/70 p-6 pt-8 shadow-lg shadow-red-950/40"
+                    ? "relative mt-8 overflow-hidden rounded-xl border-2 border-sky-200/70 bg-gradient-to-b from-sky-300/45 via-sky-600/40 to-blue-800/50 p-6 pt-8 shadow-lg shadow-sky-400/30"
                     : "mt-8 rounded-xl border-2 border-brown-600 bg-brown-900/40 p-6 shadow-lg shadow-black/30"}>
                     {festive && (
                       <>
                         <div aria-hidden className="candy-stripe absolute inset-x-0 top-0 h-2" />
                         <div aria-hidden className="festive-snow pointer-events-none absolute inset-0" />
-                        <div aria-hidden className="pointer-events-none absolute -right-3 -top-1 select-none text-6xl opacity-20 sm:text-7xl">❄</div>
-                        <div aria-hidden className="pointer-events-none absolute -bottom-4 -left-2 select-none text-5xl opacity-15">❄</div>
+                        <div aria-hidden className="pointer-events-none absolute inset-0">
+                          {FESTIVE_FLAKES.map((f, i) => (
+                            <span key={i} className="festive-flake" style={{ left: `${f.left}%`, fontSize: `${f.size}rem`, opacity: f.opacity, animationDuration: `${f.duration}s`, animationDelay: `${f.delay}s` }}>❄</span>
+                          ))}
+                        </div>
+                        <div aria-hidden className="pointer-events-none absolute right-6 top-5 hidden select-none text-6xl drop-shadow-lg sm:block">⛄</div>
                       </>
                     )}
                     <div className="relative flex flex-col items-center gap-3 text-center sm:flex-row sm:items-start sm:justify-between sm:text-left">
                       <div className="w-full min-w-0 sm:flex-1">
                         {festive && (
-                          <p className="mb-1 inline-flex items-center gap-1.5 rounded-full bg-red-700/80 px-3 py-0.5 text-[11px] font-bold uppercase tracking-wider text-white ring-1 ring-red-400/50">
-                            <span aria-hidden>🎄</span> Holiday Skills Camp <span aria-hidden>🏀</span>
+                          <p className="mb-1 inline-flex items-center gap-1.5 rounded-full bg-sky-100/90 px-3 py-0.5 text-[11px] font-bold uppercase tracking-wider text-sky-900 ring-1 ring-white/60">
+                            <span aria-hidden>❄️</span> Winter Break <span aria-hidden>⛄</span>
                           </p>
                         )}
                         <FitTitle text={group.name} className={festive ? "font-bold text-white" : "font-bold text-mesa-accent"} maxSize={20} minSize={14} />
@@ -2868,7 +2895,7 @@ export default function Home() {
                       )}
                     </div>
                     {firstCamp.description && (
-                      <p className={`relative mt-3 text-center text-xs sm:text-left sm:text-sm ${festive ? "font-semibold text-red-200" : "text-brown-400"}`}>{firstCamp.description}</p>
+                      <p className={`relative mt-3 text-center text-xs sm:text-left sm:text-sm ${festive ? "font-semibold text-sky-100" : "text-brown-400"}`}>{firstCamp.description}</p>
                     )}
                     <div className={`relative mt-4 grid gap-3 ${groupCols}`}>
                       {group.camps.map(({ camp, index }) => {
@@ -2878,7 +2905,7 @@ export default function Home() {
                         const startTime = camp.time.split("-")[0]?.trim() || camp.time;
                         const groupFull = fullOnly && camp.campDays.some((d) => (groupEnrollment[`${d}|${startTime}|${camp.name}`] || 0) >= camp.maxSpots);
                         return (
-                          <div key={camp.id} className={`rounded-lg border p-4 flex flex-col gap-2 text-center sm:text-left ${festive ? "border-emerald-700/60 bg-brown-900/70 backdrop-blur-sm" : "border-brown-600 bg-brown-800/50"}`}>
+                          <div key={camp.id} className={`rounded-lg border p-4 flex flex-col gap-2 text-center sm:text-left ${festive ? "border-sky-200/50 bg-blue-950/75 backdrop-blur-sm" : "border-brown-600 bg-brown-800/50"}`}>
                             <p className="font-semibold text-white text-sm">{camp.gradeGroup}</p>
                             <p className="text-xs text-brown-400">
                               {camp.time}

@@ -33,7 +33,7 @@ body {
   color: #ffffff;
 }
 
-/* Holiday camp card (December camps): drifting snow + candy-cane trim */
+/* Holiday camp card (December camps): icy winter look, falling snow, candy-cane trim */
 .festive-snow {
   background-image:
     radial-gradient(2px 2px at 20px 30px, rgba(255, 255, 255, 0.9), transparent),
@@ -43,15 +43,31 @@ body {
     radial-gradient(2px 2px at 180px 190px, rgba(255, 255, 255, 0.6), transparent);
   background-size: 200px 200px;
   animation: festive-snowfall 14s linear infinite;
-  opacity: 0.35;
+  opacity: 0.45;
 }
 @keyframes festive-snowfall {
   from { background-position: 0 0; }
   to { background-position: 40px 200px; }
 }
+/* Bigger drifting snowflakes; size/position/speed set inline per flake */
+.festive-flake {
+  position: absolute;
+  top: -2rem;
+  color: #fff;
+  text-shadow: 0 0 6px rgba(186, 230, 253, 0.8);
+  animation-name: festive-flake-fall;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  user-select: none;
+}
+@keyframes festive-flake-fall {
+  0% { transform: translate(0, 0) rotate(0deg); }
+  50% { transform: translate(18px, 260px) rotate(180deg); }
+  100% { transform: translate(-6px, 560px) rotate(360deg); }
+}
 @media (prefers-reduced-motion: reduce) {
-  .festive-snow { animation: none; }
+  .festive-snow, .festive-flake { animation: none; }
 }
 .candy-stripe {
-  background: repeating-linear-gradient(45deg, #b91c1c 0 10px, #f8fafc 10px 20px, #15803d 20px 30px, #f8fafc 30px 40px);
+  background: repeating-linear-gradient(45deg, #dc2626 0 10px, #f8fafc 10px 20px);
 }
