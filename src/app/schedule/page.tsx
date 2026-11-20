@@ -2856,7 +2856,7 @@ export default function Home() {
                 const festive = isFestiveCamp(firstCamp);
                 return (
                   <div key={group.name} className={festive
-                    ? "relative mt-8 overflow-hidden rounded-xl border-2 border-sky-200/70 bg-gradient-to-b from-sky-300/45 via-sky-600/40 to-blue-800/50 p-6 pt-8 shadow-lg shadow-sky-400/30"
+                    ? "relative mt-8 overflow-hidden rounded-xl border-2 border-sky-200/70 bg-gradient-to-b from-sky-300/45 via-sky-600/40 to-blue-800/50 p-6 pt-8 pb-12 shadow-lg shadow-sky-400/30"
                     : "mt-8 rounded-xl border-2 border-brown-600 bg-brown-900/40 p-6 shadow-lg shadow-black/30"}>
                     {festive && (
                       <>
@@ -2867,7 +2867,28 @@ export default function Home() {
                             <span key={i} className="festive-flake" style={{ left: `${f.left}%`, fontSize: `${f.size}rem`, opacity: f.opacity, animationDuration: `${f.duration}s`, animationDelay: `${f.delay}s` }}>❄</span>
                           ))}
                         </div>
-                        <div aria-hidden className="pointer-events-none absolute right-6 top-5 hidden select-none text-6xl drop-shadow-lg sm:block">⛄</div>
+                        {/* Snowman in the background, bottom right (tablet/desktop) */}
+                        <svg aria-hidden viewBox="0 0 100 140" className="pointer-events-none absolute bottom-2 right-6 hidden h-20 w-auto opacity-75 drop-shadow sm:block">
+                          <circle cx="50" cy="105" r="30" fill="#f8fafc" />
+                          <circle cx="50" cy="62" r="21" fill="#f8fafc" />
+                          <circle cx="50" cy="30" r="15" fill="#f8fafc" />
+                          <rect x="36" y="4" width="28" height="13" rx="2" fill="#1e3a5f" />
+                          <rect x="30" y="15" width="40" height="4" rx="2" fill="#1e3a5f" />
+                          <path d="M35 44 Q50 51 65 44 L65 49 Q50 56 35 49 Z" fill="#dc2626" />
+                          <rect x="57" y="47" width="6" height="16" rx="2" fill="#dc2626" />
+                          <circle cx="45" cy="27" r="1.8" fill="#1e3a5f" />
+                          <circle cx="55" cy="27" r="1.8" fill="#1e3a5f" />
+                          <path d="M50 31 L60 33 L50 35 Z" fill="#f97316" />
+                          <circle cx="50" cy="60" r="1.8" fill="#1e3a5f" />
+                          <circle cx="50" cy="69" r="1.8" fill="#1e3a5f" />
+                          <path d="M30 60 L10 48 M16 52 L12 44" stroke="#7c5a3a" strokeWidth="2.5" strokeLinecap="round" />
+                          <path d="M70 60 L90 48 M84 52 L88 44" stroke="#7c5a3a" strokeWidth="2.5" strokeLinecap="round" />
+                        </svg>
+                        {/* Snow bank along the bottom edge (all screen sizes) */}
+                        <svg aria-hidden viewBox="0 0 400 30" preserveAspectRatio="none" className="pointer-events-none absolute inset-x-0 bottom-0 h-7 w-full">
+                          <path d="M0 18 Q20 8 45 15 T95 13 T150 16 T205 11 T260 15 T315 12 T365 16 T400 12 V30 H0 Z" fill="#f8fafc" fillOpacity="0.9" />
+                          <path d="M0 23 Q30 16 60 21 T125 20 T190 22 T255 19 T320 22 T400 19 V30 H0 Z" fill="#e0f2fe" />
+                        </svg>
                       </>
                     )}
                     <div className="relative flex flex-col items-center gap-3 text-center sm:flex-row sm:items-start sm:justify-between sm:text-left">
@@ -2930,7 +2951,7 @@ export default function Home() {
                         );
                       })}
                     </div>
-                    <p className="relative mt-3 text-center text-xs text-brown-400 sm:text-left">
+                    <p className={`relative mt-3 text-center text-xs text-brown-400 sm:text-left ${festive ? "sm:pr-24" : ""}`}>
                       <span className="font-semibold text-brown-200">24-hour cancellation policy:</span> cancelling within 24 hours of the camp start keeps 50% as a late fee (the other 50% comes back as account credit). No rescheduling{fullOnly ? " or single days" : ""}.
                     </p>
                     {!fullOnly && firstCamp.campDays.filter((d) => isFutureCampDay(d, firstCamp.time)).length > 0 && (

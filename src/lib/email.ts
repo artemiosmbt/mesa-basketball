@@ -350,6 +350,12 @@ export async function sendRegistrationNotification(data: {
     ? `<p style="background: #162d5a; padding: 12px; border-radius: 8px; margin-top: 12px; color: #ffffff;"><strong style="color: #d4af37;">Your referral code: ${data.referralCode}</strong><br/><span style="font-size: 13px; color: #93c5fd;">Share this code with friends and family — when they book their first session using your code, you'll receive a $${REFERRAL_CREDIT_SESSION_PRICE} private session.</span></p>`
     : "";
 
+  // A small winter touch on December camp confirmations (matches the
+  // site's winter camp card): light-blue banner, red-and-white dashed trim.
+  const winterBanner = data.type === "camp" && data.campPolicy && new Date(`${data.campPolicy.firstDate} 12:00:00`).getMonth() === 11
+    ? `<div style="background: #e0f2fe; border: 2px dashed #dc2626; border-radius: 10px; padding: 12px 14px; margin: 0 0 16px 0; text-align: center; color: #0c4a6e; font-size: 15px; font-weight: bold;">❄️ ⛄ Get ready for a great winter break on the court! ⛄ ❄️</div>`
+    : "";
+
   const clientResult = await resend.emails.send({
     from: FROM_EMAIL,
     to: data.email,
@@ -358,6 +364,7 @@ export async function sendRegistrationNotification(data: {
       ? `Booking Confirmed — Mesa Basketball Training`
       : `Booking Confirmed — Mesa Basketball Training`,
     html: `
+      ${winterBanner}
       <h2>You're booked!</h2>
       <p>Hi ${escapeHtml(data.parentName)},</p>
       <p>Your ${typeLabel.toLowerCase()} has been confirmed.</p>
