@@ -146,6 +146,22 @@ function daysBetween(start: string, end: string): string[] {
   return out.length > 21 ? [] : out;
 }
 
+// "12:00-3:00 PM" → "12:00 PM-3:00 PM". Bookings store the start time on its
+// own, and the 24-hour cancellation rule, the camp-started lock and capacity
+// all need its AM/PM. A start without one takes the end's, unless that would
+// put it after the end ("11:00-1:00 PM" → 11:00 AM).
+function normalizeCampTime(time: string): string {
+  const m = time.match(/^\s*(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?\s*[-–]\s*(\d{1,2})(?::(\d{2}))?\s*(AM|PM)\s*$/i);
+  if (!m) return time;
+  const [, sh, sm = "00", sp, eh, em = "00", ep] = m;
+  let startPeriod = sp?.toUpperCase();
+  if (!startPeriod) {
+    const s12 = parseInt(sh) % 12, e12 = parseInt(eh) % 12;
+    startPeriod = s12 > e12 ? (ep.toUpperCase() === "PM" ? "AM" : "PM") : ep.toUpperCase();
+  }
+  return `${parseInt(sh)}:${sm} ${startPeriod}-${parseInt(eh)}:${em} ${ep.toUpperCase()}`;
+}
+
 export async function getCamps(options?: { noCache?: boolean }): Promise<Camp[]> {
   const url = process.env.SHEET_CSV_CAMPS;
   if (!url) {
@@ -171,7 +187,7 @@ export async function getCamps(options?: { noCache?: boolean }): Promise<Camp[]>
       name: get("name"),
       startDate: get("startDate"),
       endDate: get("endDate"),
-      time: get("time"),
+      time: normalizeCampTime(get("time")),
       location: get("location"),
       maxSpots: parseInt(get("maxSpots")) || 20,
       currentEnrolled: parseInt(get("currentEnrolled")) || 0,
