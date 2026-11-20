@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getStripe, buildCreditDiscount } from "@/lib/stripe";
 import { calcServiceFee, serviceFeeItemName, fmtMoney, calcPrivatePrice, getTrainerTier, normalizeTrainerTier, packageCoversTrainerTier, REFERRAL_CREDIT_SESSION_PRICE, volumeDiscountPct, type TrainerTier } from "@/lib/pricing";
 import { getWeeklySchedule, getCamps, isPrivateWindowOfferedByTrainer } from "@/lib/sheets";
+import { fullCampPrice, isFullCampOnly } from "@/lib/camp-pricing";
 import { resolveRequestEmail } from "@/lib/request-email";
 import { NEW_CLIENT_DISCOUNT_ENABLED } from "@/lib/feature-flags";
 import {
@@ -581,10 +582,17 @@ export async function POST(req: NextRequest) {
         );
       }
 
-      const earlyBirdActive = new Date() < new Date("2026-04-01T04:00:00Z");
-      const fullBaseStr = earlyBirdActive && liveCamp.earlyBirdPrice ? liveCamp.earlyBirdPrice : liveCamp.price;
+      const fullBaseStr = fullCampPrice(liveCamp);
       const fullBase = (parseInt(fullBaseStr.replace(/\D/g, "")) || 0) * campKidCount;
       const isFullCamp = campSessions.length === liveTotalDays;
+      // Every requested day must be one of the camp's own days, and a camp
+      // with no Drop-In Price on the sheet is sold as the whole camp only.
+      if (liveCamp.campDays.length > 0 && campSessions.some((s: { date: string }) => !liveCamp.campDays.includes(s.date))) {
+        return NextResponse.json({ error: "One of the selected days isn't part of this camp. Please refresh and try again." }, { status: 400 });
+      }
+      if (!isFullCamp && isFullCampOnly(liveCamp)) {
+        return NextResponse.json({ error: `This camp is registration for all ${liveTotalDays} days only. Please refresh and try again.` }, { status: 400 });
+      }
       let campTotalNum: number;
       if (isFullCamp) {
         campTotalNum = fullBase;

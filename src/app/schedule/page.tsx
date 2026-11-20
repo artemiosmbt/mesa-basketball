@@ -9,6 +9,7 @@ import { getTrainerBioSlug, getTrainerTier, normalizeTrainerTier, formatTrainerF
 import { calcServiceFee, serviceFeeLabel, serviceFeeItemName, isPercentServiceFee, SERVICE_FEE_PERCENT_TEXT, packagePrice, PRIVATE_RATE_BY_TIER, GROUP_PRIVATE_RATE_BY_TIER, calcPrivatePrice as getPrivatePrice, REFERRAL_CREDIT_SESSION_PRICE, packageCoversTrainerTier } from "@/lib/pricing";
 import { ALL_GRADES, normalizedAthleteName } from "@/lib/athletes";
 import { getSessionGender } from "@/lib/group-matching";
+import { isEarlyBirdActive, earlyBirdEndsLabel, isFullCampOnly, fullCampPrice } from "@/lib/camp-pricing";
 
 const SUBSTITUTE_TRAINER_LABEL = "Any Available Trainer";
 
@@ -208,9 +209,9 @@ interface Camp {
   earlyBirdPrice: string;
   dropInPrice: string;
   campDays: string[];
+  earlyBirdDeadline: string;
 }
 
-// Early bird ends March 31, 2026 end of day Eastern (April 1 04:00 UTC)
 function splitName(full: string): { first: string; last: string } {
   const parts = full.trim().split(/\s+/);
   if (parts.length <= 1) return { first: parts[0] || "", last: "" };
@@ -257,14 +258,10 @@ function DobInput({ value, onChange, required }: { value: string; onChange: (v: 
   );
 }
 
-function isEarlyBirdActive(): boolean {
-  return new Date() < new Date("2026-04-01T04:00:00Z");
-}
-
 function calcCampPrice(daysSelected: number, totalDays: number, camp: Camp, kidCount: number = 1): string {
   if (daysSelected === 0) return "";
   const count = Math.max(1, kidCount);
-  const fullBaseStr = isEarlyBirdActive() && camp.earlyBirdPrice ? camp.earlyBirdPrice : camp.price;
+  const fullBaseStr = fullCampPrice(camp);
   const fullBase = (parseInt(fullBaseStr.replace(/\D/g, "")) || 0) * count;
   if (daysSelected === totalDays) {
     return count === 1 ? fullBaseStr : `$${fullBase}`;
@@ -2798,7 +2795,23 @@ export default function Home() {
             return campGroups.map((group) => {
               const isMultiGroup = group.camps.length > 1 || !!group.camps[0]?.camp.gradeGroup;
               const firstCamp = group.camps[0].camp;
-              const earlyBird = isEarlyBirdActive();
+              const earlyBird = isEarlyBirdActive(firstCamp);
+              const fullOnly = isFullCampOnly(firstCamp);
+              // Groups priced differently show their own price on each group card.
+              const samePrice = group.camps.every(({ camp }) => camp.price === firstCamp.price && camp.earlyBirdPrice === firstCamp.earlyBirdPrice);
+              const priceBlock = (camp: Camp) => isEarlyBirdActive(camp) ? (
+                <>
+                  <p className="text-lg font-bold leading-tight text-green-400">{camp.earlyBirdPrice}</p>
+                  <p className="text-[10px] leading-tight text-brown-500">
+                    <span className="line-through">{camp.price}</span> Early Bird{earlyBirdEndsLabel(camp) && ` — ends ${earlyBirdEndsLabel(camp)}`}
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="text-lg font-bold leading-tight text-mesa-accent">{camp.price}</p>
+                  <p className="text-[10px] uppercase tracking-wide leading-tight text-brown-500">{fullOnly ? "Full Camp" : "Full Week"}</p>
+                </>
+              );
 
               if (isMultiGroup) {
                 const groupCols = group.camps.length >= 3 ? "sm:grid-cols-3" : group.camps.length === 2 ? "sm:grid-cols-2" : "sm:grid-cols-1";
@@ -2812,22 +2825,13 @@ export default function Home() {
                           <span className="whitespace-nowrap">&bull; <LocationLink location={firstCamp.location} /></span>
                         </p>
                       </div>
+                      {(samePrice || firstCamp.dropInPrice) && (
                       <div className="inline-flex shrink-0 divide-x divide-brown-700 rounded-lg border border-brown-700 bg-brown-800/40 overflow-hidden">
+                        {samePrice && (
                         <div className="px-4 py-2 text-center">
-                          {earlyBird && firstCamp.earlyBirdPrice ? (
-                            <>
-                              <p className="text-lg font-bold leading-tight text-green-400">{firstCamp.earlyBirdPrice}</p>
-                              <p className="text-[10px] leading-tight text-brown-500">
-                                <span className="line-through">{firstCamp.price}</span> Early Bird
-                              </p>
-                            </>
-                          ) : (
-                            <>
-                              <p className="text-lg font-bold leading-tight text-mesa-accent">{firstCamp.price}</p>
-                              <p className="text-[10px] uppercase tracking-wide leading-tight text-brown-500">Full Week</p>
-                            </>
-                          )}
+                          {priceBlock(firstCamp)}
                         </div>
+                        )}
                         {firstCamp.dropInPrice && (
                           <div className="px-4 py-2 text-center">
                             <p className="text-lg font-bold leading-tight text-white">{fmtPrice(firstCamp.dropInPrice)}</p>
@@ -2835,6 +2839,7 @@ export default function Home() {
                           </div>
                         )}
                       </div>
+                      )}
                     </div>
                     {firstCamp.description && (
                       <p className="mt-3 text-center text-xs text-brown-400 sm:text-left sm:text-sm">{firstCamp.description}</p>
@@ -2842,7 +2847,10 @@ export default function Home() {
                     <div className={`mt-4 grid gap-3 ${groupCols}`}>
                       {group.camps.map(({ camp, index }) => {
                         const futureDays = camp.campDays.filter((d) => isFutureCampDay(d, camp.time));
-                        const ended = camp.campDays.length > 0 && futureDays.length === 0;
+                        // A full-camp-only group closes once its first day has started.
+                        const ended = camp.campDays.length > 0 && (fullOnly ? futureDays.length < camp.campDays.length : futureDays.length === 0);
+                        const startTime = camp.time.split("-")[0]?.trim() || camp.time;
+                        const groupFull = fullOnly && camp.campDays.some((d) => (groupEnrollment[`${d}|${startTime}|${camp.name}`] || 0) >= camp.maxSpots);
                         return (
                           <div key={camp.id} className="rounded-lg border border-brown-600 bg-brown-800/50 p-4 flex flex-col gap-2 text-center sm:text-left">
                             <p className="font-semibold text-white text-sm">{camp.gradeGroup}</p>
@@ -2850,7 +2858,9 @@ export default function Home() {
                               {camp.time}
                               {campDayRange(camp.campDays) && ` • ${campDayRange(camp.campDays)}`}
                             </p>
-                            {!ended && (
+                            {!samePrice && <div>{priceBlock(camp)}</div>}
+                            {groupFull && !ended && <p className="text-xs font-semibold text-red-400">FULL</p>}
+                            {!ended && !groupFull && (
                               <button
                                 onClick={() => openModal("camp", index, `${camp.name} — ${camp.gradeGroup} at ${camp.location}`)}
                                 className="mt-auto rounded bg-mesa-accent px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-yellow-600"
@@ -2862,7 +2872,7 @@ export default function Home() {
                         );
                       })}
                     </div>
-                    {firstCamp.campDays.filter((d) => isFutureCampDay(d, firstCamp.time)).length > 0 && (
+                    {!fullOnly && firstCamp.campDays.filter((d) => isFutureCampDay(d, firstCamp.time)).length > 0 && (
                       <p className="mt-3 text-center text-xs text-brown-500 sm:text-left">
                         Select any combination of days — {fmtPrice(firstCamp.dropInPrice)}/day, or {earlyBird && firstCamp.earlyBirdPrice ? `${firstCamp.earlyBirdPrice} early bird` : firstCamp.price} for the week.
                       </p>
@@ -3594,13 +3604,14 @@ export default function Home() {
             {modal.type === "camp" && !submitResult?.success && (() => {
               const camp = camps[modal.sessionIndex];
               if (!camp?.campDays?.length) return null;
-              const earlyBird = isEarlyBirdActive();
+              const earlyBird = isEarlyBirdActive(camp);
+              const fullOnly = isFullCampOnly(camp);
               const selectedCount = campSelectedDays.size;
               const totalDays = camp.campDays.length;
               const price = calcCampPrice(selectedCount, totalDays, camp, kids.length);
               return (
                 <div className="mt-3 rounded-lg border border-brown-700 bg-brown-800/50 p-4">
-                  <p className="text-xs font-semibold text-brown-300 mb-2">Select the days you&apos;d like to attend:</p>
+                  <p className="text-xs font-semibold text-brown-300 mb-2">{fullOnly ? `Full ${totalDays}-day camp:` : "Select the days you\u2019d like to attend:"}</p>
                   <div className="space-y-2">
                     {camp.campDays.filter((day) => isFutureCampDay(day, camp.time)).map((day) => {
                       const dayStartTime = camp.time.split("-")[0]?.trim() || camp.time;
@@ -3612,9 +3623,9 @@ export default function Home() {
                           <input
                             type="checkbox"
                             checked={campSelectedDays.has(day)}
-                            disabled={dayFull}
+                            disabled={dayFull || fullOnly}
                             onChange={(e) => {
-                              if (dayFull) return;
+                              if (dayFull || fullOnly) return;
                               setCampSelectedDays((prev) => {
                                 const next = new Set(prev);
                                 if (e.target.checked) next.add(day); else next.delete(day);
@@ -3636,7 +3647,7 @@ export default function Home() {
                       <p className="text-sm font-semibold text-mesa-accent">
                         {selectedCount === totalDays ? `All ${totalDays} days` : `${selectedCount} day${selectedCount !== 1 ? "s" : ""}`}: {price}
                         {selectedCount === totalDays && earlyBird && camp.earlyBirdPrice && (
-                          <span className="ml-2 text-xs text-green-400">(Early Bird — ends Mar 31)</span>
+                          <span className="ml-2 text-xs text-green-400">(Early Bird{earlyBirdEndsLabel(camp) && ` — ends ${earlyBirdEndsLabel(camp)}`})</span>
                         )}
                       </p>
                       {selectedCount < totalDays && camp.dropInPrice && (
@@ -3646,7 +3657,7 @@ export default function Home() {
                       )}
                     </div>
                   )}
-                  {selectedCount === 0 && (
+                  {selectedCount === 0 && !fullOnly && (
                     <p className="mt-2 text-xs text-yellow-500">Select at least one day to continue.</p>
                   )}
                 </div>

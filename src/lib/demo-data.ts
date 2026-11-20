@@ -51,6 +51,7 @@ export const demoCamps: Camp[] = [
     earlyBirdPrice: "$290",
     dropInPrice: "$100",
     campDays: ["April 2", "April 3", "April 6", "April 7"],
+    earlyBirdDeadline: "",
   },
   {
     id: "camp-1",
@@ -68,6 +69,7 @@ export const demoCamps: Camp[] = [
     earlyBirdPrice: "$290",
     dropInPrice: "$100",
     campDays: ["April 2", "April 3", "April 6", "April 7"],
+    earlyBirdDeadline: "",
   },
   {
     id: "camp-2",
@@ -85,6 +87,7 @@ export const demoCamps: Camp[] = [
     earlyBirdPrice: "$290",
     dropInPrice: "$100",
     campDays: ["April 2", "April 3", "April 6", "April 7"],
+    earlyBirdDeadline: "",
   },
 ];
 

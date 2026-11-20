@@ -23,11 +23,12 @@ export interface Camp {
   price: string;
   description: string;
   notify: boolean;
-  // multi-group camp fields (optional — col K-N)
+  // multi-group camp fields (optional — col K-O)
   gradeGroup: string;
   earlyBirdPrice: string;
-  dropInPrice: string;
+  dropInPrice: string; // blank = full camp only, no single days
   campDays: string[];
+  earlyBirdDeadline: string; // col O; blank = no early bird
 }
 
 export interface PrivateSlot {
@@ -100,6 +101,51 @@ export async function getWeeklySchedule(options?: { noCache?: boolean; strict?: 
   }));
 }
 
+// Camps tab columns are found by their header text, so they can be in any
+// order. Recognised headers (case and punctuation ignored):
+//   Name of Camp | Grades/Age Group | Start Date | End Date | Time | Location |
+//   Max Spots | Early Bird Price | Early Bird End Date | Regular Price |
+//   Description | Notify
+// Optional: Drop-In Price (per day; blank = full camp only), Camp Days
+// ("Dec 28, 2026 | Dec 29, 2026"; blank = every day from Start to End Date),
+// Current Enrolled.
+const CAMP_HEADERS: Record<string, string[]> = {
+  name: ["nameofcamp", "campname", "name"],
+  gradeGroup: ["gradesagegroup", "gradeagegroup", "grades", "agegroup", "gradegroup", "group"],
+  startDate: ["startdate"],
+  endDate: ["enddate"],
+  time: ["time"],
+  location: ["location"],
+  maxSpots: ["maxspots", "spots"],
+  currentEnrolled: ["currentenrolled", "enrolled"],
+  earlyBirdPrice: ["earlybirdprice", "earlybird"],
+  earlyBirdDeadline: ["earlybirdenddate", "earlybirddeadline", "earlybirdends"],
+  price: ["regularprice", "price"],
+  dropInPrice: ["dropinprice", "perdayprice", "dropin"],
+  campDays: ["campdays", "days"],
+  description: ["description"],
+  notify: ["notify"],
+};
+
+// Every day from start to end inclusive, as "December 28, 2026". Empty when
+// either date can't be read (e.g. "April 2-3 & 6-7, 2026") or the range is
+// longer than three weeks — those camps list their days in Camp Days instead.
+function daysBetween(start: string, end: string): string[] {
+  const parse = (v: string) => {
+    const iso = v.trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    const d = iso ? new Date(+iso[1], +iso[2] - 1, +iso[3], 12) : new Date(v.trim() + " 12:00:00");
+    return isNaN(d.getTime()) || d.getFullYear() < 2020 ? null : d;
+  };
+  const a = parse(start);
+  const b = parse(end || start);
+  if (!a || !b || b < a) return [];
+  const out: string[] = [];
+  for (const d = new Date(a); d <= b && out.length <= 21; d.setDate(d.getDate() + 1)) {
+    out.push(d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }));
+  }
+  return out.length > 21 ? [] : out;
+}
+
 export async function getCamps(options?: { noCache?: boolean }): Promise<Camp[]> {
   const url = process.env.SHEET_CSV_CAMPS;
   if (!url) {
@@ -111,23 +157,34 @@ export async function getCamps(options?: { noCache?: boolean }): Promise<Camp[]>
     : { next: { revalidate: 60 } };
   const res = await fetch(url, fetchOptions);
   const rows = parseCSV(await res.text());
-  return rows.slice(1).map((row, i) => ({
-    id: `camp-${i}`,
-    name: row[0] || "",
-    startDate: row[1] || "",
-    endDate: row[2] || "",
-    time: row[3] || "",
-    location: row[4] || "",
-    maxSpots: parseInt(row[5]) || 20,
-    currentEnrolled: parseInt(row[6]) || 0,
-    price: row[7] || "",
-    description: row[8] || "",
-    notify: (row[9] || "").toUpperCase() === "TRUE",
-    gradeGroup: row[10] || "",
-    earlyBirdPrice: row[11] || "",
-    dropInPrice: row[12] || "",
-    campDays: row[13] ? row[13].split("|").map((d) => d.trim()).filter(Boolean) : [],
-  })).filter((camp) => camp.name);
+  const header = (rows[0] || []).map((h) => h.toLowerCase().replace(/[^a-z]/g, ""));
+  const col: Record<string, number> = {};
+  for (const [field, names] of Object.entries(CAMP_HEADERS)) {
+    const i = names.map((n) => header.indexOf(n)).find((x) => x !== -1);
+    if (i !== undefined) col[field] = i;
+  }
+  return rows.slice(1).map((row, i) => {
+    const get = (field: string) => (col[field] === undefined ? "" : (row[col[field]] || "").trim());
+    const listed = get("campDays").split("|").map((d) => d.trim()).filter(Boolean);
+    return {
+      id: `camp-${i}`,
+      name: get("name"),
+      startDate: get("startDate"),
+      endDate: get("endDate"),
+      time: get("time"),
+      location: get("location"),
+      maxSpots: parseInt(get("maxSpots")) || 20,
+      currentEnrolled: parseInt(get("currentEnrolled")) || 0,
+      price: get("price"),
+      description: get("description"),
+      notify: get("notify").toUpperCase() === "TRUE",
+      gradeGroup: get("gradeGroup"),
+      earlyBirdPrice: get("earlyBirdPrice"),
+      dropInPrice: get("dropInPrice"),
+      campDays: listed.length ? listed : daysBetween(get("startDate"), get("endDate")),
+      earlyBirdDeadline: get("earlyBirdDeadline"),
+    };
+  }).filter((camp) => camp.name);
 }
 
 export async function getPrivateSlots(options?: { noCache?: boolean }): Promise<PrivateSlot[]> {
