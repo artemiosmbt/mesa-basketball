@@ -71,3 +71,7 @@ body {
 .candy-stripe {
   background: repeating-linear-gradient(45deg, #dc2626 0 10px, #f8fafc 10px 20px);
 }
+/* Thin candy-cane outline (camp registration form) */
+.candy-stripe-thin {
+  background: repeating-linear-gradient(45deg, #dc2626 0 5px, #f8fafc 5px 10px);
+}

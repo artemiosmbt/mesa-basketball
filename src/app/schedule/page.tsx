@@ -3643,9 +3643,9 @@ export default function Home() {
         const festiveForm = modal.type === "camp" && isFestiveCamp(camps[modal.sessionIndex]);
         return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-          <div className={festiveForm ? "candy-stripe w-full max-w-lg rounded-2xl p-1.5 shadow-2xl shadow-sky-400/20" : "contents"}>
+          <div className={festiveForm ? "candy-stripe-thin w-full max-w-lg rounded-2xl p-[3px] shadow-2xl shadow-sky-400/20" : "contents"}>
           <div className={festiveForm
-            ? "w-full max-h-[calc(90vh-12px)] overflow-y-auto rounded-xl bg-gradient-to-b from-[#3d7cab] via-[#24548c] to-[#1c3f7a] p-6"
+            ? "w-full max-h-[calc(90vh-6px)] overflow-y-auto rounded-[13px] bg-gradient-to-b from-[#3d7cab] via-[#24548c] to-[#1c3f7a] p-6"
             : "w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl bg-brown-900 p-6 shadow-2xl"}>
             <div className="flex items-center justify-between">
               <h3 className="text-xl font-bold">
