@@ -32,3 +32,26 @@ body {
   background: var(--color-mesa-dark);
   color: #ffffff;
 }
+
+/* Holiday camp card (December camps): drifting snow + candy-cane trim */
+.festive-snow {
+  background-image:
+    radial-gradient(2px 2px at 20px 30px, rgba(255, 255, 255, 0.9), transparent),
+    radial-gradient(1.5px 1.5px at 90px 120px, rgba(255, 255, 255, 0.8), transparent),
+    radial-gradient(2.5px 2.5px at 150px 60px, rgba(255, 255, 255, 0.7), transparent),
+    radial-gradient(1.5px 1.5px at 60px 170px, rgba(255, 255, 255, 0.8), transparent),
+    radial-gradient(2px 2px at 180px 190px, rgba(255, 255, 255, 0.6), transparent);
+  background-size: 200px 200px;
+  animation: festive-snowfall 14s linear infinite;
+  opacity: 0.35;
+}
+@keyframes festive-snowfall {
+  from { background-position: 0 0; }
+  to { background-position: 40px 200px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .festive-snow { animation: none; }
+}
+.candy-stripe {
+  background: repeating-linear-gradient(45deg, #b91c1c 0 10px, #f8fafc 10px 20px, #15803d 20px 30px, #f8fafc 30px 40px);
+}

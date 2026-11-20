@@ -2824,11 +2824,28 @@ export default function Home() {
 
               if (isMultiGroup) {
                 const groupCols = group.camps.length >= 3 ? "sm:grid-cols-3" : group.camps.length === 2 ? "sm:grid-cols-2" : "sm:grid-cols-1";
+                // December camps get the holiday look automatically.
+                const festive = parseDateForDisplay(firstCamp.campDays[0] || firstCamp.startDate).getMonth() === 11;
                 return (
-                  <div key={group.name} className="mt-8 rounded-xl border-2 border-brown-600 bg-brown-900/40 p-6 shadow-lg shadow-black/30">
-                    <div className="flex flex-col items-center gap-3 text-center sm:flex-row sm:items-start sm:justify-between sm:text-left">
+                  <div key={group.name} className={festive
+                    ? "relative mt-8 overflow-hidden rounded-xl border-2 border-red-700/70 bg-gradient-to-br from-emerald-950/80 via-brown-900/60 to-red-950/70 p-6 pt-8 shadow-lg shadow-red-950/40"
+                    : "mt-8 rounded-xl border-2 border-brown-600 bg-brown-900/40 p-6 shadow-lg shadow-black/30"}>
+                    {festive && (
+                      <>
+                        <div aria-hidden className="candy-stripe absolute inset-x-0 top-0 h-2" />
+                        <div aria-hidden className="festive-snow pointer-events-none absolute inset-0" />
+                        <div aria-hidden className="pointer-events-none absolute -right-3 -top-1 select-none text-6xl opacity-20 sm:text-7xl">❄</div>
+                        <div aria-hidden className="pointer-events-none absolute -bottom-4 -left-2 select-none text-5xl opacity-15">❄</div>
+                      </>
+                    )}
+                    <div className="relative flex flex-col items-center gap-3 text-center sm:flex-row sm:items-start sm:justify-between sm:text-left">
                       <div className="w-full min-w-0 sm:flex-1">
-                        <FitTitle text={group.name} className="font-bold text-mesa-accent" maxSize={20} minSize={14} />
+                        {festive && (
+                          <p className="mb-1 inline-flex items-center gap-1.5 rounded-full bg-red-700/80 px-3 py-0.5 text-[11px] font-bold uppercase tracking-wider text-white ring-1 ring-red-400/50">
+                            <span aria-hidden>🎄</span> Holiday Skills Camp <span aria-hidden>🏀</span>
+                          </p>
+                        )}
+                        <FitTitle text={group.name} className={festive ? "font-bold text-white" : "font-bold text-mesa-accent"} maxSize={20} minSize={14} />
                         <p className="text-sm text-brown-300 mt-0.5">
                           {firstCamp.startDate}{firstCamp.endDate ? ` — ${firstCamp.endDate}` : ""}{" "}
                           <span className="whitespace-nowrap">&bull; <LocationLink location={firstCamp.location} /></span>
@@ -2851,9 +2868,9 @@ export default function Home() {
                       )}
                     </div>
                     {firstCamp.description && (
-                      <p className="mt-3 text-center text-xs text-brown-400 sm:text-left sm:text-sm">{firstCamp.description}</p>
+                      <p className={`relative mt-3 text-center text-xs sm:text-left sm:text-sm ${festive ? "font-semibold text-red-200" : "text-brown-400"}`}>{firstCamp.description}</p>
                     )}
-                    <div className={`mt-4 grid gap-3 ${groupCols}`}>
+                    <div className={`relative mt-4 grid gap-3 ${groupCols}`}>
                       {group.camps.map(({ camp, index }) => {
                         const futureDays = camp.campDays.filter((d) => isFutureCampDay(d, camp.time));
                         // A full-camp-only group closes once its first day has started.
@@ -2861,7 +2878,7 @@ export default function Home() {
                         const startTime = camp.time.split("-")[0]?.trim() || camp.time;
                         const groupFull = fullOnly && camp.campDays.some((d) => (groupEnrollment[`${d}|${startTime}|${camp.name}`] || 0) >= camp.maxSpots);
                         return (
-                          <div key={camp.id} className="rounded-lg border border-brown-600 bg-brown-800/50 p-4 flex flex-col gap-2 text-center sm:text-left">
+                          <div key={camp.id} className={`rounded-lg border p-4 flex flex-col gap-2 text-center sm:text-left ${festive ? "border-emerald-700/60 bg-brown-900/70 backdrop-blur-sm" : "border-brown-600 bg-brown-800/50"}`}>
                             <p className="font-semibold text-white text-sm">{camp.gradeGroup}</p>
                             <p className="text-xs text-brown-400">
                               {camp.time}
@@ -2881,7 +2898,7 @@ export default function Home() {
                         );
                       })}
                     </div>
-                    <p className="mt-3 text-center text-xs text-brown-400 sm:text-left">
+                    <p className="relative mt-3 text-center text-xs text-brown-400 sm:text-left">
                       <span className="font-semibold text-brown-200">24-hour cancellation policy:</span> cancelling within 24 hours of the camp start keeps 50% as a late fee (the other 50% comes back as account credit). No rescheduling{fullOnly ? " or single days" : ""}.
                     </p>
                     {!fullOnly && firstCamp.campDays.filter((d) => isFutureCampDay(d, firstCamp.time)).length > 0 && (
