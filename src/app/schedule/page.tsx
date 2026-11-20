@@ -9,7 +9,7 @@ import { getTrainerBioSlug, getTrainerTier, normalizeTrainerTier, formatTrainerF
 import { calcServiceFee, serviceFeeLabel, serviceFeeItemName, isPercentServiceFee, SERVICE_FEE_PERCENT_TEXT, packagePrice, PRIVATE_RATE_BY_TIER, GROUP_PRIVATE_RATE_BY_TIER, calcPrivatePrice as getPrivatePrice, REFERRAL_CREDIT_SESSION_PRICE, packageCoversTrainerTier } from "@/lib/pricing";
 import { ALL_GRADES, normalizedAthleteName } from "@/lib/athletes";
 import { getSessionGender } from "@/lib/group-matching";
-import { isEarlyBirdActive, earlyBirdEndsLabel, isFullCampOnly, fullCampPrice } from "@/lib/camp-pricing";
+import { isEarlyBirdActive, earlyBirdEndsLabel, isFullCampOnly, fullCampPrice, priceNumber } from "@/lib/camp-pricing";
 
 const SUBSTITUTE_TRAINER_LABEL = "Any Available Trainer";
 
@@ -258,15 +258,22 @@ function DobInput({ value, onChange, required }: { value: string; onChange: (v: 
   );
 }
 
+// Dollars saved by registering early bird, or 0.
+function earlyBirdSavings(camp: Camp): number {
+  const regular = priceNumber(camp.price) || 0;
+  const early = priceNumber(camp.earlyBirdPrice) || 0;
+  return regular > early && early > 0 ? regular - early : 0;
+}
+
 function calcCampPrice(daysSelected: number, totalDays: number, camp: Camp, kidCount: number = 1): string {
   if (daysSelected === 0) return "";
   const count = Math.max(1, kidCount);
   const fullBaseStr = fullCampPrice(camp);
-  const fullBase = (parseInt(fullBaseStr.replace(/\D/g, "")) || 0) * count;
+  const fullBase = (priceNumber(fullBaseStr) || 0) * count;
   if (daysSelected === totalDays) {
     return count === 1 ? fullBaseStr : `$${fullBase}`;
   }
-  const perDay = parseInt(camp.dropInPrice.replace(/\D/g, "")) || 100;
+  const perDay = priceNumber(camp.dropInPrice) || 100;
   const dropInTotal = perDay * daysSelected * count;
   return `$${Math.min(dropInTotal, fullBase)}`;
 }
@@ -1554,7 +1561,7 @@ export default function Home() {
         if (camp?.campDays?.length > 0) {
           const selectedDaysArr = camp.campDays.filter((d) => campSelectedDays.has(d));
           const totalPrice = calcCampPrice(selectedDaysArr.length, camp.campDays.length, camp, kids.length);
-          const dropInRatePerKid = parseInt(camp.dropInPrice.replace(/\D/g, "")) || 0;
+          const dropInRatePerKid = priceNumber(camp.dropInPrice) || 0;
           const campSessions = selectedDaysArr.map((day) => ({
             date: day,
             startTime: camp.time.split("-")[0]?.trim() || camp.time,
@@ -1909,7 +1916,7 @@ export default function Home() {
       if (!camp?.campDays?.length) return null;
       const priceStr = calcCampPrice(campSelectedDays.size, camp.campDays.length, camp, kids.length);
       if (!priceStr) return null;
-      const total = parseInt(priceStr.replace(/\D/g, "")) || 0;
+      const total = priceNumber(priceStr) || 0;
       const days = campSelectedDays.size;
       const items = [{ label: days > 1 ? `${camp.name} x${days} days` : camp.name, amount: total }];
       return { total, items };
@@ -2801,9 +2808,11 @@ export default function Home() {
               const samePrice = group.camps.every(({ camp }) => camp.price === firstCamp.price && camp.earlyBirdPrice === firstCamp.earlyBirdPrice);
               const priceBlock = (camp: Camp) => isEarlyBirdActive(camp) ? (
                 <>
-                  <p className="text-lg font-bold leading-tight text-green-400">{camp.earlyBirdPrice}</p>
-                  <p className="text-[10px] leading-tight text-brown-500">
-                    <span className="line-through">{camp.price}</span> Early Bird{earlyBirdEndsLabel(camp) && ` — ends ${earlyBirdEndsLabel(camp)}`}
+                  <p className="text-xl font-bold leading-tight text-green-400">
+                    {camp.earlyBirdPrice} <span className="text-sm font-normal text-brown-400 line-through">{camp.price}</span>
+                  </p>
+                  <p className="mt-1 inline-block rounded-full bg-green-500/15 px-2.5 py-0.5 text-xs font-bold text-green-300 ring-1 ring-green-500/40">
+                    Early Bird{earlyBirdSavings(camp) ? ` — save $${earlyBirdSavings(camp)}` : ""}{earlyBirdEndsLabel(camp) && ` · ends ${earlyBirdEndsLabel(camp)}`}
                   </p>
                 </>
               ) : (
@@ -2872,6 +2881,9 @@ export default function Home() {
                         );
                       })}
                     </div>
+                    <p className="mt-3 text-center text-xs text-brown-400 sm:text-left">
+                      <span className="font-semibold text-brown-200">24-hour cancellation policy:</span> cancelling within 24 hours of the camp start keeps 50% as a late fee (the other 50% comes back as account credit). No rescheduling{fullOnly ? " or single days" : ""}.
+                    </p>
                     {!fullOnly && firstCamp.campDays.filter((d) => isFutureCampDay(d, firstCamp.time)).length > 0 && (
                       <p className="mt-3 text-center text-xs text-brown-500 sm:text-left">
                         Select any combination of days — {fmtPrice(firstCamp.dropInPrice)}/day, or {earlyBird && firstCamp.earlyBirdPrice ? `${firstCamp.earlyBirdPrice} early bird` : firstCamp.price} for the week.
@@ -3657,6 +3669,9 @@ export default function Home() {
                       )}
                     </div>
                   )}
+                  <p className="mt-3 rounded border border-yellow-700/50 bg-yellow-900/20 px-3 py-2 text-xs text-yellow-200">
+                    <strong>24-hour cancellation policy:</strong> cancel at least 24 hours before the camp starts for a full refund. Within 24 hours, 50% is kept as a late fee and the other 50% comes back as account credit. No rescheduling{fullOnly ? " or single days" : ""}.
+                  </p>
                   {selectedCount === 0 && !fullOnly && (
                     <p className="mt-2 text-xs text-yellow-500">Select at least one day to continue.</p>
                   )}

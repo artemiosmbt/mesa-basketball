@@ -135,13 +135,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Cannot cancel — missing camp group reference." }, { status: 500 });
     }
     const campName = reg.booked_group || reg.session_details.split(" — ")[0] || reg.session_details;
-    const group = await getCampGroupByReferralCode(reg.referral_code, reg.booked_group);
+    const group = await getCampGroupByReferralCode(reg.referral_code, reg.booked_group, reg.booking_batch_id);
     const totalOriginalDays = group.length || 1;
     const remainingAfterThis = group.filter((r) => r.status === "confirmed" && r.id !== id).length;
 
     if (remainingAfterThis === 0) {
       // Last remaining day — cancel the whole (now-empty) group.
-      const success = await cancelFullCampByReferralCode(reg.referral_code, reg.booked_group);
+      const success = await cancelFullCampByReferralCode(reg.referral_code, reg.booked_group, reg.booking_batch_id);
       if (!success) {
         return NextResponse.json({ error: "This camp was already cancelled" }, { status: 409 });
       }

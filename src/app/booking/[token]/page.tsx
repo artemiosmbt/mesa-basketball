@@ -78,6 +78,7 @@ interface Booking {
   status: string;
   createdAt: string;
   isFullCamp: boolean;
+  wholeCampOnly?: boolean;
   usedReferralCredit: boolean;
   sessionPrice: number | null;
   totalParticipants: number;
@@ -376,6 +377,21 @@ export default function ManageBooking({
     const hoursUntil = (ms - Date.now()) / (1000 * 60 * 60);
     return hoursUntil >= 0 && hoursUntil < 24;
   }, [booking]);
+
+  // Whole-camp-only bookings: the 24-hour rule and the "started" lock are
+  // measured from the camp's first day, whichever day's link was opened.
+  const campFirstDayMs = useMemo(() => {
+    const times = (booking?.campGroupDays || [])
+      .filter((d) => d.status === "confirmed")
+      .map((d) => sessionInstantMs(d.bookedDate, d.bookedStartTime))
+      .filter((ms): ms is number => ms !== null);
+    return times.length ? Math.min(...times) : null;
+  }, [booking]);
+  const { wholeCampStarted, wholeCampLate } = useMemo(() => {
+    if (campFirstDayMs === null) return { wholeCampStarted: false, wholeCampLate: false };
+    const msUntil = campFirstDayMs - Date.now();
+    return { wholeCampStarted: msUntil <= 0, wholeCampLate: msUntil > 0 && msUntil < 24 * 60 * 60 * 1000 };
+  }, [campFirstDayMs]);
 
   // True when within the 15-min grace period after booking (capped at session start)
   const withinGracePeriod = useMemo(() => {
@@ -787,7 +803,7 @@ export default function ManageBooking({
           {isLateCancel && (
             <p className="mt-3 rounded-lg bg-yellow-900/30 px-4 py-2 text-sm text-yellow-400">
               {isFullCampCancel
-                ? "This cancellation was made within 24 hours of the camp. Per our policy, 50% of the total camp fee is still due."
+                ? "This cancellation was made within 24 hours of the camp. Per our policy, 50% of the camp price was kept as a late fee and the other 50% was added to your account as credit."
                 : cancelPackageForfeited
                   ? "This cancellation was made within 24 hours of the session. Per our policy, this session is forfeited from your package — no additional charge, but it doesn't carry over or refund."
                   : cancelFullForfeit
@@ -901,7 +917,59 @@ export default function ManageBooking({
 
               {/* Full camp — list every day in the camp; each future day can be cancelled
                   independently. Cancelling the last remaining day cancels the whole camp. */}
-              {booking.type === "camp" && booking.isFullCamp ? (
+              {booking.type === "camp" && booking.isFullCamp && booking.wholeCampOnly ? (
+                <>
+                  <div className="mt-4 rounded-lg border border-brown-700 bg-brown-800/40 px-4 py-3">
+                    <p className="text-xs font-semibold text-brown-300 mb-1">Camp days</p>
+                    {(booking.campGroupDays || []).map((day) => (
+                      <p key={day.token} className={`text-sm ${day.status === "cancelled" ? "text-brown-500 line-through" : "text-white"}`}>
+                        {day.bookedDate ? fmtDate(day.bookedDate) : "—"}{day.bookedStartTime ? ` — ${day.bookedStartTime}` : ""}
+                      </p>
+                    ))}
+                  </div>
+                  <div className="mt-4 rounded-lg border-2 border-mesa-accent/60 bg-brown-800/60 px-4 py-3 text-sm text-brown-200">
+                    <p className="font-semibold text-mesa-accent">Cancellation policy</p>
+                    <p className="mt-1">Cancel at least 24 hours before the camp starts for a full refund. Within 24 hours of the start, 50% of the camp price you paid is kept as a late fee and the other 50% comes back as account credit. This is a full-camp registration — no rescheduling or single days. No cancellations once the camp has started.</p>
+                  </div>
+                  {wholeCampStarted ? (
+                    <p className="mt-4 rounded-lg bg-red-900/30 px-4 py-2 text-sm text-red-400">
+                      This camp has already started. Cancellations are no longer accepted and the full amount is due.
+                    </p>
+                  ) : !showCancelConfirm ? (
+                    <div className="mt-6">
+                      <button
+                        onClick={() => setShowCancelConfirm(true)}
+                        className="rounded border border-red-700 px-4 py-2 text-sm text-red-400 hover:bg-red-900/30"
+                      >
+                        Cancel Camp
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="mt-6 rounded-lg border border-red-800 bg-red-900/20 p-4">
+                      <p className="text-sm text-brown-200">
+                        {wholeCampLate
+                          ? "The camp starts in less than 24 hours. If you cancel now, 50% of the camp price is kept as a late fee and the other 50% is added to your account as credit. Cancel the whole camp?"
+                          : "This cancels every day of the camp and refunds the camp price to your card. Cancel the whole camp?"}
+                      </p>
+                      <div className="mt-3 flex gap-2">
+                        <button
+                          onClick={handleCancel}
+                          disabled={cancelling}
+                          className="rounded bg-red-700 px-4 py-2 text-sm font-semibold text-white hover:bg-red-600 disabled:opacity-50"
+                        >
+                          {cancelling ? "Cancelling..." : "Yes, Cancel Camp"}
+                        </button>
+                        <button
+                          onClick={() => setShowCancelConfirm(false)}
+                          className="rounded bg-brown-700 px-4 py-2 text-sm text-brown-300 hover:bg-brown-600"
+                        >
+                          Go Back
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : booking.type === "camp" && booking.isFullCamp ? (
                 <>
                   <p className="mt-4 rounded-lg bg-brown-800/60 px-4 py-2 text-sm text-brown-300">
                     Cancel individual days below — a spot opens up for that day only. Once a day&apos;s start time passes, it locks and can no longer be changed.

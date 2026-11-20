@@ -67,7 +67,7 @@ export async function GET(
 
   let campGroupDays: { token: string; bookedDate: string | null; bookedStartTime: string | null; status: string }[] | undefined;
   if (reg.is_full_camp && reg.referral_code) {
-    const group = await getCampGroupByReferralCode(reg.referral_code, reg.booked_group);
+    const group = await getCampGroupByReferralCode(reg.referral_code, reg.booked_group, reg.booking_batch_id);
     campGroupDays = group.map((r) => ({
       token: r.manage_token,
       bookedDate: r.booked_date,
@@ -99,6 +99,8 @@ export async function GET(
     status: reg.status,
     createdAt: reg.created_at,
     isFullCamp: reg.is_full_camp ?? false,
+    // Sold as the whole camp only: one cancel for every day, no single days.
+    wholeCampOnly: reg.type === "camp" && !!reg.is_full_camp && reg.camp_drop_in_rate == null,
     usedReferralCredit: reg.used_referral_credit ?? false,
     sessionPrice: reg.session_price,
     totalParticipants: reg.total_participants,
@@ -114,6 +116,16 @@ export async function GET(
         ? issueOnTimeToken(reg.id)
         : undefined,
   });
+}
+
+// Start of a camp day row, for finding a booking's first day.
+function campDayStart(r: { booked_date: string | null; booked_start_time: string | null }): number {
+  const m = (r.booked_start_time || "").match(/(\d+):(\d+)\s*(AM|PM)/i);
+  if (!r.booked_date || !m) return Number.MAX_SAFE_INTEGER;
+  let h = parseInt(m[1]);
+  if (m[3].toUpperCase() === "PM" && h !== 12) h += 12;
+  if (m[3].toUpperCase() === "AM" && h === 12) h = 0;
+  return parseSessionDateTimeET(r.booked_date, h, parseInt(m[2])).getTime();
 }
 
 // DELETE — cancel booking
@@ -133,20 +145,37 @@ export async function DELETE(
     );
   }
 
+  // A whole-camp-only booking (full camp with no per-day rate — the sheet had
+  // no Drop-In Price) is cancelled as one unit, and both the "already
+  // started" lock and the 24-hour rule are measured from its FIRST day, no
+  // matter which day's manage link was used.
+  const wholeCampOnly = reg.type === "camp" && !!reg.is_full_camp && reg.camp_drop_in_rate == null;
+  let wholeCampGroup: Awaited<ReturnType<typeof getCampGroupByReferralCode>> | null = null;
+  let timingRow = reg;
+  if (wholeCampOnly && reg.referral_code) {
+    wholeCampGroup = await getCampGroupByReferralCode(reg.referral_code, reg.booked_group, reg.booking_batch_id);
+    const firstDay = wholeCampGroup
+      .filter((r) => r.status === "confirmed" && r.booked_date && r.booked_start_time)
+      .sort((a, b) => campDayStart(a) - campDayStart(b))[0];
+    if (firstDay) timingRow = firstDay;
+  }
+
   // Block cancelling a camp day once that specific day's start time has passed.
   // Each day locks independently — other days in the same camp are unaffected.
-  if (reg.type === "camp" && reg.booked_date && reg.booked_start_time) {
-    const timeMatch = reg.booked_start_time.match(/(\d+):(\d+)\s*(AM|PM)/i);
+  if (reg.type === "camp" && timingRow.booked_date && timingRow.booked_start_time) {
+    const timeMatch = timingRow.booked_start_time.match(/(\d+):(\d+)\s*(AM|PM)/i);
     if (timeMatch) {
       let hours = parseInt(timeMatch[1]);
       const mins = parseInt(timeMatch[2]);
       const period = timeMatch[3].toUpperCase();
       if (period === "PM" && hours !== 12) hours += 12;
       if (period === "AM" && hours === 12) hours = 0;
-      const sessionDateTime = parseSessionDateTimeET(reg.booked_date, hours, mins);
+      const sessionDateTime = parseSessionDateTimeET(timingRow.booked_date, hours, mins);
       if (Date.now() >= sessionDateTime.getTime()) {
         return NextResponse.json(
-          { error: "This day has already started — cancellations are no longer accepted for it. The full amount is due." },
+          { error: wholeCampOnly
+              ? "This camp has already started — cancellations are no longer accepted. The full amount is due."
+              : "This day has already started — cancellations are no longer accepted for it. The full amount is due." },
           { status: 400 }
         );
       }
@@ -155,8 +184,8 @@ export async function DELETE(
 
   // Check 24-hour policy with 15-min grace period
   let isLateCancel = false;
-  if (reg.booked_date && reg.booked_start_time) {
-    isLateCancel = isLateAction(reg.booked_date, reg.booked_start_time, reg.created_at, reg.admin_change_at);
+  if (timingRow.booked_date && timingRow.booked_start_time) {
+    isLateCancel = isLateAction(timingRow.booked_date, timingRow.booked_start_time, timingRow.created_at, timingRow.admin_change_at);
   }
 
   // Full camp: cancelling one day recalculates the group; cancelling the last
@@ -166,13 +195,13 @@ export async function DELETE(
       return NextResponse.json({ error: "Cannot cancel — missing camp group reference." }, { status: 500 });
     }
     const campName = reg.booked_group || reg.session_details.split(" — ")[0] || reg.session_details;
-    const group = await getCampGroupByReferralCode(reg.referral_code, reg.booked_group);
+    const group = wholeCampGroup ?? await getCampGroupByReferralCode(reg.referral_code, reg.booked_group, reg.booking_batch_id);
     const totalOriginalDays = group.length || 1;
     const remainingAfterThis = group.filter((r) => r.status === "confirmed" && r.id !== reg.id).length;
 
-    if (remainingAfterThis === 0) {
+    if (remainingAfterThis === 0 || wholeCampOnly) {
       // Last remaining day — cancel the whole (now-empty) group, same rule as before.
-      const success = await cancelFullCampByReferralCode(reg.referral_code, reg.booked_group);
+      const success = await cancelFullCampByReferralCode(reg.referral_code, reg.booked_group, reg.booking_batch_id);
       if (!success) {
         // Zero rows matched — another request (double-click, retry) already
         // cancelled this. Bail out here so the refund logic below never runs twice.
@@ -180,7 +209,11 @@ export async function DELETE(
       }
       // Refund any account credit that was applied to any day in this group
       const groupCredit = group.reduce((sum, r) => sum + (r.applied_account_credit || 0), 0);
-      if (groupCredit > 0 && reg.email) {
+      // Whole-camp-only late cancel keeps exactly half the camp price, so the
+      // credit they paid with is folded into the 50% below instead of being
+      // returned in full on top of it.
+      const foldCreditIntoLateFee = wholeCampOnly && isLateCancel;
+      if (groupCredit > 0 && reg.email && !foldCreditIntoLateFee) {
         await addAccountCredit(reg.email, groupCredit).catch(() => {});
       }
       // If they already paid: full Stripe refund with 24+ hours notice, 50%
@@ -205,7 +238,7 @@ export async function DELETE(
       if (wasPaid && reg.email) {
         const paidAmount = Math.max(0, resolvedSessionPrice(reg) - groupCredit - priorRefundedTotal - priorAccruedFees);
         if (isLateCancel) {
-          cancelCredit = Math.round(paidAmount * 0.5 * 100) / 100;
+          cancelCredit = Math.round((paidAmount + (foldCreditIntoLateFee ? groupCredit : 0)) * 0.5 * 100) / 100;
           if (cancelCredit > 0) await addAccountCredit(reg.email, cancelCredit).catch(() => {});
         } else {
           cancelCredit = paidAmount;
@@ -233,7 +266,7 @@ export async function DELETE(
         ? Math.round(Math.max(0, resolvedSessionPrice(reg) - groupCredit) * 0.5 * 100) / 100
         : undefined;
       if (wasPaid && isLateCancel) {
-        const paidAmount = Math.max(0, resolvedSessionPrice(reg) - groupCredit - priorRefundedTotal);
+        const paidAmount = Math.max(0, resolvedSessionPrice(reg) - (foldCreditIntoLateFee ? 0 : groupCredit) - priorRefundedTotal);
         await logLateFeeEvent({
           registrationId: reg.id,
           parentName: reg.parent_name,
@@ -275,15 +308,18 @@ export async function DELETE(
       }
       const adminMoneyOutcome = describeMoneyOutcome(stripeRefundResult, cancelCredit, isLateCancel, true);
       await sendAdminSMS(`CANCELLED (Camp): ${reg.parent_name}\n${campName}${isLateCancel ? " (late)" : ""}${adminMoneyOutcome ? ` — ${adminMoneyOutcome}` : ""}\nPlayers: ${reg.kids}`);
-      if (reg.booked_date && reg.booked_start_time) {
+      // Whole-camp-only cancels every day at once, so refresh every day's event.
+      const calendarRows = wholeCampOnly ? group.filter((r) => r.status === "confirmed") : [reg];
+      for (const day of calendarRows) {
+        if (!day.booked_date || !day.booked_start_time) continue;
         try {
           await upsertGroupSessionCalendarEvent({
             sessionType: "camp",
             sessionLabel: campName,
-            bookedDate: reg.booked_date,
-            bookedStartTime: reg.booked_start_time,
-            bookedEndTime: reg.booked_end_time || reg.booked_start_time,
-            bookedLocation: reg.booked_location || "",
+            bookedDate: day.booked_date,
+            bookedStartTime: day.booked_start_time,
+            bookedEndTime: day.booked_end_time || day.booked_start_time,
+            bookedLocation: day.booked_location || "",
             kidsJustRegistered: reg.kids,
             participantsJustRegistered: reg.total_participants || 1,
           });
@@ -838,6 +874,13 @@ export async function PUT(
       { error: "Booking is already cancelled" },
       { status: 400 }
     );
+  }
+
+  // Camps can't be rescheduled — the page never offers it, and the move
+  // logic below only knows private/weekly sessions, so it would otherwise
+  // turn a camp booking into one of those.
+  if (reg.type === "camp") {
+    return NextResponse.json({ error: "Camp registrations can't be rescheduled." }, { status: 400 });
   }
 
   const body = await req.json();

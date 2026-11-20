@@ -37,6 +37,13 @@ export function earlyBirdEndsLabel(camp: { earlyBirdDeadline?: string }): string
   return new Date(ends.getTime() - 1).toLocaleDateString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric" });
 }
 
+// "$190", "190" or "$1,190.00" → 190 / 1190. Sheets exports currency-formatted
+// cells with cents ("$190.00"), so stripping every non-digit would read 19000.
+export function priceNumber(text: string): number {
+  const n = parseFloat((text || "").replace(/[^\d.]/g, ""));
+  return Number.isFinite(n) ? n : 0;
+}
+
 // A camp with no Drop-In Price is sold as the full camp only.
 export function isFullCampOnly(camp: { dropInPrice: string }): boolean {
   return !camp.dropInPrice.trim();

@@ -761,6 +761,8 @@ export interface FinalizeCampBookingParams {
   campTotalNum?: number;
   campCreditApplied: number;
   sessionPrice?: number;
+  // Sold as the whole camp only (no Drop-In Price) — drives the policy wording.
+  campWholeOnly?: boolean;
 }
 
 /**
@@ -768,7 +770,10 @@ export interface FinalizeCampBookingParams {
  * rows created together (one row per selected day).
  */
 export async function finalizeConfirmedCampBooking(params: FinalizeCampBookingParams): Promise<void> {
-  const { campSessions, campReferrer, campCreditApplied, campTotalPrice, campTotalNum, sessionPrice } = params;
+  const { campReferrer, campCreditApplied, campTotalPrice, campTotalNum, sessionPrice } = params;
+  // Rows come back from the webhook in no guaranteed order — list days, and
+  // name the first one in the cancellation policy, in date order.
+  const campSessions = [...params.campSessions].sort((a, b) => parseSessionDateTimeET(a.date, 12, 0).getTime() - parseSessionDateTimeET(b.date, 12, 0).getTime());
 
   const daysList = campSessions
     .map((s) => `${s.date} ${s.startTime}${s.endTime ? `-${s.endTime}` : ""}`)
@@ -805,6 +810,7 @@ export async function finalizeConfirmedCampBooking(params: FinalizeCampBookingPa
       calendarEvent: { date: firstSession.date, startTime: firstSession.startTime, endTime: firstSession.endTime || firstSession.startTime, location: firstSession.location },
       calendarEvents: campSessions.map((s) => ({ date: s.date, startTime: s.startTime, endTime: s.endTime || s.startTime, location: s.location })),
       sessionDetailsIsHtml: true,
+      campPolicy: { firstDate: firstSession.date, firstStartTime: firstSession.startTime, wholeCampOnly: !!params.campWholeOnly },
     });
 
     if (campReferrer) {
@@ -821,7 +827,7 @@ export async function finalizeConfirmedCampBooking(params: FinalizeCampBookingPa
     const priceText = campTotalPrice
       ? `${campCreditApplied > 0 ? ` Total: ${campTotalPrice}, $${fmtMoney(campCreditApplied)} credit applied.` : ` Total: ${campTotalPrice}.`}${campAmountCharged > 0 ? ` Charged: $${fmtMoney(campTotalWithFee)}.` : ""}`
       : "";
-    await sendSMS(params.phone, `Mesa Basketball: Camp confirmed (${campSessions.length} day${campSessions.length !== 1 ? "s" : ""})!${priceText}\n${campDayLines}${(await newGymNotes(params.email, campSessions.map((s) => ({ location: s.location })))).sms}\nAthlete: ${params.kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
+    await sendSMS(params.phone, `Mesa Basketball: Camp confirmed (${campSessions.length} day${campSessions.length !== 1 ? "s" : ""})!${priceText}\n${campDayLines}\nCancellation policy: cancelling within 24 hours of the camp start keeps 50% as a late fee (the other 50% comes back as account credit). No rescheduling. Full policy in your confirmation email.${(await newGymNotes(params.email, campSessions.map((s) => ({ location: s.location })))).sms}\nAthlete: ${params.kids}\nManage: mesabasketballtraining.com/my-bookings\nReply STOP to opt out.`);
   }
 
   const adminCampLines = campSessions.map((s) =>
@@ -2564,9 +2570,12 @@ export async function finalizePaidCheckoutSession(session: Stripe.Checkout.Sessi
       submittedReferralCode,
       smsConsent: !!first.sms_consent,
       campTotalPrice: metadata.total_price || undefined,
-      campTotalNum: metadata.total_price ? parseInt(String(metadata.total_price).replace(/\D/g, "")) || 0 : 0,
+      // total_price is "$170.00" — keep the decimal point. Stripping every
+      // non-digit read it as 17000 and the email/SMS showed "Charged: $17,000+".
+      campTotalNum: metadata.total_price ? parseFloat(String(metadata.total_price).replace(/[^\d.]/g, "")) || 0 : 0,
       campCreditApplied,
       sessionPrice: first.session_price ?? undefined,
+      campWholeOnly: !!first.is_full_camp && first.camp_drop_in_rate == null,
     });
   }
 }

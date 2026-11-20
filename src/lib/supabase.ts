@@ -378,14 +378,20 @@ export async function recordCampDayRefund(token: string, amount: number): Promis
 // referral_code alone isn't a unique purchase ID — it's the client's own permanent
 // referral code, so it's identical across every full-camp purchase they've ever made.
 // booked_group (the camp's own name) disambiguates which specific camp purchase this is.
-export async function getCampGroupByReferralCode(referralCode: string, bookedGroup: string | null): Promise<Registration[]> {
+// A camp booking's days are the rows created by the same checkout
+// (booking_batch_id). The referral code is per parent, not per booking, so
+// matching on it alone merged a parent's separate bookings for different
+// age groups of the same camp (same booked_group). The referral-code match
+// is only the fallback for old rows written before batch ids existed.
+export async function getCampGroupByReferralCode(referralCode: string, bookedGroup: string | null, bookingBatchId?: string | null): Promise<Registration[]> {
   const supabase = getSupabase();
   let query = supabase
     .from("registrations")
     .select("*")
-    .eq("referral_code", referralCode)
     .eq("type", "camp")
     .eq("is_full_camp", true);
+  if (bookingBatchId) query = query.eq("booking_batch_id", bookingBatchId);
+  else query = query.eq("referral_code", referralCode);
   query = bookedGroup ? query.eq("booked_group", bookedGroup) : query.is("booked_group", null);
   const { data, error } = await query.order("booked_date", { ascending: true });
   if (error || !data) return [];
@@ -399,12 +405,12 @@ export async function getCampGroupByReferralCode(referralCode: string, bookedGro
  * must check row count, not just the absence of an error, before running
  * refund logic.
  */
-export async function cancelFullCampByReferralCode(referralCode: string, bookedGroup: string | null): Promise<boolean> {
+export async function cancelFullCampByReferralCode(referralCode: string, bookedGroup: string | null, bookingBatchId?: string | null): Promise<boolean> {
   const supabase = getSupabase();
   let query = supabase
     .from("registrations")
     .update({ status: "cancelled" })
-    .eq("referral_code", referralCode)
+    .eq(bookingBatchId ? "booking_batch_id" : "referral_code", bookingBatchId || referralCode)
     .eq("type", "camp")
     .eq("is_full_camp", true)
     .eq("status", "confirmed");

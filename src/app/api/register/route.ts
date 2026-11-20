@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getStripe, buildCreditDiscount } from "@/lib/stripe";
 import { calcServiceFee, serviceFeeItemName, fmtMoney, calcPrivatePrice, getTrainerTier, normalizeTrainerTier, packageCoversTrainerTier, REFERRAL_CREDIT_SESSION_PRICE, volumeDiscountPct, type TrainerTier } from "@/lib/pricing";
 import { getWeeklySchedule, getCamps, isPrivateWindowOfferedByTrainer } from "@/lib/sheets";
-import { fullCampPrice, isFullCampOnly } from "@/lib/camp-pricing";
+import { fullCampPrice, isFullCampOnly, priceNumber } from "@/lib/camp-pricing";
 import { resolveRequestEmail } from "@/lib/request-email";
 import { NEW_CLIENT_DISCOUNT_ENABLED } from "@/lib/feature-flags";
 import {
@@ -583,7 +583,7 @@ export async function POST(req: NextRequest) {
       }
 
       const fullBaseStr = fullCampPrice(liveCamp);
-      const fullBase = (parseInt(fullBaseStr.replace(/\D/g, "")) || 0) * campKidCount;
+      const fullBase = (priceNumber(fullBaseStr) || 0) * campKidCount;
       const isFullCamp = campSessions.length === liveTotalDays;
       // Every requested day must be one of the camp's own days, and a camp
       // with no Drop-In Price on the sheet is sold as the whole camp only.
@@ -597,7 +597,7 @@ export async function POST(req: NextRequest) {
       if (isFullCamp) {
         campTotalNum = fullBase;
       } else {
-        const perDay = parseInt((liveCamp.dropInPrice || "").replace(/\D/g, "")) || 100;
+        const perDay = priceNumber(liveCamp.dropInPrice || "") || 100;
         campTotalNum = Math.min(perDay * campSessions.length * campKidCount, fullBase);
       }
       if (campTotalNum <= 0) {
@@ -676,7 +676,7 @@ export async function POST(req: NextRequest) {
           // Stored for later per-day cancellation math on a full-camp
           // booking — sourced from the live sheet's drop-in rate, never the
           // client, since it directly affects a future refund calculation.
-          ...(isFullCamp ? { campDropInRate: parseInt((liveCamp.dropInPrice || "").replace(/\D/g, "")) || undefined } : {}),
+          ...(isFullCamp ? { campDropInRate: priceNumber(liveCamp.dropInPrice || "") || undefined } : {}),
           ...(dayCredit > 0 ? { appliedAccountCredit: dayCredit } : {}),
           status: amountToCharge > 0 ? "pending_payment" : undefined,
           bookingBatchId,
@@ -699,6 +699,7 @@ export async function POST(req: NextRequest) {
         campTotalNum,
         campCreditApplied,
         sessionPrice: firstDayPrice,
+        campWholeOnly: isFullCamp && isFullCampOnly(liveCamp),
       };
 
       if (amountToCharge === 0) {

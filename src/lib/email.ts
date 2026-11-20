@@ -1,7 +1,7 @@
 import { Resend } from "resend";
 import { calcServiceFee, fmtMoney, PRIVATE_RATE_BY_TIER, GROUP_PRIVATE_RATE_BY_TIER, getTrainerTier, REFERRAL_CREDIT_SESSION_PRICE } from "./pricing";
 import { formatTrainerForDisplay } from "./trainers";
-import { formatMonthYear } from "./sms";
+import { formatMonthYear, formatDateWithDay } from "./sms";
 import { REFERRAL_PROGRAM_ENABLED } from "./feature-flags";
 import { buildUnsubscribeUrl } from "./unsubscribe";
 import { NEW_GYM, mentionsNewGym } from "./new-gym";
@@ -198,6 +198,9 @@ export async function sendRegistrationNotification(data: {
   // source of truth) for a series and safe to omit entirely rather than
   // show a number/name that only applies to one date out of several.
   suppressTrainerAndRateLines?: boolean;
+  // Camp bookings: the policy box names the camp's first day/time, and a
+  // whole-camp-only booking says it can't be split into days.
+  campPolicy?: { firstDate: string; firstStartTime: string; wholeCampOnly: boolean };
 }) {
   const resend = getResend();
 
@@ -265,7 +268,14 @@ export async function sendRegistrationNotification(data: {
   // needed payment at all (free session, or fully covered by credit). Either
   // way, payment is never still "due" by the time this sends, so this only
   // states the cancellation/reschedule policy, not a payment method.
-  const paymentNote = isPackageBooking || data.isFree
+  const paymentNote = data.type === "camp" && data.campPolicy
+    ? `<div style="border: 2px solid #d4af37; border-radius: 8px; padding: 12px 14px; margin: 16px 0;">
+        <p style="margin: 0 0 6px 0; font-size: 15px; font-weight: bold; color: #d4af37;">Cancellation Policy — please read</p>
+        <p style="margin: 0 0 6px 0;">Cancel at least <strong>24 hours before the camp starts</strong> (${formatDateWithDay(data.campPolicy.firstDate)} at ${data.campPolicy.firstStartTime}) for a full refund of the camp price.</p>
+        <p style="margin: 0 0 6px 0;"><strong>Cancelling within 24 hours of the start: 50% of the camp price you paid is kept as a late fee, and the other 50% is returned to you as account credit</strong> for future Mesa sessions.</p>
+        <p style="margin: 0;">${data.campPolicy.wholeCampOnly ? "This registration is for the full camp — it can't be rescheduled or split into single days, and cancelling cancels every day. " : "Camp registrations can't be rescheduled. "}Once the camp has started, no cancellations or refunds. <strong>No-shows are charged the full camp price.</strong></p>
+      </div>`
+    : isPackageBooking || data.isFree
     ? ""
     : data.type === "weekly"
       ? `<p>Please provide at least 24 hours' notice if you need to cancel or reschedule a session. Rescheduling or canceling within 24 hours of the scheduled session will result in a 50% charge of the session fee. <strong>No-shows without prior notice will be charged the full session fee.</strong> (Sessions booked in bulk — 4+ or 8+ at once — get 10%/15% off; if cancelling one drops the rest below that discount threshold, your refund is adjusted so the remaining sessions are priced correctly.)</p>`
@@ -289,7 +299,9 @@ export async function sendRegistrationNotification(data: {
     ? `<p style="background: #1e3a5f; color: #93c5fd; padding: 12px; border-radius: 8px; font-weight: bold; text-align: center;">$${fmtMoney(data.accountCreditApplied)} account credit applied</p>`
     : "";
 
-  const manageSection = `<p><a href="${BASE_URL}/my-bookings" style="color: #d4af37; font-weight: bold;">View My Bookings</a> — Manage, cancel, or reschedule your sessions</p>`;
+  const manageSection = data.type === "camp"
+    ? `<p><a href="${BASE_URL}/my-bookings" style="color: #d4af37; font-weight: bold;">View My Bookings</a> — View or cancel your camp registration</p>`
+    : `<p><a href="${BASE_URL}/my-bookings" style="color: #d4af37; font-weight: bold;">View My Bookings</a> — Manage, cancel, or reschedule your sessions</p>`;
 
   const calendarButtons = (() => {
     if (!data.calendarEvent) return "";
