@@ -42,11 +42,10 @@ export async function POST(
     amountOwed: pricing.totalOwedViaCheckout,
     serviceFee,
     totalCharge: Math.round((pricing.totalOwedViaCheckout + serviceFee) * 100) / 100,
-    // A price decrease with nothing else owed grants account credit instead
-    // of charging anything — surfaced so the client can show that instead
-    // of a payment prompt.
-    creditGranted: pricing.wasPaid && pricing.priceDelta < 0 && pricing.totalOwedViaCheckout === 0
-      ? Math.round(-pricing.priceDelta * 100) / 100
-      : 0,
+    // A change that nets to less than what was paid (after any late fee)
+    // grants account credit instead of charging anything — surfaced so the
+    // client can show that instead of a payment prompt.
+    creditGranted: pricing.creditDue,
+    lateFeeCovered: pricing.lateFeeCovered,
   });
 }

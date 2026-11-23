@@ -11,7 +11,7 @@ import { sendSMS, sendAdminSMS, formatDateWithDay, resolveLocationName } from "@
 import { getWeeklySchedule } from "@/lib/sheets";
 import { addAccountCredit, deductAccountCredit, setAppliedAccountCredit, addReferralCredit, addRegistration, cancelRegistration, logLateFeeEvent, logRegistrationTopupCharge, getPackageById, countPackageSessionsUsed, setPackageSessions, checkGroupSessionCapacity, updateRegistrationsPricing, claimBulkBatch, releaseBulkBatch } from "@/lib/supabase";
 import { isLateAction, resolveOffSessionPaymentSource, chargeSavedCardOffSession, issueStripeRefund, computeBulkWeeklySettlement, fullPriceForWeeklyRow, rescheduleDiscountPct } from "@/lib/booking-finalize";
-import { calcServiceFee, serviceFeeLabel, fmtMoney, calcPrivatePrice, fullPriceForType, getTrainerTier, normalizeTrainerTier, effectiveSessionPrice, packageCoversTrainerTier } from "@/lib/pricing";
+import { calcServiceFee, serviceFeeLabel, fmtMoney, calcPrivatePrice, fullPriceForType, getTrainerTier, effectiveSessionPrice } from "@/lib/pricing";
 import { notifyTrainerOfCancellation, notifyTrainerOfReschedule, notifyTrainerOfNewBooking } from "@/lib/trainer-notify";
 import { newGymNotes } from "@/lib/new-gym-server";
 
@@ -185,9 +185,24 @@ export async function POST(req: NextRequest) {
   // hand instead of guessing it.
   let newBulkFullPrice: number | undefined;
   let newIsBulkDiscounted = false;
-  if (isNewPrivate) {
+  if (isNewPrivate && keepPriceUnchanged) {
+    // "Keep the same price": nothing about this session's price changes,
+    // whatever the new trainer/length — newFullPrice stays undefined, the
+    // same as the weekly branch below, so nothing is charged or credited.
+  } else if (isNewPrivate) {
     const durationMins = Math.max(60, parseMinsFromTime(bookedEndTime) - parseMinsFromTime(bookedStartTime));
-    newFullPrice = calcPrivatePrice(durationMins, reg.total_participants || 1, getTrainerTier(resolvedTrainer));
+    const participants = reg.total_participants || 1;
+    newFullPrice = calcPrivatePrice(durationMins, participants, getTrainerTier(resolvedTrainer));
+    // A trainer swap made here is the business's call, not the client's
+    // (e.g. Artemios covering a session booked with a cheaper trainer): it
+    // never raises what the client pays. The session is priced at whichever
+    // of the two trainers' rates is LOWER, so covering it costs the client
+    // nothing, and moving them to a cheaper trainer passes the saving on.
+    // Only applies private -> private; converting a group booking into a
+    // private is a genuinely different session and is priced as such.
+    if (wasPrivate && (reg.booked_trainer || undefined) !== (resolvedTrainer || undefined)) {
+      newFullPrice = Math.min(newFullPrice, calcPrivatePrice(durationMins, participants, getTrainerTier(reg.booked_trainer)));
+    }
   } else if (effectiveType === "weekly") {
     try {
       const sessions = await getWeeklySchedule({ noCache: true });
@@ -344,13 +359,20 @@ export async function POST(req: NextRequest) {
     }
     // Packages only ever cover a standard private session (up to 3 kids) —
     // never a 4+ kid group-private rate, regardless of remaining capacity.
-    // Also requires the NEW trainer to be covered by the package's own tier
-    // (see packageCoversTrainerTier) — an admin reschedule can move the
-    // session to a different trainer, and without this check an "Any
-    // Available Trainer" package could end up covering an Artemios session
-    // for free.
+    // The NEW trainer's tier is deliberately NOT checked here (the client-
+    // facing reschedule does check it, booking/[token]/route.ts): a trainer
+    // change made from admin is the business's decision — e.g. Artemios
+    // stepping in for a session booked on a cheaper trainer's package — so
+    // the package keeps covering it and the business absorbs the difference.
+    // Until 2026-11-23 this checked packageCoversTrainerTier too, which
+    // unlinked the session from the package (freeing its slot) and charged
+    // the client Artemios's full individual rate for the swap.
     const oldPkg = await getPackageById(reg.package_id).catch(() => null);
-    if (oldPkg && effectiveType === "private" && (reg.total_participants || 1) <= 3 && packageCoversTrainerTier(normalizeTrainerTier(oldPkg.trainer_tier), getTrainerTier(resolvedTrainer))) {
+    if (keepPriceUnchanged) {
+      // "Keep the same price" on a package session: it stays covered by its
+      // package exactly as before — no move-out charge, no slot freed.
+      sameMonthCovered = true;
+    } else if (oldPkg && effectiveType === "private" && (reg.total_participants || 1) <= 3) {
       const d = new Date(bookedDate);
       if (!isNaN(d.getTime())) {
         const newMonth = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;

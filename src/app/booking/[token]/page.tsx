@@ -276,6 +276,7 @@ export default function ManageBooking({
     serviceFee: number;
     totalCharge: number;
     creditGranted: number;
+    lateFeeCovered?: boolean;
   } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
 
@@ -626,7 +627,7 @@ export default function ManageBooking({
       setBooking((prev) => prev ? { ...prev, kids: data.newKids } : null);
       setShowEditPlayers(false);
       setShowPlayerConfirm(false);
-      if (data.isLate && data.lateFeeDue) {
+      if (data.isLate && data.lateFeeDue && !data.lateFeeCovered) {
         setPlayerLateResult({ isLate: true, lateFeeDue: data.lateFeeDue });
       } else {
         setPlayerSaveSuccess(true);
@@ -1311,7 +1312,9 @@ export default function ManageBooking({
                                 {removed.length > 0
                                   ? `Remove ${removed.join(", ")} from this booking?`
                                   : "Save changes to your player list?"}
-                                {within24Hours && !withinGracePeriod && removed.length > 0
+                                {playerPreview?.isLate && playerPreview.lateFeeDue && playerPreview.lateFeeCovered
+                                  ? ` Because this is within 24 hours, a ${formatPrice(playerPreview.lateFeeDue)} late fee is kept from what you paid.`
+                                  : within24Hours && !withinGracePeriod && removed.length > 0
                                   ? " A late cancellation fee will apply." : ""}
                                 {playerPreview && playerPreview.creditGranted > 0
                                   ? ` You'll receive a ${formatPrice(playerPreview.creditGranted)} credit toward your next booking.`

@@ -790,6 +790,10 @@ export async function sendPlayerUpdateNotification(data: {
   sessionType: string;
   isLate: boolean;
   lateFeeDue?: number;
+  // The fee was already settled (kept from what they paid, or paid in this
+  // change's checkout) — don't tell them it's still due.
+  lateFeeCovered?: boolean;
+  creditGranted?: number;
   oldPrice: number | null;
   newPrice: number | null;
   priceChanged: boolean;
@@ -804,10 +808,14 @@ export async function sendPlayerUpdateNotification(data: {
   const lateBlock = data.isLate && data.removedPlayers.length > 0
     ? `<div style="background:#7c1d1d;border-left:4px solid #ef4444;border-radius:6px;padding:14px 16px;margin:16px 0;">
         <p style="margin:0 0 6px 0;font-size:15px;font-weight:bold;color:#fff;">⚠️ Late Removal — Fee Applies</p>
-        <p style="margin:0;color:#fff;font-size:14px;">This player was removed within 24 hours of the session. Per our policy${data.lateFeeDue ? `, a fee of <strong>$${fmtMoney(data.lateFeeDue)}</strong> is still due` : ", a late cancellation fee still applies"}.</p>
-        ${PAYMENT_LINES}
+        ${data.lateFeeCovered
+          ? `<p style="margin:0;color:#fff;font-size:14px;">This player was removed within 24 hours of the session, so per our policy${data.lateFeeDue ? ` a <strong>$${fmtMoney(data.lateFeeDue)}</strong> late fee` : " a late fee"} applies. It has been taken care of — nothing more is due.${data.creditGranted ? ` The rest of what you paid for this player, <strong>$${fmtMoney(data.creditGranted)}</strong>, has been added to your account as credit toward your next booking.` : ""}</p>`
+          : `<p style="margin:0;color:#fff;font-size:14px;">This player was removed within 24 hours of the session. Per our policy${data.lateFeeDue ? `, a fee of <strong>$${fmtMoney(data.lateFeeDue)}</strong> is still due` : ", a late cancellation fee still applies"}.</p>
+        ${PAYMENT_LINES}`}
       </div>`
-    : "";
+    : data.creditGranted
+      ? `<p style="background:#162d5a;padding:12px;border-radius:8px;color:#fff;"><strong style="color:#d4af37;">$${fmtMoney(data.creditGranted)}</strong> has been added to your account as credit toward your next booking.</p>`
+      : "";
 
   const priceBlock = data.priceChanged && data.newPrice !== null
     ? `<p style="background:#162d5a;padding:12px;border-radius:8px;color:#fff;">
@@ -829,7 +837,8 @@ export async function sendPlayerUpdateNotification(data: {
       ${removedList}${addedList}
       <p><strong>Current Players:</strong> ${escapeHtml(data.newKids)}</p>
       ${data.priceChanged ? `<p><strong>Price:</strong> $${data.oldPrice != null ? fmtMoney(data.oldPrice) : "—"} → $${data.newPrice != null ? fmtMoney(data.newPrice) : "—"}</p>` : ""}
-      ${data.isLate && data.removedPlayers.length > 0 ? `<p style="color:#ef4444;"><strong>⚠️ Late removal${data.lateFeeDue ? ` — $${fmtMoney(data.lateFeeDue)} fee due` : ""}</strong></p>` : ""}
+      ${data.isLate && data.removedPlayers.length > 0 ? `<p style="color:#ef4444;"><strong>⚠️ Late removal${data.lateFeeDue ? ` — $${fmtMoney(data.lateFeeDue)} fee ${data.lateFeeCovered ? "kept (already paid)" : "due"}` : ""}</strong></p>` : ""}
+      ${data.creditGranted ? `<p><strong>Account credit granted:</strong> $${fmtMoney(data.creditGranted)}</p>` : ""}
     `,
   });
   if (adminResult.error) console.error("Resend admin player-update email error:", adminResult.error);

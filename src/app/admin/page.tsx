@@ -3395,11 +3395,39 @@ export default function AdminPage() {
                   } else if (targetIsPrivate) {
                     const durationMins = Math.max(60, parseTimeToMinsClient(rescheduleForm.end) - parseTimeToMinsClient(rescheduleForm.start));
                     newFull = calcPrivatePricePreview(durationMins, r.total_participants || 1, getTrainerTier(rescheduleForm.trainer || r.booked_trainer));
+                    // Mirrors the server: a trainer swap made from admin never
+                    // raises the client's price (the lower of the two rates).
+                    if (isPrivateTypeClient(r.type) && (rescheduleForm.trainer || r.booked_trainer) !== r.booked_trainer) {
+                      newFull = Math.min(newFull, calcPrivatePricePreview(durationMins, r.total_participants || 1, getTrainerTier(r.booked_trainer)));
+                    }
                   } else if (targetIsWeekly && typeof rescheduleForm.price === "number") {
                     newFull = Math.round(rescheduleForm.price * (r.total_participants || 1));
                   }
                   if (newFull === undefined) {
                     return <p className="text-[11px] text-brown-500 mt-2">Price isn&apos;t auto-tracked for camps — adjust manually if needed.</p>;
+                  }
+
+                  // A package session isn't paid per session, so the delta
+                  // below doesn't apply to it. Mirrors the server: it stays
+                  // covered (any trainer) within the package's month, and
+                  // only a move to another month charges the regular price.
+                  if (r.package_id) {
+                    const oldKey = parseDateKey(r.booked_date || ""), newKey = parseDateKey(rescheduleForm.date);
+                    const sameMonth = !!oldKey && !!newKey && oldKey.slice(0, 7) === newKey.slice(0, 7);
+                    const covered = rescheduleKeepPriceUnchanged || (targetIsPrivate && (r.total_participants || 1) <= 3 && sameMonth);
+                    return (
+                      <div className="rounded-lg border border-brown-700 bg-brown-950 p-3 mt-2 text-xs">
+                        <p className="text-brown-500 uppercase tracking-wider text-[10px] mb-1">Price</p>
+                        {covered ? (
+                          <p className="text-green-400 font-medium">Still covered by their package — no charge.</p>
+                        ) : (
+                          <p className="text-orange-400 font-medium">
+                            Leaves the package{!sameMonth ? " (different month)" : ""} — their card on file will be charged ${newFull} plus the card fee.
+                          </p>
+                        )}
+                        <p className="text-brown-500 mt-1">A late reschedule you choose to charge still forfeits the original session from the package.</p>
+                      </div>
+                    );
                   }
 
                   const showCreditCheckbox = !!r.used_referral_credit && targetIsPrivate;
@@ -3448,11 +3476,11 @@ export default function AdminPage() {
                     onChange={(e) => setRescheduleKeepPriceUnchanged(e.target.checked)}
                     className="rounded border-brown-600 accent-mesa-accent h-3.5 w-3.5"
                   />
-                  Keep the same price (skip recompute — e.g. a bulk/discounted rate that shouldn&apos;t change)
+                  Keep the same price (nothing charged or credited; a package session stays in its package)
                 </label>
                 <p className="text-[11px] text-brown-500 mt-2">
                   {rescheduleKeepPriceUnchanged
-                    ? "Price will NOT be recomputed — this registration keeps exactly what it already has."
+                    ? "Price will NOT change and nothing is charged or credited — this registration keeps exactly what it already has. Swapping the trainer from here never charges the client more either way."
                     : rescheduleSuppressNotification
                     ? "The client will NOT be emailed or texted about this change."
                     : "If the current session is within 24 hours, you’ll be asked whether to waive or charge the late fee. The client will get an email/text about the change."}

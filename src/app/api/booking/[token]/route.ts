@@ -744,7 +744,7 @@ export async function PATCH(
   const pricing = await computePlayerEditPricing(reg, players);
   const {
     newKidsStr, newCount, removedPlayers, addedPlayers, isLate, newPrice,
-    lateFeeDue, wasPaid, priceDelta, priceChanged, totalOwedViaCheckout,
+    lateFeeDue, wasPaid, priceChanged, totalOwedViaCheckout, creditDue, lateFeeCovered,
   } = pricing;
 
   // Money owed: send the client to a real Stripe Checkout for it, same as a
@@ -812,15 +812,15 @@ export async function PATCH(
   const ok = await updateRegistrationPlayers(token, newKidsStr, newCount, newPrice);
   if (!ok) return NextResponse.json({ error: "This booking is no longer active — it may have just been cancelled" }, { status: 409 });
 
-  // A price DECREASE with nothing owed (no late fee, or the group gained no
-  // headcount-driven fee) — credit the difference back for their next
+  // The change nets to LESS than what was paid (a removed player, minus any
+  // late fee kept from their share) — credit the rest back for their next
   // booking, same as admin add-player's equivalent case. Real refunds are
   // reserved for genuine reschedules/cancellations, not a roster tweak.
   let creditGranted = 0;
-  if (wasPaid && priceDelta < 0) {
+  if (creditDue > 0) {
     try {
-      await addAccountCredit(reg.email, -priceDelta);
-      creditGranted = -priceDelta;
+      await addAccountCredit(reg.email, creditDue);
+      creditGranted = creditDue;
     } catch (err) {
       console.error("Failed to grant account credit (player edit):", err);
     }
@@ -837,6 +837,8 @@ export async function PATCH(
       sessionType: reg.type,
       isLate,
       lateFeeDue,
+      lateFeeCovered,
+      creditGranted,
       oldPrice: reg.session_price,
       newPrice,
       priceChanged,
@@ -846,17 +848,17 @@ export async function PATCH(
       removedPlayers.length > 0 ? `Removed: ${removedPlayers.join(", ")}` : "",
     ].filter(Boolean).join(" | ");
     const sessionLabel = reg.session_details.split(" — ")[0] || reg.session_details;
-    const priceNote = priceChanged
+    const priceNote = (priceChanged
       ? creditGranted > 0
         ? ` | $${fmtMoney(creditGranted)} credited for their next booking.`
         : ` | New price: $${newPrice != null ? fmtMoney(newPrice) : "—"}`
-      : "";
+      : "") + (isLate && lateFeeDue ? ` | Late fee $${fmtMoney(lateFeeDue)} ${lateFeeCovered ? "kept from what they paid" : "still owed (unpaid booking)"}.` : "");
     await sendAdminSMS(`PLAYERS UPDATED (${sessionLabel}): ${reg.parent_name}\n${changeNote || "Roster order/details changed"}\nNow: ${newKidsStr}${priceNote}`);
   } catch (err) {
     console.error("Player update email/SMS error:", err);
   }
 
-  return NextResponse.json({ success: true, newKids: newKidsStr, newPrice, isLate, lateFeeDue, creditGranted: creditGranted > 0 ? creditGranted : undefined });
+  return NextResponse.json({ success: true, newKids: newKidsStr, newPrice, isLate, lateFeeDue, lateFeeCovered, creditGranted: creditGranted > 0 ? creditGranted : undefined });
 }
 
 // PUT — reschedule booking

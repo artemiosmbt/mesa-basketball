@@ -1226,10 +1226,19 @@ export interface PlayerEditPricing {
   newAmount: number;
   // Positive = client owes more; negative = a credit is due back.
   priceDelta: number;
-  // What a Stripe Checkout would actually charge for this change — the
-  // late fee is added on top rather than netted against a price decrease,
-  // since forgiving one against the other would understate what's owed.
+  // What a Stripe Checkout would actually charge for this change: the price
+  // change plus any separate late fee, netted together. Removing a player
+  // late from a paid weekly booking (2 kids at $50, one removed) is a $50
+  // decrease and a $25 fee: nothing to charge, $25 back as credit. Until
+  // 2026-11-23 the fee was charged on its own and the decrease was dropped
+  // whenever a checkout was needed, so that parent paid $125 for $75.
   totalOwedViaCheckout: number;
+  // Account credit owed back when the change nets to less than what was
+  // paid (only for a paid booking).
+  creditDue: number;
+  // The late fee is settled out of money already paid or through this
+  // change's own checkout, so nothing is still "due" from the client.
+  lateFeeCovered: boolean;
 }
 
 // Computes exactly what a roster change to `reg` would cost, WITHOUT
@@ -1298,7 +1307,9 @@ export async function computePlayerEditPricing(
           priceChanged = true;
         }
         if (isLate && removedPlayers.length > 0) {
-          lateFeeDue = removedPlayers.length * 25;
+          // The flat late fee everywhere else on the site: 50% of the full
+          // price, here per removed player ($25 for a $50 group).
+          lateFeeDue = Math.round(removedPlayers.length * liveMatch.price * 0.5 * 100) / 100;
           additionalLateFee = lateFeeDue;
         }
       } else {
@@ -1316,12 +1327,15 @@ export async function computePlayerEditPricing(
     ? Math.max(0, (reg.is_free && isPrivate ? Math.round((newPrice ?? 0) * 0.5 * 100) / 100 : (newPrice ?? 0)) - appliedCredit)
     : oldAmount;
   const priceDelta = priceChanged ? Math.round((newAmount - oldAmount) * 100) / 100 : 0;
-  const totalOwedViaCheckout = Math.round((Math.max(0, priceDelta) + additionalLateFee) * 100) / 100;
+  const net = Math.round((priceDelta + additionalLateFee) * 100) / 100;
+  const totalOwedViaCheckout = Math.max(0, net);
+  const creditDue = wasPaid && net < 0 ? -net : 0;
+  const lateFeeCovered = wasPaid && (lateFeeDue ?? 0) > 0;
 
   return {
     newPlayers, oldPlayers, newKidsStr, newCount, oldCount,
     removedPlayers, addedPlayers, isLate, newPrice, lateFeeDue, priceChanged,
-    additionalLateFee, wasPaid, oldAmount, newAmount, priceDelta, totalOwedViaCheckout,
+    additionalLateFee, wasPaid, oldAmount, newAmount, priceDelta, totalOwedViaCheckout, creditDue, lateFeeCovered,
   };
 }
 
@@ -2325,6 +2339,7 @@ async function finalizePlayerEditTopup(session: Stripe.Checkout.Session): Promis
       sessionType: reg.type,
       isLate,
       lateFeeDue,
+      lateFeeCovered: true, // paid through this checkout (net of the price change)
       oldPrice,
       newPrice,
       priceChanged: newPrice !== oldPrice,
