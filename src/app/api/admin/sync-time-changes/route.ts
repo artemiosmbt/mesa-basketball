@@ -10,6 +10,7 @@ import { notifyPrivateLocationChange } from "@/lib/private-location-notify";
 import { notifyTrainerOfCancellation, notifyTrainerOfNewBooking } from "@/lib/trainer-notify";
 import { getPackageById } from "@/lib/supabase";
 import { getTrainerTier, normalizeTrainerTier, packageCoversTrainerTier } from "@/lib/trainers";
+import { fetchAllRows } from "@/lib/fetch-all";
 
 // A time change emails and texts every player one at a time after moving
 // them; the move can't be redone, so the run must not be cut off before
@@ -105,12 +106,12 @@ export async function POST(req: NextRequest) {
   const uniqueDates = [...new Set(upcoming.map((s) => s.date))];
   let candidateRegs: WeeklyRegistration[] = [];
   if (uniqueDates.length) {
-    const { data, error: candidateError } = await supabase
+    const { data, error: candidateError } = await fetchAllRows(() => supabase
       .from("registrations")
       .select("*")
       .eq("type", "weekly")
       .eq("status", "confirmed")
-      .in("booked_date", uniqueDates);
+      .in("booked_date", uniqueDates));
     if (candidateError) {
       console.error("sync-time-changes: failed to fetch candidate registrations", candidateError);
     } else {
@@ -213,11 +214,11 @@ export async function POST(req: NextRequest) {
     console.error("sync-time-changes: failed to fetch private slots", err);
   }
 
-  const { data: allPrivateRegs } = await supabase
+  const { data: allPrivateRegs } = await fetchAllRows(() => supabase
     .from("registrations")
     .select("*")
     .in("type", ["private", "group-private"])
-    .eq("status", "confirmed");
+    .eq("status", "confirmed"));
   const privateRegsUpcoming: PrivateRegistration[] = (allPrivateRegs || []).filter(
     (r) => r.booked_date && sessionIsUpcoming(r.booked_date, r.booked_start_time || "")
   );

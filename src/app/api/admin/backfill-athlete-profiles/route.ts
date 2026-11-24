@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { verifyAdmin } from "@/lib/auth";
 import { normalizedAthleteName, type Athlete } from "@/lib/athletes";
 import { canonicalGroupForLabel } from "@/lib/group-matching";
+import { fetchAllRows } from "@/lib/fetch-all";
 
 // --- Ported verbatim from booking/[token]/route.ts:667-691 ---
 function parseKidsList(kidsStr: string): string[] {
@@ -53,11 +54,11 @@ export async function POST(req: NextRequest) {
   if (!(await verifyAdmin(req))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
 
-  const { data: regs, error: regsError } = await supabase
+  const { data: regs, error: regsError } = await fetchAllRows(() => supabase
     .from("registrations")
     .select("email, kids, booked_group")
     .neq("status", "payment_abandoned")
-    .not("email", "is", null);
+    .not("email", "is", null));
   if (regsError) return NextResponse.json({ error: regsError.message }, { status: 500 });
 
   const athletesByEmail = new Map<string, Map<string, { name: string; dob: string; grade: string; gender?: string; groups: Set<string> }>>();

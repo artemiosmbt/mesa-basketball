@@ -5,6 +5,7 @@ import { canonicalGroupForLabel, CANONICAL_GROUPS } from "@/lib/group-matching";
 import { regGroupKey } from "@/lib/weekly-schedule-matching";
 import { sendSMS, resolveLocationName } from "@/lib/sms";
 import type { Athlete, CanonicalGroupId } from "@/lib/athletes";
+import { fetchAllRows } from "@/lib/fetch-all";
 
 // Manual "spots open" text blast for one chosen day.
 //
@@ -159,11 +160,11 @@ export async function computeGroupBlast(targetDate: string): Promise<BlastPrevie
   // and compare in JS rather than an exact-string .eq() that would silently
   // match nothing.
   const groupNames = Array.from(new Set(sessionsOnDate.map((s) => s.group)));
-  const { data: existingRegs } = await supabase
+  const { data: existingRegs } = await fetchAllRows(() => supabase
     .from("registrations")
     .select("email, booked_date, booked_start_time, booked_end_time, booked_location, booked_group, session_details")
     .eq("status", "confirmed")
-    .in("booked_group", groupNames);
+    .in("booked_group", groupNames));
 
   const alreadyBookedKeys = new Set<string>();
   for (const r of existingRegs || []) {
@@ -179,10 +180,10 @@ export async function computeGroupBlast(targetDate: string): Promise<BlastPrevie
   // Consent + phone, newest row per email wins. sms_consent is captured per
   // registration, so a client who later opted out on a newer booking must
   // not be texted off the back of an older row that still says true.
-  const { data: regRows } = await supabase
+  const { data: regRows } = await fetchAllRows(() => supabase
     .from("registrations")
     .select("email, phone, sms_consent, created_at")
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false }));
 
   const phoneByEmail = new Map<string, { phone: string; consent: boolean }>();
   for (const r of regRows || []) {

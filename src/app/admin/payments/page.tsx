@@ -56,7 +56,7 @@ interface LateFeeEvent {
   session_details: string | null;
   booked_date: string | null;
   booked_start_time: string | null;
-  action: "cancel" | "reschedule";
+  action: "cancel" | "reschedule" | "player_removed";
   initiated_by: "client" | "admin";
   amount_kept: number;
   amount_refunded: number;
@@ -581,8 +581,8 @@ export default function PaymentsPage() {
                   <div key={e.id} className="rounded-xl border border-brown-700 bg-brown-900/40 px-4 py-3">
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                       <span className="font-medium text-sm">{e.parent_name}</span>
-                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${e.action === "cancel" ? "bg-red-900/40 text-red-400" : "bg-blue-900/40 text-blue-400"}`}>
-                        {e.action === "cancel" ? "cancelled late" : "rescheduled late"}
+                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${e.action === "cancel" || e.action === "player_removed" ? "bg-red-900/40 text-red-400" : "bg-blue-900/40 text-blue-400"}`}>
+                        {e.action === "cancel" ? "cancelled late" : e.action === "player_removed" ? "player removed late" : "rescheduled late"}
                       </span>
                       <span className="rounded-full bg-brown-800 text-brown-400 px-2 py-0.5 text-xs font-medium">{e.initiated_by === "admin" ? "by you" : "by client"}</span>
                       <span className="ml-auto text-xs text-brown-500 shrink-0">{timeAgo(e.created_at)}</span>

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { verifyAdmin } from "@/lib/auth";
 import { attachComputedFields } from "@/lib/admin-registration-enrichment";
+import { fetchAllRows } from "@/lib/fetch-all";
 
 // Replaces admin/payments/page.tsx's reuse of the big, unscoped
 // /api/admin/data — that page only ever read registrations, packages,
@@ -29,10 +30,10 @@ export async function GET(req: NextRequest) {
   // cuts both row count and row width versus the old full-table,
   // full-column fetch.
   const [{ data: registrations }, { data: packages }, { data: accountCredits }, { data: lateFeeEvents }] = await Promise.all([
-    supabase
+    fetchAllRows(() => supabase
       .from("registrations")
       .select("id, email, parent_name, phone, kids, type, session_details, booked_date, booked_start_time, booked_group, booked_trainer, status, is_paid, stripe_payment_intent_id, session_price, total_participants, is_free, used_referral_credit, is_full_camp, referral_code, camp_day_late_fee, camp_drop_in_rate, applied_account_credit")
-      .eq("status", "confirmed"),
+      .eq("status", "confirmed")),
     // Deliberately NOT trainer-scoped — same reasoning as admin/data's
     // equivalent query — package coverage isn't tied to one trainer.
     supabase.from("monthly_packages").select("id, email, package_type, month_year, is_paid").neq("status", "payment_abandoned"),

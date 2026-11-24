@@ -37,6 +37,7 @@ import {
 } from "./sheets-write";
 import { calcServiceFee } from "./pricing";
 import { sendAdminSMS } from "./sms";
+import { fetchAllRows, fetchInChunks } from "./fetch-all";
 import {
   STRIPE_FIXED,
   PAYMENT_METHOD_CACHE_TAB,
@@ -575,14 +576,16 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
   let writesThisRun = 0;
 
   // ---- sessions: registrations -> trainer tabs ----
-  const { data: regs, error: regErr } = await supabase
+  // Paged: a plain select stops at 1,000 rows, and past that the newest
+  // sessions silently never reached the sheet (see fetch-all.ts).
+  const { data: regs, error: regErr } = await fetchAllRows(() => supabase
     .from("registrations")
     .select(
       "id, parent_name, email, type, total_participants, booked_date, booked_start_time, booked_end_time, booked_trainer, booked_group, status, session_price, applied_account_credit, package_id, stripe_checkout_session_id, stripe_payment_intent_id"
     )
     .in("type", ["weekly", "private", "group-private"])
     .in("status", ["confirmed", "cancelled", "no_show"])
-    .not("booked_trainer", "is", null);
+    .not("booked_trainer", "is", null));
   if (regErr) {
     result.errors.push(`registrations query: ${regErr.message}`);
   }
@@ -596,10 +599,10 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
 
   const lateFeeByReg = new Map<string, "cancel" | "reschedule">();
   if (cancelledIds.length > 0) {
-    const { data: lateFeeEvents } = await supabase
+    const { data: lateFeeEvents } = await fetchInChunks(cancelledIds, (ids) => supabase
       .from("late_fee_events")
       .select("registration_id, action")
-      .in("registration_id", cancelledIds);
+      .in("registration_id", ids));
     for (const e of (lateFeeEvents || []) as LateFeeEventRow[]) {
       lateFeeByReg.set(e.registration_id, e.action);
     }
@@ -607,10 +610,10 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
 
   const packageTypeById = new Map<string, number>();
   if (packageIds.length > 0) {
-    const { data: pkgs } = await supabase
+    const { data: pkgs } = await fetchInChunks(packageIds, (ids) => supabase
       .from("monthly_packages")
       .select("id, package_type")
-      .in("id", packageIds);
+      .in("id", ids));
     for (const p of (pkgs || []) as { id: string; package_type: number }[]) {
       packageTypeById.set(p.id, p.package_type);
     }
@@ -621,10 +624,10 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
   // cancelled rows, since a non-late cancellation must be skipped entirely.
   const isLateCancelById = new Map<string, boolean>();
   if (cancelledIds.length > 0) {
-    const { data: lateFlags } = await supabase
+    const { data: lateFlags } = await fetchInChunks(cancelledIds, (ids) => supabase
       .from("registrations")
       .select("id, is_late_cancel")
-      .in("id", cancelledIds);
+      .in("id", ids));
     for (const row of (lateFlags || []) as { id: string; is_late_cancel: boolean | null }[]) {
       isLateCancelById.set(row.id, !!row.is_late_cancel);
     }
@@ -714,10 +717,10 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
   // genuinely separate, additional real Stripe charge with its own fee,
   // independent of whatever the original checkout's grouping above computed.
   if (entries.length > 0) {
-    const { data: topups, error: topupsErr } = await supabase
+    const { data: topups, error: topupsErr } = await fetchInChunks(entries.map((e) => e.reg.id), (ids) => supabase
       .from("registration_topup_charges")
       .select("registration_id, stripe_payment_intent_id, price_delta, service_fee")
-      .in("registration_id", entries.map((e) => e.reg.id));
+      .in("registration_id", ids));
     // A failed lookup here must NOT silently look identical to "no top-ups
     // exist" — under-reporting a real fee with no signal anything's wrong
     // is exactly the class of gap this table exists to close.
@@ -834,10 +837,10 @@ export async function runPayrollSync(): Promise<PayrollSyncResult> {
   }
 
   // ---- package purchases -> Package Sales Log ----
-  const { data: pkgSales, error: pkgErr } = await supabase
+  const { data: pkgSales, error: pkgErr } = await fetchAllRows(() => supabase
     .from("monthly_packages")
     .select("id, created_at, package_type, status, total_price, trainer_tier")
-    .in("status", ["active", "cancelled"]); // both mean it was actually paid at some point
+    .in("status", ["active", "cancelled"])); // both mean it was actually paid at some point
   if (pkgErr) result.errors.push(`monthly_packages query: ${pkgErr.message}`);
   result.packagesConsidered = (pkgSales || []).length;
 

@@ -5,6 +5,7 @@ import { trainerNamesMatch } from "@/lib/trainers";
 import { normalizeSessionLabelForComparison as normLabel, mergeAthleteAfterBooking, defaultGroupsForGradeGender, canonicalGroupForLabel } from "@/lib/group-matching";
 import { regGroupKey } from "@/lib/weekly-schedule-matching";
 import { athleteMatchesName, normalizedAthleteName, type Athlete, type CanonicalGroupId } from "@/lib/athletes";
+import { fetchAllRows } from "@/lib/fetch-all";
 
 let _supabase: SupabaseClient | null = null;
 
@@ -148,12 +149,12 @@ export async function getBookedSlots(): Promise<
   { date: string; startTime: string; endTime: string; location: string; trainer: string }[]
 > {
   const supabase = getSupabase();
-  const { data, error } = await supabase
+  const { data, error } = await fetchAllRows(() => supabase
     .from("registrations")
     .select("booked_date, booked_start_time, booked_end_time, booked_location, booked_trainer")
     .not("booked_date", "is", null)
     .eq("status", "confirmed")
-    .in("type", ["private", "group-private"]);
+    .in("type", ["private", "group-private"]));
 
   if (error) throw error;
   return (data || []).map((r) => ({
@@ -699,7 +700,9 @@ export async function logLateFeeEvent(event: {
   sessionDetails?: string | null;
   bookedDate?: string | null;
   bookedStartTime?: string | null;
-  action: "cancel" | "reschedule";
+  // player_removed: one athlete taken off a booking that stays live (a
+  // sibling still comes) inside the late window; kids = who was removed.
+  action: "cancel" | "reschedule" | "player_removed";
   initiatedBy: "client" | "admin";
   amountKept?: number;
   amountRefunded?: number;
@@ -1657,12 +1660,12 @@ export async function getGroupSessionEnrollment(): Promise<
   Record<string, number>
 > {
   const supabase = getSupabase();
-  const { data, error } = await supabase
+  const { data, error } = await fetchAllRows(() => supabase
     .from("registrations")
     .select("type, booked_date, booked_start_time, booked_group, booked_trainer, total_participants")
     .in("type", ["weekly", "camp"])
     .eq("status", "confirmed")
-    .not("booked_date", "is", null);
+    .not("booked_date", "is", null));
 
   if (error || !data) return {};
 

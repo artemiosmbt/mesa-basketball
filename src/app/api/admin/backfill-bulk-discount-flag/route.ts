@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { verifyAdmin } from "@/lib/auth";
 import { getWeeklySchedule } from "@/lib/sheets";
+import { fetchAllRows } from "@/lib/fetch-all";
 
 function getSupabaseAdmin() {
   return createClient(
@@ -26,12 +27,12 @@ export async function POST(req: NextRequest) {
   if (!(await verifyAdmin(req))) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const supabase = getSupabaseAdmin();
 
-  const { data: regs, error: regsError } = await supabase
+  const { data: regs, error: regsError } = await fetchAllRows(() => supabase
     .from("registrations")
     .select("id, booked_group, booked_date, booked_start_time, total_participants, session_price, session_details, is_bulk_discounted")
     .eq("type", "weekly")
     .eq("status", "confirmed")
-    .eq("is_bulk_discounted", false); // only rows the migration defaulted — never touch one already correctly set true
+    .eq("is_bulk_discounted", false)); // only rows the migration defaulted — never touch one already correctly set true
   if (regsError) return NextResponse.json({ error: regsError.message }, { status: 500 });
 
   const sessions = await getWeeklySchedule({ noCache: true });

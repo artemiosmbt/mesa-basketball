@@ -4,6 +4,7 @@ import { createClient } from "@supabase/supabase-js";
 import twilio from "twilio";
 import { getCamps } from "@/lib/sheets";
 import { formatPhone } from "@/lib/sms";
+import { fetchAllRows } from "@/lib/fetch-all";
 
 const GRADE_ORDER = ["K", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "College +"];
 
@@ -72,11 +73,11 @@ export async function GET(req: NextRequest) {
   }
 
   // Fetch all opted-in registrations
-  const { data: registrations, error: regError } = await supabase
+  const { data: registrations, error: regError } = await fetchAllRows(() => supabase
     .from("registrations")
     .select("phone, kids")
     .eq("sms_consent", true)
-    .eq("status", "confirmed");
+    .eq("status", "confirmed"));
 
   if (regError) {
     console.error("Failed to fetch registrations:", regError);

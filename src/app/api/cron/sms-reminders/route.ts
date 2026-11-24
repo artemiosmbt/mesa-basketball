@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifyCronSecret } from "@/lib/auth";
 import { createClient } from "@supabase/supabase-js";
 import twilio from "twilio";
+import { fetchAllRows } from "@/lib/fetch-all";
 
 function formatPhone(phone: string): string {
   const digits = phone.replace(/\D/g, "");
@@ -57,10 +58,10 @@ export async function GET(req: NextRequest) {
   }
 
   // Get all opted-in phone numbers
-  const { data: optedIn, error: optedInError } = await supabase
+  const { data: optedIn, error: optedInError } = await fetchAllRows(() => supabase
     .from("registrations")
     .select("phone")
-    .eq("sms_consent", true);
+    .eq("sms_consent", true));
 
   if (optedInError) {
     console.error("Failed to fetch opted-in registrations:", optedInError);
@@ -138,10 +139,10 @@ export async function GET(req: NextRequest) {
   // Re-check consent right before sending, not just at the top of the run —
   // an opt-out (STOP reply) landing partway through this loop must not still
   // get texted just because they were opted-in when phonesToText was built.
-  const { data: stillOptedIn } = await supabase
+  const { data: stillOptedIn } = await fetchAllRows(() => supabase
     .from("registrations")
     .select("phone")
-    .eq("sms_consent", true);
+    .eq("sms_consent", true));
   const stillConsentedNorm = new Set(
     (stillOptedIn || []).map((r) => normalizePhone(r.phone || "")).filter(Boolean)
   );

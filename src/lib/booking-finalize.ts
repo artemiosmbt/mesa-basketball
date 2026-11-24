@@ -2293,6 +2293,24 @@ async function finalizePlayerEditTopup(session: Stripe.Checkout.Session): Promis
     return;
   }
 
+  // Same record as the no-payment path in api/booking/[token] PATCH: a late
+  // removal's fee, kept while the rest of the booking stays live.
+  if (isLate && removedPlayers.length > 0) {
+    await logLateFeeEvent({
+      registrationId: reg.id,
+      parentName: reg.parent_name,
+      email: reg.email,
+      kids: removedPlayers.join(", "),
+      sessionType: reg.type,
+      sessionDetails: reg.session_details,
+      bookedDate: reg.booked_date,
+      bookedStartTime: reg.booked_start_time,
+      action: "player_removed",
+      initiatedBy: "client",
+      amountKept: lateFeeDue && lateFeeDue > 0 ? lateFeeDue : 0,
+    });
+  }
+
   try {
     if (reg.type === "private" || reg.type === "group-private") {
       if (reg.booked_date && reg.booked_start_time) {

@@ -14,6 +14,7 @@ import { issueStripeRefund, resolvedSessionPrice, type StripeRefundResult } from
 import { fmtMoney } from "@/lib/pricing";
 import { notifyTrainerOfCancellation, notifyTrainerOfNewBooking } from "@/lib/trainer-notify";
 import { getTrainerTier, normalizeTrainerTier, packageCoversTrainerTier } from "@/lib/trainers";
+import { fetchAllRows } from "@/lib/fetch-all";
 
 // A time change emails and texts every player one at a time after moving
 // them; the move can't be redone, so the run must not be cut off before
@@ -224,11 +225,11 @@ export async function GET(req: NextRequest) {
     console.error("detect-time-changes: confirmation re-fetch failed (weekly)", err);
   }
 
-  const { data: allWeeklyRegsRaw } = await supabase
+  const { data: allWeeklyRegsRaw } = await fetchAllRows(() => supabase
     .from("registrations")
     .select("*")
     .eq("type", "weekly")
-    .eq("status", "confirmed");
+    .eq("status", "confirmed"));
   const weeklyRegsUpcoming = (allWeeklyRegsRaw || []).filter(
     (r) => r.booked_date && sessionIsUpcoming(r.booked_date, r.booked_start_time || "")
   );
@@ -428,11 +429,11 @@ export async function GET(req: NextRequest) {
     console.error("detect-time-changes: confirmation re-fetch failed (private)", err);
   }
 
-  const { data: allPrivateRegs } = await supabase
+  const { data: allPrivateRegs } = await fetchAllRows(() => supabase
     .from("registrations")
     .select("*")
     .in("type", ["private", "group-private"])
-    .eq("status", "confirmed");
+    .eq("status", "confirmed"));
   const privateRegsUpcoming = (allPrivateRegs || []).filter(
     (r) => r.booked_date && sessionIsUpcoming(r.booked_date, r.booked_start_time || "")
   );

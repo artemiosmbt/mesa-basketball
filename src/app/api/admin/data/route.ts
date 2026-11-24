@@ -6,18 +6,20 @@ import { attachComputedFields } from "@/lib/admin-registration-enrichment";
 import { getWeeklySchedule, getPrivateSlots, parseTimeToMins } from "@/lib/sheets";
 import { getGroupSessionEnrollment } from "@/lib/supabase";
 import { trainerNamesMatch } from "@/lib/trainers";
+import { fetchAllRows, fetchInChunks } from "@/lib/fetch-all";
 
 // The money story behind a cancelled or moved booking lives in
 // late_fee_events (fee kept, refund, credit issued, credit applied, extra
 // charge, what it became). Every history view (Past, Calendar, a client's
 // profile) sends the events for the bookings it returns, so an expanded
 // card can say what happened to the money instead of just "cancelled".
-const FEE_EVENT_COLUMNS = "registration_id, action, initiated_by, amount_kept, amount_refunded, amount_credited, amount_applied, amount_charged_extra, created_at, new_session_details";
+const FEE_EVENT_COLUMNS = "registration_id, action, initiated_by, kids, amount_kept, amount_refunded, amount_credited, amount_applied, amount_charged_extra, created_at, new_session_details";
 async function feeEventsFor(supabase: SupabaseClient, regs: { id: string }[] | null | undefined) {
   const ids = (regs || []).map((r) => r.id);
   if (ids.length === 0) return [];
-  const { data } = await supabase.from("late_fee_events").select(FEE_EVENT_COLUMNS).in("registration_id", ids).order("created_at", { ascending: true });
-  return data || [];
+  // Chunked: a month or "all" of Past is hundreds of ids, too long for one URL.
+  const { data } = await fetchInChunks(ids, (chunk) => supabase.from("late_fee_events").select(FEE_EVENT_COLUMNS).in("registration_id", chunk).order("created_at", { ascending: true }));
+  return data;
 }
 
 // Mirrors admin/page.tsx's identical client-side helpers exactly — moved
@@ -131,23 +133,29 @@ export async function GET(req: NextRequest) {
     const clientsScopeError = requireTrainerNameConfigured(ctx);
     if (clientsScopeError) return clientsScopeError;
 
-    let clientRegsQuery = supabase
-      .from("registrations_with_parsed_date")
-      .select("email, parent_name, phone, kids, booked_date")
-      .neq("status", "payment_abandoned");
+    // Paged (fetch-all.ts): every booking ever made is well past the API's
+    // 1,000-row cap, and the clients missing from a cut-off read were the
+    // newest ones.
     const clientsTrainerFilter = trainerScopeFilter(ctx);
-    if (clientsTrainerFilter) {
-      clientRegsQuery = clientRegsQuery.eq("booked_trainer_normalized", clientsTrainerFilter);
-    } else {
-      // Admin's own trainer-filter dropdown also narrows the Clients tab
-      // (per the dashboard's existing comment: "applies across
-      // Upcoming/Past/Calendar, admin also gets Clients").
-      const dropdownTrainer = searchParams.get("trainer");
-      if (dropdownTrainer) clientRegsQuery = clientRegsQuery.eq("booked_trainer_normalized", normalizeDropdownTrainer(dropdownTrainer));
-    }
+    const buildClientRegsQuery = () => {
+      let clientRegsQuery = supabase
+        .from("registrations_with_parsed_date")
+        .select("id, email, parent_name, phone, kids, booked_date")
+        .neq("status", "payment_abandoned");
+      if (clientsTrainerFilter) {
+        clientRegsQuery = clientRegsQuery.eq("booked_trainer_normalized", clientsTrainerFilter);
+      } else {
+        // Admin's own trainer-filter dropdown also narrows the Clients tab
+        // (per the dashboard's existing comment: "applies across
+        // Upcoming/Past/Calendar, admin also gets Clients").
+        const dropdownTrainer = searchParams.get("trainer");
+        if (dropdownTrainer) clientRegsQuery = clientRegsQuery.eq("booked_trainer_normalized", normalizeDropdownTrainer(dropdownTrainer));
+      }
+      return clientRegsQuery;
+    };
 
     const [{ data: clientRegs }, { data: profilesRaw }, { data: referralCreditsRaw }] = await Promise.all([
-      clientRegsQuery,
+      fetchAllRows(buildClientRegsQuery),
       supabase.from("profiles").select("email, phone, parent_name, kids, video_consent"),
       supabase.from("referral_credits").select("email, credits, total_referrals"),
     ]);
@@ -440,51 +448,55 @@ export async function GET(req: NextRequest) {
     const windowParam = searchParams.get("window") || "30d";
     const pastTrainerFilter = trainerScopeFilter(ctx);
 
-    // Same "keep in history" exception the old client-side filter used —
-    // an on-time cancellation is clutter once its date passes, but a late
-    // cancellation/no-show that actually charged a fee is real activity
-    // worth keeping visible.
-    let pastQuery = supabase
-      .from("registrations_with_parsed_date")
-      .select("*")
-      .neq("status", "payment_abandoned")
-      .or("status.neq.cancelled,is_late_cancel.eq.true,camp_day_late_fee.gt.0");
-    if (pastTrainerFilter) pastQuery = pastQuery.eq("booked_trainer_normalized", pastTrainerFilter);
-
     let hasMore = false;
     const todayET = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+    let cutoffET: string | null = null;
+    if (!(search && search.trim()) && windowParam !== "all") {
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - 30);
+      cutoffET = cutoff.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
 
-    if (search && search.trim()) {
-      // Escape ilike's own wildcard characters in the user-supplied term —
-      // otherwise a search containing a literal "%" or "_" would silently
-      // match far more than intended (the exact class of bug already found
-      // and fixed once in this same route's old ?email= branch).
-      const escaped = search.trim().replace(/[%_]/g, (c) => `\\${c}`);
-      pastQuery = pastQuery.or(`parent_name.ilike.%${escaped}%,email.ilike.%${escaped}%,phone.ilike.%${escaped}%`);
-    } else {
-      pastQuery = pastQuery.lte("booked_date_parsed", todayET);
-      if (windowParam !== "all") {
-        const cutoff = new Date();
-        cutoff.setDate(cutoff.getDate() - 30);
-        const cutoffET = cutoff.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
-        pastQuery = pastQuery.gte("booked_date_parsed", cutoffET);
-
-        let olderQuery = supabase
-          .from("registrations_with_parsed_date")
-          .select("id", { count: "exact", head: true })
-          .neq("status", "payment_abandoned")
-          .or("status.neq.cancelled,is_late_cancel.eq.true,camp_day_late_fee.gt.0")
-          .lt("booked_date_parsed", cutoffET);
-        if (pastTrainerFilter) olderQuery = olderQuery.eq("booked_trainer_normalized", pastTrainerFilter);
-        const { count } = await olderQuery;
-        hasMore = !!count && count > 0;
-      }
+      let olderQuery = supabase
+        .from("registrations_with_parsed_date")
+        .select("id", { count: "exact", head: true })
+        .neq("status", "payment_abandoned")
+        .or("status.neq.cancelled,is_late_cancel.eq.true,camp_day_late_fee.gt.0")
+        .lt("booked_date_parsed", cutoffET);
+      if (pastTrainerFilter) olderQuery = olderQuery.eq("booked_trainer_normalized", pastTrainerFilter);
+      const { count } = await olderQuery;
+      hasMore = !!count && count > 0;
     }
 
-    pastQuery = pastQuery.order("booked_date_parsed", { ascending: false });
+    // Built fresh for each page: "All" history (or a broad search) is over
+    // the API's 1,000-row cap (fetch-all.ts).
+    const buildPastQuery = () => {
+      // Same "keep in history" exception the old client-side filter used —
+      // an on-time cancellation is clutter once its date passes, but a late
+      // cancellation/no-show that actually charged a fee is real activity
+      // worth keeping visible.
+      let pastQuery = supabase
+        .from("registrations_with_parsed_date")
+        .select("*")
+        .neq("status", "payment_abandoned")
+        .or("status.neq.cancelled,is_late_cancel.eq.true,camp_day_late_fee.gt.0");
+      if (pastTrainerFilter) pastQuery = pastQuery.eq("booked_trainer_normalized", pastTrainerFilter);
+
+      if (search && search.trim()) {
+        // Escape ilike's own wildcard characters in the user-supplied term —
+        // otherwise a search containing a literal "%" or "_" would silently
+        // match far more than intended (the exact class of bug already found
+        // and fixed once in this same route's old ?email= branch).
+        const escaped = search.trim().replace(/[%_]/g, (c) => `\\${c}`);
+        pastQuery = pastQuery.or(`parent_name.ilike.%${escaped}%,email.ilike.%${escaped}%,phone.ilike.%${escaped}%`);
+      } else {
+        pastQuery = pastQuery.lte("booked_date_parsed", todayET);
+        if (cutoffET) pastQuery = pastQuery.gte("booked_date_parsed", cutoffET);
+      }
+      return pastQuery.order("booked_date_parsed", { ascending: false });
+    };
 
     const [{ data: pastRegs }, { data: pastPackages }] = await Promise.all([
-      pastQuery,
+      fetchAllRows(buildPastQuery),
       supabase.from("monthly_packages").select("id, email, package_type, month_year, is_paid").neq("status", "payment_abandoned"),
     ]);
     const enrichedPast = await attachComputedFields(supabase, pastRegs || [], pastPackages || []);

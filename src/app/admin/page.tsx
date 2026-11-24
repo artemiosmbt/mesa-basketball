@@ -1268,8 +1268,9 @@ function CalendarView({ token, trainerFilter, weeklyCapacity, campCapacity, canE
 // view). Amounts are dollars.
 interface FeeEvent {
   registration_id: string;
-  action: string;          // 'cancel' | 'reschedule'
+  action: string;          // 'cancel' | 'reschedule' | 'player_removed'
   initiated_by: string;    // 'client' | 'admin'
+  kids?: string | null;    // player_removed: who was taken off the booking
   amount_kept: number | string | null;
   amount_refunded: number | string | null;
   amount_credited: number | string | null;
@@ -1307,6 +1308,13 @@ function CancellationNote({ r, events }: { r: Registration; events?: FeeEvent[] 
   for (const e of evs) {
     const when = new Date(e.created_at).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
     const who = e.initiated_by === "admin" ? "by admin" : "by the client";
+    if (e.action === "player_removed") {
+      lines.push(`${e.kids ? athleteNames(e.kids) : "A player"} removed late ${when} ${who}`);
+      const kept = money(e.amount_kept), credited = money(e.amount_credited);
+      lines.push(kept ? `${kept} kept as the late fee` : "No late fee recorded (the booking wasn't paid)");
+      if (credited) lines.push(`${credited} returned to account credit`);
+      continue;
+    }
     lines.push(`${e.action === "reschedule" ? "Rescheduled" : "Cancelled"} ${when} ${who}${r.is_late_cancel || e.action === "reschedule" ? "" : " (on time)"}`);
     const kept = money(e.amount_kept), refunded = money(e.amount_refunded), credited = money(e.amount_credited), applied = money(e.amount_applied), extra = money(e.amount_charged_extra);
     if (kept) lines.push(`${kept} kept as the late fee`);
@@ -1326,8 +1334,8 @@ function CancellationNote({ r, events }: { r: Registration; events?: FeeEvent[] 
   if (campFee > 0) lines.push(`Camp day late fee: $${campFee.toFixed(2)} kept`);
   if (cancelled && evs.length === 0 && !campFee) lines.push(r.is_late_cancel ? "Cancelled late — the late fee was kept" : "Cancelled on time — no fee");
   return (
-    <div className={`rounded-lg border px-3 py-2 ${r.is_late_cancel || campFee > 0 || noShow ? "border-red-900/60 bg-red-950/30" : "border-brown-700 bg-brown-950/40"}`}>
-      <p className="text-brown-500 uppercase tracking-wider mb-1">{noShow ? "No show" : cancelled ? "Cancellation" : "Reschedule"}</p>
+    <div className={`rounded-lg border px-3 py-2 ${r.is_late_cancel || campFee > 0 || noShow || evs.some((e) => e.action === "player_removed") ? "border-red-900/60 bg-red-950/30" : "border-brown-700 bg-brown-950/40"}`}>
+      <p className="text-brown-500 uppercase tracking-wider mb-1">{noShow ? "No show" : cancelled ? "Cancellation" : evs.every((e) => e.action === "player_removed") ? "Late player removal" : "Reschedule"}</p>
       {lines.map((l, i) => <p key={i} className="text-brown-200 leading-relaxed">{l}</p>)}
     </div>
   );
@@ -1536,12 +1544,33 @@ function RegCard({ r, isPast = false, ctx }: { r: Registration; isPast?: boolean
 
 // A collapsed folder for one real weekly/pickup/camp session — expands to
 // the individual RegCards (with each athlete's info) that make it up.
+// Every athlete in this session whose late cancellation kept a fee — a whole
+// booking cancelled late, or one child taken off a booking a sibling still
+// came on — so the session's folder says so without opening each card.
+function folderLateFees(folder: Folder, feeEvents: Map<string, FeeEvent[]>): string[] {
+  const notes: string[] = [];
+  for (const r of folder.regs) {
+    const evs = feeEvents.get(r.id) || [];
+    if (r.status === "cancelled" && r.is_late_cancel) {
+      const kept = evs.filter((e) => e.action === "cancel").reduce((sum, e) => sum + Number(e.amount_kept || 0), 0);
+      notes.push(`${r.kids ? athleteNames(r.kids) : r.parent_name} — cancelled late${kept > 0 ? `, $${kept.toFixed(2)} kept` : ", fee kept"} (${r.parent_name})`);
+    }
+    for (const e of evs) {
+      if (e.action !== "player_removed") continue;
+      const kept = Number(e.amount_kept || 0);
+      notes.push(`${e.kids ? athleteNames(e.kids) : "A player"} — removed late${kept > 0 ? `, $${kept.toFixed(2)} kept` : ""} (${r.parent_name}'s booking${r.status === "confirmed" || r.status === "no_show" ? ", the rest still came" : ""})`);
+    }
+  }
+  return notes;
+}
+
 function FolderCard({ folder, isPast = false, ctx }: { folder: Folder; isPast?: boolean; ctx: CardCtx }) {
   const cardId = `folder-${folder.key}`;
   const expanded = ctx.expandedCardIds.has(cardId);
   const sample = folder.regs[0];
   const timeLabel = sample.booked_start_time ? `${sample.booked_start_time}${sample.booked_end_time ? `-${sample.booked_end_time}` : ""}` : null;
   const noShowCount = folder.regs.filter((r) => r.status === "no_show").length;
+  const lateFees = folderLateFees(folder, ctx.feeEvents);
   return (
     <div className="rounded-xl border-2 border-brown-600 bg-brown-900/40 overflow-hidden shadow-lg shadow-black/30">
       <button type="button" onClick={() => ctx.toggleExpandedCard(cardId)} className="w-full text-left px-4 py-3 flex items-start justify-between gap-2">
@@ -1553,6 +1582,11 @@ function FolderCard({ folder, isPast = false, ctx }: { folder: Folder; isPast?: 
             {noShowCount > 0 && (
               <span className="rounded-full bg-orange-900/40 text-orange-400 px-2 py-0.5 text-xs font-medium">
                 {noShowCount === folder.regs.length ? "no show" : `${noShowCount} no show${noShowCount === 1 ? "" : "s"}`}
+              </span>
+            )}
+            {lateFees.length > 0 && (
+              <span className="rounded-full bg-red-900/40 text-red-400 px-2 py-0.5 text-xs font-medium">
+                {lateFees.length === 1 ? "late fee kept" : `${lateFees.length} late fees kept`}
               </span>
             )}
           </div>
@@ -1569,6 +1603,12 @@ function FolderCard({ folder, isPast = false, ctx }: { folder: Folder; isPast?: 
       </button>
       {expanded && (
         <div className="border-t border-brown-700 px-3 py-3 space-y-2 bg-brown-950/40">
+          {lateFees.length > 0 && (
+            <div className="rounded-lg border border-red-900/60 bg-red-950/30 px-3 py-2 text-xs">
+              <p className="text-brown-500 uppercase tracking-wider mb-1">Late cancellation — fee kept</p>
+              {lateFees.map((l, i) => <p key={i} className="text-brown-200 leading-relaxed">{l}</p>)}
+            </div>
+          )}
           {folder.regs.map((r) => <RegCard key={r.id} r={r} isPast={isPast} ctx={ctx} />)}
         </div>
       )}

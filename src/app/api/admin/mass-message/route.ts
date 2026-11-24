@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import { Resend } from "resend";
 import twilio from "twilio";
 import { verifyAdmin } from "@/lib/auth";
+import { fetchAllRows } from "@/lib/fetch-all";
 
 // A full client list sent with the rate-limit-safe delay below can run past
 // Vercel's default function timeout (a 77-email run at 550ms apart alone is
@@ -213,10 +214,10 @@ export async function POST(req: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
-  const { data: regs, error } = await supabase
+  const { data: regs, error } = await fetchAllRows(() => supabase
     .from("registrations")
     .select("email, phone, sms_consent")
-    .in("status", ["confirmed", "cancelled", "no_show"]);
+    .in("status", ["confirmed", "cancelled", "no_show"]));
   if (error) {
     return NextResponse.json({ error: `Failed to load client list: ${error.message}` }, { status: 500 });
   }

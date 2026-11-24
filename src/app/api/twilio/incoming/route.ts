@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import twilio from "twilio";
+import { fetchAllRows } from "@/lib/fetch-all";
 
 const OPT_OUT = new Set(["STOP", "STOPALL", "UNSUBSCRIBE", "CANCEL", "END", "QUIT"]);
 const OPT_IN = new Set(["START", "UNSTOP", "YES"]);
@@ -61,10 +62,10 @@ export async function POST(req: NextRequest) {
   }
 
   // Also sync to registrations so the admin dashboard reflects the opt-out
-  const { data: regs } = await supabase
+  const { data: regs } = await fetchAllRows(() => supabase
     .from("registrations")
     .select("id, phone")
-    .not("phone", "is", null);
+    .not("phone", "is", null));
 
   if (regs) {
     const matchingIds = regs

@@ -826,6 +826,25 @@ export async function PATCH(
     }
   }
 
+  // A late removal keeps a fee even though the booking stays live (a sibling
+  // still comes), so it is recorded where admin's Past history can show it.
+  if (isLate && removedPlayers.length > 0) {
+    await logLateFeeEvent({
+      registrationId: reg.id,
+      parentName: reg.parent_name,
+      email: reg.email,
+      kids: removedPlayers.join(", "),
+      sessionType: reg.type,
+      sessionDetails: reg.session_details,
+      bookedDate: reg.booked_date,
+      bookedStartTime: reg.booked_start_time,
+      action: "player_removed",
+      initiatedBy: "client",
+      amountKept: lateFeeCovered && lateFeeDue ? lateFeeDue : 0,
+      amountCredited: creditGranted,
+    });
+  }
+
   try {
     await sendPlayerUpdateNotification({
       parentName: reg.parent_name,
